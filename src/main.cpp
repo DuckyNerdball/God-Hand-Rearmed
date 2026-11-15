@@ -51,6 +51,7 @@
 #include "kamite/frame_patches.h"
 #include "kamite/test_mode.h"
 #include "kamite/game_options.h"
+#include "kamite/body_detail.h"
 #include "kamite/character_mods.h"
 #include "kamite/widescreen.h"
 #include "kamite/near_geometry.h"
@@ -419,6 +420,7 @@ namespace
         {"game", "ballbusterwomen", "KAMITE_BALL_BUSTER_WOMEN"},
         {"game", "swaybar", "KAMITE_SWAY_BAR"},
         {"game", "money", "KAMITE_MONEY"},
+        {"game", "cash", "KAMITE_CASH"},
         {"mods", "character", "KAMITE_CHARACTER"},
         {"run", "headless", "KAMITE_HEADLESS"},
         {"run", "timelimitseconds", "KAMITE_TIME_LIMIT_SECONDS"},
@@ -1066,6 +1068,7 @@ int main(int argc, char *argv[])
         kamite::installGameOptions(runtime); // [Game] UnlockHard, SkipIntro, RouletteNoOrbs, the stream volumes; Dead Pan
         kamite::texture_slots::install(); // the per-frame texture slots reserve a texture's real VRAM footprint
         kamite::model_detail::install(); // the full character meshes at every distance (no distance LOD)
+        kamite::body_detail::install(runtime); // the women's detailed bust / seat (Money / Cash above 100%), from the disc
         kamite::installSteadyIdleCamera(runtime); // [Video] SteadyIdleCamera
         kamite::jukebox::install(runtime); // the shop's radio: Gene stays in the picture while it plays
         kamite::message_guard::install(runtime); // an empty message text no longer hangs the text measurer

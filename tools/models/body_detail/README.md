@@ -1,5 +1,8 @@
 # body_detail: the women's detailed bust / seat (prototype, Nov 15)
 
+The game builds these at boot with a C++ port of `transfer3` + `build2` (src/kamite/body_detail_build.cpp, checked
+triangle for triangle against this code); this folder stays the place to try changes offline first.
+
 Offline prototypes for the Money > 100% bust and Cash > 100% seat (claude/female-models.md). Run with
 `GODHAND_EXTRACT=<your extract>`; numpy + Pillow.
 

@@ -31,7 +31,11 @@ namespace kamite::bone_tweaks
     // female skeleton; every model packed but the player's) scaled round itself at draw time, its jiggle angle x the scale, tipped down
     // by the droop; 1 = off. Any thread.
     float money();
-    void setMoney(float scale);    // 0.8 .. 1.5
+    void setMoney(float scale);    // 0.85 .. 1.3; above 1 the women also get the detailed bust (body_detail)
+    // Cash (F2 > NPCs, under Money; KAMITE_CASH / [Game] Cash, percent): above 1 the women's detailed seat (body_detail).
+    // No growth of its own yet (Cash's own round). Any thread.
+    float cash();
+    void setCash(float scale);     // 1 .. 1.3
     // The player's visible hand meshes (RH_xx / LH_xx node names), for the F2 Debug tab: which hand shape the game
     // shows (the fist / open hand / grab meshes it swaps).
     std::string handNodes(const uint8_t *rdram);

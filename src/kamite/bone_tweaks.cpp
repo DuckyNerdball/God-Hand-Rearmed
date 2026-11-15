@@ -238,6 +238,7 @@ namespace kamite::bone_tweaks
         // ---- Money: the women's chest bone scaled (see the header) ---------------------------------------------------
         constexpr int kChestBone = 29, kChestParent = 2;
         std::atomic<float> g_money{1.0f};
+        std::atomic<float> g_cash{1.0f}; // body_detail: above 1 the women's detailed seat (no growth of its own yet)
         constexpr float kMoneyDroop = 30.0f; // degrees the bust tips down per +100% (K: 15 at 150% looks right)
         std::vector<Saved> g_moneySaved; // game thread: the bones scaled since the frame started
 
@@ -327,28 +328,35 @@ namespace kamite::bone_tweaks
 #if defined(KAMITE_HAS_GS_MENU)
     namespace
     {
-        // The bottom of F2's NPCs tab (installed after npc_poses): Money, just the slider (K: an easter egg).
-        void drawMoneyPanel(const Pcsx2GsUi *ui)
+        // A slider kept in GHR.ini ([Game] <key>) once it has rested half a second (K, Nov 7: no Save button).
+        void restingSlider(const Pcsx2GsUi *ui, const char *id, const char *format, float lo, float hi, const char *key,
+                           std::atomic<float> &value, void (*set)(float), int64_t &changedMs)
         {
-            ui->separator_text("Money");
-            float money = g_money.load(std::memory_order_relaxed) * 100.0f;
+            float percent = value.load(std::memory_order_relaxed) * 100.0f;
             ui->set_next_width(340.0f);
-            // Kept in GHR.ini ([Game] Money) once the slider has rested half a second (K, Nov 7: no Save button).
-            static int64_t changedMs = -1;
             const int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                                       std::chrono::steady_clock::now().time_since_epoch()).count();
-            if (ui->slider_float("##money", &money, 85.0f, 130.0f, "%.0f%%"))
+            if (ui->slider_float(id, &percent, lo, hi, format))
             {
-                setMoney(money / 100.0f);
+                set(percent / 100.0f);
                 changedMs = nowMs;
             }
             else if (changedMs >= 0 && nowMs - changedMs > 500)
             {
                 changedMs = -1;
-                const int percent = static_cast<int>(std::lround(g_money.load(std::memory_order_relaxed) * 100.0f));
-                if (!dev_menu::saveIniValue("Game", "Money", std::to_string(percent)))
-                    KM_WARN(Game, "Money: could not write GHR.ini");
+                const int saved = static_cast<int>(std::lround(value.load(std::memory_order_relaxed) * 100.0f));
+                if (!dev_menu::saveIniValue("Game", key, std::to_string(saved)))
+                    KM_WARN(Game, key << ": could not write GHR.ini");
             }
+        }
+
+        // The bottom of F2's NPCs tab (installed after npc_poses): Money and Cash, just the sliders (K: easter eggs).
+        void drawMoneyPanel(const Pcsx2GsUi *ui)
+        {
+            static int64_t moneyMs = -1, cashMs = -1;
+            ui->separator_text("Money");
+            restingSlider(ui, "##money", "Money %.0f%%", 85.0f, 130.0f, "Money", g_money, &setMoney, moneyMs);
+            restingSlider(ui, "##cash", "Cash %.0f%%", 100.0f, 130.0f, "Cash", g_cash, &setCash, cashMs);
         }
     }
 #endif
@@ -367,6 +375,12 @@ namespace kamite::bone_tweaks
             setMoney(static_cast<float>(std::atof(money)) / 100.0f);
             if (std::fabs(g_money.load() - 1.0f) >= 0.001f)
                 KM_INFO(Game, "Money: " << g_money.load() * 100.0f << "%");
+        }
+        if (const char *cash = std::getenv("KAMITE_CASH"); cash && *cash) // percent
+        {
+            setCash(static_cast<float>(std::atof(cash)) / 100.0f);
+            if (std::fabs(g_cash.load() - 1.0f) >= 0.001f)
+                KM_INFO(Game, "Cash: " << g_cash.load() * 100.0f << "%");
         }
         g_tune[0].store(h.stiffness);
         g_tune[1].store(h.damping);
@@ -404,6 +418,8 @@ namespace kamite::bone_tweaks
 
     float money() { return g_money.load(std::memory_order_relaxed); }
     void setMoney(float scale) { g_money.store(std::clamp(scale, 0.85f, 1.3f), std::memory_order_relaxed); }
+    float cash() { return g_cash.load(std::memory_order_relaxed); }
+    void setCash(float scale) { g_cash.store(std::clamp(scale, 1.0f, 1.3f), std::memory_order_relaxed); }
 
     bool hasHair() { return characters::hair().back.bone >= 0 || characters::hair().side.bone >= 0; }
     float tuning(Tune which)

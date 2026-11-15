@@ -237,6 +237,7 @@ namespace kamite::dev_menu
                     ini.setBool("Game", "RouletteNoOrbs", rouletteNoOrbs());
                     ini.setBool("Game", "NpcPoses", npc_poses::enabled());
                     ini.set("Game", "Money", std::to_string(static_cast<int>(std::lround(bone_tweaks::money() * 100.0f))));
+                    ini.set("Game", "Cash", std::to_string(static_cast<int>(std::lround(bone_tweaks::cash() * 100.0f))));
                     saveIni(ini, g_gameplayStatus);
                 }
             }
