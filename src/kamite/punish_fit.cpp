@@ -1440,6 +1440,15 @@ namespace kamite::punish_fit
         return fit && fit->gorilla;
     }
 
+    bool suplexIsChestGrab(const uint8_t *rdram, uint32_t enemy)
+    {
+        if (!g_on || !inRam(enemy, 0x700u))
+            return false;
+        enemy &= 0x1FFFFFFu;
+        const Fit *fit = fitFor(Suplex, variantOf(rdram, enemy, Suplex, bodyOf(rdram, enemy)));
+        return fit && fit->frontCam && !fit->off;
+    }
+
     float bustHold(const uint8_t *rdram, uint32_t model)
     {
         const Fit *fit = g_pair.fit;

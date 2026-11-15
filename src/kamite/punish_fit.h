@@ -43,6 +43,9 @@ namespace kamite::punish_fit
     [[nodiscard]] bool doesntFit(const uint8_t *rdram, uint32_t enemy, int punish);
     // EE thread: a Suplex pick plays the Gorilla Suplex on this enemy's body (its Suplex fit says "gorilla").
     [[nodiscard]] bool suplexAsGorilla(const uint8_t *rdram, uint32_t enemy);
+    // EE thread: a Suplex pick plays the chest grab on this enemy (its model's Suplex fit is a frontcam one; K, Nov 15:
+    // its prompt reads BOOBPLEX).
+    [[nodiscard]] bool suplexIsChestGrab(const uint8_t *rdram, uint32_t enemy);
     // EE thread (Money, at draw time): how much this model's bust jiggle is held still (0..1) because Gene's hands are on
     // it (K, Nov 15: the women's chest grab Suplex; the fit's bust line by Gene's frame); 0 for every other model.
     [[nodiscard]] float bustHold(const uint8_t *rdram, uint32_t model);

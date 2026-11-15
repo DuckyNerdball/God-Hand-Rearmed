@@ -259,20 +259,37 @@ namespace kamite::buck_breaker
         // Set by punishCase when a Suplex pick goes to the Gorilla Suplex's case; cActionButton_set (func_001F7858, a1 =
         // the prompt id 0xA, a2 = the word) then shows SUPLEX (0xD) instead of GORILLA SUPLEX (0x26), like the menu.
         bool g_gorillaPrompt = false;
-        void onPromptSet(uint8_t *, R5900Context *ctx, PS2Runtime *)
+        // Set by punishCase when a Suplex pick plays the women's chest grab (K, Nov 15): the prompt reads BOOBPLEX, the
+        // word 0x34 = message 0x3045 (0x3011 + word at 0x1F778C; a "<7d>" placeholder of the core bank) pointed at our
+        // text. The mohawk women's Suplex (the game's) keeps SUPLEX.
+        bool g_boobplexPrompt = false;
+        constexpr uint32_t kBoobplexWord = 0x34u;
+        constexpr uint16_t kBoobplexMessage = 0x3045u;
+        constexpr uint32_t kBoobplexText = 0x000FFD00u; // guest scratch below the ELF (tutorial_text.cpp keeps the map)
+        bool pointMessage(uint16_t id, uint32_t text);
+        void onPromptSet(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            if (!g_gorillaPrompt)
+            const bool gorilla = g_gorillaPrompt, boobplex = g_boobplexPrompt;
+            g_gorillaPrompt = g_boobplexPrompt = false;
+            if (GPR_U32(ctx, 5) != 0xAu)
                 return;
-            g_gorillaPrompt = false;
-            if (GPR_U32(ctx, 5) == 0xAu && GPR_U32(ctx, 6) == 0x26u)
+            if (gorilla && GPR_U32(ctx, 6) == 0x26u)
                 SET_GPR_U32(ctx, 6, 0xDu);
+            else if (boobplex && GPR_U32(ctx, 6) == 0xDu)
+            {
+                // B O O B P L E X in the menu font, then the end code.
+                static constexpr uint16_t kText[] = {0x41, 0x4E, 0x4E, 0x41, 0x4F, 0x4B, 0x44, 0x57, 0x8001};
+                std::memcpy(rdram + kBoobplexText, kText, sizeof(kText));
+                if (pointMessage(kBoobplexMessage, kBoobplexText))
+                    SET_GPR_U32(ctx, 6, kBoobplexWord);
+            }
         }
 
         // Replaces sltiu v1,a0,0x7A at 0x2DD02C (func_002DCD50; a0 = enemy number - 0x205, s1 = the enemy): a generic
         // punish goes to the picked one's case.
         void punishCase(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            g_gorillaPrompt = false;
+            g_gorillaPrompt = g_boobplexPrompt = false;
             uint32_t index = GPR_U32(ctx, 4);
             const int pick = g_pick.load(std::memory_order_relaxed);
             if (pick > Normal && pick < kPickCount && tableOk(rdram))
@@ -306,6 +323,8 @@ namespace kamite::buck_breaker
                 const uint32_t own = GPR_U32(ctx, 4) < kCases ? ram32(rdram, kCaseTable + 4u * GPR_U32(ctx, 4)) : kSuplexCase;
                 const uint32_t now = index < kCases ? ram32(rdram, kCaseTable + 4u * index) : kSuplexCase;
                 punish_fit::setChanged(GPR_U32(ctx, 17), now != own);
+                g_boobplexPrompt = now != own && now == kSuplexCase && !g_gorillaPrompt &&
+                                   punish_fit::suplexIsChestGrab(rdram, GPR_U32(ctx, 17));
             }
             else
                 punish_fit::setChanged(GPR_U32(ctx, 17), false);
@@ -887,7 +906,7 @@ namespace kamite::buck_breaker
         hooks.observeEntry(0x16C730u, "cSubScrWaza update (Buck Breaker)", &onWazaUpdate);
         hooks.observeEntry(0x16DF38u, "cSubScrWaza input (Buck Breaker)", &onWazaInput);
         hooks.observeEntry(0x2AAA40u, "cIDBase_move (Buck Breaker)", &onLayoutMove);
-        hooks.observeEntry(0x1F7858u, "cActionButton_set (Buck Breaker: SUPLEX over a Gorilla Suplex)", &onPromptSet);
+        hooks.observeEntry(0x1F7858u, "cActionButton_set (Buck Breaker: SUPLEX over a Gorilla Suplex, BOOBPLEX)", &onPromptSet);
         KM_INFO(Game, "buck breaker: " << (g_enabled ? "on (punish slot on the Techniques screen)" : "off ([Game] BuckBreaker=0)"));
     }
 
