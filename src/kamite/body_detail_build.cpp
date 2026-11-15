@@ -11,6 +11,7 @@
 #include <limits>
 #include <map>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -752,7 +753,7 @@ namespace kamite::body_detail
         }
 
         // ---- the seat: transplant.transplant / build2(woman, shannon, (-0.15, 0.88, -1), (0.15, 1.16, -0.04),
-        // falloff=0.05, mapping='own', pin=0.85, one_vb=True), CUT_MIN = 1 ---------------------------------------------
+        // falloff=0.05, mapping='own', one_vb=True), CUT_MIN = 1 ------------------------------------------------------
 
         // boundary_loops: the boundary edges (used by one triangle) chained into loops, in order of appearance.
         std::vector<std::vector<int>> boundaryLoops(const std::vector<std::array<int, 3>> &tris)
@@ -819,20 +820,108 @@ namespace kamite::body_detail
             return loops[best];
         }
 
+        // transplant.pav: the non-decreasing least-squares fit (pool adjacent violators).
+        std::vector<double> pav(const std::vector<double> &y)
+        {
+            std::vector<double> v;
+            std::vector<int> w;
+            for (const double x : y)
+            {
+                v.push_back(x);
+                w.push_back(1);
+                while (v.size() > 1 && v[v.size() - 2] > v.back())
+                {
+                    const int n = w[w.size() - 2] + w.back();
+                    const double m = (v[v.size() - 2] * w[w.size() - 2] + v.back() * w.back()) / n;
+                    v.pop_back();
+                    w.pop_back();
+                    v.back() = m;
+                    w.back() = n;
+                }
+            }
+            std::vector<double> out;
+            for (size_t i = 0; i < v.size(); ++i)
+                out.insert(out.end(), static_cast<size_t>(w[i]), v[i]);
+            return out;
+        }
+
+        double pmod(double a, double b) // Python's a % b
+        {
+            const double r = std::fmod(a, b);
+            return r != 0 && ((r < 0) != (b < 0)) ? r + b : r;
+        }
+
+        // transplant.fan: triangle t with its edge a-b split at mids (ordered from a to b), the fan from its third corner
+        // in t's own winding.
+        template <typename I>
+        std::vector<std::array<I, 3>> fan(const std::array<I, 3> &t, I a, I b, const std::vector<I> &mids)
+        {
+            std::vector<I> ch;
+            I c{};
+            for (int x = 0; x < 3 && ch.empty(); ++x)
+            {
+                if (t[x] == a && t[(x + 1) % 3] == b)
+                {
+                    ch.push_back(a);
+                    ch.insert(ch.end(), mids.begin(), mids.end());
+                    ch.push_back(b);
+                    c = t[(x + 2) % 3];
+                }
+                else if (t[x] == b && t[(x + 1) % 3] == a)
+                {
+                    ch.push_back(b);
+                    ch.insert(ch.end(), mids.rbegin(), mids.rend());
+                    ch.push_back(a);
+                    c = t[(x + 2) % 3];
+                }
+            }
+            if (ch.empty())
+                return {t};
+            std::vector<std::array<I, 3>> out;
+            for (size_t y = 0; y + 1 < ch.size(); ++y)
+                out.push_back({ch[y], ch[y + 1], c});
+            return out;
+        }
+
+        // transplant.no_ears: a triangle with two edges on the boundary has all three corners on the patch's edge, and
+        // laid onto the hole's boundary it would be a line (repeated while any remain).
+        std::vector<std::array<int, 3>> noEars(std::vector<std::array<int, 3>> T)
+        {
+            for (;;)
+            {
+                std::unordered_map<uint64_t, int> cnt;
+                for (const auto &t : T)
+                    for (int e = 0; e < 3; ++e)
+                        ++cnt[pairKey(t[e], t[(e + 1) % 3])];
+                std::vector<std::array<int, 3>> keep;
+                for (const auto &t : T)
+                {
+                    int b = 0;
+                    for (int e = 0; e < 3; ++e)
+                        b += cnt[pairKey(t[e], t[(e + 1) % 3])] == 1;
+                    if (b < 2)
+                        keep.push_back(t);
+                }
+                if (keep.size() == T.size())
+                    return T;
+                T = std::move(keep);
+            }
+        }
+
         struct SeatResult
         {
             std::vector<char> cut;        // per triangle of the input
             std::vector<D3> flatP, flatN; // per new record (appended after the input's records)
             std::vector<D3> detailN;      // per record of the output (ring + new: the patch's normals)
             std::vector<char> ring;       // per input record: on the hole's edge (its normal changes)
-            int patch = 0, stitch = 0;
+            int patch = 0, shared = 0; // patch triangles, points added on the shared edge
         };
 
         // m gets the new records and loses the cut triangles; false when the window holds nothing.
         bool seat(Mesh &m, const Mesh &donor, SeatResult &res)
         {
             const D3 lo{-0.15, 0.88, -1.0}, hi{0.15, 1.16, -0.04};
-            constexpr double kFalloff = 0.05, kPin = 0.85;
+            constexpr double kFalloff = 0.05;
             const size_t R = m.records();
             const std::vector<D3> P = m.P; // the input's positions (the new records go into m)
             int npid = 0;
@@ -955,6 +1044,7 @@ namespace kamite::body_detail
                     const D3 p = donor.P[drep[u]];
                     Q[u] = {p.x * sx, p.y, p.z};
                 }
+            patchT = noEars(std::move(patchT));
             const auto patchLoops = boundaryLoops(patchT);
             const std::vector<int> &pl = largest(patchLoops);
 
@@ -1015,7 +1105,7 @@ namespace kamite::body_detail
                 }
             }
 
-            // Blended onto her surface near its edge, the edge pinned 85% onto the hole's boundary.
+            // Blended onto her surface near its edge.
             auto closestCut = [&](D3 q, size_t *which) {
                 double bd = std::numeric_limits<double>::infinity();
                 D3 best;
@@ -1049,32 +1139,183 @@ namespace kamite::body_detail
                     q = s0 + (q - s0) * f;
                     fall[k] = f;
                 }
-                std::vector<D3> HP;
-                for (const int k : hole)
-                    HP.push_back(P[rep[k]]);
-                for (const int k : pl)
-                {
-                    const D3 p = Q[k];
-                    double bd = std::numeric_limits<double>::infinity();
-                    D3 h;
-                    for (size_t i = 0; i < HP.size(); ++i)
-                    {
-                        const D3 s0 = HP[i], d = HP[(i + 1) % HP.size()] - HP[i];
-                        const double t = std::clamp(dot(p - s0, d) / std::max(dot(d, d), 1e-20), 0.0, 1.0);
-                        const D3 q = s0 + d * t;
-                        const double dd = dist2(q, p);
-                        if (dd < bd)
-                        {
-                            bd = dd;
-                            h = q;
-                        }
-                    }
-                    Q[k] = p + (h - p) * kPin;
-                }
             }
 
+            // One shared edge: the patch's edge vertices laid onto the hole's polyline in loop order (a run landing within
+            // 1 mm one vertex), each side's edge triangles then split at the other
+            // side's vertices: no stitch, no T-junctions (the stitch's slivers showed as dots along the waistband from low
+            // angles, K Nov 15). transplant.join_edge.
+            constexpr double kMerge = 0.001;
+            constexpr uint64_t kDonor = 1ull << 40, kKept = 1ull << 41;
+            const size_t nH = hole.size();
+            std::vector<D3> HP(nH), seg(nH);
+            std::vector<double> sl(nH), S(nH + 1, 0.0);
+            for (size_t i = 0; i < nH; ++i)
+                HP[i] = P[rep[hole[i]]];
+            for (size_t i = 0; i < nH; ++i)
+            {
+                seg[i] = HP[(i + 1) % nH] - HP[i];
+                sl[i] = std::sqrt(dot(seg[i], seg[i]));
+                S[i + 1] = S[i] + sl[i];
+            }
+            const double L = S[nH];
+            std::vector<int> Pl = pl;
+            {
+                auto area = [](const std::vector<D3> &pts) {
+                    double a = 0;
+                    for (size_t i = 0; i < pts.size(); ++i)
+                    {
+                        const D3 &p = pts[i], &q = pts[(i + 1) % pts.size()];
+                        a += p.x * q.y - q.x * p.y;
+                    }
+                    return 0.5 * a;
+                };
+                std::vector<D3> b;
+                for (const int k : Pl)
+                    b.push_back(Q[k]);
+                auto sign = [](double x) { return (x > 0) - (x < 0); };
+                if (sign(area(HP)) != sign(area(b)))
+                    std::reverse(Pl.begin(), Pl.end());
+                size_t k0 = 0;
+                double bd = std::numeric_limits<double>::infinity();
+                for (size_t k = 0; k < Pl.size(); ++k)
+                    if (const double d = dist2(Q[Pl[k]], HP[0]); d < bd)
+                    {
+                        bd = d;
+                        k0 = k;
+                    }
+                std::rotate(Pl.begin(), Pl.begin() + static_cast<long>(k0), Pl.end());
+            }
+            std::vector<double> u;
+            for (size_t j = 0; j < Pl.size(); ++j)
+            {
+                const D3 q = Q[Pl[j]];
+                double bd = std::numeric_limits<double>::infinity(), x = 0;
+                for (size_t i = 0; i < nH; ++i)
+                {
+                    const double t = std::clamp(dot(q - HP[i], seg[i]) / std::max(dot(seg[i], seg[i]), 1e-20), 0.0, 1.0);
+                    const double d = dist2(HP[i] + seg[i] * t, q);
+                    if (d < bd)
+                    {
+                        bd = d;
+                        x = S[i] + t * sl[i];
+                    }
+                }
+                if (j == 0)
+                    x = x < L / 2 ? x : x - L;
+                else
+                    x += L * std::nearbyint((u.back() - x) / L);
+                u.push_back(x);
+            }
+            u = pav(u);
+            std::vector<size_t> first, head;
+            std::vector<double> s;
+            for (size_t j = 0; j < u.size(); ++j)
+            {
+                if (j && u[j] - s.back() < kMerge)
+                {
+                    first.push_back(first.back());
+                    continue;
+                }
+                first.push_back(j);
+                s.push_back(u[j]);
+                head.push_back(j);
+            }
+            while (s.size() > 1 && s.back() > s[0] + L - kMerge)
+            {
+                for (size_t &f : first)
+                    if (f == head.back())
+                        f = 0;
+                s.pop_back();
+                head.pop_back();
+            }
+            const size_t nP = s.size();
+            // Every hole vertex onto its nearest patch vertex (the closest pairs first), each staying between its
+            // neighbours: the patch's edge triangles then hold few hole vertices to fan around.
+            std::vector<int> snapped(nP, -1);
+            {
+                const std::vector<double> s0 = s;
+                std::vector<std::tuple<double, size_t, size_t, double>> cand;
+                for (size_t i = 0; i < nH; ++i)
+                {
+                    const double x = s0[0] + pmod(S[i] - s0[0], L);
+                    size_t bj = 0;
+                    double bd = std::numeric_limits<double>::infinity();
+                    for (size_t j = 0; j <= nP; ++j)
+                        if (const double d = std::fabs(x - (j < nP ? s0[j] : s0[0] + L)); d < bd)
+                        {
+                            bd = d;
+                            bj = j;
+                        }
+                    const double y = bj == nP ? s0[0] + L : s0[bj];
+                    cand.emplace_back(std::fabs(x - y), i, bj % nP, x - y);
+                }
+                std::sort(cand.begin(), cand.end());
+                for (const auto &[d, i, j, dx] : cand)
+                {
+                    if (snapped[j] >= 0)
+                        continue;
+                    const double lo = j ? s[j - 1] : s[nP - 1] - L, hi = j + 1 < nP ? s[j + 1] : s[0] + L, x = s0[j] + dx;
+                    if (!(lo + kMerge < x && x < hi - kMerge))
+                        continue;
+                    s[j] = x;
+                    snapped[j] = static_cast<int>(i);
+                }
+            }
+            std::vector<int> Pr; // the runs' first vertices: the patch's edge loop
+            std::vector<std::pair<int, int>> run;
+            for (size_t j = 0; j < Pl.size(); ++j)
+                if (first[j] != j)
+                    run.emplace_back(Pl[j], Pl[first[j]]);
+                else
+                    Pr.push_back(Pl[j]);
+            std::map<int, uint64_t> keyOf; // donor position -> key: a hole vertex's position id, or kDonor | donor id
+            for (const auto &[k, q] : Q)
+                keyOf[k] = kDonor | static_cast<uint64_t>(k);
+            std::map<size_t, std::vector<std::pair<double, uint64_t>>> keptPts; // hole edge -> (t, patch key)
+            std::unordered_set<uint64_t> edgeKeys;
+            std::unordered_set<int> takenPid;
+            for (size_t j = 0; j < nP; ++j)
+            {
+                const int k = Pr[j];
+                if (snapped[j] >= 0)
+                {
+                    keyOf[k] = static_cast<uint64_t>(hole[snapped[j]]);
+                    Q[k] = HP[snapped[j]];
+                    takenPid.insert(hole[snapped[j]]);
+                    continue;
+                }
+                const double x = pmod(s[j], L);
+                const size_t i = std::min(static_cast<size_t>(std::upper_bound(S.begin(), S.end(), x) - S.begin()) - 1, nH - 1);
+                const double t = (x - S[i]) / std::max(S[i + 1] - S[i], 1e-20);
+                Q[k] = HP[i] + seg[i] * t;
+                keptPts[i].emplace_back(t, keyOf[k]);
+                edgeKeys.insert(keyOf[k]);
+            }
+            for (const auto &[k, r0] : run)
+            {
+                keyOf[k] = keyOf[r0];
+                Q[k] = Q[r0];
+            }
+            std::map<size_t, std::vector<std::pair<double, uint64_t>>> patchPts; // patch edge -> (u, hole position id)
+            {
+                std::vector<double> se = s;
+                se.push_back(s[0] + L);
+                for (size_t i = 0; i < nH; ++i)
+                {
+                    if (takenPid.count(hole[i]))
+                        continue;
+                    const double x = s[0] + pmod(S[i] - s[0], L);
+                    const size_t j = std::min(static_cast<size_t>(std::upper_bound(se.begin(), se.end(), x) - se.begin()) - 1, nP - 1);
+                    patchPts[j].emplace_back(x, static_cast<uint64_t>(hole[i]));
+                }
+            }
+            auto kpos = [&](uint64_t k) { return (k & kDonor) ? Q[static_cast<int>(k & 0xFFFFFFFFu)] : P[rep[static_cast<int>(k)]]; };
+
             // Records: every new triangle takes the buffer of the cut triangle under it; a new record the woman's UV,
-            // colour and weights by closest point on her cut surface in that buffer.
+            // colour and weights by closest point on her cut surface in that buffer. A hole vertex's own record comes from
+            // the cut triangles first: the first record at its position can sit across a UV seam (the crotch's stitch then
+            // spanned the whole texture, K Nov 15).
             std::vector<int> cutVb(cutT.size());
             std::map<int, int> vbTm;
             for (size_t c = 0; c < cutT.size(); ++c)
@@ -1087,9 +1328,12 @@ namespace kamite::body_detail
                 closestCut(p, &c);
                 return cutVb[c];
             };
-            std::unordered_map<uint64_t, int> recs; // (key, vb) -> record; key: position id, or 1 << 40 | donor id
+            std::unordered_map<uint64_t, int> recs; // (key, vb) -> record
             std::vector<uint64_t> newKey;          // per new record: its key
             auto rk = [](uint64_t key, int vb) { return (key << 8) ^ static_cast<uint64_t>(vb); };
+            for (const auto &t : cutT)
+                for (const int r : t)
+                    recs.emplace(rk(static_cast<uint64_t>(pid[r]), m.VB[r]), r);
             for (size_t i = 0; i < R; ++i)
                 recs.emplace(rk(static_cast<uint64_t>(pid[i]), m.VB[i]), static_cast<int>(i));
             auto record = [&](uint64_t key, D3 pos, int vb) -> int {
@@ -1136,135 +1380,206 @@ namespace kamite::body_detail
                 newKey.push_back(key);
                 return id;
             };
-            constexpr uint64_t kDonor = 1ull << 40;
-            std::vector<int> newT, newTM;
+
+            // The patch, its edge triangles split at the hole's vertices.
+            std::vector<std::array<uint64_t, 3>> pT;
             for (const auto &t : patchT)
+                pT.push_back({keyOf[t[0]], keyOf[t[1]], keyOf[t[2]]});
+            std::vector<char> alive(pT.size(), 1);
+            auto distinct = [](const auto &t) { return t[0] != t[1] && t[1] != t[2] && t[0] != t[2]; };
+            for (auto &[j, pts] : patchPts)
             {
-                const D3 ps[3] = {Q[t[0]], Q[t[1]], Q[t[2]]};
+                std::sort(pts.begin(), pts.end());
+                const uint64_t a = keyOf[Pr[j]], b = keyOf[Pr[(j + 1) % nP]];
+                std::vector<uint64_t> mids;
+                for (const auto &pt : pts)
+                    mids.push_back(pt.second);
+                for (size_t x = 0; x < pT.size(); ++x)
+                {
+                    const auto &t = pT[x];
+                    if (!alive[x] || std::find(t.begin(), t.end(), a) == t.end() || std::find(t.begin(), t.end(), b) == t.end() ||
+                        !distinct(t))
+                        continue;
+                    alive[x] = 0;
+                    for (const auto &f : fan(pT[x], a, b, mids))
+                    {
+                        pT.push_back(f);
+                        alive.push_back(1);
+                    }
+                    break;
+                }
+            }
+            {
+                std::vector<std::array<uint64_t, 3>> live;
+                for (size_t x = 0; x < pT.size(); ++x)
+                    if (alive[x] && distinct(pT[x]))
+                        live.push_back(pT[x]);
+                pT = std::move(live);
+            }
+            // A hole corner that turns away from the patch's chord folds its fan: such a triangle's inner edge flipped
+            // while both new triangles face the way her surface under them faces. The patch keeps Shannon's own winding
+            // (consistent with hers along the shared edge).
+            auto facing = [&](const std::array<uint64_t, 3> &t) {
+                const D3 a = kpos(t[0]), b = kpos(t[1]), c = kpos(t[2]);
+                size_t k = 0;
+                const D3 q = closestCut((a + b + c) * (1.0 / 3.0), &k);
+                const std::array<int, 3> &ct = cutT[k];
+                D3 bc = bary(q, P[ct[0]], P[ct[1]], P[ct[2]]);
+                bc = {std::clamp(bc.x, 0.0, 1.0), std::clamp(bc.y, 0.0, 1.0), std::clamp(bc.z, 0.0, 1.0)};
+                return dot(cross(b - a, c - a), m.N[ct[0]] * bc.x + m.N[ct[1]] * bc.y + m.N[ct[2]] * bc.z);
+            };
+            for (int round = 0; round < 8; ++round)
+            {
+                bool changed = false;
+                for (size_t x = 0; x < pT.size(); ++x)
+                {
+                    const std::array<uint64_t, 3> t = pT[x];
+                    if (facing(t) >= 0)
+                        continue;
+                    for (int e = 0; e < 3; ++e)
+                    {
+                        const uint64_t p = t[e], q = t[(e + 1) % 3], r = t[(e + 2) % 3];
+                        size_t y = 0, ny = 0;
+                        for (size_t z = 0; z < pT.size(); ++z)
+                            if (z != x && std::find(pT[z].begin(), pT[z].end(), p) != pT[z].end() &&
+                                std::find(pT[z].begin(), pT[z].end(), q) != pT[z].end())
+                            {
+                                y = z;
+                                ++ny;
+                            }
+                        if (ny != 1)
+                            continue;
+                        uint64_t sv = 0;
+                        for (const uint64_t k : pT[y])
+                            if (k != p && k != q)
+                                sv = k;
+                        const std::array<uint64_t, 3> a{p, sv, r}, b{sv, q, r};
+                        if (facing(a) > 0 && facing(b) > 0)
+                        {
+                            pT[x] = a;
+                            pT[y] = b;
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+                if (!changed)
+                    break;
+            }
+            std::vector<int> newT, newTM;
+            for (size_t x = 0; x < pT.size(); ++x)
+            {
+                const D3 ps[3] = {kpos(pT[x][0]), kpos(pT[x][1]), kpos(pT[x][2])};
                 const int vb = vbAt((ps[0] + ps[1] + ps[2]) * (1.0 / 3.0));
                 for (int k = 0; k < 3; ++k)
-                    newT.push_back(record(kDonor | static_cast<uint64_t>(t[k]), ps[k], vb));
+                    newT.push_back(record(pT[x][k], ps[k], vb));
                 newTM.push_back(vbTm[vb]);
             }
-            res.patch = static_cast<int>(patchT.size());
-            // The stitch: shortest diagonals between the hole loop and the patch loop.
-            std::vector<int> Hl = hole, Pl = pl;
-            auto hp = [&](int k) { return P[rep[k]]; };
-            auto area = [](const std::vector<D3> &pts) {
-                double a = 0;
-                for (size_t i = 0; i < pts.size(); ++i)
-                {
-                    const D3 &p = pts[i], &q = pts[(i + 1) % pts.size()];
-                    a += p.x * q.y - q.x * p.y;
-                }
-                return 0.5 * a;
-            };
-            {
-                std::vector<D3> a, b;
-                for (const int k : Hl)
-                    a.push_back(hp(k));
-                for (const int k : Pl)
-                    b.push_back(Q[k]);
-                auto sign = [](double x) { return (x > 0) - (x < 0); };
-                if (sign(area(a)) != sign(area(b)))
-                    std::reverse(Pl.begin(), Pl.end());
-            }
-            {
-                size_t k0 = 0;
-                double bd = std::numeric_limits<double>::infinity();
-                for (size_t k = 0; k < Pl.size(); ++k)
-                    if (const double d = dist2(Q[Pl[k]], hp(Hl[0])); d < bd)
-                    {
-                        bd = d;
-                        k0 = k;
-                    }
-                std::rotate(Pl.begin(), Pl.begin() + static_cast<long>(k0), Pl.end());
-            }
-            const size_t nH = Hl.size(), nP = Pl.size();
-            size_t i = 0, j = 0;
-            struct Z
-            {
-                uint64_t key[3];
-                D3 pos[3];
-            };
-            std::vector<Z> zips;
-            while (i < nH || j < nP)
-            {
-                bool adv;
-                if (i >= nH)
-                    adv = false;
-                else if (j >= nP)
-                    adv = true;
-                else
-                    adv = len(hp(Hl[(i + 1) % nH]) - Q[Pl[j % nP]]) <= len(hp(Hl[i % nH]) - Q[Pl[(j + 1) % nP]]);
-                Z z;
-                z.key[0] = static_cast<uint64_t>(Hl[i % nH]);
-                z.pos[0] = hp(Hl[i % nH]);
-                z.key[1] = kDonor | static_cast<uint64_t>(Pl[j % nP]);
-                z.pos[1] = Q[Pl[j % nP]];
-                if (adv)
-                {
-                    z.key[2] = static_cast<uint64_t>(Hl[(i + 1) % nH]);
-                    z.pos[2] = hp(Hl[(i + 1) % nH]);
-                    ++i;
-                }
-                else
-                {
-                    z.key[2] = kDonor | static_cast<uint64_t>(Pl[(j + 1) % nP]);
-                    z.pos[2] = Q[Pl[(j + 1) % nP]];
-                    ++j;
-                }
-                zips.push_back(z);
-            }
-            for (const Z &z : zips)
-            {
-                const int vb = vbAt((z.pos[0] + z.pos[1] + z.pos[2]) * (1.0 / 3.0));
-                for (int k = 0; k < 3; ++k)
-                    newT.push_back(record(z.key[k], z.pos[k], vb));
-                newTM.push_back(vbTm[vb]);
-            }
-            res.stitch = static_cast<int>(zips.size());
+            res.patch = static_cast<int>(newTM.size());
 
-            // The triangles: hers without the cut, then the patch and the stitch, each wound to face the way her surface
-            // under it faces (her normals at the closest point of the cut). Outward from the hip axis, as the prototype
-            // had it, turned the inner thighs' and the crotch's triangles away from the camera (K, Nov 15: a gap down the
-            // inner thigh).
-            std::vector<int> T;
-            std::vector<int> TM;
+            // Her triangles without the cut, the ones on the hole's edge split at the patch's edge vertices (each new
+            // record lerped along the edge, in that triangle's buffer).
+            std::vector<std::array<int, 3>> keepT;
+            std::vector<int> keepTM;
             for (size_t t = 0; t < tris; ++t)
                 if (!cut[t])
                 {
-                    T.insert(T.end(), {m.T[3 * t], m.T[3 * t + 1], m.T[3 * t + 2]});
-                    TM.push_back(m.TM[t]);
+                    keepT.push_back({m.T[3 * t], m.T[3 * t + 1], m.T[3 * t + 2]});
+                    keepTM.push_back(m.TM[t]);
                 }
-            const size_t keep = TM.size();
-            for (size_t t = 0; t < newTM.size(); ++t)
+            std::vector<char> keepAlive(keepT.size(), 1);
+            for (auto &[i, pts] : keptPts)
             {
-                int *v = &newT[3 * t];
-                const D3 ctr = (m.P[v[0]] + m.P[v[1]] + m.P[v[2]]) * (1.0 / 3.0);
-                size_t c = 0;
-                const D3 q = closestCut(ctr, &c);
-                const std::array<int, 3> &ct = cutT[c];
-                D3 bc = bary(q, P[ct[0]], P[ct[1]], P[ct[2]]);
-                bc = {std::clamp(bc.x, 0.0, 1.0), std::clamp(bc.y, 0.0, 1.0), std::clamp(bc.z, 0.0, 1.0)};
-                const D3 ref = m.N[ct[0]] * bc.x + m.N[ct[1]] * bc.y + m.N[ct[2]] * bc.z;
-                if (dot(cross(m.P[v[1]] - m.P[v[0]], m.P[v[2]] - m.P[v[0]]), ref) < 0)
-                    std::swap(v[1], v[2]);
+                std::sort(pts.begin(), pts.end());
+                const int ha = hole[i], hb = hole[(i + 1) % nH];
+                const size_t n = keepT.size();
+                for (size_t x = 0; x < n; ++x)
+                {
+                    if (!keepAlive[x])
+                        continue;
+                    const std::array<int, 3> t = keepT[x];
+                    int a = -1, b = -1, na = 0, nb = 0;
+                    for (const int v : t)
+                        if (v < static_cast<int>(R))
+                        {
+                            if (pid[v] == ha)
+                            {
+                                a = v;
+                                ++na;
+                            }
+                            if (pid[v] == hb)
+                            {
+                                b = v;
+                                ++nb;
+                            }
+                        }
+                    if (na != 1 || nb != 1)
+                        continue;
+                    std::vector<int> mids;
+                    for (const auto &[tt, k] : pts)
+                    {
+                        D3 n3 = m.N[a] * (1 - tt) + m.N[b] * tt;
+                        n3 = n3 * (1.0 / (len(n3) + 1e-12));
+                        float C[4];
+                        for (int c = 0; c < 4; ++c)
+                            C[c] = static_cast<float>(m.C[4 * a + c] * (1 - tt) + m.C[4 * b + c] * tt);
+                        std::vector<std::pair<int, double>> mix;
+                        for (int j = 0; j < 3; ++j)
+                            addMix(mix, m.J[3 * a + j], m.W[3 * a + j], (1 - tt) * m.W[3 * a + j]);
+                        for (int j = 0; j < 3; ++j)
+                            addMix(mix, m.J[3 * b + j], m.W[3 * b + j], tt * m.W[3 * b + j]);
+                        int J[3];
+                        float W[3];
+                        topWeights(mix, J, W);
+                        const double uu = m.U[a] * (1 - tt) + m.U[b] * tt, vv = m.V[a] * (1 - tt) + m.V[b] * tt;
+                        mids.push_back(static_cast<int>(pushRecord(m, kpos(k), n3, uu, vv, C, J, W, m.VB[a])));
+                        newKey.push_back(kKept);
+                    }
+                    keepAlive[x] = 0;
+                    const int tm = keepTM[x];
+                    for (const auto &f : fan(t, a, b, mids))
+                    {
+                        keepT.push_back(f);
+                        keepTM.push_back(tm);
+                        keepAlive.push_back(1);
+                    }
+                }
             }
+            for (const auto &v : keptPts)
+                res.shared += static_cast<int>(v.second.size());
+            for (const auto &v : patchPts)
+                res.shared += static_cast<int>(v.second.size());
+
+            // The triangles: hers, then the patch.
+            std::vector<int> T;
+            std::vector<int> TM;
+            for (size_t x = 0; x < keepT.size(); ++x)
+                if (keepAlive[x])
+                {
+                    T.insert(T.end(), keepT[x].begin(), keepT[x].end());
+                    TM.push_back(keepTM[x]);
+                }
             T.insert(T.end(), newT.begin(), newT.end());
             TM.insert(TM.end(), newTM.begin(), newTM.end());
             m.T = std::move(T);
             m.TM = std::move(TM);
 
             // Normals: shading follows the geometry's blend: her own normal (at the closest point of the cut) at the
-            // patch's edge, the patch's own (from her mesh and the patch, not the stitch's slivers) over the same falloff;
-            // the hole's ring keeps hers. Normals recomputed on both sides of the stitch left a hard line down the side of
-            // the hip (K, Nov 15). The flat state: each new record at its closest point on the cut surface, her normal.
-            const std::vector<D3> sn = smoothNormals(m.P, m.T, keep + patchT.size());
+            // patch's edge, the patch's own over the same falloff. Normals recomputed across the patch's edge left a hard
+            // line down the side of the hip (K, Nov 15). The flat state: each new record at its closest point on the cut
+            // surface, her normal; the shared edge's records are where they are in both states.
+            const std::vector<D3> sn = smoothNormals(m.P, m.T, m.triangles());
             res.detailN = m.N;
             res.ring.assign(R, 0);
             for (size_t r = R; r < m.records(); ++r)
             {
+                const uint64_t key = newKey[r - R];
+                if (key == kKept)
+                {
+                    res.flatP.push_back(m.P[r]);
+                    res.flatN.push_back(m.N[r]);
+                    continue;
+                }
                 size_t c = 0;
                 const D3 q = closestCut(m.P[r], &c);
                 const std::array<int, 3> &t = cutT[c];
@@ -1273,14 +1588,13 @@ namespace kamite::body_detail
                 const double bs = bc.x + bc.y + bc.z;
                 D3 her = (m.N[t[0]] * bc.x + m.N[t[1]] * bc.y + m.N[t[2]] * bc.z) * (1.0 / bs);
                 her = her * (1.0 / (len(her) + 1e-12));
-                const uint64_t key = newKey[r - R];
                 double f = 0.0;
                 if (key & kDonor)
                     if (const auto it = fall.find(static_cast<int>(key & 0xFFFFFFFFu)); it != fall.end())
                         f = it->second;
                 const D3 n = her * (1 - f) + sn[r] * f;
                 res.detailN[r] = n * (1.0 / (len(n) + 1e-12));
-                res.flatP.push_back(q);
+                res.flatP.push_back(edgeKeys.count(key) ? m.P[r] : q);
                 res.flatN.push_back(her);
             }
             res.cut = std::move(cut);
@@ -1668,7 +1982,7 @@ namespace kamite::body_detail
             if (!seated)
                 out.error = "no seat cut (bust only)";
             out.seatPatch = sr.patch;
-            out.seatStitch = sr.stitch;
+            out.seatShared = sr.shared;
         }
 
         // Every record in both states.

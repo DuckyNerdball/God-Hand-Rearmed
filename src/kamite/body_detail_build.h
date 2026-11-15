@@ -11,7 +11,7 @@
 //   back near the centre line) onto Olivia's bunny-suit bust (el/elf4.dat), box-mapped to the woman's bone-29 extents,
 //   the height smoothed;
 // - the seat: the costume piece holding the seat cut in a window behind the hips and Shannon's seat (el/el15.dat
-//   body_u1) stitched in at her own size (only her hip width matched), blended onto the woman's surface near its edge.
+//   body_u1) joined in at her own size (only her hip width matched), blended onto the woman's surface near its edge.
 // Every new vertex takes the woman's own UVs, colours and weights, so her textures stay hers.
 //
 // One topology serves both states: each changed vertex has a flat position (on the woman's original surface: the
@@ -68,7 +68,7 @@ namespace kamite::body_detail
         std::vector<Change> changes;
         int sentinel[3] = {-1, -1, -1}; // per region: a change whose position differs between the states
         size_t used = 0;           // bytes before the padding
-        int bustAdded = 0, seatPatch = 0, seatStitch = 0;
+        int bustAdded = 0, seatPatch = 0, seatShared = 0;
         std::string error;
     };
 

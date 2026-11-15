@@ -1,4 +1,4 @@
-"""Seat transplant: cut a window out of a woman's body, stitch in the donor's patch (box-mapped to her size), and give
+"""Seat transplant: cut a window out of a woman's body, join in the donor's patch (box-mapped to her size), and give
 the new vertices her own UVs / weights / material by closest point on her original surface (per UV island)."""
 import os, sys, numpy as np
 CUT_MODE="min"; CUT_MIN=2
@@ -214,30 +214,117 @@ def depth_match(Q, patchT, P, cutT, ys=np.arange(0.88,1.165,0.01), most=1.5, mar
     for it in range(2): s=np.maximum(1.0,np.convolve(np.pad(s,1,mode='edge'),[0.25,0.5,0.25],'valid'))
     return {k:np.array([q[0],q[1],q[2]*np.interp(q[1],ys,s)]) for k,q in Q.items()}, s
 
-def build2(m, donor, lo, hi, falloff=0.04, mapping='own', pin=0.85, one_vb=True, match_depth=True):
+def pav(y):
+    """The non-decreasing least-squares fit of y (pool adjacent violators)."""
+    v=[];w=[]
+    for x in y:
+        v.append(float(x)); w.append(1)
+        while len(v)>1 and v[-2]>v[-1]:
+            n=w[-2]+w[-1]; mm=(v[-2]*w[-2]+v[-1]*w[-1])/n; v[-2:]=[mm]; w[-2:]=[n]
+    out=[]
+    for x,n in zip(v,w): out+=[x]*n
+    return out
+
+def join_edge(HP, PQ, merge=0.001):
+    """The patch's edge laid onto the hole's boundary. PQ: the patch-edge positions in loop order, the same sense as the
+    hole's loop HP, PQ[0] the closest to HP[0]. Each goes to its closest point on the hole's polyline, kept in loop order
+    (the least-squares monotonic fit); a run that lands within `merge` of its first becomes one vertex. Then every hole
+    vertex goes onto its nearest patch vertex (the closest pairs first), each staying between its neighbours: the patch's
+    edge triangles then hold few hole vertices to fan around. Returns the first of each patch vertex's run, the runs' loop
+    parameters (from HP[0], increasing, the first in [-L/2, L/2)), the hole vertex each run snapped to (or -1), the
+    hole's cumulative lengths and its length."""
+    nH=len(HP); seg=np.roll(HP,-1,0)-HP; sl=np.linalg.norm(seg,axis=1); S=np.concatenate([[0.0],np.cumsum(sl)]); L=S[-1]
+    u=[]
+    for j,q in enumerate(PQ):
+        t=np.clip(((q-HP)*seg).sum(1)/np.maximum((seg*seg).sum(1),1e-20),0,1); c=HP+seg*t[:,None]
+        i=int(np.argmin(((c-q)**2).sum(1))); x=S[i]+t[i]*sl[i]
+        if j==0: x=x if x<L/2 else x-L
+        else: x+=L*np.round((u[-1]-x)/L)
+        u.append(x)
+    u=pav(u); first=[]; s=[]; head=[]
+    for j,x in enumerate(u):
+        if j and x-s[-1]<merge: first.append(first[-1]); continue
+        first.append(j); s.append(x); head.append(j)
+    while len(s)>1 and s[-1]>s[0]+L-merge:
+        first=[0 if f==head[-1] else f for f in first]; s.pop(); head.pop()
+    n=len(s); snapped=[-1]*n
+    s0=list(s); cand=[]
+    for i in range(nH):
+        x=s0[0]+(S[i]-s0[0])%L; d=[abs(x-y) for y in s0]+[abs(x-(s0[0]+L))]; j=int(np.argmin(d))%n
+        y=s0[j] if not (j==0 and d[n]<d[0]) else s0[0]+L
+        cand.append((abs(x-y),i,j,x-y))
+    for dd,i,j,dx in sorted(cand):
+        if snapped[j]>=0: continue
+        lo=s[j-1] if j else s[-1]-L; hi=s[j+1] if j+1<n else s[0]+L
+        x=s0[j]+dx
+        if not lo+merge<x<hi-merge: continue
+        s[j]=x; snapped[j]=i
+    return first,s,snapped,S,L
+
+def no_ears(T):
+    """T (triples of position ids) without its ears: a triangle with two edges on the boundary has all three corners on
+    the patch's edge, and laid onto the hole's boundary it would be a line (repeated while any remain)."""
+    T=list(T)
+    while True:
+        cnt={}
+        for t in T:
+            for e in ((t[0],t[1]),(t[1],t[2]),(t[2],t[0])): k=(min(e),max(e)); cnt[k]=cnt.get(k,0)+1
+        ears={x for x,t in enumerate(T) if sum(cnt[(min(e),max(e))]==1 for e in ((t[0],t[1]),(t[1],t[2]),(t[2],t[0])))>=2}
+        if not ears: return T
+        T=[t for x,t in enumerate(T) if x not in ears]
+
+def fan(t, a, b, mids):
+    """Triangle t (three ids) with its edge a-b split at mids (ordered from a to b): the fan from its third corner, in
+    t's own winding."""
+    t=list(t)
+    for x in range(3):
+        if t[x]==a and t[(x+1)%3]==b: ch=[a]+list(mids)+[b]; c=t[(x+2)%3]; break
+        if t[x]==b and t[(x+1)%3]==a: ch=[b]+list(mids)[::-1]+[a]; c=t[(x+2)%3]; break
+    else: return [tuple(t)]
+    return [(ch[y],ch[y+1],c) for y in range(len(ch)-1)]
+
+def build2(m, donor, lo, hi, falloff=0.04, mapping='own', one_vb=True, match_depth=True):
     """build() for cuts across several vertex buffers: every new triangle takes the vertex buffer (material, UVs) of
-    the woman's cut triangle under it; a position gets one record per vertex buffer that uses it."""
+    the woman's cut triangle under it; a position gets one record per vertex buffer that uses it. The patch and her
+    mesh share one edge: the patch's edge laid onto the hole's boundary, each side's edge triangles split at the other
+    side's vertices (no stitch: its slivers showed as dots along the waistband from low angles, K Nov 15)."""
     r=transplant(m,donor,lo,hi,mapping=mapping,one_vb=one_vb)
-    P=m['P']; T=m['T']; pid=r['pid']; cut=r['cut']
+    P=m['P']; T=m['T']; pid=r['pid']; cut=r['cut']; dpid=r['dpid']
     cutT=T[cut]; cutI=np.where(cut)[0]
     A,B,C=P[cutT[:,0]],P[cutT[:,1]],P[cutT[:,2]]
     Q=dict(r['Q'])
-    if match_depth: Q,_=depth_match(Q,[(r['dpid'][a],r['dpid'][b],r['dpid'][c]) for a,b,c in r['patchT']],P,cutT)
+    patchT=no_ears([(int(dpid[a]),int(dpid[b]),int(dpid[c])) for a,b,c in r['patchT']])
+    if match_depth: Q,_=depth_match(Q,patchT,P,cutT)
+    rep={}
+    for i in range(len(P)): rep.setdefault(int(pid[i]),i)
+    def opos(k): return P[rep[k]]
+    H=list(max(r['hole'],key=len)); Pl=list(max(boundary_loops(np.array(patchT),{k:k for k in Q}),key=len))
     fall={}
     if falloff:
-        edge=np.array([Q[k] for k in max(r['patch_loops'],key=len)])
+        edge=np.array([Q[k] for k in Pl])
         for k,q in list(Q.items()):
             cq=tri_closest(q,A,B,C); s0=cq[np.argmin(((cq-q)**2).sum(1))]
             d=np.sqrt(((edge-q)**2).sum(1)).min(); f=np.clip(d/falloff,0,1); f=f*f*(3-2*f)
             Q[k]=s0+(q-s0)*f; fall[k]=f
-        # the patch's edge pinned onto the hole's own boundary (most of the way), so the stitch lies flat on the
-        # surface instead of standing edge-on where the two edges sit at different depths
-        rep0={}
-        for i in range(len(P)): rep0.setdefault(int(pid[i]),i)
-        hl=max(r['hole'],key=len); HP=np.array([P[rep0[k]] for k in hl])
-        S0=HP; S1=np.roll(HP,-1,0)
-        for k in max(r['patch_loops'],key=len):
-            h=seg_closest(Q[k],S0,S1); Q[k]=Q[k]+(h-Q[k])*pin
+    # the shared edge: the patch's edge vertices onto the hole's polyline (or onto its vertices)
+    HP=np.array([opos(k) for k in H]); nH=len(H)
+    def area(pts):
+        p=np.array(pts)[:,:2]; return 0.5*np.sum(p[:,0]*np.roll(p[:,1],-1)-np.roll(p[:,0],-1)*p[:,1])
+    if np.sign(area(HP))!=np.sign(area([Q[k] for k in Pl])): Pl=Pl[::-1]
+    k0=int(np.argmin([((Q[k]-HP[0])**2).sum() for k in Pl])); Pl=Pl[k0:]+Pl[:k0]
+    first,s,snapped,S,L=join_edge(HP,[Q[k] for k in Pl])
+    run=[(Pl[j],Pl[first[j]]) for j in range(len(Pl)) if first[j]!=j]; Pl=[Pl[j] for j in range(len(Pl)) if first[j]==j]
+    nP=len(Pl); seg=np.roll(HP,-1,0)-HP
+    key={k:('d',k) for k in Q}; kept_pts={}  # hole edge i -> [(t, patch key)]
+    for j,k in enumerate(Pl):
+        if snapped[j]>=0: key[k]=('o',H[snapped[j]]); Q[k]=HP[snapped[j]]; continue
+        u=s[j]%L; i=min(int(np.searchsorted(S,u,'right'))-1,nH-1); t=(u-S[i])/max(S[i+1]-S[i],1e-20)
+        Q[k]=HP[i]+seg[i]*t; kept_pts.setdefault(i,[]).append((t,('d',k)))
+    for k,r0 in run: key[k]=key[r0]; Q[k]=Q[r0]
+    taken={H[i] for i in snapped if i>=0}; se=list(s)+[s[0]+L]; patch_pts={}  # patch edge j -> [(u, hole key)]
+    for i,h in enumerate(H):
+        if h in taken: continue
+        u=s[0]+(S[i]-s[0])%L; j=min(int(np.searchsorted(se,u,'right'))-1,nP-1); patch_pts.setdefault(j,[]).append((u,('o',h)))
     NP=list(P);NN=list(m['N']);NUV=list(m['UV']);NC=list(m['C']);NJ=list(m['J']);NW=list(m['W']);NVB=list(m['VB'])
     cut_vb=m['VB'][cutT[:,0]]
     vb_tm={int(m['VB'][T[i][0]]):int(m['TM'][i]) for i in cutI}
@@ -247,73 +334,96 @@ def build2(m, donor, lo, hi, falloff=0.04, mapping='own', pin=0.85, one_vb=True,
         return k, cq[np.argmin(((cq-p)**2).sum(1))]
     def vb_at(p):
         cq=tri_closest(p,A,B,C); return int(cut_vb[np.argmin(((cq-p)**2).sum(1))])
-    recs={}  # (position key, vb) -> record
+    def mix(J3, W3, ws):
+        w={}
+        for J,W,f in zip(J3,W3,ws):
+            for jj,ww in zip(J,W):
+                if ww>0: w[jj]=w.get(jj,0)+f*ww
+        top=sorted(w.items(),key=lambda x:-x[1])[:3]; s_=sum(x[1] for x in top) or 1
+        J=[x[0] for x in top]+[0]*(3-len(top)); W=[round(100*x[1]/s_) for x in top]+[0]*(3-len(top)); W[0]+=100-sum(W)
+        return J,W
+    # (position key, vb) -> record; a hole vertex's own record from the cut triangles first (the first record at that
+    # position can sit across a UV seam: the crotch's stitch then spanned the whole texture, K Nov 15)
+    recs={}
+    for t in cutT:
+        for i in t: recs.setdefault((('o',int(pid[i])),int(m['VB'][i])),int(i))
     for i in range(len(P)): recs.setdefault((('o',int(pid[i])),int(m['VB'][i])),i)
     def record(key, pos, vb):
         if (key,vb) in recs: return recs[(key,vb)]
         k,cq=closest_in(pos,vb); t=cutT[k]
         bc=np.clip(bary(cq,P[t[0]],P[t[1]],P[t[2]]),0,1); bc/=bc.sum()
         uv=sum(bc[i]*m['UV'][t[i]] for i in range(3)); col=sum(bc[i]*m['C'][t[i]] for i in range(3))
-        w={}
-        for i in range(3):
-            for jj,ww in zip(m['J'][t[i]],m['W'][t[i]]):
-                if ww>0: w[jj]=w.get(jj,0)+bc[i]*ww
-        top=sorted(w.items(),key=lambda x:-x[1])[:3]; s=sum(x[1] for x in top) or 1
-        J=[x[0] for x in top]+[0]*(3-len(top)); W=[round(100*x[1]/s) for x in top]+[0]*(3-len(top)); W[0]+=100-sum(W)
+        J,W=mix([m['J'][t[i]] for i in range(3)],[m['W'][t[i]] for i in range(3)],bc)
         NP.append(np.array(pos,float));NN.append(np.zeros(3));NUV.append(uv);NC.append(col);NJ.append(J);NW.append(W);NVB.append(vb)
         recs[(key,vb)]=len(NP)-1; return recs[(key,vb)]
-    rep={}
-    for i in range(len(P)): rep.setdefault(int(pid[i]),i)
-    def opos(k): return P[rep[k]]
-    newT=[];newTM=[]
-    dpid=r['dpid']
-    for a,b,c in r['patchT']:
-        ks=[('d',int(dpid[a])),('d',int(dpid[b])),('d',int(dpid[c]))]; ps=[Q[k[1]] for k in ks]
-        vb=vb_at(np.mean(ps,0))
-        newT.append(tuple(record(k,p,vb) for k,p in zip(ks,ps))); newTM.append(vb_tm[vb])
-    # stitch: shortest diagonals between the hole loop and the patch loop (positions), each triangle in the buffer
-    # under it
-    H=list(max(r['hole'],key=len)); Pl=list(max(r['patch_loops'],key=len))
-    def hp(k): return opos(k)
-    def pp(k): return Q[k]
-    def area(pts):
-        p=np.array(pts)[:,:2]; return 0.5*np.sum(p[:,0]*np.roll(p[:,1],-1)-np.roll(p[:,0],-1)*p[:,1])
-    if np.sign(area([hp(k) for k in H]))!=np.sign(area([pp(k) for k in Pl])): Pl=Pl[::-1]
-    k0=int(np.argmin([((pp(k)-hp(H[0]))**2).sum() for k in Pl])); Pl=Pl[k0:]+Pl[:k0]
-    nH,nP=len(H),len(Pl); i=j=0; zips=[]
-    while i<nH or j<nP:
-        if i>=nH: adv=False
-        elif j>=nP: adv=True
-        else: adv=np.linalg.norm(hp(H[(i+1)%nH])-pp(Pl[j%nP]))<=np.linalg.norm(hp(H[i%nH])-pp(Pl[(j+1)%nP]))
-        if adv: zips.append((('o',H[i%nH]),('d',Pl[j%nP]),('o',H[(i+1)%nH]))); i+=1
-        else: zips.append((('o',H[i%nH]),('d',Pl[j%nP]),('d',Pl[(j+1)%nP]))); j+=1
     def kpos(k): return opos(k[1]) if k[0]=='o' else Q[k[1]]
-    for z in zips:
-        ps=[kpos(k) for k in z]; vb=vb_at(np.mean(ps,0))
-        newT.append(tuple(record(k,p,vb) for k,p in zip(z,ps))); newTM.append(vb_tm[vb])
-    keepT=[tuple(t) for t,c in zip(T,cut) if not c]; keepTM=[tm for tm,c in zip(m['TM'],cut) if not c]
+    def split(tris, a, b, mids):
+        for x,t in enumerate(tris):
+            if t is not None and a in t and b in t and len(set(t))==3:
+                tris[x]=None; tris+=fan(t,a,b,mids); return True
+        return False
+    # the patch, its edge triangles split at the hole's vertices
+    pT=[tuple(key[v] for v in t) for t in patchT]
+    for j,pts in sorted(patch_pts.items()):
+        split(pT,key[Pl[j]],key[Pl[(j+1)%nP]],[h for u,h in sorted(pts)])
+    pT=[t for t in pT if t is not None and len(set(t))==3]
+    # a hole corner that turns away from the patch's chord folds its fan: such a triangle's inner edge flipped while both
+    # new triangles face the way her surface under them faces. The patch keeps Shannon's own winding (consistent with
+    # hers along the shared edge).
+    def ref(ps):
+        ctr=np.mean(ps,0); cq=tri_closest(ctr,A,B,C); k=int(np.argmin(((cq-ctr)**2).sum(1))); ct=cutT[k]
+        bc=np.clip(bary(cq[k],P[ct[0]],P[ct[1]],P[ct[2]]),0,1); return sum(bc[i]*m['N'][ct[i]] for i in range(3))
+    def facing(t):
+        ps=[kpos(k) for k in t]; return np.cross(ps[1]-ps[0],ps[2]-ps[0])@ref(ps)
+    for it in range(8):
+        changed=False
+        for x in range(len(pT)):
+            t=pT[x]
+            if facing(t)>=0: continue
+            for e in range(3):
+                p_,q_,r_=t[e],t[(e+1)%3],t[(e+2)%3]
+                ys=[y for y in range(len(pT)) if y!=x and p_ in pT[y] and q_ in pT[y]]
+                if len(ys)!=1: continue
+                y=ys[0]; u=pT[y]; s_=[k for k in u if k!=p_ and k!=q_][0]
+                a_,b_=(p_,s_,r_),(s_,q_,r_)
+                if facing(a_)>0 and facing(b_)>0: pT[x]=a_; pT[y]=b_; changed=True; break
+        if not changed: break
+    newT=[];newTM=[]
+    for t in pT:
+        ps=[kpos(k) for k in t]; vb=vb_at(np.mean(ps,0))
+        newT.append(tuple(record(k,p,vb) for k,p in zip(t,ps))); newTM.append(vb_tm[vb])
+    # her triangles without the cut, the ones on the hole's edge split at the patch's edge vertices (each new record
+    # lerped along the edge, in that triangle's buffer)
+    keepT=[tuple(int(x) for x in t) for t,c in zip(T,cut) if not c]; keepTM=[tm for tm,c in zip(m['TM'],cut) if not c]
+    kept_new=set()
+    for i,pts in sorted(kept_pts.items()):
+        ha,hb=H[i],H[(i+1)%nH]; pts=sorted(pts)
+        for x in range(len(keepT)):
+            t=keepT[x]
+            if t is None: continue
+            ra=[v for v in t if v<len(P) and pid[v]==ha]; rb=[v for v in t if v<len(P) and pid[v]==hb]
+            if len(ra)!=1 or len(rb)!=1: continue
+            a,b=ra[0],rb[0]; mids=[]
+            for tt,k in pts:
+                n=NN[a]*(1-tt)+NN[b]*tt
+                J,W=mix([NJ[a],NJ[b]],[NW[a],NW[b]],[1-tt,tt])
+                NP.append(np.array(Q[k[1]],float));NN.append(n/(np.linalg.norm(n)+1e-12));NUV.append(NUV[a]*(1-tt)+NUV[b]*tt)
+                NC.append(NC[a]*(1-tt)+NC[b]*tt);NJ.append(J);NW.append(W);NVB.append(NVB[a]); mids.append(len(NP)-1); kept_new.add(len(NP)-1)
+            tm=keepTM[x]; keepT[x]=None; keepTM[x]=None
+            for f in fan(t,a,b,mids): keepT.append(f); keepTM.append(tm)
+    keepTM=[tm for tm,t in zip(keepTM,keepT) if t is not None]; keepT=[t for t in keepT if t is not None]
     out=dict(m); out.update(P=np.array(NP,float),N=np.array(NN,float),UV=np.array(NUV,float),C=np.array(NC,float),J=np.array(NJ,int),W=np.array(NW,float),VB=np.array(NVB),
                             T=np.array(keepT+newT,int),TM=np.array(keepTM+newTM))
-    # winding: each new triangle faces the way her surface under it faces (her normals at the closest point of the
-    # cut); outward from the hip axis turned the inner thighs' and the crotch's triangles away (K, Nov 15: a gap)
-    nt=out['T']; added=np.arange(len(keepT),len(nt))
-    for t in added:
-        a,b,c=nt[t]; ctr=(out['P'][a]+out['P'][b]+out['P'][c])/3
-        cq=tri_closest(ctr,A,B,C); k=int(np.argmin(((cq-ctr)**2).sum(1))); ct=cutT[k]
-        bc=np.clip(bary(cq[k],P[ct[0]],P[ct[1]],P[ct[2]]),0,1)
-        ref=sum(bc[i]*m['N'][ct[i]] for i in range(3))
-        if np.cross(out['P'][b]-out['P'][a],out['P'][c]-out['P'][a])@ref<0: nt[t]=[a,c,b]
-    out['T']=nt
-    # normals from her mesh + the patch only: the stitch's slivers would bend the edge's shading
-    sn,_=smooth_normals(out['P'],out['T'][:len(keepT)+len(r['patchT'])])
+    sn,_=smooth_normals(out['P'],out['T'])
     # shading follows the geometry's blend: her own normal (at the closest point of the cut) at the patch's edge, the
-    # patch's over the same falloff; the hole's ring keeps hers. (Normals recomputed on both sides of the stitch left a
-    # hard line down the side of the hip, K Nov 15.)
+    # patch's over the same falloff. (Normals recomputed across the patch's edge left a hard line down the side of the
+    # hip, K Nov 15.)
     key_of={v:kk for (kk,vb),v in recs.items()}
     for i in range(len(P),len(out['P'])):
+        if i in kept_new: continue
         q=out['P'][i]; cq=tri_closest(q,A,B,C); kk=int(np.argmin(((cq-q)**2).sum(1))); ct=cutT[kk]
         bc=np.clip(bary(cq[kk],P[ct[0]],P[ct[1]],P[ct[2]]),0,1); bc/=bc.sum()
         her=sum(bc[j2]*m['N'][ct[j2]] for j2 in range(3)); her/=np.linalg.norm(her)+1e-12
         key=key_of.get(i); f=fall.get(key[1],0.0) if key and key[0]=='d' else 0.0
         n=her*(1-f)+sn[i]*f; out['N'][i]=n/(np.linalg.norm(n)+1e-12)
-    return out, len(r['patchT']), len(zips)
+    return out, len(pT), sum(len(v) for v in kept_pts.values())+sum(len(v) for v in patch_pts.values())
