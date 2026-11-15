@@ -94,6 +94,6 @@ two-bone IK with the elbow as a hinge, the clavicle shrugging when the reach nee
 the hands on their way in and out on a curve through a point in front of the breast, her hanging right arm raised out of
 his way. `chest_suplex.py emit` writes the three women's skeletons at 1.00 and 1.20 (held: her size kept, her knees
 bent) into resources/punish_fit.txt, replacing their Suplex fits (idempotent; run after emit7): pose lines per Money
-value (0.85, 1.00, 1.30; blended by the runtime), the bust hold, frontcam with its cam line (the pair's centre per
-frame in Gene's model space: the camera parts 27 / 28 are turned half a turn round it). `chest_suplex.py <body file> <size> <money>
+value (0.85, 1.00, 1.30; blended by the runtime), the bust hold, frontcam with its cam lines (Camera: the punish
+camera's parts 27 / 28 per frame in Gene's model space, four ways round, CAMERAS; the runtime picks one at random). `chest_suplex.py <body file> <size> <money>
 <out.png> [frames] [yaw] [zoom]` renders a strip.

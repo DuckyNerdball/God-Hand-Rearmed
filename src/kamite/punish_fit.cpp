@@ -34,8 +34,8 @@
 // The women's chest grab Suplex (K, Nov 15; claude/boobplex.md): a fit's pose lines give whole pre-rotations for chosen
 // bones over chosen frames (Gene's arms solved offline onto the bust at a few Money values, blended at the motion's start
 // for the current Money; her hanging arm raised out of his way), its bust line holds her bust jiggle still while his
-// hands are on (bustHold, for bone_tweaks' Money), and "frontcam" with a cam line turns the punish camera half a turn
-// round the pair's centre (the camera is two parts of Gene's model keyed by his punish motion: frontCamera).
+// hands are on (bustHold, for bone_tweaks' Money), and "frontcam" with its cam lines replaces the punish camera (two parts
+// of Gene's model keyed by his punish motion: setCamera), one of a few ways at random.
 //
 // Size (K, Nov 8). Enemies of one model come in many sizes (stage 1: 1.03, 1.05, 1.07 ... 1.10), so a pair is not
 // fitted per size: it is scaled. Every actor's model, root travel (cObjBase_addNullSpeed: the motion's delta x +0x110 /
@@ -76,6 +76,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <set>
 #include <sstream>
 #include <string>
@@ -208,8 +209,20 @@ namespace kamite::punish_fit
             std::vector<Pose> poses;
             uint16_t bustMotion = 0;                       // Gene's motion the bust hold follows
             std::vector<std::pair<float, float>> bust;     // Gene's frame -> how much the victim's bust jiggle is held (0..1)
-            uint16_t camMotion = 0;                        // frontcam: Gene's motion whose camera turns
-            std::vector<std::pair<float, std::array<float, 2>>> camPivot; // its frame -> the pair's centre (x, z, his model)
+            struct CamPath
+            {
+                uint16_t motion = 0;
+                int variant = 0;
+                std::vector<std::pair<float, std::array<float, 6>>> keys; // frame -> eye, look-at (Gene's model space)
+            };
+            std::vector<CamPath> cams; // frontcam: the punish camera's ways (one picked at random per punish)
+            const CamPath *cam(uint16_t motion, int variant) const
+            {
+                for (const CamPath &c : cams)
+                    if (c.motion == motion && c.variant == variant)
+                        return &c;
+                return nullptr;
+            }
             const Track *find(uint16_t motion, bool gene) const
             {
                 for (const Track &t : tracks)
@@ -277,6 +290,7 @@ namespace kamite::punish_fit
             uint32_t geneMotionPtr = 0; // the pointer Gene's current punish motion was started with (ours or the game's)
             const Track *geneTrack = nullptr;
             float applied[3] = {}; // forward, side, turn (radians) put in so far
+            int camVariant = 0;    // the fit's camera way for this punish (frontcam)
         };
 
         // An actor's size change (Gene's, the victim's), easing in while the pair plays and out after it (EE thread only).
@@ -305,7 +319,7 @@ namespace kamite::punish_fit
             return !starts && g_pair.enemy == enemy && g_pair.punish == punish ? g_pairOn : g_on.load(std::memory_order_relaxed);
         }
         Resize g_resize[2]; // the victim, Gene
-        std::map<std::tuple<uint32_t, int, uint16_t, bool, int, int>, uint32_t> g_copies; // (body, punish, motion, gene, size, Money) -> copy
+        std::map<std::tuple<uint32_t, int, uint16_t, bool, int, int, int>, uint32_t> g_copies; // (body, punish, motion, gene, size, Money, camera) -> copy
         uint32_t g_areaAt = kRewriteArea;
         std::set<uint64_t> g_logged;
 
@@ -605,6 +619,22 @@ namespace kamite::punish_fit
         }
 
         // func_001299F0, wrapped.
+        // One of the fit's camera ways at random (K, Nov 15), never the one picked last. The host's generator: the game's
+        // own random rolls (the AI's, recorded by test cases) stay untouched.
+        int pickCamera(const Fit &fit, uint16_t motion)
+        {
+            static std::mt19937 rng{std::random_device{}()};
+            static int last = -1;
+            std::vector<int> ways;
+            for (const Fit::CamPath &c : fit.cams)
+                if (c.motion == motion && c.variant != last)
+                    ways.push_back(c.variant);
+            if (ways.empty())
+                return last < 0 ? 0 : last;
+            last = ways[std::uniform_int_distribution<size_t>(0, ways.size() - 1)(rng)];
+            return last;
+        }
+
         void alignHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t ra = GPR_U32(ctx, 31);
@@ -647,6 +677,7 @@ namespace kamite::punish_fit
                 const Fits *fits = fitsForPair(rdram, enemy, call->punish, body);
                 const Anchor an = fits ? anchorFor(*fits, g_pair.baseScale[1]) : Anchor{};
                 g_pair.fit = an.fit;
+                g_pair.camVariant = an.fit ? pickCamera(*an.fit, call->geneMotion) : 0;
                 g_pair.sizeKey = sizeKeyOf(an.fit, an.scale);
                 g_pair.live = an.any;
                 if (an.any)
@@ -767,43 +798,42 @@ namespace kamite::punish_fit
             return out;
         }
 
-        // The punish camera to the pair's front (K, Nov 15). Gene's punish motions carry the camera as two root-level
-        // parts of his model, 27 = the eye, 28 = what it looks at (pl00 func_00124EC0: cCamManager_setPartsCamera, then
-        // cPartsCamera_SetParts with parts 27 and 28; the parts camera puts them through Gene's matrix), keyed as
-        // translations in his model space. Both are turned half a turn about the vertical through the pair's centre (the
-        // fit's cam line, frame by frame): x, z -> 2 x centre - x, z, so the camera keeps the original's distance from
-        // the pair (turned round its look-at point, which runs ahead of the pair, it ended up to 4 m further; K).
-        void frontCamera(std::vector<uint8_t> &m, uint16_t frames, const Fit &fit)
+        // The punish camera (K, Nov 15). Gene's punish motions carry the camera as two root-level parts of his model, 27 =
+        // the eye, 28 = what it looks at (pl00 func_00124EC0: cCamManager_setPartsCamera, then cPartsCamera_SetParts with
+        // parts 27 and 28; the parts camera puts them through Gene's matrix), keyed as translations in his model space. A
+        // fit's cam line gives both per frame (to its last key; the game's own after): the women's chest grab is shot close
+        // and from the front for the grab, then goes round to the game's own camera by frame 60 (four ways round, K: one
+        // at random). The game's own translations are replaced (addCurve by the difference).
+        void setCamera(std::vector<uint8_t> &m, uint16_t frames, const Fit::CamPath &path)
         {
-            const auto &pivot = fit.camPivot;
-            const auto centre = [&](float f, int c) {
-                const int i = c == 0 ? 0 : 1;
-                if (f <= pivot.front().first)
-                    return pivot.front().second[i];
-                if (f >= pivot.back().first)
-                    return pivot.back().second[i];
+            const auto &keys = path.keys;
+            const auto value = [&](float f, int i) {
+                if (f <= keys.front().first)
+                    return keys.front().second[i];
+                if (f >= keys.back().first)
+                    return keys.back().second[i];
                 size_t k = 1;
-                while (pivot[k].first < f)
+                while (keys[k].first < f)
                     ++k;
-                const float t = (f - pivot[k - 1].first) / (pivot[k].first - pivot[k - 1].first);
-                return pivot[k - 1].second[i] + (pivot[k].second[i] - pivot[k - 1].second[i]) * t;
+                const float t = (f - keys[k - 1].first) / (keys[k].first - keys[k - 1].first);
+                return keys[k - 1].second[i] + (keys[k].second[i] - keys[k - 1].second[i]) * t;
             };
-            for (int bone : {27, 28})
-                for (int c : {0, 2})
+            for (int part = 0; part < 2; ++part)
+                for (int c = 0; c < 3; ++c)
                 {
                     std::vector<mot::Rec> recs;
                     if (!mot::parse(m, recs))
                         return;
                     const mot::Rec *own = nullptr;
                     for (const mot::Rec &r : recs)
-                        if (r.bone == bone && (r.channel & 0x0F) == c)
+                        if (r.bone == 27 + part && (r.channel & 0x0F) == c)
                             own = &r;
                     if (!own)
-                        return;
-                    std::vector<float> delta(frames);
-                    for (int f = 0; f < frames; ++f)
-                        delta[f] = 2.0f * (centre(static_cast<float>(f), c) - mot::sample(*own, static_cast<float>(f)));
-                    mot::addCurve(m, bone, c, delta, 1);
+                        continue;
+                    std::vector<float> delta(frames, 0.0f); // past the path's last key: the game's own camera
+                    for (int f = 0; f < frames && static_cast<float>(f) <= keys.back().first; ++f)
+                        delta[f] = value(static_cast<float>(f), part * 3 + c) - mot::sample(*own, static_cast<float>(f));
+                    mot::addCurve(m, 27 + part, c, delta, 1);
                 }
         }
 
@@ -813,8 +843,9 @@ namespace kamite::punish_fit
         {
             const bool posed = fit.hasPoses(track.motion, track.gene);
             const float money = bone_tweaks::money();
+            const int camVariant = track.gene && fit.frontCam && fit.cam(track.motion, g_pair.camVariant) ? g_pair.camVariant : -1;
             const auto key = std::make_tuple(body, punish, track.motion, track.gene, sizeKey,
-                                             posed ? static_cast<int>(std::lround(money * 100.0f)) : 0);
+                                             posed ? static_cast<int>(std::lround(money * 100.0f)) : 0, camVariant);
             if (const auto it = g_copies.find(key); it != g_copies.end())
                 return it->second;
             const uint32_t length = mot::motionLength(rdram + motion, PS2_RAM_SIZE - motion);
@@ -890,7 +921,7 @@ namespace kamite::punish_fit
                         pose[slot][f] = o.pre[f];
                     anyPose = true;
                 }
-            const bool camera = track.gene && fit.frontCam && fit.camMotion == track.motion && !fit.camPivot.empty();
+            const Fit::CamPath *camera = track.gene && fit.frontCam ? fit.cam(track.motion, g_pair.camVariant) : nullptr;
             if (!anyHeight && !anyBend && !anyPose && !anyTwist && !anyLegs && !anyFeet && !anyFold && extra.empty() && !camera)
             {
                 g_copies[key] = 0u;
@@ -954,7 +985,7 @@ namespace kamite::punish_fit
             for (const auto &[bone, pre] : extra)
                 mot::preRotate(m, bone, pre, 1);
             if (camera)
-                frontCamera(m, frames, fit);
+                setCamera(m, frames, *camera);
             const uint32_t size = (static_cast<uint32_t>(m.size()) + 0x3Fu) & ~0x3Fu;
             if (size > kRewriteAreaEnd - kRewriteArea)
                 return 0u;
@@ -1139,8 +1170,7 @@ namespace kamite::punish_fit
         // punish_fit.txt:
         //   fit <Suplex|Stinger|CobraTwist|Spanking|GorillaSuplex> <body hex>[,<body hex>...] [off] [gorilla] [own] [frontcam]
         //       [scale=<s>] [size=<s>]   (the lines after it, until the next fit, are its; gorilla on a Suplex fit: that body
-        //       plays the Gorilla Suplex for a Suplex pick; frontcam: the punish camera turned to the pair's front (with a
-        //       cam line); scale: the
+        //       plays the Gorilla Suplex for a Suplex pick; frontcam: the punish camera from the fit's cam lines; scale: the
         //       enemy size it is for, 1 if not given)
         //   gene <motion> <frame>:<forward>,<side>,<turn>,<height>[,<torso x>,<torso z>,<left raise>,<left swing>,
         //       <left elbow>,<right raise>,<right swing>,<right elbow>[,<left forearm twist>[,<lift>]]] ...
@@ -1148,7 +1178,8 @@ namespace kamite::punish_fit
         //   pose <gene|victim> <motion> <money> <bone> <frame>:<x>,<y>,<z> ...   (the bone's whole pre-rotation over those
         //       frames, a rotation vector in degrees; money 0 = any, else the Money value it was solved at)
         //   bust <gene motion> <frame>:<hold> ...   (the caught victim's bust jiggle held, 0..1, by Gene's frame)
-        //   cam <gene motion> <frame>:<x>,<z> ...   (frontcam: the pair's centre in Gene's model space, the camera's pivot)
+        //   cam <gene motion> <variant> <frame>:<eye x>,<y>,<z>,<look-at x>,<y>,<z> ...   (frontcam: the punish camera's parts
+        //       27 / 28 in Gene's model space; one variant picked at random per punish, never the same twice running)
         //   body <body hex>[,<body hex>...] <type>   (the enemy labels' body type)
         void load()
         {
@@ -1241,17 +1272,20 @@ namespace kamite::punish_fit
                 }
                 else if (fit && kind == "cam")
                 {
-                    // cam <gene motion> <frame>:<x>,<z> ...   (frontcam's pivot: the pair's centre in Gene's model space)
+                    // cam <gene motion> <variant> <frame>:<eye x>,<y>,<z>,<look-at x>,<y>,<z> ...   (frontcam: the camera)
+                    Fit::CamPath path;
                     unsigned motion = 0;
                     std::string item;
-                    fields >> motion;
-                    fit->camMotion = static_cast<uint16_t>(motion);
+                    fields >> motion >> path.variant;
+                    path.motion = static_cast<uint16_t>(motion);
                     while (fields >> item)
                     {
-                        std::array<float, 2> v{};
-                        if (std::sscanf(item.c_str(), "%*f:%f,%f", &v[0], &v[1]) == 2)
-                            fit->camPivot.emplace_back(std::strtof(item.c_str(), nullptr), v);
+                        std::array<float, 6> v{};
+                        if (std::sscanf(item.c_str(), "%*f:%f,%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) == 6)
+                            path.keys.emplace_back(std::strtof(item.c_str(), nullptr), v);
                     }
+                    if (!path.keys.empty())
+                        fit->cams.push_back(std::move(path));
                 }
                 else if (fit && kind == "bust")
                 {

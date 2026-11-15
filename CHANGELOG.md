@@ -4,9 +4,9 @@ Newest first, one line per change; the code comments say how.
 
 ## November 15, 2026
 
-- Buck Breaker: Suplex on women is a chest grab: Gene's hands on her bust from the grab until she lands, shown from the front.
+- Buck Breaker: Suplex on women is a chest grab: Gene's hands on her bust from the grab until she lands.
 - Buck Breaker: the chest grab's hands follow Money; her bust stays still while they are on.
-- Buck Breaker: the chest grab's front camera stays as close as the usual Suplex camera.
+- Buck Breaker: the chest grab's camera starts close on her chest and swings round to the usual Suplex camera for the landing (one of four ways round, at random).
 - Buck Breaker: on larger women the Suplex keeps her size (her knees bend) instead of shrinking her.
 - Options: new GRAPHICS category (launcher tab and in-game list) with Graphics API, Internal Resolution, the texture options, Anti-Aliasing, Brightness and Depth of Field; DISPLAY keeps the window settings.
 - Graphics: Texture Filtering: PS2 (Bilinear), Crunchy (Unfiltered 3D) or Dangerously Crunchy (3D+UI); depth of field, glow and heat haze stay smooth.

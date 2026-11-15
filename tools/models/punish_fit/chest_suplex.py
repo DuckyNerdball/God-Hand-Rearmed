@@ -580,14 +580,15 @@ def block(keys, file, scale, size):
         V = victim_pre_frames(ch, vm)
         for b in (7, 6):
             lines.append('pose victim %d 0 %d ' % (vm, b) + ' '.join('%d:%.1f,%.1f,%.1f' % ((t,) + tuple(V[t][b])) for t in sorted(V)))
-    # the camera turned to the pair's front: half a turn round the pair's centre (the two chests) in Gene's model space,
-    # frame by frame, so it keeps the original's distance (round its look-at point it ran up to 4 m further; K)
-    piv = []
-    for t in range(0, len(pair.frames), 2):
-        q = pair.at(t)
-        m_ = (q['Pg'][2] + to_model(q['G'], to_world(q['V'], q['Pv'][2]))) / 2
-        piv.append('%d:%.3f,%.3f' % (t, m_[0], m_[2]))
-    lines.append('cam 333 ' + ' '.join(piv))
+    # the camera (K, Nov 15): the close front shot on her chest for the grab, then round to the game's own camera by
+    # frame 60; four ways round (CAMERAS), the runtime picks one at random (never the same twice running)
+    for v, kw in enumerate(CAMERAS):
+        cam = Camera(ch, **kw)
+        keys = []
+        for t in range(0, cam.turn[1] + 1):   # every frame (every 2 was 22 cm off between); from the turn's end the game's own
+            e, g = cam.at(t)
+            keys.append('%d:%s' % (t, ','.join('%.3f' % x for x in list(e) + list(g))))
+        lines.append('cam 333 %d ' % v + ' '.join(keys))
     h0, h1 = ch.hold
     lines.append('bust 333 ' + ' '.join('%d:%.2f' % (t, ch.weight(t)) for t in range(h0 - RAMP_IN, h1 + RAMP_OUT + 1)))
     return lines
@@ -613,6 +614,127 @@ def emit(path=PF):
         if not skip:
             out.append(line)
     open(path, 'w', newline='\n').write('\n'.join(out))
+
+
+# ---- the camera (K, Nov 15): a close front shot on her chest for the grab, then round to the game's own for the end ----
+CAMERAS = (dict(side=1), dict(side=-1), dict(side=1, over=55.0), dict(side=-1, over=55.0))   # K: all four, at random
+FOV = 25.0   # part 27's rot y (0.436 rad), the parts camera's field of view (vertical: matches K's screenshots)
+
+
+def game_camera(pair, t):
+    """The motion's own eye (part 27) and look-at (part 28), Gene's model space."""
+    return (np.array([pair.gm.get(27, c, t) for c in range(3)]), np.array([pair.gm.get(28, c, t) for c in range(3)]))
+
+
+def perspective(objs, eye, target, fov=FOV, size=(270, 480), floor=0.0):
+    """A perspective render from eye to target (world), vertical field of view `fov`, the floor drawn at y = floor."""
+    from raster import render
+    f = unit(target - eye); r = unit(np.cross(f, [0, 1.0, 0])); u = np.cross(r, f)
+    def cam(V):
+        d = V - eye
+        c = np.stack([d @ r, d @ u, d @ f], 1)
+        z = np.maximum(c[:, 2], 1e-3)
+        return np.stack([c[:, 0] / z, c[:, 1] / z, -c[:, 2]], 1), c[:, 2]
+    out = []
+    g = np.array([[x, floor, z] for x in np.linspace(-8, 8, 17) for z in np.linspace(-8, 8, 17)])
+    gt = [(i * 17 + j, i * 17 + j + 1, (i + 1) * 17 + j) for i in range(16) for j in range(16)] + \
+         [(i * 17 + j + 1, (i + 1) * 17 + j + 1, (i + 1) * 17 + j) for i in range(16) for j in range(16)]
+    for V, T, col in [(g, np.array(gt), (200, 200, 190))] + list(objs):
+        P, z = cam(V)
+        T = np.asarray(T)
+        keep = (z[T] > 0.05).all(1)
+        out.append((P, T[keep], col))
+    span = 2 * math.tan(math.radians(fov) / 2)
+    return render(out, np.eye(3), size=size, extent=(np.zeros(2), span))[0]
+
+
+def pair_centre(q):
+    """The two chests' midpoint, Gene's model space."""
+    return (q['Pg'][2] + to_model(q['G'], to_world(q['V'], q['Pv'][2]))) / 2
+
+
+class Camera:
+    """Per frame eye and look-at in Gene's model space: the front chest shot (FRONT_*), from T_TURN0 an orbit round the
+    pair's centre to the game's own camera, reached at T_TURN1 and kept to the end."""
+
+    def __init__(self, ch, dist=2.3, pitch=10.0, turn=(20, 60), side=1, aim_low=0.05, over=0.0):
+        self.ch = ch; self.pair = ch.pair; self.over = over
+        self.dist, self.pitch, self.turn, self.side, self.aim_low = dist, pitch, turn, side, aim_low
+        n = len(self.pair.frames)
+        self.q = [self.pair.at(t) for t in range(n)]
+        # her chest's forward (horizontal, Gene's model space), averaged over the grab so the shot holds still
+        fw = []
+        for t in range(n):
+            q = self.q[t]
+            v = q['G']['R'].T @ (q['V']['R'] @ (q['Wv'][2] @ np.array([0, 0, 1.0])))
+            fw.append(unit(np.array([v[0], 0, v[2]])))
+        self.fw = np.array(fw)
+
+    def bust(self, t, money=1.0):
+        q = self.q[t]
+        c = (self.ch.targets(q, money, 1)[0] + self.ch.targets(q, money, -1)[0]) / 2   # between the two palms' spots
+        return c - np.array([0, self.aim_low, 0])
+
+    def front(self, t):
+        k = range(max(0, t - 6), min(len(self.fw), t + 7))
+        f = unit(np.mean(self.fw[list(k)], 0))
+        tg = self.bust(t)
+        eye = tg + f * self.dist * math.cos(math.radians(self.pitch)) + np.array([0, self.dist * math.sin(math.radians(self.pitch)), 0])
+        return eye, tg
+
+    def pivot(self, t):
+        k = range(max(0, t - 4), min(len(self.q), t + 5))
+        return np.mean([pair_centre(self.q[i]) for i in k], 0)
+
+    def at(self, t):
+        """In the turn the eye goes round the pair's centre (yaw the chosen way, the distance and height blended, rising
+        by `over` degrees of elevation at the turn's middle: over the top of the throw) and the look-at slides from her
+        chest (live, so she stays in frame as she flies) to the game's own look-at (her landing)."""
+        t0, t1 = self.turn
+        if t <= t0:
+            return self.front(t)
+        e0, g0 = game_camera(self.pair, t)
+        if t >= t1:
+            return e0, g0
+        s = smooth((t - t0) / float(t1 - t0))
+        ef, _ = self.front(t0)                # the front shot's eye as it was when the turn began
+        piv = self.pivot(t)
+        def sph(p):
+            d = p - piv; h = math.hypot(d[0], d[2])
+            return math.atan2(d[0], d[2]), math.atan2(d[1], h), np.linalg.norm(d)
+        a1, el1, r1 = sph(ef); a2, el2, r2 = sph(e0)
+        da = (a2 - a1) % (2 * math.pi)                             # round one side (side 1) ...
+        if self.side < 0:
+            da -= 2 * math.pi                                      # ... or the other
+        a = a1 + da * s; r = r1 + (r2 - r1) * s
+        el = el1 + (el2 - el1) * s + math.radians(self.over) * math.sin(math.pi * s)
+        eye = piv + r * np.array([math.cos(el) * math.sin(a), math.sin(el), math.cos(el) * math.cos(a)])
+        # the look-at: her chest, then her middle (chest to hips) while she flies, then the game's own (her landing)
+        q = self.q[t]
+        mid = to_model(q['G'], to_world(q['V'], (q['Pv'][2] + q['Pv'][0]) / 2))
+        b = self.bust(t)
+        k1 = smooth(min(1.0, 2 * s)); k2 = smooth(max(0.0, 2 * s - 1))
+        tg = b + (mid - b) * k1
+        return eye, tg + (g0 - tg) * k2
+
+
+def camera_strip(cam, frames, out, money=1.0, size=(216, 384)):
+    from PIL import Image, ImageDraw
+    pair, ch = cam.pair, cam.ch
+    ims = []
+    for t in frames:
+        q, loc, w, info = ch.solve(t, money)
+        G, V, _, _ = posed_meshes(pair, q, loc, money)
+        e, g = cam.at(t)
+        im = Image.fromarray(perspective([(G, pair.gmesh['T'], (90, 120, 200)), (V, pair.vmesh['T'], (220, 140, 80))],
+                                         to_world(q['G'], e), to_world(q['G'], g), size=size))
+        ImageDraw.Draw(im).text((6, 4), 'f%d' % t, fill=(0, 0, 0))
+        ims.append(im)
+    sh = Image.new('RGB', (sum(i.width for i in ims), ims[0].height), 'white'); x = 0
+    for i in ims:
+        sh.paste(i, (x, 0)); x += i.width
+    sh.save(out)
+    return out
 
 
 if __name__ == '__main__' and sys.argv[1:2] == ['emit']:
