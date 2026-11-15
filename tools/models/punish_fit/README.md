@@ -87,3 +87,12 @@ odd_bodies.py (K, Nov 12): non-human skeletons, written by hand (emit7 appends i
 file). em23, the snake demon: Spanking with the big bodies' straight arm, palm down, raised 35 deg, Stinger and Cobra Twist off,
 Suplex as the game plays it, label type "snake". The punish motions drive bones by number, so these bodies get human
 channels on whatever bones carry them; offline renders of them are rough (the tail is not posed as in the game).
+
+chest_suplex.py (K, Nov 15; claude/boobplex.md): the women's chest grab Suplex. The game's punish Suplex (333 / 329,
+331) with the women's placement fit; Gene's arms solved per frame onto the bust (bone 29 with Money's size and droop):
+two-bone IK with the elbow as a hinge, the clavicle shrugging when the reach needs it (spread over the frames round it),
+the hands on their way in and out on a curve through a point in front of the breast, her hanging right arm raised out of
+his way. `chest_suplex.py emit` writes the three women's skeletons at 1.00 and 1.20 (held: her size kept, her knees
+bent) into resources/punish_fit.txt, replacing their Suplex fits (idempotent; run after emit7): pose lines per Money
+value (0.85, 1.00, 1.30; blended by the runtime), the bust hold, frontcam. `chest_suplex.py <body file> <size> <money>
+<out.png> [frames] [yaw] [zoom]` renders a strip.

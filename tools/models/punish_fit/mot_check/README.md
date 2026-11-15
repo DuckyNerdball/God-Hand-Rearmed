@@ -7,3 +7,8 @@ Run from a scratch directory (they write src.bin / out.bin / vals.txt there), GO
   grab, the twitch K saw).
 - reg.py: every fit's edited motions, the half-frame wobble beyond the original's own (the originals wobble up to
   ~30 deg at half frames themselves). Nov 8: <= 0.4 deg.
+- chest_check.py <body hash> <scale> <money> [victim motion] (Nov 15, the women's chest grab Suplex): the fit's pose
+  lines (Money blended) and the fit's own pose applied as rewrite() does (apply_pose.cpp: per-frame pre-rotations in the
+  file's order; build like apply_fit), each bone against the intended rotation at every frame and half frame. Nov 15:
+  <= 0.9 deg at frames, <= 4 deg beyond the original's own half-frame drift (a free forearm sat near Euler gimbal lock
+  and wobbled 13 deg; a flipping elbow hinge 180).

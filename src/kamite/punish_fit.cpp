@@ -31,6 +31,12 @@
 // every frame (mot_edit preRotate); the shoulder helpers 12 / 6, which follow the upper arms at about half in the game's
 // motions, get half. Offline the same pre-rotations are measured (fit5.py gene_xform).
 //
+// The women's chest grab Suplex (K, Nov 15; claude/boobplex.md): a fit's pose lines give whole pre-rotations for chosen
+// bones over chosen frames (Gene's arms solved offline onto the bust at a few Money values, blended at the motion's start
+// for the current Money; her hanging arm raised out of his way), its bust line holds her bust jiggle still while his
+// hands are on (bustHold, for bone_tweaks' Money), and "frontcam" turns the punish camera to the pair's front (the
+// camera is two parts of Gene's model keyed by his punish motion: frontCamera).
+//
 // Size (K, Nov 8). Enemies of one model come in many sizes (stage 1: 1.03, 1.05, 1.07 ... 1.10), so a pair is not
 // fitted per size: it is scaled. Every actor's model, root travel (cObjBase_addNullSpeed: the motion's delta x +0x110 /
 // +0x114 / +0x118) and the pair's placement (x enemy +0x110 / +0x118) scale with it, so Gene and the enemy scaled by
@@ -49,6 +55,7 @@
 
 #include "kamite/punish_fit.h"
 
+#include "kamite/bone_tweaks.h"
 #include "kamite/function_hooks.h"
 #include "kamite/game_layout.h"
 #include "kamite/log.h"
@@ -58,6 +65,7 @@
 #include "runtime/ps2_pnach.h"
 #include "runtime/ps2_save_state.h"
 
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -163,20 +171,56 @@ namespace kamite::punish_fit
                     out[c] = a.v[c] + (b.v[c] - a.v[c]) * t;
             }
         };
+        // A bone's whole pre-rotation per frame (rotation vectors, degrees), for one Money value (0: any): the women's chest
+        // grab Suplex (K, Nov 15; tools chest_suplex.py), Gene's arms solved onto the bust at a few Money values and blended
+        // at the motion's start. Outside its frames the bone keeps the fit's own pose (or none).
+        struct Pose
+        {
+            uint16_t motion = 0;
+            bool gene = false;
+            float money = 0.0f;
+            int bone = 0;
+            std::vector<std::pair<float, std::array<float, 3>>> keys;
+            std::array<float, 3> at(float frame) const
+            {
+                if (frame <= keys.front().first)
+                    return keys.front().second;
+                if (frame >= keys.back().first)
+                    return keys.back().second;
+                size_t i = 1;
+                while (keys[i].first < frame)
+                    ++i;
+                const auto &[f0, a] = keys[i - 1];
+                const auto &[f1, b] = keys[i];
+                const float t = (frame - f0) / (f1 - f0);
+                return {a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t};
+            }
+        };
         struct Fit
         {
             bool off = false;
-            bool gorilla = false; // a Suplex fit: the Suplex pick plays the Gorilla Suplex on this body
-            bool own = false;     // for the enemy's own punish (its prompt unchanged), e.g. Spanking on women (K, Nov 12)
-            float scale = 1.0f;   // the enemy size it was fitted at
-            float size = 1.0f;    // the victim's size change for the pairing
+            bool gorilla = false;  // a Suplex fit: the Suplex pick plays the Gorilla Suplex on this body
+            bool own = false;      // for the enemy's own punish (its prompt unchanged), e.g. Spanking on women (K, Nov 12)
+            bool frontCam = false; // the punish camera swung round to the pair's front (K, Nov 15: the women's chest grab)
+            float scale = 1.0f;    // the enemy size it was fitted at
+            float size = 1.0f;     // the victim's size change for the pairing
             std::vector<Track> tracks;
+            std::vector<Pose> poses;
+            uint16_t bustMotion = 0;                       // Gene's motion the bust hold follows
+            std::vector<std::pair<float, float>> bust;     // Gene's frame -> how much the victim's bust jiggle is held (0..1)
             const Track *find(uint16_t motion, bool gene) const
             {
                 for (const Track &t : tracks)
                     if (t.motion == motion && t.gene == gene)
                         return &t;
                 return nullptr;
+            }
+            bool hasPoses(uint16_t motion, bool gene) const
+            {
+                for (const Pose &p : poses)
+                    if (p.motion == motion && p.gene == gene)
+                        return true;
+                return false;
             }
         };
 
@@ -259,7 +303,7 @@ namespace kamite::punish_fit
             return !starts && g_pair.enemy == enemy && g_pair.punish == punish ? g_pairOn : g_on.load(std::memory_order_relaxed);
         }
         Resize g_resize[2]; // the victim, Gene
-        std::map<std::tuple<uint32_t, int, uint16_t, bool, int>, uint32_t> g_copies; // (body, punish, motion, gene, size) -> copy
+        std::map<std::tuple<uint32_t, int, uint16_t, bool, int, int>, uint32_t> g_copies; // (body, punish, motion, gene, size, Money) -> copy
         uint32_t g_areaAt = kRewriteArea;
         std::set<uint64_t> g_logged;
 
@@ -664,11 +708,98 @@ namespace kamite::punish_fit
             g_pair.applied[2] = turn;
         }
 
+        // A rotation vector (degrees) as a matrix (Rodrigues; the offline tools' scipy as_rotvec).
+        mot::Mat fromRotvec(const std::array<float, 3> &v)
+        {
+            const float a = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (a < 1e-6f)
+                return {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+            const float x = v[0] / a, y = v[1] / a, z = v[2] / a;
+            const float c = std::cos(a * kDegrees), s = std::sin(a * kDegrees), k = 1.0f - c;
+            return {c + x * x * k,     x * y * k - z * s, x * z * k + y * s,
+                    y * x * k + z * s, c + y * y * k,     y * z * k - x * s,
+                    z * x * k - y * s, z * y * k + x * s, c + z * z * k};
+        }
+
+        // The fit's pose lines for one motion: per bone, its whole pre-rotation at each frame its lines cover (`first` ..
+        // `last`), blended between the two Money values nearest `money` (K, Nov 15: Gene's hands follow Money's bust).
+        struct PoseOverride
+        {
+            int bone = 0, first = 0, last = -1;
+            std::vector<mot::Mat> pre; // one a frame; only first .. last are meant
+        };
+        std::vector<PoseOverride> poseOverrides(const Fit &fit, uint16_t motion, bool gene, int frames, float money)
+        {
+            std::map<int, std::vector<const Pose *>> byBone;
+            for (const Pose &p : fit.poses)
+                if (p.motion == motion && p.gene == gene && !p.keys.empty())
+                    byBone[p.bone].push_back(&p);
+            std::vector<PoseOverride> out;
+            for (auto &[bone, list] : byBone)
+            {
+                std::sort(list.begin(), list.end(), [](const Pose *a, const Pose *b) { return a->money < b->money; });
+                const Pose *lo = list.front(), *hi = list.back();
+                for (const Pose *p : list)
+                    if (p->money <= money)
+                        lo = p;
+                for (auto it = list.rbegin(); it != list.rend(); ++it)
+                    if ((*it)->money >= money)
+                        hi = *it;
+                if (money <= list.front()->money)
+                    lo = hi = list.front();
+                if (money >= list.back()->money)
+                    lo = hi = list.back();
+                const float t = hi->money > lo->money ? (money - lo->money) / (hi->money - lo->money) : 0.0f;
+                PoseOverride o;
+                o.bone = bone;
+                o.first = std::max(0, static_cast<int>(std::ceil(lo->keys.front().first)));
+                o.last = std::min(frames - 1, static_cast<int>(lo->keys.back().first));
+                o.pre.resize(frames, fromRotvec({0.0f, 0.0f, 0.0f}));
+                for (int f = o.first; f <= o.last; ++f)
+                {
+                    const auto a = lo->at(static_cast<float>(f)), b = hi->at(static_cast<float>(f));
+                    o.pre[f] = fromRotvec({a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t});
+                }
+                out.push_back(std::move(o));
+            }
+            return out;
+        }
+
+        // The punish camera to the pair's front (K, Nov 15). Gene's punish motions carry the camera as two root-level
+        // parts of his model, 27 = the eye, 28 = what it looks at (pl00 func_00124EC0: cCamManager_setPartsCamera, then
+        // cPartsCamera_SetParts with parts 27 and 28), keyed as translations in his model space. The eye is turned half a
+        // turn round the look-at point about the vertical: x, z -> 2 x look-at - eye.
+        void frontCamera(std::vector<uint8_t> &m, uint16_t frames)
+        {
+            std::vector<mot::Rec> recs;
+            if (!mot::parse(m, recs))
+                return;
+            for (int c : {0, 2})
+            {
+                const mot::Rec *eye = nullptr, *at = nullptr;
+                for (const mot::Rec &r : recs)
+                    if ((r.channel & 0x0F) == c && (r.bone == 27 || r.bone == 28))
+                        (r.bone == 27 ? eye : at) = &r;
+                if (!eye || !at)
+                    return;
+                std::vector<float> delta(frames);
+                for (int f = 0; f < frames; ++f)
+                    delta[f] = 2.0f * (mot::sample(*at, static_cast<float>(f)) - mot::sample(*eye, static_cast<float>(f)));
+                const std::vector<float> d = delta;
+                mot::addCurve(m, 27, c, d, 1);
+                if (!mot::parse(m, recs))
+                    return;
+            }
+        }
+
         // A copy of the motion at `motion` with the track's heights (and the victim's bend), in kRewriteArea; 0 if
         // nothing changes or it does not fit.
-        uint32_t rewrite(uint8_t *rdram, uint32_t motion, const Track &track, uint32_t body, int punish, int sizeKey)
+        uint32_t rewrite(uint8_t *rdram, uint32_t motion, const Track &track, const Fit &fit, uint32_t body, int punish, int sizeKey)
         {
-            const auto key = std::make_tuple(body, punish, track.motion, track.gene, sizeKey);
+            const bool posed = fit.hasPoses(track.motion, track.gene);
+            const float money = bone_tweaks::money();
+            const auto key = std::make_tuple(body, punish, track.motion, track.gene, sizeKey,
+                                             posed ? static_cast<int>(std::lround(money * 100.0f)) : 0);
             if (const auto it = g_copies.find(key); it != g_copies.end())
                 return it->second;
             const uint32_t length = mot::motionLength(rdram + motion, PS2_RAM_SIZE - motion);
@@ -724,7 +855,28 @@ namespace kamite::punish_fit
                 twist.push_back(mot::rotX(v[12] * kDegrees * 0.5f));
                 anyTwist = anyTwist || v[12] != 0.0f;
             }
-            if (!anyHeight && !anyBend && !anyPose && !anyTwist && !anyLegs && !anyFeet && !anyFold)
+            // Whole pre-rotations from the fit's pose lines (the women's chest grab): Gene's arm bones in the pose list
+            // replace the fit's own pose over their frames; other bones (the clavicles, the hands, the victim's arm) get
+            // their own pre-rotation, none outside their frames.
+            std::vector<std::pair<int, std::vector<mot::Mat>>> extra;
+            if (posed)
+                for (PoseOverride &o : poseOverrides(fit, track.motion, track.gene, frames, money))
+                {
+                    int slot = -1;
+                    for (int i = 0; i < 7 && track.gene; ++i)
+                        if (kPoseBones[i] == o.bone)
+                            slot = i;
+                    if (slot < 0)
+                    {
+                        extra.emplace_back(o.bone, std::move(o.pre));
+                        continue;
+                    }
+                    for (int f = o.first; f <= o.last; ++f)
+                        pose[slot][f] = o.pre[f];
+                    anyPose = true;
+                }
+            const bool camera = track.gene && fit.frontCam;
+            if (!anyHeight && !anyBend && !anyPose && !anyTwist && !anyLegs && !anyFeet && !anyFold && extra.empty() && !camera)
             {
                 g_copies[key] = 0u;
                 return 0u;
@@ -784,6 +936,10 @@ namespace kamite::punish_fit
             if (anyTwist)
                 for (int bone : {15, 16})
                     mot::preRotate(m, bone, {}, 1, twist);
+            for (const auto &[bone, pre] : extra)
+                mot::preRotate(m, bone, pre, 1);
+            if (camera)
+                frontCamera(m, frames);
             const uint32_t size = (static_cast<uint32_t>(m.size()) + 0x3Fu) & ~0x3Fu;
             if (size > kRewriteAreaEnd - kRewriteArea)
                 return 0u;
@@ -828,7 +984,7 @@ namespace kamite::punish_fit
                     const Track *track = fit ? fit->find(list[i], isGene) : nullptr;
                     uint32_t started = motion;
                     if (track)
-                        if (const uint32_t copy = rewrite(rdram, motion, *track, body, p, sizeKey))
+                        if (const uint32_t copy = rewrite(rdram, motion, *track, *fit, body, p, sizeKey))
                         {
                             started = copy;
                             SET_GPR_U32(ctx, 5, copy);
@@ -966,12 +1122,16 @@ namespace kamite::punish_fit
         }
 
         // punish_fit.txt:
-        //   fit <Suplex|Stinger|CobraTwist|Spanking|GorillaSuplex> <body hex>[,<body hex>...] [off] [gorilla] [own] [scale=<s>]
-        //       [size=<s>]   (the lines after it, until the next fit, are its; gorilla on a Suplex fit: that body plays
-        //       the Gorilla Suplex for a Suplex pick; scale: the enemy size it is for, 1 if not given)
+        //   fit <Suplex|Stinger|CobraTwist|Spanking|GorillaSuplex> <body hex>[,<body hex>...] [off] [gorilla] [own] [frontcam]
+        //       [scale=<s>] [size=<s>]   (the lines after it, until the next fit, are its; gorilla on a Suplex fit: that body
+        //       plays the Gorilla Suplex for a Suplex pick; frontcam: the punish camera turned to the pair's front; scale: the
+        //       enemy size it is for, 1 if not given)
         //   gene <motion> <frame>:<forward>,<side>,<turn>,<height>[,<torso x>,<torso z>,<left raise>,<left swing>,
         //       <left elbow>,<right raise>,<right swing>,<right elbow>[,<left forearm twist>[,<lift>]]] ...
         //   victim <motion> <frame>:<height>,<bend>[,<hips back>,<pelvis tilt>,<legs>[,<feet back>,<thigh pitch>,<knee bend>]] ...
+        //   pose <gene|victim> <motion> <money> <bone> <frame>:<x>,<y>,<z> ...   (the bone's whole pre-rotation over those
+        //       frames, a rotation vector in degrees; money 0 = any, else the Money value it was solved at)
+        //   bust <gene motion> <frame>:<hold> ...   (the caught victim's bust jiggle held, 0..1, by Gene's frame)
         //   body <body hex>[,<body hex>...] <type>   (the enemy labels' body type)
         void load()
         {
@@ -1007,6 +1167,8 @@ namespace kamite::punish_fit
                             made->gorilla = true;
                         else if (token == "own")
                             made->own = true;
+                        else if (token == "frontcam")
+                            made->frontCam = true;
                         else if (token.rfind("scale=", 0) == 0)
                             made->scale = std::strtof(token.c_str() + 6, nullptr);
                         else if (token.rfind("size=", 0) == 0)
@@ -1041,6 +1203,38 @@ namespace kamite::punish_fit
                     const auto to = static_cast<uint32_t>(std::strtoul(body.c_str(), nullptr, 16));
                     if (key && to)
                         g_core[key] = to;
+                }
+                else if (fit && kind == "pose")
+                {
+                    // pose <gene|victim> <motion> <money> <bone> <frame>:<x>,<y>,<z> ... (rotation vector, degrees)
+                    Pose p;
+                    std::string who, item;
+                    unsigned motion = 0;
+                    fields >> who >> motion >> p.money >> p.bone;
+                    p.gene = who == "gene";
+                    p.motion = static_cast<uint16_t>(motion);
+                    while (fields >> item)
+                    {
+                        std::array<float, 3> v{};
+                        if (std::sscanf(item.c_str(), "%*f:%f,%f,%f", &v[0], &v[1], &v[2]) == 3)
+                            p.keys.emplace_back(std::strtof(item.c_str(), nullptr), v);
+                    }
+                    if (!p.keys.empty() && p.bone > 0 && p.bone < 64)
+                        fit->poses.push_back(std::move(p));
+                }
+                else if (fit && kind == "bust")
+                {
+                    // bust <gene motion> <frame>:<hold> ...
+                    unsigned motion = 0;
+                    std::string item;
+                    fields >> motion;
+                    fit->bustMotion = static_cast<uint16_t>(motion);
+                    while (fields >> item)
+                    {
+                        const size_t colon = item.find(':');
+                        if (colon != std::string::npos)
+                            fit->bust.emplace_back(std::strtof(item.c_str(), nullptr), std::strtof(item.c_str() + colon + 1, nullptr));
+                    }
                 }
                 else if (fit && (kind == "gene" || kind == "victim"))
                 {
@@ -1116,6 +1310,24 @@ namespace kamite::punish_fit
             return false;
         const Fit *fit = fitFor(Suplex, bodyOf(rdram, enemy & 0x1FFFFFFu));
         return fit && fit->gorilla;
+    }
+
+    float bustHold(const uint8_t *rdram, uint32_t model)
+    {
+        const Fit *fit = g_pair.fit;
+        if (!g_pair.live || !fit || fit->bust.empty() || (model & 0x1FFFFFFu) != g_pair.enemy || !g_pair.geneTrack ||
+            g_pair.geneTrack->motion != fit->bustMotion || !inRam(g_pair.gene, 0x700u) ||
+            (rd32(rdram, g_pair.gene + kMotionPlaying) & 0x1FFFFFFu) != g_pair.geneMotionPtr)
+            return 0.0f;
+        const float frame = rdF(rdram, g_pair.gene + kMotionFrame);
+        const auto &b = fit->bust;
+        if (frame <= b.front().first || frame >= b.back().first)
+            return frame <= b.front().first ? b.front().second : b.back().second;
+        size_t i = 1;
+        while (b[i].first < frame)
+            ++i;
+        const float t = (frame - b[i - 1].first) / (b[i].first - b[i - 1].first);
+        return std::clamp(b[i - 1].second + (b[i].second - b[i - 1].second) * t, 0.0f, 1.0f);
     }
 
     void describe(const uint8_t *rdram, uint32_t enemy, std::string &label, std::string &status)

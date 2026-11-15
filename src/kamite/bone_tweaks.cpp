@@ -4,6 +4,7 @@
 #include "kamite/function_hooks.h"
 #include "kamite/game_layout.h"
 #include "kamite/log.h"
+#include "kamite/punish_fit.h"
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
 #include "runtime/ps2_game_menu.h"
@@ -243,7 +244,10 @@ namespace kamite::bone_tweaks
         void placeMoney(uint8_t *rdram, uint32_t model)
         {
             const float scale = g_money.load(std::memory_order_relaxed);
-            if (std::fabs(scale - 1.0f) < 0.001f || !inRam(model, 0x2E4u))
+            // Gene's hands on her chest (Buck Breaker's chest grab Suplex, K, Nov 15): the jiggle is held still while they
+            // are on (it would swing the bust through his fingers), let go as they come off. At 100% too.
+            const float hold = punish_fit::bustHold(rdram, model);
+            if ((std::fabs(scale - 1.0f) < 0.001f && hold <= 0.0f) || !inRam(model, 0x2E4u))
                 return;
             const int n = rdram[(model + kPartNum) & 0x01FFFFFFu];
             if (n <= kChestBone || n > 64)
@@ -284,7 +288,7 @@ namespace kamite::bone_tweaks
             const Vec by = row(b, 1);
             const float jiggle = std::atan2(dot(by, pz), dot(by, py));
             constexpr float kRad = 3.14159265f / 180.0f;
-            const float angle = jiggle * scale + (scale - 1.0f) * kMoneyDroop * kRad;
+            const float angle = jiggle * scale * (1.0f - hold) + (scale - 1.0f) * kMoneyDroop * kRad;
             const float c = std::cos(angle), sn = std::sin(angle);
             const Vec rows[3] = {mulf(px, scale), mulf(add(mulf(py, c), mulf(pz, sn)), scale),
                                  mulf(sub(mulf(pz, c), mulf(py, sn)), scale)};

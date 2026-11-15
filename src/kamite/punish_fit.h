@@ -43,6 +43,9 @@ namespace kamite::punish_fit
     [[nodiscard]] bool doesntFit(const uint8_t *rdram, uint32_t enemy, int punish);
     // EE thread: a Suplex pick plays the Gorilla Suplex on this enemy's body (its Suplex fit says "gorilla").
     [[nodiscard]] bool suplexAsGorilla(const uint8_t *rdram, uint32_t enemy);
+    // EE thread (Money, at draw time): how much this model's bust jiggle is held still (0..1) because Gene's hands are on
+    // it (K, Nov 15: the women's chest grab Suplex; the fit's bust line by Gene's frame); 0 for every other model.
+    [[nodiscard]] float bustHold(const uint8_t *rdram, uint32_t model);
     // EE thread, for the enemy labels (F2 > Debug > Enemy labels, K's feedback): "em1b | men | 1.00" (the model file,
     // the body type from punish_fit.txt's body lines when Buck Breaker is on, the enemy's size), and for the enemy in
     // Gene's punish "Spanking: fitted" in `status` (else empty).
