@@ -15,11 +15,13 @@
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -259,37 +261,71 @@ namespace kamite::buck_breaker
         // Set by punishCase when a Suplex pick goes to the Gorilla Suplex's case; cActionButton_set (func_001F7858, a1 =
         // the prompt id 0xA, a2 = the word) then shows SUPLEX (0xD) instead of GORILLA SUPLEX (0x26), like the menu.
         bool g_gorillaPrompt = false;
-        // Set by punishCase when a Suplex pick plays the women's chest grab (K, Nov 15): the prompt reads BOOBPLEX, the
-        // word 0x34 = message 0x3045 (0x3011 + word at 0x1F778C; a "<7d>" placeholder of the core bank) pointed at our
-        // text. The mohawk women's Suplex (the game's) keeps SUPLEX.
-        bool g_boobplexPrompt = false;
-        constexpr uint32_t kBoobplexWord = 0x34u;
-        constexpr uint16_t kBoobplexMessage = 0x3045u;
-        constexpr uint32_t kBoobplexText = 0x000FFD00u; // guest scratch below the ELF (tutorial_text.cpp keeps the map)
-        bool pointMessage(uint16_t id, uint32_t text);
         void onPromptSet(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            const bool gorilla = g_gorillaPrompt, boobplex = g_boobplexPrompt;
-            g_gorillaPrompt = g_boobplexPrompt = false;
-            if (GPR_U32(ctx, 5) != 0xAu)
-                return;
-            if (gorilla && GPR_U32(ctx, 6) == 0x26u)
+            const bool gorilla = g_gorillaPrompt;
+            g_gorillaPrompt = false;
+            if (GPR_U32(ctx, 5) == 0xAu && gorilla && GPR_U32(ctx, 6) == 0x26u)
                 SET_GPR_U32(ctx, 6, 0xDu);
-            else if (boobplex && GPR_U32(ctx, 6) == 0xDu)
+        }
+
+        // The women's chest grab Suplex (K, Nov 15): its prompt reads BOOBPLEX, the mohawk women's (the game's) SUPLEX.
+        // The prompt keeps SUPLEX's word 0xD: a word picks the press check too (func_001F7050: table 0x42C100, and any
+        // word from 0x33 on is never shown or pressable), so only the text changes, where func_001F7680 makes the message
+        // (0x3011 + word, at 0x1F778C): message 0x3045 (a "<7d>" placeholder of the core bank) pointed at our text.
+        // punishCase marks the stunned enemy (the entry's +0x14, t1 of cActionButton_set) every frame it sets the prompt.
+        constexpr uint16_t kBoobplexMessage = 0x3045u;
+        constexpr uint32_t kBoobplexText = 0x000FFD00u; // guest scratch below the ELF (tutorial_text.cpp keeps the map)
+        uint32_t g_boobplexEnemies[8] = {};
+        uint32_t g_boobplexNext = 0;
+        void markBoobplex(uint32_t enemy, bool on)
+        {
+            enemy &= 0x1FFFFFFu;
+            for (uint32_t &e : g_boobplexEnemies)
+                if (e == enemy)
+                {
+                    if (!on)
+                        e = 0;
+                    return;
+                }
+            if (!on)
+                return;
+            for (uint32_t &e : g_boobplexEnemies)
+                if (!e)
+                {
+                    e = enemy;
+                    return;
+                }
+            g_boobplexEnemies[g_boobplexNext] = enemy;
+            g_boobplexNext = (g_boobplexNext + 1u) % std::size(g_boobplexEnemies);
+        }
+        bool pointMessage(uint16_t id, uint32_t text);
+        // Replaces addiu v0,v0,0x3011 at 0x1F778C (func_001F7680; v0 = the entry's word, a1 = the entry).
+        void promptText(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            const uint32_t word = GPR_U32(ctx, 2);
+            uint32_t message = word + 0x3011u;
+            const uint32_t entry = GPR_U32(ctx, 5) & 0x1FFFFFFu;
+            if (word == 0xDu && entry >= 0x100000u && entry < 0x2000000u - 0x44u && ram32(rdram, entry + 0x18u) == 0xAu)
             {
-                // B O O B P L E X in the menu font, then the end code.
-                static constexpr uint16_t kText[] = {0x41, 0x4E, 0x4E, 0x41, 0x4F, 0x4B, 0x44, 0x57, 0x8001};
-                std::memcpy(rdram + kBoobplexText, kText, sizeof(kText));
-                if (pointMessage(kBoobplexMessage, kBoobplexText))
-                    SET_GPR_U32(ctx, 6, kBoobplexWord);
+                const uint32_t enemy = ram32(rdram, entry + 0x14u) & 0x1FFFFFFu;
+                if (enemy && std::find(std::begin(g_boobplexEnemies), std::end(g_boobplexEnemies), enemy) != std::end(g_boobplexEnemies))
+                {
+                    // B O O B P L E X in the menu font, then the end code.
+                    static constexpr uint16_t kText[] = {0x41, 0x4E, 0x4E, 0x41, 0x4F, 0x4B, 0x44, 0x57, 0x8001};
+                    std::memcpy(rdram + kBoobplexText, kText, sizeof(kText));
+                    if (pointMessage(kBoobplexMessage, kBoobplexText))
+                        message = kBoobplexMessage;
+                }
             }
+            SET_GPR_U32(ctx, 2, message);
         }
 
         // Replaces sltiu v1,a0,0x7A at 0x2DD02C (func_002DCD50; a0 = enemy number - 0x205, s1 = the enemy): a generic
         // punish goes to the picked one's case.
         void punishCase(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            g_gorillaPrompt = g_boobplexPrompt = false;
+            g_gorillaPrompt = false;
             uint32_t index = GPR_U32(ctx, 4);
             const int pick = g_pick.load(std::memory_order_relaxed);
             if (pick > Normal && pick < kPickCount && tableOk(rdram))
@@ -323,11 +359,14 @@ namespace kamite::buck_breaker
                 const uint32_t own = GPR_U32(ctx, 4) < kCases ? ram32(rdram, kCaseTable + 4u * GPR_U32(ctx, 4)) : kSuplexCase;
                 const uint32_t now = index < kCases ? ram32(rdram, kCaseTable + 4u * index) : kSuplexCase;
                 punish_fit::setChanged(GPR_U32(ctx, 17), now != own);
-                g_boobplexPrompt = now != own && now == kSuplexCase && !g_gorillaPrompt &&
-                                   punish_fit::suplexIsChestGrab(rdram, GPR_U32(ctx, 17));
+                markBoobplex(GPR_U32(ctx, 17), now != own && now == kSuplexCase && !g_gorillaPrompt &&
+                                                   punish_fit::suplexIsChestGrab(rdram, GPR_U32(ctx, 17)));
             }
             else
+            {
                 punish_fit::setChanged(GPR_U32(ctx, 17), false);
+                markBoobplex(GPR_U32(ctx, 17), false);
+            }
             SET_GPR_U32(ctx, 4, index);
             SET_GPR_U32(ctx, 3, index < kCases ? 1u : 0u);
         }
@@ -895,6 +934,7 @@ namespace kamite::buck_breaker
         g_ram = runtime.memory().getRDRAM();
         ps2xRegisterHostHook("km_buck_breaker_case", &punishCase);
         ps2xRegisterHostHook("km_buck_breaker_slot", &onSlotDraw);
+        ps2xRegisterHostHook("km_buck_breaker_prompt_text", &promptText);
         if (!g_ram)
             return;
         g_enabled = envOn("KAMITE_BUCK_BREAKER");
@@ -906,7 +946,7 @@ namespace kamite::buck_breaker
         hooks.observeEntry(0x16C730u, "cSubScrWaza update (Buck Breaker)", &onWazaUpdate);
         hooks.observeEntry(0x16DF38u, "cSubScrWaza input (Buck Breaker)", &onWazaInput);
         hooks.observeEntry(0x2AAA40u, "cIDBase_move (Buck Breaker)", &onLayoutMove);
-        hooks.observeEntry(0x1F7858u, "cActionButton_set (Buck Breaker: SUPLEX over a Gorilla Suplex, BOOBPLEX)", &onPromptSet);
+        hooks.observeEntry(0x1F7858u, "cActionButton_set (Buck Breaker: SUPLEX over a Gorilla Suplex)", &onPromptSet);
         KM_INFO(Game, "buck breaker: " << (g_enabled ? "on (punish slot on the Techniques screen)" : "off ([Game] BuckBreaker=0)"));
     }
 

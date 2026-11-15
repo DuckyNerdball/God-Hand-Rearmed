@@ -440,6 +440,13 @@ flag = "buck_breaker"
 address = "0x0016DD78"
 hook = "km_buck_breaker_slot"
 flag = "buck_breaker"
+# ... and the action prompt's text (func_001F7680: message = 0x3011 + the entry's word): BOOBPLEX over the women's
+# chest grab Suplex, its word kept (the word also picks the press check: func_001F7050 never shows a word from 0x33 on).
+[[patches.hooks]]
+address = "0x001F778C"
+hook = "km_buck_breaker_prompt_text"
+replace = true
+flag = "buck_breaker"
 # [Game] SwayBar (game_options.cpp): after the enemy health bar's cIDBase_trans (func_0028F108 / func_0028F5B0; the
 # enemy in s3 / s2) the layout is drawn again as the stun bar.
 [[patches.hooks]]
