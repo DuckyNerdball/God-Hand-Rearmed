@@ -7,17 +7,15 @@ recompilation: the game's own code rebuilt as a Windows program, with PCSX2's ha
 codename, Kamite, is the name the code and its folders use.
 
 > [!WARNING]
-> **Under construction.** The game plays from start to credits, but the port is still being tested. Expect bugs.
+> **Under construction.** The game plays from start to credits, but the port is still under development.
 
-> **No game files are included.** You need your own disc image of the game (USA, serial SLUS-21503; see
-> [DISC_HASHES.md](DISC_HASHES.md)). Building and playing: [docs/BUILDING.md](docs/BUILDING.md).
+> **No game files are included.** Play your own damn copy! (USA, serial SLUS-21503; see
+> [DISC_HASHES.md](DISC_HASHES.md))
 
 ## Features
 
-- **Native on Windows 10/11:** the PS2 program recompiled to C++, the PS2 hardware reimplemented in `runtime/`.
-- **PCSX2's hardware renderer** (Direct3D 11) at 1x to 8x the PS2's resolution, with the game's own PCSX2 fixes,
-  precise depth (no z-fighting on distant scenery) and an option to turn the depth of field off.
-- **60 FPS mode**, with timers, the roulette, menus and prompts kept at the PS2's speed.
+- **Gone Native:** the PS2 program recompiled to C++ for Windows, more platforms coming soon™!
+- **Smooth Sexy Silky 60 FPS:** thousands of fixes to ensure timers are kept at the PS2's speed.
 - **Any aspect ratio** (16:9, 21:9, 32:9...), the HUD at the screen edges or where the PS2 had it, menus in the PS2's
   proportions or stretched.
 - **Camera options:** field of view, distance and tilt (live in the F2 menu, with presets), fights framed as on the
@@ -31,8 +29,7 @@ codename, Kamite, is the name the code and its folders use.
   use at full resolution (Xbox 360, Steam Deck, Switch or keyboard art, picked from your controller or set in the
   launcher; PlayStation pads keep the game's own). Menu controls Western (south confirms, east cancels; the roulette too) by default, or Japanese or
   Classic in the launcher; the moves keep their buttons.
-- **Playable characters:** a character system that swaps the player model at the disc level, with an example mod
-  (Xavier from *Xavier: Renegade Angel*).
+- **Playable characters:** a character system that swaps the player model at the disc level, with an example mod built in.
 - **Diagnostics for developers:** crash and hang logs with function names, PC sampler, call profiler, frame, RAM and
   GS dumps.
 
