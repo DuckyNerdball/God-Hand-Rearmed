@@ -2,9 +2,8 @@
 
 # God Hand: Rearmed
 
-**God Hand: Rearmed** is an unofficial, fan-made native PC port of **God Hand** (PlayStation 2, 2006), built by static
-recompilation: the game's own code rebuilt as a Windows program, with PCSX2's hardware renderer for the graphics. Its
-codename, Kamite, is the name the code and its folders use.
+**God Hand: Rearmed** (Project Kamite) is an unofficial, fan-made native PC port of **God Hand** (PlayStation 2, 2006), built by static
+recompilation: the game's own code is rebuilt as a Windows program, with PCSX2's hardware renderer for the graphics.
 
 > [!WARNING]
 > **Under construction.** The game plays from start to credits, but the port is still under development.
