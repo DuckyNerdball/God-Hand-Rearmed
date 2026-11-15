@@ -7,6 +7,9 @@ Newest first, one line per change; the code comments say how.
 - Characters keep their full detail at every distance (no more lower-detail models swapped in as they move away).
 - Money above 100% gives the women a more detailed bust, Cash above 100% a rounder seat (both switch live).
 - F2: Cash slider under Money (NPCs tab).
+- Fixed a see-through gap down the women's inner thighs with Cash above 100%.
+- Fixed a ledge between the women's breasts with Money above 100%.
+- The women with horns on their bra keep their own bust above 100% Money (the horns were crushed).
 - Buck Breaker: Suplex on women is a chest grab: Gene's hands on her bust from the grab until she lands.
 - Buck Breaker: the chest grab's hands follow Money; her bust stays still while they are on.
 - Buck Breaker: the chest grab's camera starts close on her chest and swings round to the usual Suplex camera during the throw, pulling back to show it whole and landing with her (one of four ways round, at random).

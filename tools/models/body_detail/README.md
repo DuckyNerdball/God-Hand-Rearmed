@@ -19,6 +19,11 @@ Offline prototypes for the Money > 100% bust and Cash > 100% seat (claude/female
   the seat failed (no edges where the crease and the under-curve go).
 - `texr.py`: textured offline raster (per-pixel UV, Gouraud from vertex normals when the object has `N`).
 
+**Bust recipe:** `transfer3(woman, bunny, levels=1)` with its defaults `back=(0.02, 0.05), anchor=0.8` (Nov 15 fix: pushed
+along the tilted normals the cleavage's centre vertices met in a ledge; the 0.5 smoothing anchor left the centre 1.5 cm
+proud of the donor). build2 now winds each new triangle by her surface normal under it (outward from the hip axis
+turned the inner thighs' triangles away: a see-through gap in game).
+
 **Current seat recipe (K's round 3, Nov 15): `build2(m, shannon, (-0.15, 0.88, -1), (0.15, 1.16, -0.04),
 falloff=0.05, mapping='own')` with `CUT_MIN = 1`.** Shannon's seat at her own size (only her hip width matched): the
 box-mapped version squeezed her depth into the generic seat's boxy plateau and came out up to 1.1 cm smaller in the

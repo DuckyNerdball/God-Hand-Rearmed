@@ -26,7 +26,7 @@ namespace kamite::body_detail
             const char *file;
             uint32_t offset, size;
             uint64_t hash;
-            bool seat;
+            bool bust, seat;
         };
         constexpr Model kModels[] = {
 #include "kamite/body_detail_models.inc"
@@ -44,7 +44,7 @@ namespace kamite::body_detail
             uint32_t size = 0;                                       // the mdb's size
             std::vector<Change> changes;
             int sentinel[3] = {-1, -1, -1};
-            bool seat = false;
+            bool bust = false, seat = false;
         };
         std::vector<Body> g_bodies; // set at boot, read-only afterwards
 
@@ -105,7 +105,7 @@ namespace kamite::body_detail
                     }
                 if (!same)
                     continue;
-                const bool want[3] = {false, bone_tweaks::money() > kOn, b.seat && bone_tweaks::cash() > kOn};
+                const bool want[3] = {false, b.bust && bone_tweaks::money() > kOn, b.seat && bone_tweaks::cash() > kOn};
                 for (int region = 1; region <= 2; ++region)
                 {
                     const int s = b.sentinel[region];
@@ -179,7 +179,7 @@ namespace kamite::body_detail
             if (it == built.end())
             {
                 Built b;
-                if (!build(block.data(), block.size(), bunny, shannon, m.seat, b))
+                if (!build(block.data(), block.size(), bunny, shannon, m.bust, m.seat, b))
                 {
                     KM_WARN(Boot, "body detail: " << m.file << " @0x" << std::hex << m.offset << std::dec << ": " << b.error);
                     built.emplace(m.hash, std::make_pair(-1, std::vector<uint8_t>()));
@@ -191,6 +191,7 @@ namespace kamite::body_detail
                 identify(body, b);
                 body.changes = std::move(b.changes);
                 std::memcpy(body.sentinel, b.sentinel, sizeof body.sentinel);
+                body.bust = m.bust && b.sentinel[1] >= 0;
                 body.seat = m.seat && b.sentinel[2] >= 0;
                 g_bodies.push_back(std::move(body));
                 it = built.emplace(m.hash, std::make_pair(static_cast<int>(g_bodies.size()) - 1, std::move(b.scr))).first;

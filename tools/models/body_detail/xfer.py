@@ -339,9 +339,13 @@ def stretch(P0, P1, T):
         out[k]=max(s[0],1/max(s[1],1e-6))
     return out
 
-def transfer3(m, donor, bone=29, levels=1, max_t=0.05, smooth_iters=12, tangential=0.0, region_mode='any', max_in=None):
+def transfer3(m, donor, bone=29, levels=1, max_t=0.05, smooth_iters=12, tangential=0.0, region_mode='any', max_in=None,
+              back=(0.02, 0.05), anchor=0.8):
     """transfer2 with the displacement split into its normal part (kept) and its sliding part (scaled down), and the
-    normal offset smoothed as a height: the costume's texture stays where it was painted, pushed outward."""
+    normal offset smoothed as a height: the costume's texture stays where it was painted, pushed outward.
+    back=(x0, x1): the push direction turns from the normal to straight back (+z) within x1 of the centre line, fully
+    within x0 (pushed back along their tilted normals the cleavage's centre vertices met in a ledge, K Nov 15);
+    anchor: the projected height's share in each smoothing step (0.5 left the centre 1.5 cm proud of the donor)."""
     w=w_on(m,bone)
     region=(w[m['T']]>0).any(1) if region_mode=='any' else (w[m['T']]>0).all(1)
     sm,reg=subdivide(m,region,levels)
@@ -356,9 +360,13 @@ def transfer3(m, donor, bone=29, levels=1, max_t=0.05, smooth_iters=12, tangenti
     inreg=np.zeros(npos,bool); inreg[pid[sm['T'][reg].ravel()]]=True
     outv=np.zeros(npos,bool); outv[pid[sm['T'][~reg].ravel()]]=True
     fixed=~inreg|outv
+    Dir=Npos.copy()
+    if back:
+        f=np.clip((back[1]-np.abs(Ppos[:,0]))/(back[1]-back[0]),0,1); f=f*f*(3-2*f)
+        Dir=Dir*(1-f)[:,None]+np.array([0,0,1.0])*f[:,None]; Dir/=np.linalg.norm(Dir,axis=1)[:,None]+1e-12
     H=np.zeros(npos); Tg=np.zeros((npos,3))
     for k in np.where(~fixed)[0]:
-        o=Ppos[k]; d=Npos[k]
+        o=Ppos[k]; d=Dir[k]
         t=ray_hit(o,d,A,B,C); t=t[np.isfinite(t)&(np.abs(t)<max_t)]
         if len(t): q=o+d*t[np.argmin(np.abs(t))]
         else:
@@ -372,11 +380,11 @@ def transfer3(m, donor, bone=29, levels=1, max_t=0.05, smooth_iters=12, tangenti
         Hn=H.copy(); Tn=Tg.copy()
         for k in np.where(~fixed)[0]:
             if nb[k]:
-                Hn[k]=0.5*H0[k]+0.5*np.mean([H[j] for j in nb[k]])
-                Tn[k]=0.5*T0[k]+0.5*np.mean([Tg[j] for j in nb[k]],0)
+                Hn[k]=anchor*H0[k]+(1-anchor)*np.mean([H[j] for j in nb[k]])
+                Tn[k]=anchor*T0[k]+(1-anchor)*np.mean([Tg[j] for j in nb[k]],0)
         H,Tg=Hn,Tn
     if max_in is not None: H=np.maximum(H,-max_in)
-    D=H[:,None]*Npos+tangential*Tg
+    D=H[:,None]*Dir+tangential*Tg
     newP=P+D[pid]; sm['P']=newP
     nrm2,_=smooth_normals(newP,sm['T'])
     N=sm['N'].copy(); mv=~fixed[pid]; N[mv]=nrm2[mv]; sm['N']=N

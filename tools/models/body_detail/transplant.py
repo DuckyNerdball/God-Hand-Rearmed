@@ -270,12 +270,16 @@ def build2(m, donor, lo, hi, falloff=0.04, mapping='own', pin=0.85, one_vb=True)
     keepT=[tuple(t) for t,c in zip(T,cut) if not c]; keepTM=[tm for tm,c in zip(m['TM'],cut) if not c]
     out=dict(m); out.update(P=np.array(NP,float),N=np.array(NN,float),UV=np.array(NUV,float),C=np.array(NC,float),J=np.array(NJ,int),W=np.array(NW,float),VB=np.array(NVB),
                             T=np.array(keepT+newT,int),TM=np.array(keepTM+newTM))
-    # winding: outward from the hip axis, like the cut
-    def facing(PP,TT):
-        n=np.cross(PP[TT[:,1]]-PP[TT[:,0]],PP[TT[:,2]]-PP[TT[:,0]]); c=PP[TT].mean(1)
-        return np.sign((n*np.stack([c[:,0],np.zeros(len(c)),c[:,2]],1)).sum(1))
-    ref=np.sign(facing(P,cutT).sum()); nt=out['T']; added=np.arange(len(keepT),len(nt))
-    f=facing(out['P'],nt[added]); fl=added[f!=ref]; nt[fl]=nt[fl][:,[0,2,1]]; out['T']=nt
+    # winding: each new triangle faces the way her surface under it faces (her normals at the closest point of the
+    # cut); outward from the hip axis turned the inner thighs' and the crotch's triangles away (K, Nov 15: a gap)
+    nt=out['T']; added=np.arange(len(keepT),len(nt))
+    for t in added:
+        a,b,c=nt[t]; ctr=(out['P'][a]+out['P'][b]+out['P'][c])/3
+        cq=tri_closest(ctr,A,B,C); k=int(np.argmin(((cq-ctr)**2).sum(1))); ct=cutT[k]
+        bc=np.clip(bary(cq[k],P[ct[0]],P[ct[1]],P[ct[2]]),0,1)
+        ref=sum(bc[i]*m['N'][ct[i]] for i in range(3))
+        if np.cross(out['P'][b]-out['P'][a],out['P'][c]-out['P'][a])@ref<0: nt[t]=[a,c,b]
+    out['T']=nt
     # normals from her mesh + the patch only: the stitch's slivers would bend the edge's shading
     sn,_=smooth_normals(out['P'],out['T'][:len(keepT)+len(r['patchT'])])
     ring=set(int(k) for k in H)

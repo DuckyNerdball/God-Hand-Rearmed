@@ -1,49 +1,49 @@
 // The women's models rebuilt by body_detail (SLUS-21503): file, scr block offset, size, FNV-1a 64 of its bytes, the
-// seat (0: a dress keeps her own seat). From a scan of every em / ema file's MD entries with the women's skeleton,
+// bust (false: em0d's body, horns on her bra cups and a bigger bust of her own), the seat (false: a dress keeps her own). From a scan of every em / ema file's MD entries with the women's skeleton,
 // rendered and sorted by hand (claude/female-models.md); a block that does not match is left alone.
-{"em/em00.dat", 0x100D80u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em01.dat", 0x1166C0u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em05.dat", 0x7CE40u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em07.dat", 0x70680u, 0x2A480u, 0x642322C7F2C7984EULL, false}, // bdcce0
-{"em/em0a.dat", 0xB17C0u, 0x25D40u, 0x0FBCAACE2B4E9150ULL, true}, // f2852f
-{"em/em0a.dat", 0xFE680u, 0x26D40u, 0x43DDA339C07F6B1FULL, true}, // e33b02
-{"em/em0a.dat", 0x14AF00u, 0x26300u, 0xF132B9D867717222ULL, true}, // e47353
-{"em/em0b.dat", 0xFC980u, 0x25CC0u, 0x4167F836EA76E84BULL, true}, // 5d250a
-{"em/em0c.dat", 0x101580u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em0d.dat", 0xF9400u, 0x27A00u, 0x80DC21EDB2FB1701ULL, true}, // b00eb0
-{"em/em0d.dat", 0x148980u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em0e.dat", 0x1125C0u, 0x2A480u, 0x642322C7F2C7984EULL, false}, // bdcce0
-{"em/em0f.dat", 0x2F880u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em0f.dat", 0x7BAC0u, 0x26300u, 0xF132B9D867717222ULL, true}, // e47353
-{"em/em10.dat", 0x2F880u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em10.dat", 0x7BAC0u, 0x25D40u, 0x0FBCAACE2B4E9150ULL, true}, // f2852f
-{"em/em10.dat", 0xC8980u, 0x26D40u, 0x43DDA339C07F6B1FULL, true}, // e33b02
-{"em/em10.dat", 0x115200u, 0x26300u, 0xF132B9D867717222ULL, true}, // e47353
-{"em/em15.dat", 0x105040u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em16.dat", 0x2EE80u, 0x26D40u, 0x43DDA339C07F6B1FULL, true}, // e33b02
-{"em/em16.dat", 0xCD600u, 0x26300u, 0xF132B9D867717222ULL, true}, // e47353
-{"em/em16.dat", 0x14F840u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em1a.dat", 0x104A00u, 0x2A480u, 0x642322C7F2C7984EULL, false}, // bdcce0
-{"em/em1b.dat", 0xCC0C0u, 0x2A480u, 0x642322C7F2C7984EULL, false}, // bdcce0
-{"em/em1c.dat", 0x11B2C0u, 0x25D40u, 0x0FBCAACE2B4E9150ULL, true}, // f2852f
-{"em/em1d.dat", 0x7F6C0u, 0x27A00u, 0x80DC21EDB2FB1701ULL, true}, // b00eb0
-{"em/em1e.dat", 0x68400u, 0x27A00u, 0x80DC21EDB2FB1701ULL, true}, // b00eb0
-{"em/em24.dat", 0xFDA40u, 0x25CC0u, 0x4167F836EA76E84BULL, true}, // 5d250a
-{"em/em25.dat", 0x10BA40u, 0x27A00u, 0x80DC21EDB2FB1701ULL, true}, // b00eb0
-{"em/em25.dat", 0x15AFC0u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em3a.dat", 0xBF300u, 0x27A00u, 0x80DC21EDB2FB1701ULL, true}, // b00eb0
-{"em/em40.dat", 0x7D400u, 0x26300u, 0xF132B9D867717222ULL, true}, // e47353
-{"em/em40.dat", 0xCA600u, 0x25CC0u, 0x4167F836EA76E84BULL, true}, // 5d250a
-{"em/em41.dat", 0x11D700u, 0x27A00u, 0x80DC21EDB2FB1701ULL, true}, // b00eb0
-{"em/em42.dat", 0x1119C0u, 0x27A00u, 0x80DC21EDB2FB1701ULL, true}, // b00eb0
-{"em/em42.dat", 0x160F40u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em43.dat", 0x10F000u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em44.dat", 0x9F7C0u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
-{"em/em46.dat", 0xFF680u, 0x2A480u, 0x642322C7F2C7984EULL, false}, // bdcce0
-{"em/em4f.dat", 0x13D340u, 0x26300u, 0xF132B9D867717222ULL, true}, // e47353
-{"em/em52.dat", 0xEE380u, 0x25CC0u, 0x4167F836EA76E84BULL, true}, // 5d250a
-{"em/ema6.dat", 0x119080u, 0x26300u, 0xF132B9D867717222ULL, true}, // e47353
-{"em/ema6.dat", 0x26E5C0u, 0x26D40u, 0x43DDA339C07F6B1FULL, true}, // e33b02
-{"em/ema6.dat", 0x3CA440u, 0x2A480u, 0x642322C7F2C7984EULL, false}, // bdcce0
-{"em/ema6.dat", 0x4DFD40u, 0x25CC0u, 0x4167F836EA76E84BULL, true}, // 5d250a
-{"em/ema6.dat", 0x52D580u, 0x26700u, 0x56EB68FC7CE29012ULL, true}, // 76e547
+{"em/em00.dat", 0x100D80u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em01.dat", 0x1166C0u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em05.dat", 0x7CE40u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em07.dat", 0x70680u, 0x2A480u, 0x642322C7F2C7984EULL, true, false}, // bdcce0
+{"em/em0a.dat", 0xB17C0u, 0x25D40u, 0x0FBCAACE2B4E9150ULL, true, true}, // f2852f
+{"em/em0a.dat", 0xFE680u, 0x26D40u, 0x43DDA339C07F6B1FULL, true, true}, // e33b02
+{"em/em0a.dat", 0x14AF00u, 0x26300u, 0xF132B9D867717222ULL, true, true}, // e47353
+{"em/em0b.dat", 0xFC980u, 0x25CC0u, 0x4167F836EA76E84BULL, true, true}, // 5d250a
+{"em/em0c.dat", 0x101580u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em0d.dat", 0xF9400u, 0x27A00u, 0x80DC21EDB2FB1701ULL, false, true}, // b00eb0
+{"em/em0d.dat", 0x148980u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em0e.dat", 0x1125C0u, 0x2A480u, 0x642322C7F2C7984EULL, true, false}, // bdcce0
+{"em/em0f.dat", 0x2F880u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em0f.dat", 0x7BAC0u, 0x26300u, 0xF132B9D867717222ULL, true, true}, // e47353
+{"em/em10.dat", 0x2F880u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em10.dat", 0x7BAC0u, 0x25D40u, 0x0FBCAACE2B4E9150ULL, true, true}, // f2852f
+{"em/em10.dat", 0xC8980u, 0x26D40u, 0x43DDA339C07F6B1FULL, true, true}, // e33b02
+{"em/em10.dat", 0x115200u, 0x26300u, 0xF132B9D867717222ULL, true, true}, // e47353
+{"em/em15.dat", 0x105040u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em16.dat", 0x2EE80u, 0x26D40u, 0x43DDA339C07F6B1FULL, true, true}, // e33b02
+{"em/em16.dat", 0xCD600u, 0x26300u, 0xF132B9D867717222ULL, true, true}, // e47353
+{"em/em16.dat", 0x14F840u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em1a.dat", 0x104A00u, 0x2A480u, 0x642322C7F2C7984EULL, true, false}, // bdcce0
+{"em/em1b.dat", 0xCC0C0u, 0x2A480u, 0x642322C7F2C7984EULL, true, false}, // bdcce0
+{"em/em1c.dat", 0x11B2C0u, 0x25D40u, 0x0FBCAACE2B4E9150ULL, true, true}, // f2852f
+{"em/em1d.dat", 0x7F6C0u, 0x27A00u, 0x80DC21EDB2FB1701ULL, false, true}, // b00eb0
+{"em/em1e.dat", 0x68400u, 0x27A00u, 0x80DC21EDB2FB1701ULL, false, true}, // b00eb0
+{"em/em24.dat", 0xFDA40u, 0x25CC0u, 0x4167F836EA76E84BULL, true, true}, // 5d250a
+{"em/em25.dat", 0x10BA40u, 0x27A00u, 0x80DC21EDB2FB1701ULL, false, true}, // b00eb0
+{"em/em25.dat", 0x15AFC0u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em3a.dat", 0xBF300u, 0x27A00u, 0x80DC21EDB2FB1701ULL, false, true}, // b00eb0
+{"em/em40.dat", 0x7D400u, 0x26300u, 0xF132B9D867717222ULL, true, true}, // e47353
+{"em/em40.dat", 0xCA600u, 0x25CC0u, 0x4167F836EA76E84BULL, true, true}, // 5d250a
+{"em/em41.dat", 0x11D700u, 0x27A00u, 0x80DC21EDB2FB1701ULL, false, true}, // b00eb0
+{"em/em42.dat", 0x1119C0u, 0x27A00u, 0x80DC21EDB2FB1701ULL, false, true}, // b00eb0
+{"em/em42.dat", 0x160F40u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em43.dat", 0x10F000u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em44.dat", 0x9F7C0u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em46.dat", 0xFF680u, 0x2A480u, 0x642322C7F2C7984EULL, true, false}, // bdcce0
+{"em/em4f.dat", 0x13D340u, 0x26300u, 0xF132B9D867717222ULL, true, true}, // e47353
+{"em/em52.dat", 0xEE380u, 0x25CC0u, 0x4167F836EA76E84BULL, true, true}, // 5d250a
+{"em/ema6.dat", 0x119080u, 0x26300u, 0xF132B9D867717222ULL, true, true}, // e47353
+{"em/ema6.dat", 0x26E5C0u, 0x26D40u, 0x43DDA339C07F6B1FULL, true, true}, // e33b02
+{"em/ema6.dat", 0x3CA440u, 0x2A480u, 0x642322C7F2C7984EULL, true, false}, // bdcce0
+{"em/ema6.dat", 0x4DFD40u, 0x25CC0u, 0x4167F836EA76E84BULL, true, true}, // 5d250a
+{"em/ema6.dat", 0x52D580u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547

@@ -476,6 +476,8 @@ namespace kamite::body_detail
             constexpr int kBone = 29;
             constexpr double kMaxT = 0.05;
             constexpr int kSmooth = 12;
+            constexpr double kAnchor = 0.8;                     // the projected height's share in each smoothing step
+            constexpr double kBackFrom = 0.02, kBackTo = 0.05;  // straight back within kBackFrom of x = 0, none past kBackTo
             const size_t records0 = m.records();
             std::vector<char> region(m.triangles());
             double g_lo[3] = {1e9, 1e9, 1e9}, g_hi[3] = {-1e9, -1e9, -1e9};
@@ -548,13 +550,24 @@ namespace kamite::body_detail
             for (int k = 0; k < npos; ++k)
                 fixed[k] = !inreg[k] || outv[k];
 
-            // The height along the normal onto the donor (the nearest hit within 5 cm, else the closest point).
+            // The push direction: the smoothed normal, turning to straight back within 2-5 cm of the centre line (the
+            // generic women's cleavage bulges forward; pushed back along its up / down tilted normals the centre
+            // vertices met in a horizontal ledge, K Nov 15).
+            std::vector<D3> Dir(npos);
+            for (int k = 0; k < npos; ++k)
+            {
+                double f = std::clamp((kBackTo - std::fabs(Ppos[k].x)) / (kBackTo - kBackFrom), 0.0, 1.0);
+                f = f * f * (3 - 2 * f);
+                const D3 d = Npos[k] * (1 - f) + D3{0.0, 0.0, 1.0} * f;
+                Dir[k] = d * (1.0 / (len(d) + 1e-12));
+            }
+            // The height along it onto the donor (the nearest hit within 5 cm, else the closest point).
             std::vector<double> H(npos, 0.0);
             for (int k = 0; k < npos; ++k)
             {
                 if (fixed[k])
                     continue;
-                const D3 o = Ppos[k], d = Npos[k];
+                const D3 o = Ppos[k], d = Dir[k];
                 double best = std::numeric_limits<double>::infinity(), bt = 0;
                 for (size_t t = 0; t < A.size(); ++t)
                 {
@@ -584,7 +597,7 @@ namespace kamite::body_detail
                 }
                 H[k] = dot(q - o, d);
             }
-            // Smoothed as a height over the region, the border held (Jacobi, the projected heights as soft anchors).
+            // Smoothed as a height over the region, the border held (Jacobi, the projected heights as anchors).
             std::vector<std::vector<int>> nb(npos);
             for (size_t t = 0; t < m.triangles(); ++t)
             {
@@ -610,13 +623,13 @@ namespace kamite::body_detail
                     double s = 0;
                     for (int j : nb[k])
                         s += H[j];
-                    Hn[k] = 0.5 * H0[k] + 0.5 * (s / static_cast<double>(nb[k].size()));
+                    Hn[k] = kAnchor * H0[k] + (1 - kAnchor) * (s / static_cast<double>(nb[k].size()));
                 }
                 H = std::move(Hn);
             }
             detailP.resize(P.size());
             for (size_t i = 0; i < P.size(); ++i)
-                detailP[i] = P[i] + Npos[pid[i]] * H[pid[i]];
+                detailP[i] = P[i] + Dir[pid[i]] * H[pid[i]];
             const std::vector<D3> nrm2 = smoothNormals(detailP, m.T, m.triangles());
             detailN = m.N;
             moved.assign(P.size(), 0);
@@ -1041,7 +1054,10 @@ namespace kamite::body_detail
             }
             res.stitch = static_cast<int>(zips.size());
 
-            // The triangles: hers without the cut, then the patch and the stitch, wound outward like the cut.
+            // The triangles: hers without the cut, then the patch and the stitch, each wound to face the way her surface
+            // under it faces (her normals at the closest point of the cut). Outward from the hip axis, as the prototype
+            // had it, turned the inner thighs' and the crotch's triangles away from the camera (K, Nov 15: a gap down the
+            // inner thigh).
             std::vector<int> T;
             std::vector<int> TM;
             for (size_t t = 0; t < tris; ++t)
@@ -1051,23 +1067,17 @@ namespace kamite::body_detail
                     TM.push_back(m.TM[t]);
                 }
             const size_t keep = TM.size();
-            auto facing = [&](int a, int b, int c) {
-                const D3 n = cross(m.P[b] - m.P[a], m.P[c] - m.P[a]);
-                const D3 ctr = (m.P[a] + m.P[b] + m.P[c]) * (1.0 / 3.0);
-                const double s = n.x * ctr.x + n.z * ctr.z;
-                return (s > 0) - (s < 0);
-            };
-            int ref = 0;
-            {
-                double sum = 0;
-                for (const auto &t : cutT)
-                    sum += facing(t[0], t[1], t[2]);
-                ref = (sum > 0) - (sum < 0);
-            }
             for (size_t t = 0; t < newTM.size(); ++t)
             {
                 int *v = &newT[3 * t];
-                if (facing(v[0], v[1], v[2]) != ref)
+                const D3 ctr = (m.P[v[0]] + m.P[v[1]] + m.P[v[2]]) * (1.0 / 3.0);
+                size_t c = 0;
+                const D3 q = closestCut(ctr, &c);
+                const std::array<int, 3> &ct = cutT[c];
+                D3 bc = bary(q, P[ct[0]], P[ct[1]], P[ct[2]]);
+                bc = {std::clamp(bc.x, 0.0, 1.0), std::clamp(bc.y, 0.0, 1.0), std::clamp(bc.z, 0.0, 1.0)};
+                const D3 ref = m.N[ct[0]] * bc.x + m.N[ct[1]] * bc.y + m.N[ct[2]] * bc.z;
+                if (dot(cross(m.P[v[1]] - m.P[v[0]], m.P[v[2]] - m.P[v[0]]), ref) < 0)
                     std::swap(v[1], v[2]);
             }
             T.insert(T.end(), newT.begin(), newT.end());
@@ -1421,7 +1431,7 @@ namespace kamite::body_detail
         return false;
     }
 
-    bool build(const uint8_t *scr, size_t size, const Mesh &bunny, const Mesh &shannon, bool withSeat, Built &out)
+    bool build(const uint8_t *scr, size_t size, const Mesh &bunny, const Mesh &shannon, bool withBust, bool withSeat, Built &out)
     {
         out = Built{};
         std::vector<NodeRef> nodes;
@@ -1460,7 +1470,14 @@ namespace kamite::body_detail
         // The bust (every record keeps its own flat state; the bust's moved records their detailed one).
         std::vector<D3> bustP, bustN;
         std::vector<char> moved;
-        bust(m, bunny, bustP, bustN, moved);
+        if (withBust)
+            bust(m, bunny, bustP, bustN, moved);
+        else
+        {
+            bustP = m.P;
+            bustN = m.N;
+            moved.assign(m.records(), 0);
+        }
         out.bustAdded = static_cast<int>(m.records() - R0);
         const size_t R1 = m.records();
         const std::vector<D3> flatN1 = m.N; // the subdivided normals (midpoints lerped)

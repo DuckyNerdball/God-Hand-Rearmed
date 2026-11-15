@@ -7,8 +7,9 @@
 //
 // A model (scr, tools/models/gamemodel.py) keeps its body in the node named "body": vertex buffers of triangle strips
 // (positions f32 x, y, z + a strip flag; int8 normals; int16 UVs; RGBA; three bone weights). The rebuilt body has
-// - the bust: the triangles touching bone 29 subdivided once, the new interior pushed along its smoothed normal onto
-//   Olivia's bunny-suit bust (el/elf4.dat), box-mapped to the woman's bone-29 extents, the height smoothed;
+// - the bust: the triangles touching bone 29 subdivided once, the new interior pushed along its smoothed normal (straight
+//   back near the centre line) onto Olivia's bunny-suit bust (el/elf4.dat), box-mapped to the woman's bone-29 extents,
+//   the height smoothed;
 // - the seat: the costume piece holding the seat cut in a window behind the hips and Shannon's seat (el/el15.dat
 //   body_u1) stitched in at her own size (only her hip width matched), blended onto the woman's surface near its edge.
 // Every new vertex takes the woman's own UVs, colours and weights, so her textures stay hers.
@@ -71,8 +72,9 @@ namespace kamite::body_detail
         std::string error;
     };
 
-    // seat = false: the bust only (a skirt or loose coat over the seat keeps the woman's own seat).
-    bool build(const uint8_t *scr, size_t size, const Mesh &bunny, const Mesh &shannon, bool seat, Built &out);
+    // bust = false: her own bust (one already detailed, with attachments on it); seat = false: her own seat (a skirt or
+    // a dress over it).
+    bool build(const uint8_t *scr, size_t size, const Mesh &bunny, const Mesh &shannon, bool bust, bool seat, Built &out);
 
     // The changes written into an mdb (guest RAM or a file copy): region 1 / 2 to their flat or detailed state.
     void apply(uint8_t *mdb, const std::vector<Change> &changes, int region, bool detailed);
