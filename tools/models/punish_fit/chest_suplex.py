@@ -654,10 +654,11 @@ def pair_centre(q):
 
 
 class Camera:
-    """Per frame eye and look-at in Gene's model space: the front chest shot (FRONT_*), from T_TURN0 an orbit round the
-    pair's centre to the game's own camera, reached at T_TURN1 and kept to the end."""
+    """Per frame eye and look-at in Gene's model space: the front chest shot, then (`turn`: from the lift, f25, her
+    weight coming up, to the ground contact, f37, her body down; K: the camera moves when the characters do) round the
+    pair's centre to the game's own camera, kept from the contact to the end."""
 
-    def __init__(self, ch, dist=2.3, pitch=10.0, turn=(20, 60), side=1, aim_low=0.05, over=0.0):
+    def __init__(self, ch, dist=2.3, pitch=10.0, turn=(25, 37), side=1, aim_low=0.05, over=0.0):
         self.ch = ch; self.pair = ch.pair; self.over = over
         self.dist, self.pitch, self.turn, self.side, self.aim_low = dist, pitch, turn, side, aim_low
         n = len(self.pair.frames)
@@ -696,7 +697,7 @@ class Camera:
         e0, g0 = game_camera(self.pair, t)
         if t >= t1:
             return e0, g0
-        s = smooth((t - t0) / float(t1 - t0))
+        s = turn_ease((t - t0) / float(t1 - t0))
         ef, _ = self.front(t0)                # the front shot's eye as it was when the turn began
         piv = self.pivot(t)
         def sph(p):
@@ -716,6 +717,13 @@ class Camera:
         k1 = smooth(min(1.0, 2 * s)); k2 = smooth(max(0.0, 2 * s - 1))
         tg = b + (mid - b) * k1
         return eye, tg + (g0 - tg) * k2
+
+
+def turn_ease(u):
+    """The turn's timing (K, Nov 15: the camera's motion follows the characters'): it leaves the front shot slowly as
+    her weight comes up, is fastest in the flight and arrives with a short ease-out on the ground contact."""
+    u = min(max(float(u), 0.0), 1.0)
+    return smooth(u ** 1.6)
 
 
 def camera_strip(cam, frames, out, money=1.0, size=(216, 384)):
