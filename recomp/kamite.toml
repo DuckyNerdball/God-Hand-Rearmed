@@ -2422,6 +2422,18 @@ address = "0x00151C70"
 hook = "km_texture_slot_size"
 flag = "texture_slots"
 
+# No distance LOD (model_detail.h): cModel_Trans passes its far flag (distance past the model's LOD threshold +0x2B2)
+# in $a2 to the node tagging methods, which tag only the nodes whose distance-mesh bit (cMeshInfo.flags 0x01000000)
+# matches it. At both entries the flag is cleared when the model has a near mesh: the full meshes at every distance.
+[[patches.hooks]]
+address = "0x0014AAB8"
+hook = "km_no_lod"
+flag = "no_lod"
+[[patches.hooks]]
+address = "0x0014AC90"
+hook = "km_no_lod"
+flag = "no_lod"
+
 # Sprint attack traversal ([Game] SprintTraversal; sprint_traversal.cpp): round Gene's wall check in func_00108AB0
 # (ChkCollScrWall, jal at 0x1094B8), the stage collision groups marked for the sprint attack he is doing are switched
 # off (before: the argument setup at 0x1094A8) and back on (after: 0x1094E0, where both paths and the skip meet).

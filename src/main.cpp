@@ -34,6 +34,7 @@
 #include "kamite/hotkeys.h"
 #include "kamite/ini_file.h"
 #include "kamite/texture_slots.h"
+#include "kamite/model_detail.h"
 #include "kamite/jukebox.h"
 #include "kamite/message_guard.h"
 #include "kamite/bone_tweaks.h"
@@ -1064,6 +1065,7 @@ int main(int argc, char *argv[])
         kamite::test_mode::install(runtime, exeDir); // the case recorder (R3), --replay-case and --test runs (dev-only)
         kamite::installGameOptions(runtime); // [Game] UnlockHard, SkipIntro, RouletteNoOrbs, the stream volumes; Dead Pan
         kamite::texture_slots::install(); // the per-frame texture slots reserve a texture's real VRAM footprint
+        kamite::model_detail::install(); // the full character meshes at every distance (no distance LOD)
         kamite::installSteadyIdleCamera(runtime); // [Video] SteadyIdleCamera
         kamite::jukebox::install(runtime); // the shop's radio: Gene stays in the picture while it plays
         kamite::message_guard::install(runtime); // an empty message text no longer hangs the text measurer
