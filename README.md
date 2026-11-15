@@ -74,10 +74,8 @@ See [CHANGELOG.md](CHANGELOG.md) for what changed and when.
   OPTIONS screen's help text.
 - [Ace Combat 5 static recompilation](https://github.com/sal063/Ace-Combat-5-Static-recompilation): the movie decoder
   (Apache-2.0).
-- Xavier and *Xavier: Renegade Angel* belong to Adult Swim. The Xavier mod is a fan-made example of the character
-  system and is not affiliated with or endorsed by Adult Swim.
-- God Hand: Rearmed is directed, play-tested and written by K, built with AI assistance (Claude by Anthropic), with ideas and
-  testing from his friends.
+- God Hand: Rearmed is directed, play-tested, and written by K, built with AI assistance (Claude by Anthropic), with ideas and
+  testing from the boys.
 
 ## Legal
 
