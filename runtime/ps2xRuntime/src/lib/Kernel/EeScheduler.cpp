@@ -17,6 +17,15 @@ const std::atomic<uint32_t> *ps2xGsSignalSerialAddress() noexcept;
 const std::atomic<uint32_t> *ps2xGsFinishSerialAddress() noexcept;
 // host_vsync.cpp: the host display's last vblank and refresh period.
 bool ps2xHostVsync(std::chrono::steady_clock::time_point &lastVblank, std::chrono::nanoseconds &period) noexcept;
+
+// The VSync option (claude/graphics-options.md): OFF lets the image tear, or a variable-refresh display follow the game,
+// so the vblank is not locked to the display then. -1 = not read yet (PS2X_PCSX2_VSYNC=0 is OFF; GHR.ini fills the
+// environment after static initialisation, so it is read at the first lock). The OPTIONS screen sets it live.
+static std::atomic<int> g_vsyncLockWanted{-1};
+void ps2xSetVsyncLockWanted(bool on) noexcept
+{
+    g_vsyncLockWanted.store(on ? 1 : 0, std::memory_order_relaxed);
+}
 // host_vsync.cpp (round 10 diagnostics): efficiency class of the current logical processor (-1 unknown) and the
 // calling thread's CPU time in ms.
 int ps2xCurrentCoreClass() noexcept;
@@ -85,8 +94,11 @@ namespace
             const char *stats = std::getenv("PS2X_VSYNC_LOCK_STATS");
             s_stats = stats && *stats == '1';
             s_lock = (value && *value == '0') ? 0 : 1;
+            int expected = -1;
+            const char *vsync = std::getenv("PS2X_PCSX2_VSYNC");
+            g_vsyncLockWanted.compare_exchange_strong(expected, (vsync && *vsync == '0') ? 0 : 1);
         }
-        if (s_lock == 0)
+        if (s_lock == 0 || g_vsyncLockWanted.load(std::memory_order_relaxed) == 0)
             return target;
         std::chrono::steady_clock::time_point lastVblank;
         std::chrono::nanoseconds period{};

@@ -1,7 +1,7 @@
 """Preview of the OPTIONS screen's overlay (text, cursor, Yes / No) over the wall, without a Windows build.
 
 python tools/options/overlay_preview.py out.png [--size 1920x1080] [--title] [--cursor N] [--confirm N]
-    [--page controls|display|interface|gameplay|sound] [--open] [--row N] [--scroll N] [--set Section.Key=Value ...]
+    [--page controls|display|graphics|interface|gameplay|sound] [--open] [--row N] [--scroll N] [--set Section.Key=Value ...]
     [--menu western|japanese|classic] [--prompts xbox|playstation|nintendo|steam|keys] [--switch FROM:DIR:T]
     [--page mapping [--line PLACE] [--swap A:B ...] [--extra PLACE=VALUE ...] [--paddles 0|2|4] [--readonly] [--drum TURN] [--armed reset]]
 
@@ -56,7 +56,7 @@ HINT_ART = {'xbox': ('xbox360', '360_A', '360_B', '360_Y', '360_LB', '360_RB'),
 def title_letters():
     """Each title's letters (alpha over half, as options_screen measures them): name:left:right;..."""
     out = []
-    for name in ('controls', 'display', 'interface', 'gameplay', 'sound'):
+    for name in ('controls', 'display', 'graphics', 'interface', 'gameplay', 'sound'):
         im = Image.open(os.path.join(ROOT, 'resources/options', 'title_%s.png' % name)).convert('RGBA')
         box = im.getchannel('A').point(lambda a: 255 if a > 127 else 0).getbbox()
         if box:
@@ -84,7 +84,7 @@ def main():
     ap.add_argument('--title', action='store_true', help='the title screen\'s list (else the pause\'s)')
     ap.add_argument('--cursor', type=int, default=0)
     ap.add_argument('--confirm', type=int, default=-1, help='row asking Yes / No')
-    ap.add_argument('--page', choices=['controls', 'display', 'interface', 'gameplay', 'sound', 'mapping'], help='the mockup page beside the list (or open)')
+    ap.add_argument('--page', choices=['controls', 'display', 'graphics', 'interface', 'gameplay', 'sound', 'mapping'], help='the mockup page beside the list (or open)')
     ap.add_argument('--line', default='', help='mapping: the selected button')
     ap.add_argument('--swap', action='append', default=[], help='mapping: A:B exchanges two buttons\' actions')
     ap.add_argument('--extra', action='append', default=[], help='mapping: PLACE=none|quicksave|quickload|saveload|PLACE '
@@ -121,7 +121,7 @@ def main():
         open(path + '.rgba', 'wb').write(struct.pack('<II', *im.size) + im.tobytes())
         bars.append(path)
     fonts = os.path.join(ROOT, 'resources/fonts')
-    page = {'controls': 0, 'display': 1, 'interface': 2, 'gameplay': 3, 'sound': 4, 'mapping': 0}.get(a.page, -1)
+    page = {'controls': 0, 'display': 1, 'graphics': 2, 'interface': 3, 'gameplay': 4, 'sound': 5, 'mapping': 0}.get(a.page, -1)
     env = dict(os.environ, KAMITE_PREVIEW_HINTS='|'.join(hint_paths(work, a.menu, a.prompts)),
                KAMITE_PREVIEW_TITLES=title_letters(), KAMITE_PREVIEW_SWITCH=a.switch)
     menu = {'western': 'western', 'japanese': 'japanese', 'classic': 'classic'}[a.menu]

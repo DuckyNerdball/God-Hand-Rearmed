@@ -137,6 +137,7 @@ namespace kamite::options_pages
                 }
                 for (int c = 0; c < s.choiceCount; ++c)
                     choices.push_back(s.choices[c].game);
+                row.list = s.gameList; // Texture Filtering: words too long for a row of three
                 row.choice = settings::choiceIndex(s, value);
                 if (row.choice < 0) // set by hand to something else: shown as it is
                 {

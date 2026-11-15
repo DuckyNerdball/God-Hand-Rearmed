@@ -2,6 +2,14 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 15, 2026
+
+- Options: new GRAPHICS category (launcher tab and in-game list) with Graphics API, Internal Resolution, the texture options, Anti-Aliasing, Brightness and Depth of Field; DISPLAY keeps the window settings.
+- Graphics: Texture Filtering: PS2 (Bilinear), Crunchy (Unfiltered 3D) or Dangerously Crunchy (3D+UI); depth of field, glow and heat haze stay smooth.
+- Graphics: Trilinear Filtering: PS2 or Forced (no shimmer in the distance, Crunchy stays crunchy).
+- Graphics: Anisotropic Filtering (16x by default), Anti-Aliasing (FXAA or Off) and Brightness, all changeable while playing.
+- Display: new VSync option; Off allows tearing and variable refresh (G-Sync / FreeSync).
+
 ## November 14, 2026
 
 - Options: up / down go round from the last option to the first and back, in the list and in the pages.

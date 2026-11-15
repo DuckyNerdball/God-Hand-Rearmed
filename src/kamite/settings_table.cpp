@@ -53,6 +53,18 @@ namespace kamite::settings
         constexpr Choice kPostEffects[] = {{"ps2", "PS2 resolution (PCSX2's fix)", "PS2 RESOLUTION"},
                                            {"upscaled", "Upscaled", "UPSCALED"},
                                            {"off", "No fix", "NO FIX"}};
+        // GRAPHICS (K, Nov 15; claude/graphics-options.md). The values are the renderer's own (pcsx2gs options).
+        constexpr Choice kTextureFilters[] = {{"0", "PS2 (Bilinear)", "PS2"},
+                                              {"1", "Crunchy (Unfiltered 3D)", "CRUNCHY"},
+                                              {"2", "Dangerously Crunchy (3D+UI)", "CRUNCHY+UI"}};
+        constexpr Choice kTrilinears[] = {{"-1", "PS2", "PS2"}, {"2", "Forced", "FORCED"}};
+        constexpr Choice kAnisotropies[] = {{"0", "Off", "OFF"}, {"2", "2x", "2X"}, {"4", "4x", "4X"},
+                                            {"8", "8x", "8X"},   {"16", "16x", "16X"}};
+        constexpr Choice kAntiAliasings[] = {{"1", "FXAA", "FXAA"}, {"0", "Off", "OFF"}};
+        constexpr Choice kVsyncs[] = {{"2", "On", "ON"}, {"0", "Off", "OFF"}}; // PS2X_PCSX2_VSYNC: 2 mailbox, 0 tearing
+        // Brightness: 5 % steps round the game's own 100 %.
+        constexpr int kBrightnesses[] = {50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110,
+                                         115, 120, 125, 130, 135, 140, 145, 150};
         constexpr Choice kControlStyles[] = {{"classic", "Classic", "CLASSIC"}, {"modern", "Modern", "MODERN"}};
         constexpr Choice kRouletteTimers[] = {{"normal", "Normal", "NORMAL"}, {"double", "Double time", "DOUBLE"}};
         constexpr Choice kSoundModes[] = {{"mono", "Mono", "MONO"}, {"stereo", "Stereo", "STEREO"},
@@ -90,6 +102,13 @@ namespace kamite::settings
             s.values = kVolumes, s.valueCount = static_cast<int>(std::size(kVolumes)), s.unit = "%";
             return s;
         }
+        constexpr Setting brightness(const char *description)
+        {
+            Setting s = base("Brightness", Tab::Graphics, "Effects", "Brightness", description, "Video", "Brightness", "100",
+                             Kind::Slider);
+            s.values = kBrightnesses, s.valueCount = static_cast<int>(std::size(kBrightnesses)), s.unit = "%";
+            return s;
+        }
         constexpr const char *kMisque = "Misqu\xC3\xA9 & Risqu\xC3\xA9";
         constexpr Setting money()
         {
@@ -103,6 +122,7 @@ namespace kamite::settings
         }
         // Modifiers.
         constexpr Setting live(Setting s) { return s.live = true, s; }
+        constexpr Setting gameList(Setting s) { return s.gameList = true, s; }
         constexpr Setting note(Setting s, const char *text) { return s.note = text, s; }
         constexpr Setting gameNote(Setting s, const char *text) { return s.gameNote = text, s; }
         constexpr Setting sub(Setting s, const char *parent, const char *value = nullptr)
@@ -169,14 +189,6 @@ namespace kamite::settings
                     "Game", "MenuButtons", "western", kMenuButtons)),
 
         // ---- Display --------------------------------------------------------------------------------------------
-        live(onLeave(gameNote(choice(Tab::Display, "Renderer", "Graphics API", "Default: Vulkan | Fallback: DX11", "Video",
-                                     "GraphicsAPI", "vulkan", kGraphicsApis),
-                              kOnLeaveNote))),
-        live(onLeave(gameNote(choice(Tab::Display, "Renderer", "Internal Resolution",
-                                     "1x: 448p | 2x: 896p | 3x: 1344p | 4x: 1792p", "Video", "InternalResolution", "3",
-                                     kResolutions),
-                              kOnLeaveNote))),
-        // Launcher-only (K, Nov 13: Upscaled has caused no issues; a dev option, clutter in game).
         live(withChoices(custom("DisplayMode", Tab::Display, "Game Window", "Display Mode",
                                 "Window, max window, or borderless fullscreen.\nYou can also use F11, if you're into that."),
                          kDisplayModes, static_cast<int>(std::size(kDisplayModes)), "fullscreen")),
@@ -188,11 +200,37 @@ namespace kamite::settings
                                      "Screen width from 4:3 to wider than yo momma!", "Video", "AspectRatio", "16:9",
                                      kAspects),
                               kOnLeaveNote))),
-        choice(Tab::Display, "Effects", "Post Effects",
+        // DRAFT help (K writes the port's help texts).
+        live(choice(Tab::Display, "Game Window", "VSync",
+                    "On: no tearing.\nOff: for G-Sync / FreeSync displays; other displays tear.", "Video", "VSync", "2",
+                    kVsyncs)),
+
+        // ---- Graphics (K, Nov 15: its own tab; claude/graphics-options.md) ---------------------------------------
+        live(onLeave(gameNote(choice(Tab::Graphics, "Renderer", "Graphics API", "Default: Vulkan | Fallback: DX11", "Video",
+                                     "GraphicsAPI", "vulkan", kGraphicsApis),
+                              kOnLeaveNote))),
+        live(onLeave(gameNote(choice(Tab::Graphics, "Renderer", "Internal Resolution",
+                                     "1x: 448p | 2x: 896p | 3x: 1344p | 4x: 1792p", "Video", "InternalResolution", "3",
+                                     kResolutions),
+                              kOnLeaveNote))),
+        // DRAFT help texts below (K writes the port's help texts).
+        live(gameList(choice(Tab::Graphics, "Textures", "Texture Filtering",
+                             "PS2: the game's own smoothing. Crunchy: unfiltered 3D.\nDangerously Crunchy: the UI too.",
+                             "Video", "TextureFiltering", "0", kTextureFilters))),
+        live(choice(Tab::Graphics, "Textures", "Trilinear Filtering",
+                    "PS2: as the game draws it. Forced: blends into the\ndistance, so far textures don't shimmer.", "Video",
+                    "TrilinearFiltering", "-1", kTrilinears)),
+        live(choice(Tab::Graphics, "Textures", "Anisotropic Filtering", "Keeps floors and walls sharp at a slant.",
+                    "Video", "AnisotropicFiltering", "16", kAnisotropies)),
+        live(choice(Tab::Graphics, "Effects", "Anti-Aliasing", "FXAA smooths jagged edges\nand softens the picture a little.",
+                    "Video", "AntiAliasing", "1", kAntiAliasings)),
+        live(brightness("100% is the game as it was.")),
+        // Launcher-only (K, Nov 13: Upscaled has caused no issues; a dev option, clutter in game).
+        choice(Tab::Graphics, "Effects", "Post Effects",
                "The blur effects (depth of field, heat haze) are drawn from small copies of the frame. PS2 resolution "
                "keeps them aligned but grainy at high internal resolutions; Upscaled draws them sharp.",
                "Video", "PostEffects", "upscaled", kPostEffects),
-        live(note(toggle(Tab::Display, "Effects", "Depth of Field",
+        live(note(toggle(Tab::Graphics, "Effects", "Depth of Field",
                          "Blur in the distance.\nIt can't hurt you.",
                          "Video", "DepthOfField", true),
                   "F2 switches it while playing.")),
@@ -312,6 +350,8 @@ namespace kamite::settings
             return "Controls";
         case Tab::Display:
             return "Display";
+        case Tab::Graphics:
+            return "Graphics";
         case Tab::Interface:
             return "Interface";
         case Tab::Gameplay:

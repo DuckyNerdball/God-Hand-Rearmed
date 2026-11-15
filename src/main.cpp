@@ -458,6 +458,13 @@ namespace
         {"video", "startfullscreen", "KAMITE_START_FULLSCREEN"},
         {"video", "posteffects", "PS2X_PCSX2_NATIVE_SCALING"},
         {"video", "depthoffield", "PS2X_PCSX2_DOF"},
+        // GRAPHICS (claude/graphics-options.md); VSync in DISPLAY.
+        {"video", "texturefiltering", "PS2X_PCSX2_CRUNCHY"},
+        {"video", "trilinearfiltering", "PS2X_PCSX2_TRILINEAR"},
+        {"video", "anisotropicfiltering", "PS2X_PCSX2_ANISOTROPY"},
+        {"video", "antialiasing", "PS2X_PCSX2_FXAA"},
+        {"video", "brightness", "PS2X_PCSX2_BRIGHTNESS_PERCENT"},
+        {"video", "vsync", "PS2X_PCSX2_VSYNC"},
         {"video", "precisedepth", "PS2X_PCSX2_PRECISE_DEPTH"},
         {"video", "perspectiveshading", "PS2X_PCSX2_PERSPECTIVE_SHADING"},
         // Near geometry (the cut triangles next to the camera) only serves the see-through: on with it, off without.

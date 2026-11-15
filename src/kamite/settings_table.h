@@ -20,12 +20,14 @@ namespace kamite::settings
     {
         Controls,
         Display,
+        Graphics, // K, Nov 15 (claude/graphics-options.md)
         Interface,
         Gameplay,
         Sound,
         Mods, // launcher only
     };
-    inline constexpr Tab kTabs[] = {Tab::Controls, Tab::Display, Tab::Interface, Tab::Gameplay, Tab::Sound, Tab::Mods};
+    inline constexpr Tab kTabs[] = {Tab::Controls, Tab::Display,  Tab::Graphics, Tab::Interface,
+                                    Tab::Gameplay, Tab::Sound,    Tab::Mods};
     const char *tabName(Tab tab); // "Controls"...
 
     enum class Kind : uint8_t
@@ -68,6 +70,7 @@ namespace kamite::settings
         bool wideOnly = false;   // greyed in the launcher / left out in game at 4:3
         bool gameSlider = false; // a Choice of numbers: a slider in game (its choices' values are the stops)
         bool applyOnLeave = false; // in game: saved at once, applied when the cursor leaves the row (a renderer rebuild)
+        bool gameList = false;     // in game: < value > even with 3 or fewer choices (words too long for a row of three)
     };
 
     extern const Setting kSettings[];

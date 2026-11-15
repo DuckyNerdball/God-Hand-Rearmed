@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-NAMES = ('controls', 'display', 'interface', 'gameplay', 'sound')  # OPTIONS never slides
+NAMES = ('controls', 'display', 'graphics', 'interface', 'gameplay', 'sound')  # OPTIONS never slides
 PAD = 0.15     # of the title's width, each side (options_overlay.cpp kTitleBlurPad)
 STREAK = 0.7   # of the letters' height
 SHRINK = 4

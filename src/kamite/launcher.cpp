@@ -2333,9 +2333,10 @@ void main()
             if (ImGui::BeginTabBar("tabs"))
             {
                 // The launcher's own order (K, Nov 13: Controls after Sound; the game keeps Controls first).
-                constexpr settings::Tab kLauncherTabs[] = {settings::Tab::Display, settings::Tab::Interface,
-                                                           settings::Tab::Gameplay, settings::Tab::Sound,
-                                                           settings::Tab::Controls, settings::Tab::Mods};
+                constexpr settings::Tab kLauncherTabs[] = {settings::Tab::Display,  settings::Tab::Graphics,
+                                                           settings::Tab::Interface, settings::Tab::Gameplay,
+                                                           settings::Tab::Sound,    settings::Tab::Controls,
+                                                           settings::Tab::Mods};
                 for (const settings::Tab tab : kLauncherTabs)
                 {
                     if (!ImGui::BeginTabItem(settings::tabName(tab)))

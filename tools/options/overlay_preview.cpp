@@ -84,11 +84,13 @@ int main(int argc, char **argv)
     setAssets(argv[8], argv[9], argc > 10 ? argv[10] : "");
     if (argc > 12)
         setScrollBar(argv[11], argv[12]);
-    static const Row pauseRows[] = {{"CONTROLS", "Display controls"}, {"DISPLAY", "Picture and camera."},
+    static const Row pauseRows[] = {{"CONTROLS", "Display controls"}, {"DISPLAY", "Window and screen settings."},
+        {"GRAPHICS", "Rendering and graphics settings."},
         {"INTERFACE", "The HUD, button prompts and gauges."}, {"GAMEPLAY", "Techniques, enemies and new\nways to play."},
         {"SOUND", "Sound mode and volume levels."}, {"LOAD GAME", "Select a save file and\nrestart the game."},
         {"RESET GAME", "Return to title screen"}, {"RESTORE DEFAULTS", "Set every option back to\nits default."}, {"EXIT", ""}};
-    static const Row titleRows[] = {pauseRows[0], pauseRows[1], pauseRows[2], pauseRows[3], pauseRows[4], pauseRows[7], pauseRows[8]};
+    static const Row titleRows[] = {pauseRows[0], pauseRows[1], pauseRows[2], pauseRows[3], pauseRows[4], pauseRows[5], pauseRows[8], pauseRows[9]};
+    constexpr int kCategories = 6; // CONTROLS .. SOUND
 
     // The real pages: the shared settings list over the repo's GHR.ini (with --set overrides), as the game builds them.
     static kamite::IniFile ini;
@@ -104,14 +106,14 @@ int main(int argc, char **argv)
     v.aspect = float(W) / float(H);
     v.pause = atoi(argv[5]) != 0;
     v.rows = v.pause ? pauseRows : titleRows;
-    v.rowCount = v.pause ? 9 : 7;
+    v.rowCount = v.pause ? 10 : 8;
     v.cursor = atoi(argv[6]);
     v.confirmRow = atoi(argv[7]);
     v.confirmYes = false;
     v.question = "Would you really like to reset?";
     static kamite::options_pages::PageData data;
-    const int page = argc > 13 ? atoi(argv[13]) : -1; // a tab: 0 controls .. 4 sound
-    if (page >= 0 && page < 5)
+    const int page = argc > 13 ? atoi(argv[13]) : -1; // a tab: 0 controls .. 5 sound
+    if (page >= 0 && page < kCategories)
     {
         kamite::options_pages::buildPage(data, kamite::settings::kTabs[page], ini, v.aspect);
         v.page = &data.page;
@@ -153,14 +155,14 @@ int main(int argc, char **argv)
         v.cancelHint.art[0] = hintPaths[2].c_str();
         v.cancelHint.word = "Cancel";
         // An open page: L1 / R1 and the neighbouring categories (the list's first five rows).
-        if (v.inPage && page >= 0 && page < 5)
+        if (v.inPage && page >= 0 && page < kCategories)
         {
             if (page > 0)
             {
                 v.prevHint.art[0] = hintPaths[3].c_str();
                 v.prevHint.word = pauseRows[page - 1].name;
             }
-            if (page < 4)
+            if (page < kCategories - 1)
             {
                 v.nextHint.art[0] = hintPaths[4].c_str();
                 v.nextHint.word = pauseRows[page + 1].name;

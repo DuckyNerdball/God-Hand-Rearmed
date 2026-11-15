@@ -500,8 +500,9 @@ bool GSPcsx2Backend::EnsureOpen()
         {"PS2X_PCSX2_DXGI_PRESENT", "dxgi_present", nullptr},         // 0: Vulkan presents its own way (not through DXGI)
         {"PS2X_PCSX2_FXAA", "fxaa", "1"},
         {"PS2X_PCSX2_TEXTURE_FILTERING", "texture_filtering", nullptr},
+        {"PS2X_PCSX2_CRUNCHY", "crunchy", nullptr},                   // Texture Filtering: 0 the PS2's, 1 3D, 2 3D + UI unfiltered
         {"PS2X_PCSX2_TRILINEAR", "trilinear", nullptr},
-        {"PS2X_PCSX2_ANISOTROPY", "anisotropy", nullptr},
+        {"PS2X_PCSX2_ANISOTROPY", "anisotropy", "16"},             // GRAPHICS > Anisotropic Filtering (16x default)
         {"PS2X_PCSX2_CAS", "cas", nullptr},
         {"PS2X_PCSX2_CAS_SHARPNESS", "cas_sharpness", nullptr},
         {"PS2X_PCSX2_SHADEBOOST", "shadeboost", nullptr},
@@ -509,6 +510,7 @@ bool GSPcsx2Backend::EnsureOpen()
         {"PS2X_PCSX2_CONTRAST", "contrast", nullptr},
         {"PS2X_PCSX2_SATURATION", "saturation", nullptr},
         {"PS2X_PCSX2_GAMMA", "gamma", nullptr},
+        {"PS2X_PCSX2_BRIGHTNESS_PERCENT", "brightness_percent", nullptr}, // Brightness: 100 = unchanged
         {"PS2X_PCSX2_TV_SHADER", "tv_shader", nullptr},
         {"PS2X_PCSX2_PRESENT_FILTER", "present_filter", nullptr},
         {"PS2X_PCSX2_DITHERING", "dithering", nullptr},

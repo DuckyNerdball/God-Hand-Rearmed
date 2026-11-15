@@ -80,6 +80,8 @@
 #include <thread>
 #include <vector>
 
+void ps2xSetVsyncLockWanted(bool on) noexcept; // runtime Kernel/EeScheduler.cpp: VSync OFF unlocks the vblank
+
 namespace kamite::options_screen
 {
     namespace
@@ -115,6 +117,7 @@ namespace kamite::options_screen
         {
             Controls,
             Display,
+            Graphics,
             Interface,
             Gameplay,
             Sound,
@@ -128,7 +131,9 @@ namespace kamite::options_screen
 
         // Help lines (K's, Nov 13; SOUND and the game's own rows: drafts / the game's wording).
         constexpr Text kControlsText{"CONTROLS", "Camera and input settings."};
-        constexpr Text kDisplayText{"DISPLAY", "Rendering and graphics settings."};
+        // DISPLAY's draft and GRAPHICS taking K's old DISPLAY line (Nov 15: the picture moved to GRAPHICS).
+        constexpr Text kDisplayText{"DISPLAY", "Window and screen settings."};
+        constexpr Text kGraphicsText{"GRAPHICS", "Rendering and graphics settings."};
         constexpr Text kInterfaceText{"INTERFACE", "HUD options and button prompts."};
         constexpr Text kGameplayText{"GAMEPLAY", "Framerate and optional gameplay enhancements."};
         constexpr Text kSoundText{"SOUND", "Sound mode and volume levels."};
@@ -139,14 +144,15 @@ namespace kamite::options_screen
         constexpr const char *kResetQuestion = "Would you really like to reset?"; // the game's own (message 0x2008)
         constexpr const char *kRestoreQuestion = "Set every option back to its default?";
 
-        constexpr std::array<Text, 9> kPauseText{kControlsText, kDisplayText, kInterfaceText, kGameplayText, kSoundText,
-                                                 kLoadText,     kResetText,   kRestoreText,   kExitText};
-        constexpr std::array<Action, 9> kPauseActions{Action::Controls, Action::Display,   Action::Interface,
-                                                      Action::Gameplay, Action::Sound,     Action::LoadGame,
-                                                      Action::ResetGame, Action::Restore, Action::Exit};
-        constexpr std::array<Text, 7> kTitleText{kControlsText, kDisplayText, kInterfaceText, kGameplayText, kSoundText, kRestoreText, kExitText};
-        constexpr std::array<Action, 7> kTitleActions{Action::Controls, Action::Display, Action::Interface, Action::Gameplay,
-                                                      Action::Sound,    Action::Restore, Action::Exit};
+        constexpr std::array<Text, 10> kPauseText{kControlsText, kDisplayText, kGraphicsText, kInterfaceText, kGameplayText,
+                                                  kSoundText,    kLoadText,    kResetText,    kRestoreText,   kExitText};
+        constexpr std::array<Action, 10> kPauseActions{Action::Controls,  Action::Display, Action::Graphics, Action::Interface,
+                                                       Action::Gameplay,  Action::Sound,   Action::LoadGame, Action::ResetGame,
+                                                       Action::Restore,   Action::Exit};
+        constexpr std::array<Text, 8> kTitleText{kControlsText, kDisplayText, kGraphicsText, kInterfaceText,
+                                                 kGameplayText, kSoundText,   kRestoreText,  kExitText};
+        constexpr std::array<Action, 8> kTitleActions{Action::Controls, Action::Display, Action::Graphics, Action::Interface,
+                                                      Action::Gameplay, Action::Sound,   Action::Restore,  Action::Exit};
 
         struct Kind
         {
@@ -661,6 +667,8 @@ namespace kamite::options_screen
                 return settings::Tab::Controls;
             case Action::Display:
                 return settings::Tab::Display;
+            case Action::Graphics:
+                return settings::Tab::Graphics;
             case Action::Interface:
                 return settings::Tab::Interface;
             case Action::Gameplay:
@@ -671,8 +679,8 @@ namespace kamite::options_screen
         }
         bool isCategory(Action action)
         {
-            return action == Action::Controls || action == Action::Display || action == Action::Interface ||
-                   action == Action::Gameplay || action == Action::Sound;
+            return action == Action::Controls || action == Action::Display || action == Action::Graphics ||
+                   action == Action::Interface || action == Action::Gameplay || action == Action::Sound;
         }
 
         // The pages (options_pages.cpp), from the GHR.ini read as the screen opened.
@@ -778,6 +786,22 @@ namespace kamite::options_screen
                 setAspectLive(value);
             else if (id == "InternalResolution")
                 GSPcsx2Backend::SetScale(std::clamp(static_cast<float>(std::atof(value.c_str())), 1.0f, 8.0f));
+            // GRAPHICS (claude/graphics-options.md): the renderer's own options, at its next frame.
+            else if (id == "TextureFiltering")
+                GSPcsx2Backend::SetOption("crunchy", value.c_str());
+            else if (id == "TrilinearFiltering")
+                GSPcsx2Backend::SetOption("trilinear", value.c_str());
+            else if (id == "AnisotropicFiltering")
+                GSPcsx2Backend::SetOption("anisotropy", value.c_str());
+            else if (id == "AntiAliasing")
+                GSPcsx2Backend::SetOption("fxaa", value.c_str());
+            else if (id == "Brightness")
+                GSPcsx2Backend::SetOption("brightness_percent", value.c_str());
+            else if (id == "VSync")
+            {
+                GSPcsx2Backend::SetOption("vsync", value.c_str());
+                ps2xSetVsyncLockWanted(value != "0"); // OFF: the display follows the game (EeScheduler.cpp)
+            }
             else if (id == "GraphicsAPI")
             {
                 if (GSPcsx2Backend::SetGraphicsApi(value.c_str()))
@@ -1868,7 +1892,7 @@ namespace kamite::options_screen
                                       utf8(exeDir / "resources" / "options" / "scroll_thumb.png"));
         options_overlay::setSliderFill(utf8(exeDir / "resources" / "options" / "slider_fill.png"));
         // The titles' letters (their glow left out): where the L1 / R1 hints go beside them.
-        for (const char *name : {"controls", "display", "interface", "gameplay", "sound"})
+        for (const char *name : {"controls", "display", "graphics", "interface", "gameplay", "sound"})
         {
             const std::string path = utf8(exeDir / "resources" / "options" / (std::string("title_") + name + ".png"));
             ::Image title = LoadImage(path.c_str());

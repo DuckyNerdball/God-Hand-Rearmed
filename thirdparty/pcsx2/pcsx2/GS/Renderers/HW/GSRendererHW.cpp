@@ -23,6 +23,7 @@ namespace pcsx2gs
 	extern std::atomic<bool> g_drawDof;      // compat/Bridge.cpp: pcsx2gs_set_option("dof")
 	extern std::atomic<bool> g_preciseDepth; // compat/Bridge.cpp: pcsx2gs_set_option("precise_depth")
 	extern std::atomic<bool> g_perspectiveShading; // compat/Bridge.cpp: pcsx2gs_set_option("perspective_shading")
+	extern std::atomic<int> g_crunchy; // compat/Bridge.cpp: pcsx2gs_set_option("crunchy"), Texture Filtering
 	struct SeeThroughParams // the same as compat/Bridge.cpp's
 	{
 		float cx, cy, rx, ry, start, ramp, strength, soft;
@@ -8622,6 +8623,13 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	const bool trilinear_manual = need_mipmap && GSConfig.HWMipmap && !hd_mips;
 
 	bool bilinear = m_vt.IsLinear();
+	// pcsx2gs (Kamite): Texture Filtering's crunchy modes (g_crunchy; claude/graphics-options.md): 1 = the 3D
+	// (triangles) unfiltered, 2 = the 2D too (sprites: HUD, text, menus, movies). A texture that is a copy of the screen
+	// (a render target: depth of field, glow, heat haze) always keeps the game's filtering, or the blur turns to blocks.
+	const int crunchy = pcsx2gs::g_crunchy.load(std::memory_order_relaxed);
+	const bool crunch = crunchy != 0 && !tex->m_target && (crunchy >= 2 || m_vt.m_primclass == GS_TRIANGLE_CLASS);
+	if (crunch)
+		bilinear = false;
 	int trilinear = 0;
 	bool trilinear_auto = false; // Generate mipmaps if needed (basic).
 	switch (GSConfig.TriFilter)
@@ -8630,7 +8638,8 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		{
 			// Force bilinear otherwise we can end up with min/mag nearest and mip linear.
 			// We don't need to check for HWMipmapLevel::Off here, because forced trilinear implies forced mipmaps.
-			bilinear = true;
+			// pcsx2gs (Kamite): crunchy keeps nearest texels with the mip levels blended (Nearest_Mipmap_Linear below).
+			bilinear = !crunch;
 			if (can_trilinear)
 			{
 				trilinear = static_cast<u8>(GS_MIN_FILTER::Linear_Mipmap_Linear);
@@ -8663,6 +8672,9 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		trilinear = static_cast<u8>(filter);
 		trilinear_auto = true;
 	}
+	// pcsx2gs (Kamite): crunchy: the game's or forced linear minification becomes nearest (the mip blend stays).
+	if (crunch && trilinear >= static_cast<int>(GS_MIN_FILTER::Linear_Mipmap_Nearest))
+		trilinear -= static_cast<int>(GS_MIN_FILTER::Linear_Mipmap_Nearest) - static_cast<int>(GS_MIN_FILTER::Nearest_Mipmap_Nearest);
 
 	// 1 and 0 are equivalent
 	m_conf.ps.wms = (wms & 2 || target_region) ? wms : 0;

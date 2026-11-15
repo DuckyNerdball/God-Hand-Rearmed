@@ -38,6 +38,9 @@ namespace pcsx2gs
     void FinishDrawDump(); // GSRendererHW.cpp
     extern std::mutex g_textureAddMutex;  // below (texture_add)
     extern std::vector<std::string> g_textureAdds;
+    // Texture Filtering's crunchy modes (GSRendererHW.cpp; claude/graphics-options.md): 0 = the game's filtering, 1 = the
+    // 3D unfiltered, 2 = the 3D and the 2D; screen copies always keep the game's. Options "crunchy" (open and live).
+    std::atomic<int> g_crunchy{0};
 }
 
 extern Pcsx2Config EmuConfig;
@@ -121,6 +124,10 @@ namespace
     // Effects and Aspect Ratio): applied on the GS thread at the next Vsync.
     std::mutex g_liveMutex;
     std::string g_liveNativeScaling; // empty: none waiting
+    // The GRAPHICS options changed while running (fxaa, trilinear, anisotropy, brightness_percent): GSOptions keys,
+    // applied together through GSUpdateConfig at the next Vsync. vsync: < 0 = none waiting.
+    std::vector<std::pair<std::string, std::string>> g_liveGs;
+    int g_liveVsync = -1;
     float g_liveAspect = -1.0f;      // < 0: none waiting; 0 = the PS2's 4:3
     uint32_t g_aspectMode = 0u;      // the last pcsx2gs_set_aspect mode (0 = the game's 4:3, shown in the custom shape)
     bool g_stretch = false;          // the open's stretch (Pcsx2GsOpenParams)
@@ -135,15 +142,73 @@ namespace
             EmuConfig.CurrentAspectRatio = AspectRatioType::RAuto4_3_3_2; // the widescreen shape stays
     }
 
+    // A GRAPHICS option (open and live; claude/graphics-options.md). false: not one of them.
+    bool ApplyGraphicsOption(Pcsx2Config::GSOptions &options, std::string_view key, int value)
+    {
+        if (key == "fxaa")
+            options.FXAA = value != 0;
+        else if (key == "trilinear")
+            options.TriFilter = static_cast<TriFiltering>(std::clamp(value, -1, 2)); // -1 the game's (PS2), 2 forced
+        else if (key == "anisotropy")
+            options.MaxAnisotropy = static_cast<u8>(std::clamp(value, 0, 16));
+        else if (key == "brightness_percent")
+        {
+            // Brightness: 100 % = unchanged; PCSX2's Shade Boost brightness is 50 for that (1..100).
+            options.ShadeBoost_Brightness = static_cast<u8>(std::clamp((value + 1) / 2, 1, 100));
+        }
+        else
+            return false;
+        return true;
+    }
+
+    // Shade Boost (an extra pass) only while one of its values is off its default.
+    void UpdateShadeBoost(Pcsx2Config::GSOptions &options)
+    {
+        options.ShadeBoost = options.ShadeBoost_Brightness != Pcsx2Config::GSOptions::DEFAULT_SHADEBOOST_BRIGHTNESS ||
+                             options.ShadeBoost_Contrast != Pcsx2Config::GSOptions::DEFAULT_SHADEBOOST_CONTRAST ||
+                             options.ShadeBoost_Saturation != Pcsx2Config::GSOptions::DEFAULT_SHADEBOOST_SATURATION ||
+                             options.ShadeBoost_Gamma != Pcsx2Config::GSOptions::DEFAULT_SHADEBOOST_GAMMA;
+    }
+
+    GSVSyncMode VsyncMode(int value)
+    {
+        return value == 1 ? GSVSyncMode::FIFO : value == 2 ? GSVSyncMode::Mailbox : GSVSyncMode::Disabled;
+    }
+
     void ApplyLiveOptions()
     {
         std::string scaling;
         float aspect = -1.0f;
+        std::vector<std::pair<std::string, std::string>> graphics;
+        int vsync = -1;
         {
             std::lock_guard<std::mutex> lock(g_liveMutex);
             scaling.swap(g_liveNativeScaling);
             aspect = g_liveAspect;
             g_liveAspect = -1.0f;
+            graphics.swap(g_liveGs);
+            vsync = g_liveVsync;
+            g_liveVsync = -1;
+        }
+        if (!graphics.empty())
+        {
+            Pcsx2Config::GSOptions options = GSConfig;
+            for (const auto &[key, value] : graphics)
+                ApplyGraphicsOption(options, key, std::atoi(value.c_str()));
+            UpdateShadeBoost(options);
+            if (options != GSConfig)
+            {
+                EmuConfig.GS = options;
+                GSUpdateConfig(options); // trilinear empties the texture cache; anisotropy the sampler cache
+                std::fprintf(stderr, "[pcsx2-gs] graphics: fxaa %d, trilinear %d, anisotropy %u, brightness %u%s\n",
+                             options.FXAA ? 1 : 0, static_cast<int>(options.TriFilter), options.MaxAnisotropy,
+                             options.ShadeBoost_Brightness, options.ShadeBoost ? " (shade boost)" : "");
+            }
+        }
+        if (vsync >= 0 && g_gs_device && g_gs_device->GetVSyncMode() != VsyncMode(vsync))
+        {
+            GSSetVSyncMode(VsyncMode(vsync), false);
+            std::fprintf(stderr, "[pcsx2-gs] vsync: %d\n", vsync);
         }
         if (!scaling.empty())
         {
@@ -233,14 +298,12 @@ namespace
                 continue;
             }
             const auto clampU8 = [](int v, int lo, int hi) { return static_cast<u8>(std::clamp(v, lo, hi)); };
-            if (key == "fxaa")
-                options.FXAA = value != 0;
+            if (ApplyGraphicsOption(options, key, value)) // fxaa, trilinear, anisotropy, brightness_percent
+                UpdateShadeBoost(options);
+            else if (key == "crunchy")
+                pcsx2gs::g_crunchy.store(std::clamp(value, 0, 2), std::memory_order_relaxed);
             else if (key == "texture_filtering")
                 options.TextureFiltering = static_cast<BiFiltering>(std::clamp(value, 0, 3));
-            else if (key == "trilinear")
-                options.TriFilter = static_cast<TriFiltering>(std::clamp(value, -1, 2));
-            else if (key == "anisotropy")
-                options.MaxAnisotropy = clampU8(value, 0, 16);
             else if (key == "cas")
                 options.CASMode = static_cast<GSCASMode>(std::clamp(value, 0, 2));
             else if (key == "cas_sharpness")
@@ -624,6 +687,8 @@ extern "C" __declspec(dllexport) const Pcsx2GsApi *pcsx2gs_get_api(uint32_t vers
 //   texture_add=<path> a replacement image written while the game runs (the port's button prompts), added at
 //                      the next vsync (GSTextureReplacements::AddReplacementFile)
 //   dof=0/1            the game's depth-of-field composite drawn (1, the default) or skipped (GSRendererHW.cpp)
+//   crunchy=0/1/2, fxaa=0/1, trilinear=-1/2, anisotropy=0..16, brightness_percent=50..150, vsync=0/1/2
+//                      the GRAPHICS options (claude/graphics-options.md); all but crunchy at the next Vsync
 //   precise_depth=0/1  depth from Q for perspective-textured draws (1, the default; GSRendererHW::ApplyPreciseDepth)
 //   perspective_shading=0/1  vertex colour interpolated with perspective (1, the default;
 //                      GSRendererHW::ApplyPerspectiveShading)
@@ -735,6 +800,25 @@ extern "C" __declspec(dllexport) void pcsx2gs_set_option(const char *key, const 
     {
         std::lock_guard<std::mutex> lock(g_liveMutex);
         g_liveAspect = std::max(0.0f, static_cast<float>(std::atof(value)));
+        return;
+    }
+    // The GRAPHICS options (claude/graphics-options.md).
+    if (std::strcmp(key, "fxaa") == 0 || std::strcmp(key, "trilinear") == 0 || std::strcmp(key, "anisotropy") == 0 ||
+        std::strcmp(key, "brightness_percent") == 0)
+    {
+        std::lock_guard<std::mutex> lock(g_liveMutex);
+        g_liveGs.emplace_back(key, value);
+        return;
+    }
+    if (std::strcmp(key, "vsync") == 0)
+    {
+        std::lock_guard<std::mutex> lock(g_liveMutex);
+        g_liveVsync = std::clamp(std::atoi(value), 0, 2);
+        return;
+    }
+    if (std::strcmp(key, "crunchy") == 0)
+    {
+        pcsx2gs::g_crunchy.store(std::clamp(std::atoi(value), 0, 2), std::memory_order_relaxed);
         return;
     }
     if (std::strcmp(key, "dof") == 0)
