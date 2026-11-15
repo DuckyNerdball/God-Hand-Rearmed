@@ -374,15 +374,16 @@ namespace kamite::body_detail
             return (static_cast<uint64_t>(lo) << 32) | hi;
         }
 
-        // xfer.subdivide, one level: red-green over the flagged triangles (and their neighbours across a split edge).
-        // Midpoints per record pair (so per vertex buffer), positions shared by position id.
-        void subdivide(Mesh &m, std::vector<char> &region)
+        // xfer.subdivide, one level: red-green over the triangles flagged in splitOn (and their neighbours across a split
+        // edge). Midpoints per record pair (so per vertex buffer), positions shared by position id. carried: per-triangle
+        // flags the children inherit (may be splitOn itself).
+        void subdivide(Mesh &m, const std::vector<char> &splitOn, std::vector<char> &region)
         {
             int count = 0;
             const std::vector<int> pid = posIds(m.P, count);
             std::unordered_set<uint64_t> split;
             for (size_t t = 0; t < m.triangles(); ++t)
-                if (region[t])
+                if (splitOn[t])
                     for (int e = 0; e < 3; ++e)
                         split.insert(pairKey(pid[m.T[3 * t + e]], pid[m.T[3 * t + (e + 1) % 3]]));
             auto isSplit = [&](int a, int b) { return split.count(pairKey(pid[a], pid[b])) != 0; };
@@ -478,6 +479,7 @@ namespace kamite::body_detail
             constexpr int kSmooth = 12;
             constexpr double kAnchor = 0.8;                     // the projected height's share in each smoothing step
             constexpr double kBackFrom = 0.02, kBackTo = 0.05;  // straight back within kBackFrom of x = 0, none past kBackTo
+            constexpr double kBand = 0.004;                     // the cleavage band: triangles with a vertex this near x = 0
             const size_t records0 = m.records();
             std::vector<char> region(m.triangles());
             double g_lo[3] = {1e9, 1e9, 1e9}, g_hi[3] = {-1e9, -1e9, -1e9};
@@ -495,7 +497,33 @@ namespace kamite::body_detail
                 for (int k = 0; k < 3; ++k)
                     if (w_on(m, m.T[3 * t + k], kBone) > 0)
                         region[t] = 1;
-            subdivide(m, region);
+            subdivide(m, std::vector<char>(region), region);
+            // The cleavage: the triangles touching the centre line subdivided once more (one strip of triangles between the
+            // crease and the breast's inner edge zig-zagged up and down, K Nov 15), not where one reaches the region's
+            // border (under the bust the donor has no surface ahead).
+            {
+                int n1 = 0;
+                const std::vector<int> pid1 = posIds(m.P, n1);
+                std::vector<char> inr(n1), onb(n1);
+                for (size_t t = 0; t < m.triangles(); ++t)
+                    for (int k = 0; k < 3; ++k)
+                        (region[t] ? inr : onb)[pid1[m.T[3 * t + k]]] = 1;
+                std::vector<char> band(m.triangles());
+                for (size_t t = 0; t < m.triangles(); ++t)
+                {
+                    if (!region[t])
+                        continue;
+                    bool touch = false, border = false;
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        const int v = m.T[3 * t + k];
+                        touch = touch || std::fabs(m.P[v].x) < kBand;
+                        border = border || (inr[pid1[v]] && onb[pid1[v]]);
+                    }
+                    band[t] = touch && !border;
+                }
+                subdivide(m, band, region);
+            }
 
             // The donor's bone-29 surface, box-mapped onto the woman's bone-29 extents (x symmetric).
             std::vector<char> dOn(donor.records());
@@ -612,6 +640,17 @@ namespace kamite::body_detail
                         nb[b].push_back(a);
                 }
             }
+            // The centre line is the bottom of the groove: never shallower than its neighbours' mean (the donor's own mesh
+            // has a little ridge at its cleavage's foot, which left a peak there).
+            for (int k = 0; k < npos; ++k)
+            {
+                if (fixed[k] || std::fabs(Ppos[k].x) >= 0.002 || nb[k].empty())
+                    continue;
+                double sum = 0;
+                for (const int j : nb[k])
+                    sum += H[j];
+                H[k] = std::min(H[k], sum / static_cast<double>(nb[k].size()));
+            }
             const std::vector<double> H0 = H;
             for (int it = 0; it < kSmooth; ++it)
             {
@@ -639,6 +678,77 @@ namespace kamite::body_detail
                     detailN[i] = nrm2[i];
                     moved[i] = 1;
                 }
+        }
+
+        // ---- xfer.crease: the cleavage's centre line as a shading crease ---------------------------------------------
+        // Each moved centre record gets a left and a right copy (same position, same flat state), each with its own wall's
+        // normal (the groove-wall faces within +-1.5 cm of its height on that side), blended in by the walls' angle (none
+        // below 20 deg, full above 50): the breasts shade as two shapes instead of one smeared surface (K Nov 15).
+        void crease(Mesh &m, std::vector<D3> &detailP, std::vector<D3> &detailN)
+        {
+            constexpr double kHalf = 0.002, kA0 = 20.0, kA1 = 50.0, kWin = 0.015;
+            const size_t R = m.records(), tris = m.triangles();
+            std::vector<char> moved(R), cset(R);
+            for (size_t i = 0; i < R; ++i)
+            {
+                moved[i] = std::fabs(detailP[i].x - m.P[i].x) > 1e-7 || std::fabs(detailP[i].y - m.P[i].y) > 1e-7 ||
+                           std::fabs(detailP[i].z - m.P[i].z) > 1e-7;
+                cset[i] = std::fabs(m.P[i].x) < kHalf;
+            }
+            std::vector<D3> fn(tris), ctr(tris);
+            std::vector<char> wall(tris);
+            for (size_t t = 0; t < tris; ++t)
+            {
+                const int a = m.T[3 * t], b = m.T[3 * t + 1], c = m.T[3 * t + 2];
+                fn[t] = cross(detailP[b] - detailP[a], detailP[c] - detailP[a]);
+                ctr[t] = (detailP[a] + detailP[b] + detailP[c]) * (1.0 / 3.0);
+                wall[t] = (cset[a] || cset[b] || cset[c]) && (moved[a] || moved[b] || moved[c]);
+            }
+            auto unit = [](D3 v) { return v * (1.0 / (len(v) + 1e-12)); };
+            for (size_t r = 0; r < R; ++r)
+            {
+                if (!moved[r] || !cset[r])
+                    continue;
+                std::vector<size_t> L, Rt;
+                for (size_t t = 0; t < tris; ++t)
+                    if (m.T[3 * t] == static_cast<int>(r) || m.T[3 * t + 1] == static_cast<int>(r) || m.T[3 * t + 2] == static_cast<int>(r))
+                    {
+                        if (ctr[t].x < 0)
+                            L.push_back(t);
+                        else if (ctr[t].x > 0)
+                            Rt.push_back(t);
+                    }
+                if (L.empty() || Rt.empty())
+                    continue;
+                D3 nl, nr;
+                for (size_t t = 0; t < tris; ++t)
+                    if (wall[t] && std::fabs(ctr[t].y - detailP[r].y) < kWin)
+                    {
+                        if (ctr[t].x < 0)
+                            nl = nl + fn[t];
+                        else if (ctr[t].x > 0)
+                            nr = nr + fn[t];
+                    }
+                nl = unit(nl);
+                nr = unit(nr);
+                const D3 avg = unit(detailN[r]);
+                const double ang = std::acos(std::clamp(dot(nl, nr), -1.0, 1.0)) * 180.0 / 3.14159265358979323846;
+                double w = std::clamp((ang - kA0) / (kA1 - kA0), 0.0, 1.0);
+                w = w * w * (3 - 2 * w);
+                if (w <= 0)
+                    continue;
+                detailN[r] = unit(avg * (1 - w) + nl * w);
+                const int J[3] = {m.J[3 * r], m.J[3 * r + 1], m.J[3 * r + 2]};
+                const float W[3] = {m.W[3 * r], m.W[3 * r + 1], m.W[3 * r + 2]};
+                const float C[4] = {m.C[4 * r], m.C[4 * r + 1], m.C[4 * r + 2], m.C[4 * r + 3]};
+                const int copy = static_cast<int>(pushRecord(m, m.P[r], m.N[r], m.U[r], m.V[r], C, J, W, m.VB[r]));
+                detailP.push_back(detailP[r]);
+                detailN.push_back(unit(avg * (1 - w) + nr * w));
+                for (const size_t t : Rt)
+                    for (int k = 0; k < 3; ++k)
+                        if (m.T[3 * t + k] == static_cast<int>(r))
+                            m.T[3 * t + k] = copy;
+            }
         }
 
         // ---- the seat: transplant.transplant / build2(woman, shannon, (-0.15, 0.88, -1), (0.15, 1.16, -0.04),
@@ -848,6 +958,63 @@ namespace kamite::body_detail
             const auto patchLoops = boundaryLoops(patchT);
             const std::vector<int> &pl = largest(patchLoops);
 
+            // Deepened per height (z scaled about the hip axis) wherever her own seat reaches further back (plus 3 mm: the
+            // blend onto her surface gives a little back), never made shallower: Cash at 101% is never smaller than her
+            // seat (em0d's women: theirs is 1-2 cm deeper than Shannon's, K Nov 15). transplant.depth_match.
+            {
+                constexpr int kYs = 29;      // y 0.88 .. 1.16
+                constexpr double kMargin = 0.003, kMost = 1.5;
+                auto rear = [](const std::vector<std::array<D3, 3>> &tri, double y) {
+                    double best = std::numeric_limits<double>::quiet_NaN();
+                    for (int xi = 0; xi < 8; ++xi) // x 0.03 .. 0.10
+                    {
+                        const D3 o{0.03 + 0.01 * xi, y, -1.0}, d{0.0, 0.0, 1.0};
+                        double tmin = std::numeric_limits<double>::infinity();
+                        for (const auto &t : tri)
+                        {
+                            const double h = rayHit(o, d, t[0], t[1], t[2]);
+                            if (std::isfinite(h))
+                                tmin = std::min(tmin, h);
+                        }
+                        if (std::isfinite(tmin) && !(best <= -1.0 + tmin))
+                            best = -1.0 + tmin;
+                    }
+                    return best;
+                };
+                std::vector<std::array<D3, 3>> herT, hisT;
+                for (const auto &t : cutT)
+                    herT.push_back({P[t[0]], P[t[1]], P[t[2]]});
+                for (const auto &t : patchT)
+                    hisT.push_back({Q[t[0]], Q[t[1]], Q[t[2]]});
+                double ys[kYs], sc[kYs];
+                for (int i = 0; i < kYs; ++i)
+                {
+                    ys[i] = 0.88 + 0.01 * i;
+                    const double her = rear(herT, ys[i]), his = rear(hisT, ys[i]);
+                    sc[i] = std::isfinite(her) && std::isfinite(his) && his < 0 ? std::clamp((her - kMargin) / his, 1.0, kMost) : 1.0;
+                }
+                for (int it = 0; it < 2; ++it)
+                {
+                    double n[kYs];
+                    for (int i = 0; i < kYs; ++i)
+                        n[i] = std::max(1.0, 0.25 * sc[std::max(i - 1, 0)] + 0.5 * sc[i] + 0.25 * sc[std::min(i + 1, kYs - 1)]);
+                    std::copy(n, n + kYs, sc);
+                }
+                for (auto &[k, q] : Q)
+                {
+                    double f = sc[0];
+                    if (q.y >= ys[kYs - 1])
+                        f = sc[kYs - 1];
+                    else if (q.y > ys[0])
+                    {
+                        const int i = std::min(kYs - 2, static_cast<int>((q.y - ys[0]) / 0.01));
+                        const double t = (q.y - ys[i]) / (ys[i + 1] - ys[i]);
+                        f = sc[i] + (sc[i + 1] - sc[i]) * t;
+                    }
+                    q.z *= f;
+                }
+            }
+
             // Blended onto her surface near its edge, the edge pinned 85% onto the hole's boundary.
             auto closestCut = [&](D3 q, size_t *which) {
                 double bd = std::numeric_limits<double>::infinity();
@@ -866,6 +1033,7 @@ namespace kamite::body_detail
                 }
                 return best;
             };
+            std::map<int, double> fall; // per donor position: the share of Shannon's shape (0 at the patch's edge)
             {
                 std::vector<D3> edge;
                 for (const int k : pl)
@@ -879,6 +1047,7 @@ namespace kamite::body_detail
                     double f = std::clamp(d / kFalloff, 0.0, 1.0);
                     f = f * f * (3 - 2 * f);
                     q = s0 + (q - s0) * f;
+                    fall[k] = f;
                 }
                 std::vector<D3> HP;
                 for (const int k : hole)
@@ -919,6 +1088,7 @@ namespace kamite::body_detail
                 return cutVb[c];
             };
             std::unordered_map<uint64_t, int> recs; // (key, vb) -> record; key: position id, or 1 << 40 | donor id
+            std::vector<uint64_t> newKey;          // per new record: its key
             auto rk = [](uint64_t key, int vb) { return (key << 8) ^ static_cast<uint64_t>(vb); };
             for (size_t i = 0; i < R; ++i)
                 recs.emplace(rk(static_cast<uint64_t>(pid[i]), m.VB[i]), static_cast<int>(i));
@@ -963,6 +1133,7 @@ namespace kamite::body_detail
                 topWeights(mix, J, W);
                 const int id = static_cast<int>(pushRecord(m, pos, D3{}, u, v, C, J, W, vb));
                 recs.emplace(rk(key, vb), id);
+                newKey.push_back(key);
                 return id;
             };
             constexpr uint64_t kDonor = 1ull << 40;
@@ -1085,19 +1256,13 @@ namespace kamite::body_detail
             m.T = std::move(T);
             m.TM = std::move(TM);
 
-            // Normals from her mesh and the patch (not the stitch's slivers), for the new records and the hole's ring.
+            // Normals: shading follows the geometry's blend: her own normal (at the closest point of the cut) at the
+            // patch's edge, the patch's own (from her mesh and the patch, not the stitch's slivers) over the same falloff;
+            // the hole's ring keeps hers. Normals recomputed on both sides of the stitch left a hard line down the side of
+            // the hip (K, Nov 15). The flat state: each new record at its closest point on the cut surface, her normal.
             const std::vector<D3> sn = smoothNormals(m.P, m.T, keep + patchT.size());
             res.detailN = m.N;
             res.ring.assign(R, 0);
-            std::unordered_set<int> ringSet(Hl.begin(), Hl.end());
-            for (size_t r = 0; r < m.records(); ++r)
-                if (r >= R || ringSet.count(pid[r]))
-                {
-                    res.detailN[r] = sn[r];
-                    if (r < R)
-                        res.ring[r] = 1;
-                }
-            // The flat state: each new record at its closest point on the cut surface, the normal interpolated there.
             for (size_t r = R; r < m.records(); ++r)
             {
                 size_t c = 0;
@@ -1105,9 +1270,18 @@ namespace kamite::body_detail
                 const std::array<int, 3> &t = cutT[c];
                 D3 bc = bary(q, P[t[0]], P[t[1]], P[t[2]]);
                 bc = {std::clamp(bc.x, 0.0, 1.0), std::clamp(bc.y, 0.0, 1.0), std::clamp(bc.z, 0.0, 1.0)};
-                const D3 n = m.N[t[0]] * bc.x + m.N[t[1]] * bc.y + m.N[t[2]] * bc.z;
+                const double bs = bc.x + bc.y + bc.z;
+                D3 her = (m.N[t[0]] * bc.x + m.N[t[1]] * bc.y + m.N[t[2]] * bc.z) * (1.0 / bs);
+                her = her * (1.0 / (len(her) + 1e-12));
+                const uint64_t key = newKey[r - R];
+                double f = 0.0;
+                if (key & kDonor)
+                    if (const auto it = fall.find(static_cast<int>(key & 0xFFFFFFFFu)); it != fall.end())
+                        f = it->second;
+                const D3 n = her * (1 - f) + sn[r] * f;
+                res.detailN[r] = n * (1.0 / (len(n) + 1e-12));
                 res.flatP.push_back(q);
-                res.flatN.push_back(n);
+                res.flatN.push_back(her);
             }
             res.cut = std::move(cut);
             return true;
@@ -1471,7 +1645,11 @@ namespace kamite::body_detail
         std::vector<D3> bustP, bustN;
         std::vector<char> moved;
         if (withBust)
+        {
             bust(m, bunny, bustP, bustN, moved);
+            crease(m, bustP, bustN);
+            moved.resize(m.records(), 1); // the crease's copies are moved records
+        }
         else
         {
             bustP = m.P;

@@ -24,6 +24,12 @@ along the tilted normals the cleavage's centre vertices met in a ledge; the 0.5 
 proud of the donor). build2 now winds each new triangle by her surface normal under it (outward from the hip axis
 turned the inner thighs' triangles away: a see-through gap in game).
 
+**Nov 15, second in-game round:** transfer3 subdivides the triangles touching the centre line once more (`band=0.004`,
+not at the region's border), holds each centre-line vertex at least as deep as its neighbours' mean, and ends with
+`crease()` (the centre records split into left / right copies with their own wall normals). build2 deepens Shannon's
+patch per height to her own seat's depth plus 3 mm (`depth_match`; em0d's seat is 1-2 cm deeper than Shannon's) and
+blends the new vertices' normals from hers at the patch edge to the patch's over the falloff (the ring keeps hers).
+
 **Current seat recipe (K's round 3, Nov 15): `build2(m, shannon, (-0.15, 0.88, -1), (0.15, 1.16, -0.04),
 falloff=0.05, mapping='own')` with `CUT_MIN = 1`.** Shannon's seat at her own size (only her hip width matched): the
 box-mapped version squeezed her depth into the generic seat's boxy plateau and came out up to 1.1 cm smaller in the

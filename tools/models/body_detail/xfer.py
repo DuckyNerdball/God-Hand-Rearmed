@@ -32,11 +32,11 @@ def pos_ids(P):
         ids[i]=key.setdefault(tuple(p),len(key))
     return ids
 
-def subdivide(m, region, levels=2):
+def subdivide(m, region, levels=2, carry=None):
     """Red-green subdivision of the triangles flagged in region (bool per triangle). Midpoints are per vertex buffer
     (attributes lerped), positions shared by position id so seams stay closed."""
     P=list(m['P']);N=list(m['N']);UV=list(m['UV']);C=list(m['C']);J=list(m['J']);W=list(m['W']);VB=list(m['VB'])
-    T=[tuple(t) for t in m['T']]; TM=list(m['TM']); reg=list(region)
+    T=[tuple(t) for t in m['T']]; TM=list(m['TM']); reg=list(region); car=list(carry) if carry is not None else [False]*len(T)
     for lev in range(levels):
         pid=pos_ids(np.array(P))
         split=set()
@@ -57,28 +57,29 @@ def subdivide(m, region, levels=2):
             UV.append((np.array(UV[a])+np.array(UV[b]))/2); C.append((np.array(C[a])+np.array(C[b]))/2)
             J.append(jj); W.append(ww); VB.append(VB[a])
             mids[key]=len(P)-1; return mids[key]
-        nT=[];nTM=[];nreg=[]
-        for t,tm,r in zip(T,TM,reg):
+        nT=[];nTM=[];nreg=[];ncar=[]
+        for t,tm,r,cr in zip(T,TM,reg,car):
             a,b,c=t
             sab=frozenset((pid[a],pid[b])) in split; sbc=frozenset((pid[b],pid[c])) in split; sca=frozenset((pid[c],pid[a])) in split
             n=sab+sbc+sca
-            if n==0: nT.append(t);nTM.append(tm);nreg.append(r); continue
+            if n==0: nT.append(t);nTM.append(tm);nreg.append(r);ncar.append(cr); continue
             if n==3:
                 ab,bc,ca=mid(a,b),mid(b,c),mid(c,a)
-                for q in ((a,ab,ca),(ab,b,bc),(ca,bc,c),(ab,bc,ca)): nT.append(q);nTM.append(tm);nreg.append(r)
+                for q in ((a,ab,ca),(ab,b,bc),(ca,bc,c),(ab,bc,ca)): nT.append(q);nTM.append(tm);nreg.append(r);ncar.append(cr)
                 continue
             # rotate so the pattern starts at a split edge
             if n==1:
                 while not (frozenset((pid[a],pid[b])) in split): a,b,c=b,c,a
                 ab=mid(a,b)
-                for q in ((a,ab,c),(ab,b,c)): nT.append(q);nTM.append(tm);nreg.append(r)
+                for q in ((a,ab,c),(ab,b,c)): nT.append(q);nTM.append(tm);nreg.append(r);ncar.append(cr)
             else:  # two split edges: rotate so ab and bc are split
                 while not ((frozenset((pid[a],pid[b])) in split) and (frozenset((pid[b],pid[c])) in split)): a,b,c=b,c,a
                 ab,bc=mid(a,b),mid(b,c)
-                for q in ((ab,b,bc),(a,ab,bc),(a,bc,c)): nT.append(q);nTM.append(tm);nreg.append(r)
-        T,TM,reg=nT,nTM,nreg
+                for q in ((ab,b,bc),(a,ab,bc),(a,bc,c)): nT.append(q);nTM.append(tm);nreg.append(r);ncar.append(cr)
+        T,TM,reg,car=nT,nTM,nreg,ncar
     out=dict(m); out.update(P=np.array(P,float),N=np.array(N,float),UV=np.array(UV,float),C=np.array(C,float),
                             J=np.array(J,int),W=np.array(W,float),VB=np.array(VB),T=np.array(T,int),TM=np.array(TM))
+    if carry is not None: return out, np.array(reg), np.array(car)
     return out, np.array(reg)
 
 def tri_closest(p, A, B, C):
@@ -339,8 +340,41 @@ def stretch(P0, P1, T):
         out[k]=max(s[0],1/max(s[1],1e-6))
     return out
 
+def crease(sm, half=0.002, a0=20, a1=50, win=0.015):
+    """The cleavage's centre line as a shading crease: each centre record gets a left and a right copy (same position,
+    same flat state), each with its own wall's normal (the groove-wall faces within +-1.5 cm of its height on that side),
+    blended in by the walls' angle (none below 20 deg, full above 50): the breasts shade as two shapes instead of one
+    smeared surface (K Nov 15)."""
+    P=sm['P']; P0=sm['P0']; T=sm['T'].copy(); N=sm['N'].copy()
+    moved=np.any(np.abs(P-P0)>1e-7,1)
+    cen=np.where(moved&(np.abs(P0[:,0])<half))[0]
+    cset=np.abs(P0[:,0])<half
+    fn=np.cross(P[T[:,1]]-P[T[:,0]],P[T[:,2]]-P[T[:,0]]); ctr=P[T].mean(1); cx=ctr[:,0]
+    wall=cset[T].any(1)&moved[T].any(1)
+    newrecs=[]
+    for r in cen:
+        tris=np.where((T==r).any(1))[0]
+        L=[t for t in tris if cx[t]<0]; R=[t for t in tris if cx[t]>0]
+        if not L or not R: continue
+        near=wall&(np.abs(ctr[:,1]-P[r][1])<win)
+        nl=fn[near&(cx<0)].sum(0); nr=fn[near&(cx>0)].sum(0)
+        nl/=np.linalg.norm(nl)+1e-12; nr/=np.linalg.norm(nr)+1e-12; avg=N[r]/(np.linalg.norm(N[r])+1e-12)
+        ang=np.degrees(np.arccos(np.clip(nl@nr,-1,1))); w=np.clip((ang-a0)/(a1-a0),0,1); w=w*w*(3-2*w)
+        if w<=0: continue
+        lN=avg*(1-w)+nl*w; rN=avg*(1-w)+nr*w
+        N[r]=lN/np.linalg.norm(lN); newrecs.append((r,rN/np.linalg.norm(rN)))
+        idx=len(P)+len(newrecs)-1
+        for t in R: T[t][T[t]==r]=idx
+    out=dict(sm)
+    if not newrecs: return out
+    src=np.array([s2 for s2,_ in newrecs])
+    for k in ('P','P0','UV','C','J','W','VB'): out[k]=np.concatenate([sm[k],sm[k][src]])
+    out['N']=np.concatenate([N,np.array([n for _,n in newrecs])]); out['T']=T
+    if 'N0' in sm: out['N0']=np.concatenate([sm['N0'],sm['N0'][src]])
+    return out
+
 def transfer3(m, donor, bone=29, levels=1, max_t=0.05, smooth_iters=12, tangential=0.0, region_mode='any', max_in=None,
-              back=(0.02, 0.05), anchor=0.8):
+              back=(0.02, 0.05), anchor=0.8, band=0.004, miss_free=False):
     """transfer2 with the displacement split into its normal part (kept) and its sliding part (scaled down), and the
     normal offset smoothed as a height: the costume's texture stays where it was painted, pushed outward.
     back=(x0, x1): the push direction turns from the normal to straight back (+z) within x1 of the centre line, fully
@@ -349,6 +383,14 @@ def transfer3(m, donor, bone=29, levels=1, max_t=0.05, smooth_iters=12, tangenti
     w=w_on(m,bone)
     region=(w[m['T']]>0).any(1) if region_mode=='any' else (w[m['T']]>0).all(1)
     sm,reg=subdivide(m,region,levels)
+    if band:
+        # the cleavage: the triangles touching the centre line subdivided once more (one strip of triangles between the
+        # crease and the breast's inner edge zig-zagged up and down, K Nov 15)
+        # (not where a triangle reaches the region's border: under the bust the donor has no surface ahead)
+        P1=sm['P']; pid1=pos_ids(P1); onb=np.zeros(pid1.max()+1,bool); inr=np.zeros(pid1.max()+1,bool)
+        inr[pid1[sm['T'][reg].ravel()]]=True; onb[pid1[sm['T'][~reg].ravel()]]=True; border=inr&onb
+        touch=np.array([(np.abs(P1[t][:,0])<band).any() and not border[pid1[t]].any() for t in sm['T']])&reg
+        sm,touch2,reg=subdivide(sm,touch,1,carry=reg)
     dw=w_on(donor,bone); dT=donor['T'][(dw[donor['T']]>0).any(1)]
     gsel=m['P'][w>0]; dsel=donor['P'][dw>0]
     fx=affine_box(np.array([-dsel[:,0].max(),dsel[:,1].min(),dsel[:,2].min()]),np.array([dsel[:,0].max(),dsel[:,1].max(),dsel[:,2].max()]),
@@ -364,23 +406,31 @@ def transfer3(m, donor, bone=29, levels=1, max_t=0.05, smooth_iters=12, tangenti
     if back:
         f=np.clip((back[1]-np.abs(Ppos[:,0]))/(back[1]-back[0]),0,1); f=f*f*(3-2*f)
         Dir=Dir*(1-f)[:,None]+np.array([0,0,1.0])*f[:,None]; Dir/=np.linalg.norm(Dir,axis=1)[:,None]+1e-12
-    H=np.zeros(npos); Tg=np.zeros((npos,3))
+    H=np.zeros(npos); Tg=np.zeros((npos,3)); miss=np.zeros(npos,bool)
     for k in np.where(~fixed)[0]:
         o=Ppos[k]; d=Dir[k]
         t=ray_hit(o,d,A,B,C); t=t[np.isfinite(t)&(np.abs(t)<max_t)]
         if len(t): q=o+d*t[np.argmin(np.abs(t))]
+        elif miss_free:
+            miss[k]=True; continue   # nothing ahead: its height comes from its neighbours (smoothing, no anchor)
         else:
             cq=tri_closest(o,A,B,C); q=cq[np.argmin(((cq-o)**2).sum(1))]
         D=q-o; H[k]=D@d; Tg[k]=D-H[k]*d
     nb=[set() for _ in range(npos)]
     for t in pid[sm['T'][reg]]:
         for a,b in ((t[0],t[1]),(t[1],t[2]),(t[2],t[0])): nb[a].add(b); nb[b].add(a)
+    if band:
+        # the centre line is the bottom of the groove: never shallower than its neighbours' mean (the donor's own mesh
+        # has a little ridge at its cleavage's foot, which left a peak there)
+        for k in np.where(~fixed&(np.abs(Ppos[:,0])<0.002))[0]:
+            if nb[k]: H[k]=min(H[k],np.mean([H[j] for j in nb[k]]))
     H0=H.copy(); T0=Tg.copy()
     for it in range(smooth_iters):
         Hn=H.copy(); Tn=Tg.copy()
         for k in np.where(~fixed)[0]:
             if nb[k]:
-                Hn[k]=anchor*H0[k]+(1-anchor)*np.mean([H[j] for j in nb[k]])
+                ak=0.0 if miss[k] else anchor
+                Hn[k]=ak*H0[k]+(1-ak)*np.mean([H[j] for j in nb[k]])
                 Tn[k]=anchor*T0[k]+(1-anchor)*np.mean([Tg[j] for j in nb[k]],0)
         H,Tg=Hn,Tn
     if max_in is not None: H=np.maximum(H,-max_in)
@@ -389,4 +439,5 @@ def transfer3(m, donor, bone=29, levels=1, max_t=0.05, smooth_iters=12, tangenti
     nrm2,_=smooth_normals(newP,sm['T'])
     N=sm['N'].copy(); mv=~fixed[pid]; N[mv]=nrm2[mv]; sm['N']=N
     sm['P0']=P
+    if band: sm=crease(sm)
     return sm, reg

@@ -192,7 +192,29 @@ def seg_closest(p, S0, S1):
     d=S1-S0; t=np.clip(((p-S0)*d).sum(1)/np.maximum((d*d).sum(1),1e-20),0,1); q=S0+d*t[:,None]
     return q[np.argmin(((q-p)**2).sum(1))]
 
-def build2(m, donor, lo, hi, falloff=0.04, mapping='own', pin=0.85, one_vb=True):
+def rear_profile(PP, TT, ys, xs=np.arange(0.03,0.105,0.01)):
+    """The rearmost surface (most negative z) per height, over x 0.03-0.10 (nan where nothing is hit)."""
+    from xfer import ray_hit
+    A,B,C=PP[TT[:,0]],PP[TT[:,1]],PP[TT[:,2]]; out=np.full(len(ys),np.nan)
+    for i,y in enumerate(ys):
+        for x in xs:
+            t=ray_hit(np.array([x,y,-1.0]),np.array([0,0,1.0]),A,B,C); t=t[np.isfinite(t)]
+            if len(t): out[i]=np.nanmin([out[i],-1.0+t.min()])
+    return out
+
+def depth_match(Q, patchT, P, cutT, ys=np.arange(0.88,1.165,0.01), most=1.5, margin=0.003):
+    """Shannon's patch deepened per height (z scaled about the hip axis) wherever the woman's own seat reaches further
+    back (plus margin: the blend onto her surface near the edge gives back a little), never made shallower: Cash at 101%
+    is never smaller than her seat (em0d's women: theirs is 1-2 cm deeper than
+    Shannon's, K Nov 15). The scale is smoothed over height."""
+    keys=sorted(Q); idx={k:i for i,k in enumerate(keys)}
+    QP=np.array([Q[k] for k in keys]); QT=np.array([[idx[a],idx[b],idx[c]] for a,b,c in patchT])
+    her=rear_profile(P,cutT,ys); his=rear_profile(QP,QT,ys)
+    s=np.where(np.isfinite(her)&np.isfinite(his)&(his<0),np.clip((her-margin)/np.where(his<0,his,-1),1.0,most),1.0)
+    for it in range(2): s=np.maximum(1.0,np.convolve(np.pad(s,1,mode='edge'),[0.25,0.5,0.25],'valid'))
+    return {k:np.array([q[0],q[1],q[2]*np.interp(q[1],ys,s)]) for k,q in Q.items()}, s
+
+def build2(m, donor, lo, hi, falloff=0.04, mapping='own', pin=0.85, one_vb=True, match_depth=True):
     """build() for cuts across several vertex buffers: every new triangle takes the vertex buffer (material, UVs) of
     the woman's cut triangle under it; a position gets one record per vertex buffer that uses it."""
     r=transplant(m,donor,lo,hi,mapping=mapping,one_vb=one_vb)
@@ -200,12 +222,14 @@ def build2(m, donor, lo, hi, falloff=0.04, mapping='own', pin=0.85, one_vb=True)
     cutT=T[cut]; cutI=np.where(cut)[0]
     A,B,C=P[cutT[:,0]],P[cutT[:,1]],P[cutT[:,2]]
     Q=dict(r['Q'])
+    if match_depth: Q,_=depth_match(Q,[(r['dpid'][a],r['dpid'][b],r['dpid'][c]) for a,b,c in r['patchT']],P,cutT)
+    fall={}
     if falloff:
         edge=np.array([Q[k] for k in max(r['patch_loops'],key=len)])
         for k,q in list(Q.items()):
             cq=tri_closest(q,A,B,C); s0=cq[np.argmin(((cq-q)**2).sum(1))]
             d=np.sqrt(((edge-q)**2).sum(1)).min(); f=np.clip(d/falloff,0,1); f=f*f*(3-2*f)
-            Q[k]=s0+(q-s0)*f
+            Q[k]=s0+(q-s0)*f; fall[k]=f
         # the patch's edge pinned onto the hole's own boundary (most of the way), so the stitch lies flat on the
         # surface instead of standing edge-on where the two edges sit at different depths
         rep0={}
@@ -282,7 +306,14 @@ def build2(m, donor, lo, hi, falloff=0.04, mapping='own', pin=0.85, one_vb=True)
     out['T']=nt
     # normals from her mesh + the patch only: the stitch's slivers would bend the edge's shading
     sn,_=smooth_normals(out['P'],out['T'][:len(keepT)+len(r['patchT'])])
-    ring=set(int(k) for k in H)
-    for i in range(len(NP)):
-        if i>=len(P) or int(pid[i]) in ring: out['N'][i]=sn[i]
+    # shading follows the geometry's blend: her own normal (at the closest point of the cut) at the patch's edge, the
+    # patch's over the same falloff; the hole's ring keeps hers. (Normals recomputed on both sides of the stitch left a
+    # hard line down the side of the hip, K Nov 15.)
+    key_of={v:kk for (kk,vb),v in recs.items()}
+    for i in range(len(P),len(out['P'])):
+        q=out['P'][i]; cq=tri_closest(q,A,B,C); kk=int(np.argmin(((cq-q)**2).sum(1))); ct=cutT[kk]
+        bc=np.clip(bary(cq[kk],P[ct[0]],P[ct[1]],P[ct[2]]),0,1); bc/=bc.sum()
+        her=sum(bc[j2]*m['N'][ct[j2]] for j2 in range(3)); her/=np.linalg.norm(her)+1e-12
+        key=key_of.get(i); f=fall.get(key[1],0.0) if key and key[0]=='d' else 0.0
+        n=her*(1-f)+sn[i]*f; out['N'][i]=n/(np.linalg.norm(n)+1e-12)
     return out, len(r['patchT']), len(zips)

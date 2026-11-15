@@ -10,6 +10,9 @@ Newest first, one line per change; the code comments say how.
 - Fixed a see-through gap down the women's inner thighs with Cash above 100%.
 - Fixed a ledge between the women's breasts with Money above 100%.
 - The women with horns on their bra keep their own bust above 100% Money (the horns were crushed).
+- Fixed a hard shading line down the side of the women's hips with Cash above 100%.
+- Fixed the mohawk women's seat coming out smaller with Cash above 100%.
+- The women's cleavage above 100% Money: two distinct shapes, no glitchy creases between them.
 - Buck Breaker: Suplex on women is a chest grab: Gene's hands on her bust from the grab until she lands.
 - Buck Breaker: the chest grab's hands follow Money; her bust stays still while they are on.
 - Buck Breaker: the chest grab's camera starts close on her chest and swings round to the usual Suplex camera during the throw, pulling back to show it whole and landing with her (one of four ways round, at random).
