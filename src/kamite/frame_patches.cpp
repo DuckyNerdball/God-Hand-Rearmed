@@ -1429,6 +1429,52 @@ namespace kamite
             g_origCustomIdMain(rdram, ctx, runtime);
         }
 
+        // cObjSimple_MoveBust (0x2B6A40, a0 = the object; from cObjSimple_Update every update): the women's bust jiggle, a
+        // spring on part 29's rot.x with per-frame constants and no time factor (claude/cash.md), so at 60 it bounced
+        // twice as fast and settled twice as quickly. Stepped on the 30 FPS frames only: the PS2's pace exactly (the
+        // root's move on the frame between is carried in the next step's delta, its previous position +0x2FE0 being
+        // written only by the step). On the frames between, the bone holds the last step's angle (written back in case
+        // the motion rewrote it).
+        GuestFunction g_origMoveBust = nullptr;
+        struct BustHold
+        {
+            float angle = 0.0f;
+            uint32_t frame = 0; // frame30 of the step
+        };
+        std::unordered_map<uint32_t, BustHold> g_bustHold; // object -> its last step (game thread)
+        uint32_t bustPart(uint8_t *rdram, uint32_t obj)
+        {
+            if (ram8(rdram, obj + 0x2B4u) <= 29u)
+                return 0u;
+            uint32_t parts = 0, part = 0;
+            std::memcpy(&parts, &ram8(rdram, obj + 0x278u), 4);
+            if (parts < 0x100000u || parts >= 0x2000000u - 0x80u)
+                return 0u;
+            std::memcpy(&part, &ram8(rdram, parts + 0x74u), 4);
+            return part >= 0x100000u && part < 0x2000000u - 0x110u ? part : 0u;
+        }
+        void moveBust(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t obj = GPR_U32(ctx, 4);
+            const bool live = g_fps60 && ctx->pc == 0x2B6A40u && obj >= 0x100000u && obj < 0x2000000u - 0x3000u;
+            if (live && thinkSkipped(rdram))
+            {
+                const auto it = g_bustHold.find(obj);
+                if (const uint32_t part = bustPart(rdram, obj); part && it != g_bustHold.end() && it->second.frame == frame30(rdram))
+                    std::memcpy(&ram8(rdram, part + 0x100u), &it->second.angle, 4);
+                ctx->pc = GPR_U32(ctx, 31);
+                return;
+            }
+            g_origMoveBust(rdram, ctx, runtime);
+            if (live)
+                if (const uint32_t part = bustPart(rdram, obj))
+                {
+                    BustHold &h = g_bustHold[obj];
+                    std::memcpy(&h.angle, &ram8(rdram, part + 0x100u), 4);
+                    h.frame = frame30(rdram);
+                }
+        }
+
         // ColiseumBattle_StepResult (0x1EF180, a0 = the ring's battle object, +0x8 its sub-step): the round's end (the
         // CLEAR banner's holds, the prize tally of 1000 gold a frame with a tick sound, the waits before the fade). Its
         // sub-steps 0..9 are frame-counted, so on the frames between the 30 FPS ones only the common tail runs
@@ -2799,6 +2845,13 @@ namespace kamite
         {
             g_origCustomIdMain = nullptr;
             KM_WARN(Game, "fps60: CustomIDWork_Main is not hookable");
+        }
+        if (!runtime.hasFunction(0x2B6A40u) || !(g_origMoveBust = runtime.lookupFunction(0x2B6A40u)) ||
+            !FunctionHooks::instance().replace(0x2B6A40u, "cObjSimple_MoveBust (60 FPS bust jiggle)", &moveBust,
+                                               ReplacementStatus::Native, "60 FPS: one jiggle step per 30 FPS frame"))
+        {
+            g_origMoveBust = nullptr;
+            KM_WARN(Game, "fps60: cObjSimple_MoveBust is not hookable");
         }
         if (!runtime.hasFunction(0x1EF180u) || !(g_origRingResult = runtime.lookupFunction(0x1EF180u)) ||
             !FunctionHooks::instance().replace(0x1EF180u, "ColiseumBattle_StepResult (60 FPS round end)", &ringResult,
