@@ -48,7 +48,8 @@ def read_fit(punish, key, scale):
             p = line.split()
             if out is not None:
                 break
-            if p[1] == punish and key in p[2].split(',') and 'scale=%.2f' % scale in line and ' off' not in line:
+            if p[1] == punish and key in p[2].split(',') and 'scale=%.2f' % scale in line and ' off' not in line \
+                    and 'node=' not in line:   # a model variant's fits (node=MOHI: the mohawk women) are not the body's
                 out = dict(size=float(re.search(r'size=([\d.]+)', line).group(1)), gene={}, victim={})
         elif out is not None and line.startswith(('gene ', 'victim ')):
             p = line.split()
