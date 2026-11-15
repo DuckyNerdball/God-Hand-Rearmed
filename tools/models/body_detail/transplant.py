@@ -50,11 +50,15 @@ def uv_islands(m):
             else: owner[r]=ti
     return np.array([find(i) for i in range(len(T))])
 
-def transplant(m, donor, lo, hi, d_lo=None, d_hi=None):
+def transplant(m, donor, lo, hi, d_lo=None, d_hi=None, mapping='box', one_vb=False):
     lo=np.array(lo,float); hi=np.array(hi,float); d_lo=lo if d_lo is None else np.array(d_lo,float); d_hi=hi if d_hi is None else np.array(d_hi,float)
     P=m['P']; T=m['T']; pid=pos_ids(P)
     inwin=((P>=lo)&(P<=hi)).all(1)
     cut=inwin[T].all(1) if CUT_MODE=='all' else (inwin[T].sum(1)>=CUT_MIN)
+    if one_vb:
+        # stay inside the costume piece that holds the seat: the patch then ends on the piece's own seam (a waistband
+        # stays a clean line instead of sawtooth where patch triangles pick one material or the other)
+        tvb=m['VB'][T[:,0]]; main=np.bincount(tvb[cut]).argmax(); cut&=tvb==main
     isl=uv_islands(m)
     # donor patch in the same window (its own coordinates), then box-mapped onto the woman's cut extents
     gv=P[T[cut]].reshape(-1,3)
@@ -80,8 +84,17 @@ def transplant(m, donor, lo, hi, d_lo=None, d_hi=None):
         dsel|=add
     dv=dP[dT[dsel]].reshape(-1,3)
     gx=np.abs(gv[:,0]).max(); dx=np.abs(dv[:,0]).max()
-    fx=affine_box(np.array([-dx,dv[:,1].min(),dv[:,2].min()]),np.array([dx,dv[:,1].max(),dv[:,2].max()]),
-                  np.array([-gx,gv[:,1].min(),gv[:,2].min()]),np.array([gx,gv[:,1].max(),gv[:,2].max()]))
+    if mapping=='box':
+        fx=affine_box(np.array([-dx,dv[:,1].min(),dv[:,2].min()]),np.array([dx,dv[:,1].max(),dv[:,2].max()]),
+                      np.array([-gx,gv[:,1].min(),gv[:,2].min()]),np.array([gx,gv[:,1].max(),gv[:,2].max()]))
+    else:
+        # the donor at her own size (same skeleton, same space): only her hip width matched to the woman's at seat
+        # height, so the new seat touches the old one's volume instead of being squeezed into its boxy outline
+        def hipw(PP):
+            b=PP[(PP[:,1]>0.95)&(PP[:,1]<1.05)&(PP[:,2]<0.0)]
+            return np.abs(b[:,0]).max()
+        sx=hipw(P)/hipw(dP)
+        fx=lambda X: X*np.array([sx,1.0,1.0])
     patchT=dT[dsel]; dpid=pos_ids(dP)
     # unique donor positions used by the patch
     used=np.unique(dpid[patchT.ravel()]); rep={}
@@ -91,8 +104,8 @@ def transplant(m, donor, lo, hi, d_lo=None, d_hi=None):
     hole=boundary_loops(T[cut],pid); pl=boundary_loops(np.array([[dpid[a],dpid[b],dpid[c]] for a,b,c in patchT]),{i:i for i in range(dpid.max()+1)})
     return dict(cut=cut,isl=isl,patchT=patchT,dpid=dpid,Q=Q,hole=hole,patch_loops=pl,pid=pid)
 
-def build(m, donor, lo, hi, shrink=0.92, falloff=None):
-    r=transplant(m,donor,lo,hi)
+def build(m, donor, lo, hi, shrink=0.92, falloff=None, mapping='box'):
+    r=transplant(m,donor,lo,hi,mapping=mapping)
     P=m['P']; T=m['T']; pid=r['pid']; cut=r['cut']
     cutT=T[cut]; A,B,C=P[cutT[:,0]],P[cutT[:,1]],P[cutT[:,2]]
     cen=P[cutT].reshape(-1,3).mean(0)
@@ -174,3 +187,98 @@ def build(m, donor, lo, hi, shrink=0.92, falloff=None):
         for i in range(len(P)):
             if pid[i] in ring: out['N'][i]=sn[i]
     return out, len(patch), len(zip_)
+
+def seg_closest(p, S0, S1):
+    d=S1-S0; t=np.clip(((p-S0)*d).sum(1)/np.maximum((d*d).sum(1),1e-20),0,1); q=S0+d*t[:,None]
+    return q[np.argmin(((q-p)**2).sum(1))]
+
+def build2(m, donor, lo, hi, falloff=0.04, mapping='own', pin=0.85, one_vb=True):
+    """build() for cuts across several vertex buffers: every new triangle takes the vertex buffer (material, UVs) of
+    the woman's cut triangle under it; a position gets one record per vertex buffer that uses it."""
+    r=transplant(m,donor,lo,hi,mapping=mapping,one_vb=one_vb)
+    P=m['P']; T=m['T']; pid=r['pid']; cut=r['cut']
+    cutT=T[cut]; cutI=np.where(cut)[0]
+    A,B,C=P[cutT[:,0]],P[cutT[:,1]],P[cutT[:,2]]
+    Q=dict(r['Q'])
+    if falloff:
+        edge=np.array([Q[k] for k in max(r['patch_loops'],key=len)])
+        for k,q in list(Q.items()):
+            cq=tri_closest(q,A,B,C); s0=cq[np.argmin(((cq-q)**2).sum(1))]
+            d=np.sqrt(((edge-q)**2).sum(1)).min(); f=np.clip(d/falloff,0,1); f=f*f*(3-2*f)
+            Q[k]=s0+(q-s0)*f
+        # the patch's edge pinned onto the hole's own boundary (most of the way), so the stitch lies flat on the
+        # surface instead of standing edge-on where the two edges sit at different depths
+        rep0={}
+        for i in range(len(P)): rep0.setdefault(int(pid[i]),i)
+        hl=max(r['hole'],key=len); HP=np.array([P[rep0[k]] for k in hl])
+        S0=HP; S1=np.roll(HP,-1,0)
+        for k in max(r['patch_loops'],key=len):
+            h=seg_closest(Q[k],S0,S1); Q[k]=Q[k]+(h-Q[k])*pin
+    NP=list(P);NN=list(m['N']);NUV=list(m['UV']);NC=list(m['C']);NJ=list(m['J']);NW=list(m['W']);NVB=list(m['VB'])
+    cut_vb=m['VB'][cutT[:,0]]
+    vb_tm={int(m['VB'][T[i][0]]):int(m['TM'][i]) for i in cutI}
+    def closest_in(p, vb):
+        sel=np.where(cut_vb==vb)[0]
+        cq=tri_closest(p,A[sel],B[sel],C[sel]); k=sel[np.argmin(((cq-p)**2).sum(1))]
+        return k, cq[np.argmin(((cq-p)**2).sum(1))]
+    def vb_at(p):
+        cq=tri_closest(p,A,B,C); return int(cut_vb[np.argmin(((cq-p)**2).sum(1))])
+    recs={}  # (position key, vb) -> record
+    for i in range(len(P)): recs.setdefault((('o',int(pid[i])),int(m['VB'][i])),i)
+    def record(key, pos, vb):
+        if (key,vb) in recs: return recs[(key,vb)]
+        k,cq=closest_in(pos,vb); t=cutT[k]
+        bc=np.clip(bary(cq,P[t[0]],P[t[1]],P[t[2]]),0,1); bc/=bc.sum()
+        uv=sum(bc[i]*m['UV'][t[i]] for i in range(3)); col=sum(bc[i]*m['C'][t[i]] for i in range(3))
+        w={}
+        for i in range(3):
+            for jj,ww in zip(m['J'][t[i]],m['W'][t[i]]):
+                if ww>0: w[jj]=w.get(jj,0)+bc[i]*ww
+        top=sorted(w.items(),key=lambda x:-x[1])[:3]; s=sum(x[1] for x in top) or 1
+        J=[x[0] for x in top]+[0]*(3-len(top)); W=[round(100*x[1]/s) for x in top]+[0]*(3-len(top)); W[0]+=100-sum(W)
+        NP.append(np.array(pos,float));NN.append(np.zeros(3));NUV.append(uv);NC.append(col);NJ.append(J);NW.append(W);NVB.append(vb)
+        recs[(key,vb)]=len(NP)-1; return recs[(key,vb)]
+    rep={}
+    for i in range(len(P)): rep.setdefault(int(pid[i]),i)
+    def opos(k): return P[rep[k]]
+    newT=[];newTM=[]
+    dpid=r['dpid']
+    for a,b,c in r['patchT']:
+        ks=[('d',int(dpid[a])),('d',int(dpid[b])),('d',int(dpid[c]))]; ps=[Q[k[1]] for k in ks]
+        vb=vb_at(np.mean(ps,0))
+        newT.append(tuple(record(k,p,vb) for k,p in zip(ks,ps))); newTM.append(vb_tm[vb])
+    # stitch: shortest diagonals between the hole loop and the patch loop (positions), each triangle in the buffer
+    # under it
+    H=list(max(r['hole'],key=len)); Pl=list(max(r['patch_loops'],key=len))
+    def hp(k): return opos(k)
+    def pp(k): return Q[k]
+    def area(pts):
+        p=np.array(pts)[:,:2]; return 0.5*np.sum(p[:,0]*np.roll(p[:,1],-1)-np.roll(p[:,0],-1)*p[:,1])
+    if np.sign(area([hp(k) for k in H]))!=np.sign(area([pp(k) for k in Pl])): Pl=Pl[::-1]
+    k0=int(np.argmin([((pp(k)-hp(H[0]))**2).sum() for k in Pl])); Pl=Pl[k0:]+Pl[:k0]
+    nH,nP=len(H),len(Pl); i=j=0; zips=[]
+    while i<nH or j<nP:
+        if i>=nH: adv=False
+        elif j>=nP: adv=True
+        else: adv=np.linalg.norm(hp(H[(i+1)%nH])-pp(Pl[j%nP]))<=np.linalg.norm(hp(H[i%nH])-pp(Pl[(j+1)%nP]))
+        if adv: zips.append((('o',H[i%nH]),('d',Pl[j%nP]),('o',H[(i+1)%nH]))); i+=1
+        else: zips.append((('o',H[i%nH]),('d',Pl[j%nP]),('d',Pl[(j+1)%nP]))); j+=1
+    def kpos(k): return opos(k[1]) if k[0]=='o' else Q[k[1]]
+    for z in zips:
+        ps=[kpos(k) for k in z]; vb=vb_at(np.mean(ps,0))
+        newT.append(tuple(record(k,p,vb) for k,p in zip(z,ps))); newTM.append(vb_tm[vb])
+    keepT=[tuple(t) for t,c in zip(T,cut) if not c]; keepTM=[tm for tm,c in zip(m['TM'],cut) if not c]
+    out=dict(m); out.update(P=np.array(NP,float),N=np.array(NN,float),UV=np.array(NUV,float),C=np.array(NC,float),J=np.array(NJ,int),W=np.array(NW,float),VB=np.array(NVB),
+                            T=np.array(keepT+newT,int),TM=np.array(keepTM+newTM))
+    # winding: outward from the hip axis, like the cut
+    def facing(PP,TT):
+        n=np.cross(PP[TT[:,1]]-PP[TT[:,0]],PP[TT[:,2]]-PP[TT[:,0]]); c=PP[TT].mean(1)
+        return np.sign((n*np.stack([c[:,0],np.zeros(len(c)),c[:,2]],1)).sum(1))
+    ref=np.sign(facing(P,cutT).sum()); nt=out['T']; added=np.arange(len(keepT),len(nt))
+    f=facing(out['P'],nt[added]); fl=added[f!=ref]; nt[fl]=nt[fl][:,[0,2,1]]; out['T']=nt
+    # normals from her mesh + the patch only: the stitch's slivers would bend the edge's shading
+    sn,_=smooth_normals(out['P'],out['T'][:len(keepT)+len(r['patchT'])])
+    ring=set(int(k) for k in H)
+    for i in range(len(NP)):
+        if i>=len(P) or int(pid[i]) in ring: out['N'][i]=sn[i]
+    return out, len(r['patchT']), len(zips)

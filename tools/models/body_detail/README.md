@@ -15,3 +15,13 @@ Offline prototypes for the Money > 100% bust and Cash > 100% seat (claude/female
   the lower back and the seat, K Nov 15). Donor: Shannon, el/el15.dat body_u1. Shrinkwrapping
   the seat failed (no edges where the crease and the under-curve go).
 - `texr.py`: textured offline raster (per-pixel UV, Gouraud from vertex normals when the object has `N`).
+
+**Current seat recipe (K's round 3, Nov 15): `build2(m, shannon, (-0.15, 0.88, -1), (0.15, 1.16, -0.04),
+falloff=0.05, mapping='own')` with `CUT_MIN = 1`.** Shannon's seat at her own size (only her hip width matched): the
+box-mapped version squeezed her depth into the generic seat's boxy plateau and came out up to 1.1 cm smaller in the
+upper half (K: "too small"); at her own size the new seat is 0 to +0.9 cm fuller across the cheek (Cash at 101% never
+smaller than the original). The cut stays inside the costume piece holding the seat (`one_vb`), so it ends on the
+piece's own seam (crossing it made a sawtooth waistband). The patch's edge is pinned 85% onto the hole's boundary and
+the stitch is left out of the shading normals (two edge-on slivers at the top corners darkened the shading). `build2`
+handles cuts across several vertex buffers (each new triangle takes the buffer under it). `prof.py`-style side
+profiles (the rearmost surface per height, x 0.03-0.10) are how the size was checked.
