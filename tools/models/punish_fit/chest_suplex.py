@@ -580,6 +580,14 @@ def block(keys, file, scale, size):
         V = victim_pre_frames(ch, vm)
         for b in (7, 6):
             lines.append('pose victim %d 0 %d ' % (vm, b) + ' '.join('%d:%.1f,%.1f,%.1f' % ((t,) + tuple(V[t][b])) for t in sorted(V)))
+    # the camera turned to the pair's front: half a turn round the pair's centre (the two chests) in Gene's model space,
+    # frame by frame, so it keeps the original's distance (round its look-at point it ran up to 4 m further; K)
+    piv = []
+    for t in range(0, len(pair.frames), 2):
+        q = pair.at(t)
+        m_ = (q['Pg'][2] + to_model(q['G'], to_world(q['V'], q['Pv'][2]))) / 2
+        piv.append('%d:%.3f,%.3f' % (t, m_[0], m_[2]))
+    lines.append('cam 333 ' + ' '.join(piv))
     h0, h1 = ch.hold
     lines.append('bust 333 ' + ' '.join('%d:%.2f' % (t, ch.weight(t)) for t in range(h0 - RAMP_IN, h1 + RAMP_OUT + 1)))
     return lines
@@ -600,7 +608,7 @@ def emit(path=PF):
                         out += block(keys, file, scale, size)
                         print('emitted', file, scale)
                 placed = True
-        elif skip and not line.startswith(('gene ', 'victim ', 'pose ', 'bust ')):
+        elif skip and not line.startswith(('gene ', 'victim ', 'pose ', 'bust ', 'cam ')):
             skip = False
         if not skip:
             out.append(line)
