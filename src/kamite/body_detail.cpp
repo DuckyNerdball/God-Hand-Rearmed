@@ -31,6 +31,23 @@ namespace kamite::body_detail
         constexpr Model kModels[] = {
 #include "kamite/body_detail_models.inc"
         };
+        // Models kept as they are, with Cash's growth on their own seats (growOnly): file, block, size, FNV-1a 64.
+        struct GrowModel
+        {
+            const char *file;
+            uint32_t offset, size;
+            uint64_t hash;
+        };
+        constexpr GrowModel kGrowModels[] = {
+            {"em/em52.dat", 0x31580u, 0x47640u, 0x97A8C864A29AC1F0ULL}, // Shannon
+            {"em/ema0.dat", 0x28060u, 0x47700u, 0xF37EDAD64FF2AE63ULL}, // Olivia
+            {"el/el0a.dat", 0x577A0u, 0x21640u, 0x7E94290CBD92FD0FULL}, // Olivia, cutscenes (dress)
+            {"el/elf5.dat", 0x273E0u, 0x29D80u, 0xDBA0ADACA05FA7D8ULL}, // Olivia, cutscenes (dress + extras)
+            {"el/elf4.dat", 0x25A20u, 0x1E700u, 0x16E4FA36326B5C40ULL}, // Olivia, cutscenes (bunny suit)
+            {"el/el15.dat", 0x24EE0u, 0x1C840u, 0x2C2C47653973ABDAULL}, // Shannon, cutscenes
+            {"el/el1a.dat", 0xF460u, 0x46200u, 0x045B558E999D846BULL},  // Shannon, cutscenes (whole)
+            // not el09 (the bathtub Olivia: no hips)
+        };
 
         constexpr uint32_t kGetMeshPtr = 0x0014B6F8u;    // cModel_getMeshPtr(model, index)
         constexpr uint32_t kTransCallSite = 0x0014A4C0u; // the return address of its first call in cModel_Trans
@@ -47,6 +64,7 @@ namespace kamite::body_detail
             bool bust = false, seat = false;
         };
         std::vector<Body> g_bodies; // set at boot, read-only afterwards
+        std::vector<std::string> g_nodeNames{"body"}; // the nodes check() looks at (the grown models' too)
 
         uint64_t fnv(const std::vector<uint8_t> &b)
         {
@@ -70,9 +88,8 @@ namespace kamite::body_detail
 
         // The bytes of a body's mdb that neither state touches: the header's first 12 (with the buffer and bone
         // counts), the buffer table, buffer 0's header and its first UVs.
-        void identify(Body &body, const Built &b)
+        void identify(Body &body, const uint8_t *m, uint32_t size)
         {
-            const uint8_t *m = b.scr.data() + b.bodyMdb;
             uint16_t nv;
             std::memcpy(&nv, m + 10, 2);
             uint32_t vb0, uv;
@@ -85,7 +102,7 @@ namespace kamite::body_detail
             take(32, 4u * nv);
             take(vb0, 32);
             take(vb0 + uv, std::min<uint32_t>(64u, 4u * count));
-            body.size = b.bodyMdbSize;
+            body.size = size;
         }
 
         // The rebuilt body an mdb is (its bytes no state changes), or nullptr.
@@ -132,7 +149,7 @@ namespace kamite::body_detail
             if (!b)
                 return;
             uint8_t *p = rdram + (mdb & PS2_RAM_MASK);
-            const float cash = bone_tweaks::cash();
+            const float cash = bone_tweaks::cash(); // (the reads are relaxed atomics: cheap per node)
             const bool want[3] = {false, b->bust && bone_tweaks::money() > kOn, b->seat && cash > kOn};
             const float grow[3] = {0.0f, 0.0f, want[2] ? cashGrowthScale(cash) : 0.0f};
             for (int region = 1; region <= 2; ++region)
@@ -151,8 +168,25 @@ namespace kamite::body_detail
         {
             if (GPR_U32(ctx, 31) != kTransCallSite)
                 return;
-            if (const uint32_t mdb = bodyMdb(rdram, GPR_U32(ctx, 4)))
-                check(rdram, mdb);
+            const uint32_t model = GPR_U32(ctx, 4);
+            if (!inRam(model, 0x2E4u))
+                return;
+            uint32_t node = rd32(rdram, model + kMeshHead);
+            for (int i = 0; i < 64 && inRam(node, 0x418u); ++i)
+            {
+                const uint32_t info = rd32(rdram, node + kNodeInfo);
+                if (inRam(info, 16u))
+                {
+                    const char *name = reinterpret_cast<const char *>(rdram + ((info + kInfoName) & PS2_RAM_MASK));
+                    for (const std::string &n : g_nodeNames)
+                        if (std::strncmp(name, n.c_str(), 8) == 0)
+                        {
+                            check(rdram, rd32(rdram, node + kNodeMdb));
+                            break;
+                        }
+                }
+                node = rd32(rdram, node + kNodeNext);
+            }
         }
 
         bool readDonor(const char *path, const char *node, Mesh &out)
@@ -204,7 +238,7 @@ namespace kamite::body_detail
                 if (!b.error.empty())
                     KM_INFO(Boot, "body detail: " << m.file << " @0x" << std::hex << m.offset << std::dec << ": " << b.error);
                 Body body;
-                identify(body, b);
+                identify(body, b.scr.data() + b.bodyMdb, b.bodyMdbSize);
                 body.changes = std::move(b.changes);
                 std::memcpy(body.sentinel, b.sentinel, sizeof body.sentinel);
                 body.bust = m.bust && b.sentinel[1] >= 0;
@@ -217,15 +251,42 @@ namespace kamite::body_detail
             patches.emplace_back(file->imageOffset + m.offset, it->second.second);
             ++models;
         }
-        if (patches.empty())
+        // Shannon and Olivia keep their models; Cash grows their own seats (and what hangs over them).
+        int grown = 0;
+        for (const GrowModel &g : kGrowModels)
+        {
+            const auto file = disc_files::find(g.file);
+            std::vector<uint8_t> block;
+            std::vector<GrownNode> nodes;
+            if (!file || !disc_files::readRange(*file, g.offset, g.size, block) || block.size() != g.size || fnv(block) != g.hash ||
+                !growOnly(block.data(), block.size(), nodes))
+            {
+                ++other;
+                continue;
+            }
+            for (GrownNode &n : nodes)
+            {
+                Body body;
+                identify(body, block.data() + n.mdb, n.mdbSize);
+                body.changes = std::move(n.changes);
+                body.sentinel[2] = n.sentinel;
+                body.seat = true;
+                g_bodies.push_back(std::move(body));
+                if (std::find(g_nodeNames.begin(), g_nodeNames.end(), std::string(n.name)) == g_nodeNames.end())
+                    g_nodeNames.emplace_back(n.name);
+            }
+            ++grown;
+        }
+        if (patches.empty() && grown == 0)
         {
             KM_WARN(Boot, "body detail: no model matched (" << other << " listed blocks differ on this disc)");
             return;
         }
-        PS2DiscOverlay::add(std::move(patches));
+        if (!patches.empty())
+            PS2DiscOverlay::add(std::move(patches));
         FunctionHooks::instance().observeEntry(kGetMeshPtr, "body_detail", &onGetMeshPtr);
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
-        KM_INFO(Boot, "body detail: " << models << " women's models rebuilt (" << g_bodies.size() << " bodies, " << ms << " ms"
+        KM_INFO(Boot, "body detail: " << models << " women's models rebuilt, " << grown << " grown as they are (" << g_bodies.size() << " bodies, " << ms << " ms"
                                      << (other ? ", " + std::to_string(other) + " listed blocks differ" : std::string()) << ")");
     }
 

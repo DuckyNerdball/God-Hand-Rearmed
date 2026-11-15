@@ -2367,6 +2367,72 @@ namespace kamite::body_detail
         return true;
     }
 
+    bool growOnly(const uint8_t *scr, size_t size, std::vector<GrownNode> &out)
+    {
+        out.clear();
+        std::vector<NodeRef> nodes;
+        if (!readNodes(scr, size, nodes))
+            return false;
+        for (const NodeRef &r : nodes)
+        {
+            if (r.flags & 0x01000000u) // a distance mesh: never drawn (model_detail)
+                continue;
+            Mesh m;
+            std::vector<VbRef> vbs;
+            if (!loadMesh(scr, size, r.mdb, m, &vbs))
+                continue;
+            const size_t R = m.records();
+            std::vector<D3> D(R), moved(R);
+            bool any = false;
+            for (size_t i = 0; i < R; ++i)
+            {
+                D[i] = cashField(m.P[i]);
+                moved[i] = m.P[i] + D[i];
+                any = any || len(D[i]) >= 1e-5;
+            }
+            if (!any)
+                continue;
+            const std::vector<D3> sn = smoothNormals(m.P, m.T, m.triangles()), sn2 = smoothNormals(moved, m.T, m.triangles());
+            GrownNode g;
+            std::memcpy(g.name, r.name, 8);
+            g.mdb = r.mdb;
+            uint32_t end = r.mdb + 32u + 4u * static_cast<uint32_t>(vbs.size());
+            float most = 0.0f;
+            size_t i = 0;
+            for (const VbRef &b : vbs)
+            {
+                const uint32_t n = b.count;
+                end = std::max({end, b.at + 32u, b.at + b.pos + 16u * n, b.at + b.uv + 4u * n, b.nrm ? b.at + b.nrm + 4u * n : 0u,
+                                b.col ? b.at + b.col + 4u * n : 0u, b.wt ? b.at + b.wt + 8u * n : 0u});
+                for (uint32_t k = 0; k < n; ++k, ++i)
+                {
+                    if (!b.nrm || len(D[i]) < 1e-5)
+                        continue;
+                    Change c;
+                    c.pos = b.at + b.pos + 16u * k - r.mdb;
+                    c.nrm = b.at + b.nrm + 4u * k - r.mdb;
+                    std::memcpy(c.flat, scr + r.mdb + c.pos, 12);
+                    std::memcpy(c.detail, c.flat, 12);
+                    std::memcpy(c.flatN, scr + r.mdb + c.nrm, 3);
+                    std::memcpy(c.detailN, c.flatN, 3);
+                    c.grow[0] = static_cast<float>(D[i].x);
+                    c.grow[1] = static_cast<float>(D[i].y);
+                    c.grow[2] = static_cast<float>(D[i].z);
+                    quantN(m.N[i] + (sn2[i] - sn[i]), true, c.growN);
+                    c.region = 2;
+                    const float gl = std::fabs(c.grow[0]) + std::fabs(c.grow[1]) + std::fabs(c.grow[2]);
+                    if (gl > most)
+                        most = gl, g.sentinel = static_cast<int>(g.changes.size());
+                    g.changes.push_back(c);
+                }
+            }
+            g.mdbSize = end - r.mdb;
+            if (g.sentinel >= 0 && most >= 1e-3f && end <= size) // (boots near the thighs move under 1 mm: left alone)
+                out.push_back(std::move(g));
+        }
+        return true;
+    }
+
     float cashGrowthScale(float cash) { return std::clamp((cash - 1.0f) / 0.3f, 0.0f, 1.0f); }
 
     void wantedPosition(const Change &c, bool detailed, float grow, float out[3])

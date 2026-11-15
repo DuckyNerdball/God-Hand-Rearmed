@@ -84,6 +84,18 @@ namespace kamite::body_detail
     // hips and upper thighs a little. Linear in Cash: the move at 130% x cashGrowthScale(Cash) (0 at 100%, 1 at 130%).
     float cashGrowthScale(float cash);
 
+    // A model kept as it is (Shannon and Olivia, in play and in cutscenes: their own seats are detailed already): Cash's
+    // growth on every node it reaches (her body, a skirt, boots), as changes whose flat and detailed states are the
+    // stored record. Offsets relative to the node's mdb.
+    struct GrownNode
+    {
+        char name[9] = {};
+        uint32_t mdb = 0, mdbSize = 0; // in scr
+        std::vector<Change> changes;
+        int sentinel = -1;             // the largest growth
+    };
+    bool growOnly(const uint8_t *scr, size_t size, std::vector<GrownNode> &out);
+
     // A change's position in a state (detailed: + grow x its growth), as apply writes it.
     void wantedPosition(const Change &c, bool detailed, float grow, float out[3]);
 
