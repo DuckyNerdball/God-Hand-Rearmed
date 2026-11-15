@@ -71,6 +71,8 @@ namespace kamite::settings
                                           {"prologic2", "Dolby Pro Logic II", "PRO LOGIC II"}};
         // Money: F2's range in 5 % steps.
         constexpr int kMoneys[] = {85, 90, 95, 100, 105, 110, 115, 120, 125, 130};
+        // Cash: F2's range in 5 % steps (100 % = the women's own seats, above it the detailed seat, body_detail).
+        constexpr int kCashes[] = {100, 105, 110, 115, 120, 125, 130};
         // The volumes: 5 % steps, except 65 -> 69 -> 70 (K).
         constexpr int kVolumes[] = {0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 69, 70, 75, 80, 85, 90, 95, 100};
 
@@ -114,6 +116,12 @@ namespace kamite::settings
         {
             Setting s = base("Money", Tab::Gameplay, kMisque, "Money", "", "Game", "Money", "100", Kind::Slider);
             s.values = kMoneys, s.valueCount = static_cast<int>(std::size(kMoneys)), s.unit = "%";
+            return s;
+        }
+        constexpr Setting cash()
+        {
+            Setting s = base("Cash", Tab::Gameplay, kMisque, "Cash", "", "Game", "Cash", "100", Kind::Slider);
+            s.values = kCashes, s.valueCount = static_cast<int>(std::size(kCashes)), s.unit = "%";
             return s;
         }
         constexpr Setting custom(const char *id, Tab tab, const char *category, const char *name, const char *description)
@@ -325,6 +333,7 @@ namespace kamite::settings
                   "F2 > NPCs sets the poses.")),
         // Money (K, Nov 14): out of F2 into Options, no help text; F2 > NPCs keeps its slider (any whole percent).
         live(money()),
+        live(cash()), // Cash (K, Nov 15): right under Money, the same way
 
         // ---- Sound ----------------------------------------------------------------------------------------------
         live(choice(Tab::Sound, "Sound", "Mode", "Select between monaural,\nstereo, or surround sound.", "Sound", "Mode",

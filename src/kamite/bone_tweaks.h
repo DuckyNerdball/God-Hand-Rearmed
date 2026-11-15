@@ -32,7 +32,8 @@ namespace kamite::bone_tweaks
     // by the droop; 1 = off. Any thread.
     float money();
     void setMoney(float scale);    // 0.85 .. 1.3; above 1 the women also get the detailed bust (body_detail)
-    // Cash (F2 > NPCs, under Money; KAMITE_CASH / [Game] Cash, percent): above 1 the women's detailed seat (body_detail).
+    // Cash (Options / launcher under Money, 5 % steps; F2 > NPCs; KAMITE_CASH / [Game] Cash, percent): above 1 the women's
+    // detailed seat (body_detail).
     // No growth of its own yet (Cash's own round). Any thread.
     float cash();
     void setCash(float scale);     // 1 .. 1.3

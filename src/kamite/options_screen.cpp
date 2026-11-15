@@ -867,6 +867,8 @@ namespace kamite::options_screen
                 npc_poses::setEnabled(on);
             else if (id == "Money")
                 bone_tweaks::setMoney(static_cast<float>(std::atof(value.c_str())) / 100.0f);
+            else if (id == "Cash")
+                bone_tweaks::setCash(static_cast<float>(std::atof(value.c_str())) / 100.0f);
             else if (id == "EnemyLifeGauge" || id == "Vibration" || id == "Mode")
                 readGameOptions(); // onFrame writes them into the game
             else if (id == "MusicVolume" || id == "EffectsVolume" || id == "VoicesVolume")
