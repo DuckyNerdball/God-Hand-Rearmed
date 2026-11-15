@@ -91,13 +91,21 @@ def transplant(m, donor, lo, hi, d_lo=None, d_hi=None):
     hole=boundary_loops(T[cut],pid); pl=boundary_loops(np.array([[dpid[a],dpid[b],dpid[c]] for a,b,c in patchT]),{i:i for i in range(dpid.max()+1)})
     return dict(cut=cut,isl=isl,patchT=patchT,dpid=dpid,Q=Q,hole=hole,patch_loops=pl,pid=pid)
 
-def build(m, donor, lo, hi, shrink=0.92):
+def build(m, donor, lo, hi, shrink=0.92, falloff=None):
     r=transplant(m,donor,lo,hi)
     P=m['P']; T=m['T']; pid=r['pid']; cut=r['cut']
     cutT=T[cut]; A,B,C=P[cutT[:,0]],P[cutT[:,1]],P[cutT[:,2]]
     cen=P[cutT].reshape(-1,3).mean(0)
     # shrink the patch a little round the cut's centre (back view) so the zipper has width
     Q={k:np.array([cen[0]+(v[0]-cen[0])*shrink,cen[1]+(v[1]-cen[1])*shrink,v[2]]) for k,v in r['Q'].items()}
+    if falloff:
+        # blend the patch onto the woman's own surface near its edge: on the edge it lies on her cut surface (no step
+        # for the stitch to bridge), a falloff inside it is the donor's shape
+        edge=np.array([Q[k] for k in max(r['patch_loops'],key=len)])
+        for k,q in list(Q.items()):
+            cq=tri_closest(q,A,B,C); s0=cq[np.argmin(((cq-q)**2).sum(1))]
+            d=np.sqrt(((edge-q)**2).sum(1)).min(); f=np.clip(d/falloff,0,1); f=f*f*(3-2*f)
+            Q[k]=s0+(q-s0)*f
     # record lists to extend
     NP=list(P);NN=list(m['N']);NUV=list(m['UV']);NC=list(m['C']);NJ=list(m['J']);NW=list(m['W']);NVB=list(m['VB'])
     vb=int(np.bincount(m['VB'][cutT.ravel()]).argmax())
@@ -158,6 +166,11 @@ def build(m, donor, lo, hi, shrink=0.92):
     f=facing(out['P'],nt[added]); flip=added[f!=ref]
     nt[flip]=nt[flip][:,[0,2,1]]; out['T']=nt
     # normals: smooth over the patch and zipper, the hole's own records keep theirs
-    sn,_=smooth_normals(out['P'],out['T'])
+    sn,spid=smooth_normals(out['P'],out['T'])
     newrec=np.arange(len(P),len(NP)); out['N'][newrec]=sn[newrec]
+    if falloff:
+        # the hole's ring too, so the shading runs on across the stitch
+        ring=set(pid[v] for v in H)
+        for i in range(len(P)):
+            if pid[i] in ring: out['N'][i]=sn[i]
     return out, len(patch), len(zip_)

@@ -324,3 +324,61 @@ def transfer_radial(m, donor, gmask, dmask, levels=2, z0=0.0, falloff=0.03, smoo
     fn0=np.cross(P[sm['T'][:,1]]-P[sm['T'][:,0]],P[sm['T'][:,2]]-P[sm['T'][:,0]])
     fn1=np.cross(newP[sm['T'][:,1]]-newP[sm['T'][:,0]],newP[sm['T'][:,2]]-newP[sm['T'][:,0]])
     return sm, reg, int(((fn0*fn1).sum(1)<0).sum())
+
+def stretch(P0, P1, T):
+    """Per-triangle texture stretch: the larger singular value of the old->new triangle map (1 = unchanged)."""
+    out=np.ones(len(T))
+    for k,(a,b,c) in enumerate(T):
+        e0=np.stack([P0[b]-P0[a],P0[c]-P0[a]],1); e1=np.stack([P1[b]-P1[a],P1[c]-P1[a]],1)
+        # 2D frame of the old triangle
+        u=e0[:,0]/ (np.linalg.norm(e0[:,0])+1e-12); n=np.cross(e0[:,0],e0[:,1]); v=np.cross(n,u); v/=np.linalg.norm(v)+1e-12
+        E0=np.array([[u@e0[:,0],u@e0[:,1]],[v@e0[:,0],v@e0[:,1]]])
+        if abs(np.linalg.det(E0))<1e-14: continue
+        M=e1@np.linalg.inv(E0)   # 3x2
+        s=np.linalg.svd(M,compute_uv=False)
+        out[k]=max(s[0],1/max(s[1],1e-6))
+    return out
+
+def transfer3(m, donor, bone=29, levels=1, max_t=0.05, smooth_iters=12, tangential=0.0, region_mode='any', max_in=None):
+    """transfer2 with the displacement split into its normal part (kept) and its sliding part (scaled down), and the
+    normal offset smoothed as a height: the costume's texture stays where it was painted, pushed outward."""
+    w=w_on(m,bone)
+    region=(w[m['T']]>0).any(1) if region_mode=='any' else (w[m['T']]>0).all(1)
+    sm,reg=subdivide(m,region,levels)
+    dw=w_on(donor,bone); dT=donor['T'][(dw[donor['T']]>0).any(1)]
+    gsel=m['P'][w>0]; dsel=donor['P'][dw>0]
+    fx=affine_box(np.array([-dsel[:,0].max(),dsel[:,1].min(),dsel[:,2].min()]),np.array([dsel[:,0].max(),dsel[:,1].max(),dsel[:,2].max()]),
+                  np.array([-gsel[:,0].max(),gsel[:,1].min(),gsel[:,2].min()]),np.array([gsel[:,0].max(),gsel[:,1].max(),gsel[:,2].max()]))
+    DP=fx(donor['P']); A,B,C=DP[dT[:,0]],DP[dT[:,1]],DP[dT[:,2]]
+    P=sm['P']; nrm,pid=smooth_normals(P,sm['T'])
+    npos=pid.max()+1
+    Ppos=np.zeros((npos,3)); Npos=np.zeros((npos,3)); Ppos[pid]=P; Npos[pid]=nrm
+    inreg=np.zeros(npos,bool); inreg[pid[sm['T'][reg].ravel()]]=True
+    outv=np.zeros(npos,bool); outv[pid[sm['T'][~reg].ravel()]]=True
+    fixed=~inreg|outv
+    H=np.zeros(npos); Tg=np.zeros((npos,3))
+    for k in np.where(~fixed)[0]:
+        o=Ppos[k]; d=Npos[k]
+        t=ray_hit(o,d,A,B,C); t=t[np.isfinite(t)&(np.abs(t)<max_t)]
+        if len(t): q=o+d*t[np.argmin(np.abs(t))]
+        else:
+            cq=tri_closest(o,A,B,C); q=cq[np.argmin(((cq-o)**2).sum(1))]
+        D=q-o; H[k]=D@d; Tg[k]=D-H[k]*d
+    nb=[set() for _ in range(npos)]
+    for t in pid[sm['T'][reg]]:
+        for a,b in ((t[0],t[1]),(t[1],t[2]),(t[2],t[0])): nb[a].add(b); nb[b].add(a)
+    H0=H.copy(); T0=Tg.copy()
+    for it in range(smooth_iters):
+        Hn=H.copy(); Tn=Tg.copy()
+        for k in np.where(~fixed)[0]:
+            if nb[k]:
+                Hn[k]=0.5*H0[k]+0.5*np.mean([H[j] for j in nb[k]])
+                Tn[k]=0.5*T0[k]+0.5*np.mean([Tg[j] for j in nb[k]],0)
+        H,Tg=Hn,Tn
+    if max_in is not None: H=np.maximum(H,-max_in)
+    D=H[:,None]*Npos+tangential*Tg
+    newP=P+D[pid]; sm['P']=newP
+    nrm2,_=smooth_normals(newP,sm['T'])
+    N=sm['N'].copy(); mv=~fixed[pid]; N[mv]=nrm2[mv]; sm['N']=N
+    sm['P0']=P
+    return sm, reg
