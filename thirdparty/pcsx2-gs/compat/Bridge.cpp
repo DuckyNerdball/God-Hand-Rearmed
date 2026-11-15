@@ -196,7 +196,10 @@ namespace
             for (const auto &[key, value] : graphics)
                 ApplyGraphicsOption(options, key, std::atoi(value.c_str()));
             UpdateShadeBoost(options);
-            if (options != GSConfig)
+            // (GSOptions' operator!= is not built here: compat/Pcsx2ConfigGS.cpp has only part of Pcsx2Config.)
+            if (options.FXAA != GSConfig.FXAA || options.TriFilter != GSConfig.TriFilter ||
+                options.MaxAnisotropy != GSConfig.MaxAnisotropy || options.ShadeBoost != GSConfig.ShadeBoost ||
+                options.ShadeBoost_Brightness != GSConfig.ShadeBoost_Brightness)
             {
                 EmuConfig.GS = options;
                 GSUpdateConfig(options); // trilinear empties the texture cache; anisotropy the sampler cache
