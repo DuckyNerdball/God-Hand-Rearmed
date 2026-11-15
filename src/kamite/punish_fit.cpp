@@ -130,6 +130,8 @@ namespace kamite::punish_fit
         constexpr float kFeetIn = 0.6f; // a victim's legs value of 1 moves the ankles this much of the way to the middle
         constexpr uint32_t kParts = 0x144u, kPartCount = 0x2B4u, kPartOffset = 0xE0u, kPartParent = 0x148u;
         constexpr uint32_t kMotionPlaying = 0x428u, kMotionFrame = 0x430u;
+        // The model's mesh nodes (body_detail.cpp): a list from +0x25C, next at +0x404, its info at +0x414, the name at info +8.
+        constexpr uint32_t kMeshHead = 0x25Cu, kNodeNext = 0x404u, kNodeInfo = 0x414u, kInfoName = 0x8u;
 
         // A curve: keys (frame, values). Gene: forward (m), side (m), turn (degrees), height (m), torso x, torso z,
         // left raise, left swing, left elbow, right raise, right swing, right elbow, left forearm twist (degrees), lift (m:
@@ -203,6 +205,7 @@ namespace kamite::punish_fit
             bool gorilla = false;  // a Suplex fit: the Suplex pick plays the Gorilla Suplex on this body
             bool own = false;      // for the enemy's own punish (its prompt unchanged), e.g. Spanking on women (K, Nov 12)
             bool frontCam = false; // the punish camera swung round to the pair's front (K, Nov 15: the women's chest grab)
+            std::string node;      // node=: only for models with a mesh node whose name starts with this (K, Nov 15: mohawk women)
             float scale = 1.0f;    // the enemy size it was fitted at
             float size = 1.0f;     // the victim's size change for the pairing
             std::vector<Track> tracks;
@@ -310,6 +313,10 @@ namespace kamite::punish_fit
         fs::path g_file, g_shippedFile;
         std::map<uint64_t, Fits> g_fits; // punish << 32 | body, by size; read at start, then only read
         std::map<uint64_t, Fits> g_ownFits; // the same for the enemy's own punish (fits marked own)
+        // node= fits: (punish, body) -> (node prefix, the variant's key); the variant's fits are in g_fits under its key, so
+        // everything keyed by body (pair, save states, motion copies) keeps them apart from the body's other fits.
+        std::map<uint64_t, std::vector<std::pair<std::string, uint32_t>>> g_variants;
+        std::map<uint32_t, std::pair<uint32_t, std::string>> g_variantOf; // the variant's key -> (body, node), for the log
         std::map<uint32_t, std::string> g_bodyNames; // body -> its type ("men", ...), punish_fit.txt's body lines
         Pair g_pair;
 
@@ -488,6 +495,40 @@ namespace kamite::punish_fit
         {
             return changedFor(enemy) ? fitsFor(punish, body) : ownFitsFor(punish, body);
         }
+
+        // Whether the enemy's model has a mesh node whose name starts with `prefix` (names are up to 8 characters).
+        bool hasNode(const uint8_t *rdram, uint32_t enemy, const std::string &prefix)
+        {
+            if (prefix.empty() || prefix.size() > 8u)
+                return false;
+            uint32_t node = rd32(rdram, enemy + kMeshHead);
+            for (int i = 0; i < 64 && inRam(node, 0x418u); ++i)
+            {
+                const uint32_t info = rd32(rdram, node + kNodeInfo);
+                if (inRam(info, 16u) && std::memcmp(rdram + ((info + kInfoName) & (PS2_RAM_SIZE - 1u)), prefix.data(), prefix.size()) == 0)
+                    return true;
+                node = rd32(rdram, node + kNodeNext);
+            }
+            return false;
+        }
+
+        // The body's fit variant for this model (node= fits), else the body.
+        uint32_t variantOf(const uint8_t *rdram, uint32_t enemy, int punish, uint32_t body)
+        {
+            const auto it = g_variants.find(fitKey(punish, body));
+            if (it != g_variants.end())
+                for (const auto &[prefix, key] : it->second)
+                    if (hasNode(rdram, enemy, prefix))
+                        return key;
+            return body;
+        }
+
+        // The body a pair's fits are keyed by: a Buck Breaker pick takes the model's variant, the enemy's own punish its body.
+        uint32_t pairBody(const uint8_t *rdram, uint32_t enemy, int punish)
+        {
+            const uint32_t body = bodyOf(rdram, enemy);
+            return changedFor(enemy) ? variantOf(rdram, enemy, punish, body) : body;
+        }
         const Fit *fitFor(int punish, uint32_t body) // its flags (off, gorilla)
         {
             const Fits *fits = fitsFor(punish, body);
@@ -511,9 +552,11 @@ namespace kamite::punish_fit
             const int sizeKey = static_cast<int>(std::lround(size * 100.0f));
             if (!g_logged.insert(fitKey(punish, body) ^ (static_cast<uint64_t>(sizeKey & 0xFFFF) << 40)).second)
                 return;
-            KM_INFO(Game, "punish fit: " << kNames[punish] << " on body " << std::hex << body << std::dec << " ("
-                                         << enemyName(g_ram, enemy) << ", size "
-                                         << size << "): " << what);
+            const auto variant = g_variantOf.find(body);
+            KM_INFO(Game, "punish fit: " << kNames[punish] << " on body " << std::hex
+                                         << (variant != g_variantOf.end() ? variant->second.first : body) << std::dec
+                                         << (variant != g_variantOf.end() ? " node " + variant->second.second : std::string())
+                                         << " (" << enemyName(g_ram, enemy) << ", size " << size << "): " << what);
         }
 
         // Moves Gene by (side, forward) in his facing without Turn (scaled by the enemy's own size) and turns him.
@@ -606,7 +649,7 @@ namespace kamite::punish_fit
                 sizeKey = g_pair.sizeKey;
                 return g_pair.fit;
             }
-            const Fits *fits = fitsForPair(rdram, enemy, punish, bodyOf(rdram, enemy));
+            const Fits *fits = fitsForPair(rdram, enemy, punish, pairBody(rdram, enemy, punish));
             if (!fits)
                 return nullptr;
             float scale[3];
@@ -648,7 +691,7 @@ namespace kamite::punish_fit
                 g_align(rdram, ctx, runtime);
                 return;
             }
-            const uint32_t body = bodyOf(rdram, enemy);
+            const uint32_t body = pairBody(rdram, enemy, call->punish);
             const bool first = call->geneMotion == kMotions[call->punish].gene[0];
             const bool newPair = first || g_pair.enemy != enemy || g_pair.punish != call->punish || g_pair.gene != gene;
             if (newPair)
@@ -1024,7 +1067,7 @@ namespace kamite::punish_fit
                         continue;
                     if (!pairOn(enemy, p, i == 0))
                         return; // Buck Breaker off for this punish: the game's motion as it is
-                    const uint32_t body = bodyOf(rdram, enemy);
+                    const uint32_t body = pairBody(rdram, enemy, p);
                     int sizeKey = 100;
                     const Fit *fit = fitNow(rdram, enemy, p, sizeKey);
                     const Track *track = fit ? fit->find(list[i], isGene) : nullptr;
@@ -1169,9 +1212,10 @@ namespace kamite::punish_fit
 
         // punish_fit.txt:
         //   fit <Suplex|Stinger|CobraTwist|Spanking|GorillaSuplex> <body hex>[,<body hex>...] [off] [gorilla] [own] [frontcam]
-        //       [scale=<s>] [size=<s>]   (the lines after it, until the next fit, are its; gorilla on a Suplex fit: that body
-        //       plays the Gorilla Suplex for a Suplex pick; frontcam: the punish camera from the fit's cam lines; scale: the
-        //       enemy size it is for, 1 if not given)
+        //       [node=<name>] [scale=<s>] [size=<s>]   (the lines after it, until the next fit, are its; gorilla on a Suplex
+        //       fit: that body plays the Gorilla Suplex for a Suplex pick; frontcam: the punish camera from the fit's cam
+        //       lines; node: these fits replace the body's for a Buck Breaker pick on a model with a mesh node whose name
+        //       starts with it, e.g. MOHI = the mohawk women; scale: the enemy size it is for, 1 if not given)
         //   gene <motion> <frame>:<forward>,<side>,<turn>,<height>[,<torso x>,<torso z>,<left raise>,<left swing>,
         //       <left elbow>,<right raise>,<right swing>,<right elbow>[,<left forearm twist>[,<lift>]]] ...
         //   victim <motion> <frame>:<height>,<bend>[,<hips back>,<pelvis tilt>,<legs>[,<feet back>,<thigh pitch>,<knee bend>]] ...
@@ -1217,6 +1261,8 @@ namespace kamite::punish_fit
                             made->own = true;
                         else if (token == "frontcam")
                             made->frontCam = true;
+                        else if (token.rfind("node=", 0) == 0)
+                            made->node = token.substr(5, 8);
                         else if (token.rfind("scale=", 0) == 0)
                             made->scale = std::strtof(token.c_str() + 6, nullptr);
                         else if (token.rfind("size=", 0) == 0)
@@ -1226,8 +1272,23 @@ namespace kamite::punish_fit
                     std::istringstream keys(bodies);
                     std::string body;
                     while (punish >= 0 && std::getline(keys, body, ','))
-                        if (const uint32_t key = static_cast<uint32_t>(std::strtoul(body.c_str(), nullptr, 16)))
+                        if (uint32_t key = static_cast<uint32_t>(std::strtoul(body.c_str(), nullptr, 16)))
                         {
+                            if (!made->node.empty())
+                            {
+                                // The variant's own key (FNV-1a of the body and the node name).
+                                uint32_t h = 2166136261u;
+                                for (int i = 0; i < 4; ++i)
+                                    h = (h ^ ((key >> (8 * i)) & 0xFFu)) * 16777619u;
+                                for (const char c : made->node)
+                                    h = (h ^ static_cast<uint8_t>(c)) * 16777619u;
+                                h = h ? h : 1u;
+                                auto &list = g_variants[fitKey(punish, key)];
+                                if (std::none_of(list.begin(), list.end(), [&](const auto &v) { return v.second == h; }))
+                                    list.emplace_back(made->node, h);
+                                g_variantOf[h] = {key, made->node};
+                                key = h;
+                            }
                             (made->own ? g_ownFits : g_fits)[fitKey(punish, key)].push_back(made);
                             fit = made.get();
                         }
@@ -1361,11 +1422,12 @@ namespace kamite::punish_fit
     {
         if (!g_on || punish < 0 || punish >= kPunishCount || !inRam(enemy, 0x700u))
             return false;
-        const Fits *fits = fitsFor(punish, bodyOf(rdram, enemy & 0x1FFFFFFu));
+        enemy &= 0x1FFFFFFu;
+        const Fits *fits = fitsFor(punish, variantOf(rdram, enemy, punish, bodyOf(rdram, enemy)));
         if (!fits)
             return false;
         float scale[3];
-        ownScale(rdram, enemy & 0x1FFFFFFu, scale);
+        ownScale(rdram, enemy, scale);
         return !anchorFor(*fits, scale[1]).within;
     }
 
@@ -1373,7 +1435,8 @@ namespace kamite::punish_fit
     {
         if (!g_on || !inRam(enemy, 0x700u))
             return false;
-        const Fit *fit = fitFor(Suplex, bodyOf(rdram, enemy & 0x1FFFFFFu));
+        enemy &= 0x1FFFFFFu;
+        const Fit *fit = fitFor(Suplex, variantOf(rdram, enemy, Suplex, bodyOf(rdram, enemy)));
         return fit && fit->gorilla;
     }
 
@@ -1418,7 +1481,7 @@ namespace kamite::punish_fit
         for (int p = 0; p < kPunishCount; ++p)
             if (phase == kGenePhase[p])
             {
-                const Fits *fits = g_on ? fitsForPair(rdram, enemy, p, body) : nullptr;
+                const Fits *fits = g_on ? fitsForPair(rdram, enemy, p, pairBody(rdram, enemy, p)) : nullptr;
                 const Anchor an = fits ? anchorFor(*fits, scale[1]) : Anchor{};
                 char what[96];
                 if (!an.any)

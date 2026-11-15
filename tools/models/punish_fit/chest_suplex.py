@@ -594,6 +594,10 @@ def block(keys, file, scale, size):
     return lines
 
 
+MOHAWK = '2ed83e81'  # em0d's mohawk women's skeleton (shared with other women: told apart by their MOHI mesh)
+MOHAWK_NOTE = "   # em0d (mohawk women): the game's Suplex, not the chest grab (spikes on her bra; K, Nov 15)"
+
+
 def emit(path=PF):
     """Replace the women's Suplex fits in punish_fit.txt (idempotent; run after emit7)."""
     src = open(path).read().split('\n')
@@ -603,6 +607,13 @@ def emit(path=PF):
         if line.startswith('fit '):
             p = line.split()
             skip = p[1] == 'Suplex' and bool(women & set(p[2].split(',')))
+            # K, Nov 15: the mohawk women (spikes on her bra) keep the game's Suplex: emit7's fits for their skeleton,
+            # tagged node=MOHI (their model's mohawk mesh), stay in place of being replaced.
+            if skip and 'frontcam' not in p and MOHAWK in p[2].split(','):
+                if not any(t.startswith('node=') for t in p):
+                    head = line.split('#')[0].split()
+                    line = ' '.join(head[:3] + ['node=MOHI'] + head[3:]) + MOHAWK_NOTE
+                skip = False
             if skip and not placed:
                 for keys, file in WOMEN:
                     for scale, size in SIZES:

@@ -67,6 +67,7 @@ def main(path):
            '#   victim <motion> <frame>:<height m>,<waist bend deg> ...',
            '# off = doesn\'t fit: Buck Breaker keeps the enemy\'s own punish for that pick.',
            '# gorilla (on a Suplex fit) = a Suplex pick plays the Gorilla Suplex on that body (its GorillaSuplex fit applies).',
+           '# node=<name> = for models with a mesh node whose name starts with it (MOHI: the mohawk women), in place of the body\'s.',
            '# Between two sizes the runtime interpolates; a body with only a 1.3 fit (the original pairing) is unchanged at 1.0.']
     lines.append('# body <body>[,<body>...] <type>   (the enemy labels\' body type: F2 > Debug > Enemy labels)')
     for g in range(len(B)): lines.append('body %s %s'%(','.join(B[g]['keys']),type_of(g)))
