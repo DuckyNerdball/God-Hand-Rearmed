@@ -55,6 +55,7 @@
 
 #include "kamite/punish_fit.h"
 
+#include "kamite/body_detail.h"
 #include "kamite/bone_tweaks.h"
 #include "kamite/function_hooks.h"
 #include "kamite/game_layout.h"
@@ -132,6 +133,9 @@ namespace kamite::punish_fit
         constexpr uint32_t kPartRotation = 0x100u; // the part's rotation x, y, z (radians; the motion samples into it)
         constexpr uint32_t kMotionSample = 0x00158328u, kCalcParts = 0x00149EB8u;
         constexpr uint32_t kMotionPlaying = 0x428u, kMotionFrame = 0x430u;
+        // A fit variant for models drawn with the detailed bust (Money above 100%, K Nov 15: the chest grab has a fit for
+        // each bust): kept with the node= variants under this name (no mesh node name starts with '+').
+        const std::string kDetailBust = "+bust";
         // The model's mesh nodes (body_detail.cpp): a list from +0x25C, next at +0x404, its info at +0x414, the name at info +8.
         constexpr uint32_t kMeshHead = 0x25Cu, kNodeNext = 0x404u, kNodeInfo = 0x414u, kInfoName = 0x8u;
 
@@ -207,7 +211,8 @@ namespace kamite::punish_fit
             bool gorilla = false;  // a Suplex fit: the Suplex pick plays the Gorilla Suplex on this body
             bool own = false;      // for the enemy's own punish (its prompt unchanged), e.g. Spanking on women (K, Nov 12)
             bool frontCam = false; // the punish camera swung round to the pair's front (K, Nov 15: the women's chest grab)
-            std::string node;      // node=: only for models with a mesh node whose name starts with this (K, Nov 15: mohawk women)
+            std::string node;      // node=: only for models with a mesh node whose name starts with this (K, Nov 15: mohawk women);
+                                   // kDetailBust (bust=detail): only for models drawn with the detailed bust (body_detail)
             float scale = 1.0f;    // the enemy size it was fitted at
             float size = 1.0f;     // the victim's size change for the pairing
             std::vector<Track> tracks;
@@ -530,13 +535,13 @@ namespace kamite::punish_fit
             return false;
         }
 
-        // The body's fit variant for this model (node= fits), else the body.
+        // The body's fit variant for this model (node= / bust=detail fits), else the body.
         uint32_t variantOf(const uint8_t *rdram, uint32_t enemy, int punish, uint32_t body)
         {
             const auto it = g_variants.find(fitKey(punish, body));
             if (it != g_variants.end())
                 for (const auto &[prefix, key] : it->second)
-                    if (hasNode(rdram, enemy, prefix))
+                    if (prefix == kDetailBust ? body_detail::bustDetailed(rdram, enemy) : hasNode(rdram, enemy, prefix))
                         return key;
             return body;
         }
@@ -573,7 +578,9 @@ namespace kamite::punish_fit
             const auto variant = g_variantOf.find(body);
             KM_INFO(Game, "punish fit: " << kNames[punish] << " on body " << std::hex
                                          << (variant != g_variantOf.end() ? variant->second.first : body) << std::dec
-                                         << (variant != g_variantOf.end() ? " node " + variant->second.second : std::string())
+                                         << (variant == g_variantOf.end() ? std::string()
+                                             : variant->second.second == kDetailBust ? std::string(" (detailed bust)")
+                                                                                      : " node " + variant->second.second)
                                          << " (" << enemyName(g_ram, enemy) << ", size " << size << "): " << what);
         }
 
@@ -1406,10 +1413,11 @@ namespace kamite::punish_fit
 
         // punish_fit.txt:
         //   fit <Suplex|Stinger|CobraTwist|Spanking|GorillaSuplex> <body hex>[,<body hex>...] [off] [gorilla] [own] [frontcam]
-        //       [node=<name>] [scale=<s>] [size=<s>]   (the lines after it, until the next fit, are its; gorilla on a Suplex
-        //       fit: that body plays the Gorilla Suplex for a Suplex pick; frontcam: the punish camera from the fit's cam
-        //       lines; node: these fits replace the body's for a Buck Breaker pick on a model with a mesh node whose name
-        //       starts with it, e.g. MOHI = the mohawk women; scale: the enemy size it is for, 1 if not given)
+        //       [node=<name>] [bust=detail] [scale=<s>] [size=<s>]   (the lines after it, until the next fit, are its;
+        //       gorilla on a Suplex fit: that body plays the Gorilla Suplex for a Suplex pick; frontcam: the punish camera
+        //       from the fit's cam lines; node: these fits replace the body's for a Buck Breaker pick on a model with a
+        //       mesh node whose name starts with it, e.g. MOHI = the mohawk women; bust=detail: the same for a model drawn
+        //       with the detailed bust; scale: the enemy size it is for, 1 if not given)
         //   gene <motion> <frame>:<forward>,<side>,<turn>,<height>[,<torso x>,<torso z>,<left raise>,<left swing>,
         //       <left elbow>,<right raise>,<right swing>,<right elbow>[,<left forearm twist>[,<lift>]]] ...
         //   victim <motion> <frame>:<height>,<bend>[,<hips back>,<pelvis tilt>,<legs>[,<feet back>,<thigh pitch>,<knee bend>]] ...
@@ -1457,6 +1465,8 @@ namespace kamite::punish_fit
                             made->frontCam = true;
                         else if (token.rfind("node=", 0) == 0)
                             made->node = token.substr(5, 8);
+                        else if (token == "bust=detail")
+                            made->node = kDetailBust;
                         else if (token.rfind("scale=", 0) == 0)
                             made->scale = std::strtof(token.c_str() + 6, nullptr);
                         else if (token.rfind("size=", 0) == 0)

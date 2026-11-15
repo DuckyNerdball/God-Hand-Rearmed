@@ -88,14 +88,14 @@ namespace kamite::body_detail
             body.size = b.bodyMdbSize;
         }
 
-        // A body node drawn: its bust / seat to the state Money / Cash ask for.
-        void check(uint8_t *rdram, uint32_t mdb)
+        // The rebuilt body an mdb is (its bytes no state changes), or nullptr.
+        const Body *bodyOf(const uint8_t *rdram, uint32_t mdb)
         {
             for (const Body &b : g_bodies)
             {
                 if (!inRam(mdb, b.size))
                     continue;
-                uint8_t *p = rdram + (mdb & PS2_RAM_MASK);
+                const uint8_t *p = rdram + (mdb & PS2_RAM_MASK);
                 bool same = true;
                 for (const auto &[at, bytes] : b.id)
                     if (std::memcmp(p + at, bytes.data(), bytes.size()) != 0)
@@ -103,19 +103,44 @@ namespace kamite::body_detail
                         same = false;
                         break;
                     }
-                if (!same)
-                    continue;
-                const bool want[3] = {false, b.bust && bone_tweaks::money() > kOn, b.seat && bone_tweaks::cash() > kOn};
-                for (int region = 1; region <= 2; ++region)
-                {
-                    const int s = b.sentinel[region];
-                    if (s < 0)
-                        continue;
-                    const Change &c = b.changes[static_cast<size_t>(s)];
-                    if (std::memcmp(p + c.pos, want[region] ? c.detail : c.flat, 12) != 0)
-                        apply(p, b.changes, region, want[region]);
-                }
+                if (same)
+                    return &b;
+            }
+            return nullptr;
+        }
+
+        // The model's "body" node's mdb, or 0.
+        uint32_t bodyMdb(const uint8_t *rdram, uint32_t model)
+        {
+            if (!inRam(model, 0x2E4u))
+                return 0u;
+            uint32_t node = rd32(rdram, model + kMeshHead);
+            for (int i = 0; i < 64 && inRam(node, 0x418u); ++i)
+            {
+                const uint32_t info = rd32(rdram, node + kNodeInfo);
+                if (inRam(info, 16u) && std::memcmp(rdram + ((info + kInfoName) & PS2_RAM_MASK), "body\0", 5) == 0)
+                    return rd32(rdram, node + kNodeMdb);
+                node = rd32(rdram, node + kNodeNext);
+            }
+            return 0u;
+        }
+
+        // A body node drawn: its bust / seat to the state Money / Cash ask for.
+        void check(uint8_t *rdram, uint32_t mdb)
+        {
+            const Body *b = bodyOf(rdram, mdb);
+            if (!b)
                 return;
+            uint8_t *p = rdram + (mdb & PS2_RAM_MASK);
+            const bool want[3] = {false, b->bust && bone_tweaks::money() > kOn, b->seat && bone_tweaks::cash() > kOn};
+            for (int region = 1; region <= 2; ++region)
+            {
+                const int s = b->sentinel[region];
+                if (s < 0)
+                    continue;
+                const Change &c = b->changes[static_cast<size_t>(s)];
+                if (std::memcmp(p + c.pos, want[region] ? c.detail : c.flat, 12) != 0)
+                    apply(p, b->changes, region, want[region]);
             }
         }
 
@@ -123,20 +148,8 @@ namespace kamite::body_detail
         {
             if (GPR_U32(ctx, 31) != kTransCallSite)
                 return;
-            const uint32_t model = GPR_U32(ctx, 4);
-            if (!inRam(model, 0x2E4u))
-                return;
-            uint32_t node = rd32(rdram, model + kMeshHead);
-            for (int i = 0; i < 64 && inRam(node, 0x418u); ++i)
-            {
-                const uint32_t info = rd32(rdram, node + kNodeInfo);
-                if (inRam(info, 16u) && std::memcmp(rdram + ((info + kInfoName) & PS2_RAM_MASK), "body\0", 5) == 0)
-                {
-                    check(rdram, rd32(rdram, node + kNodeMdb));
-                    return;
-                }
-                node = rd32(rdram, node + kNodeNext);
-            }
+            if (const uint32_t mdb = bodyMdb(rdram, GPR_U32(ctx, 4)))
+                check(rdram, mdb);
         }
 
         bool readDonor(const char *path, const char *node, Mesh &out)
@@ -211,5 +224,15 @@ namespace kamite::body_detail
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
         KM_INFO(Boot, "body detail: " << models << " women's models rebuilt (" << g_bodies.size() << " bodies, " << ms << " ms"
                                      << (other ? ", " + std::to_string(other) + " listed blocks differ" : std::string()) << ")");
+    }
+
+    bool bustDetailed(const uint8_t *rdram, uint32_t model)
+    {
+        const uint32_t mdb = bodyMdb(rdram, model & PS2_RAM_MASK);
+        const Body *b = mdb ? bodyOf(rdram, mdb) : nullptr;
+        if (!b || !b->bust || b->sentinel[1] < 0)
+            return false;
+        const Change &c = b->changes[static_cast<size_t>(b->sentinel[1])];
+        return std::memcmp(rdram + (mdb & PS2_RAM_MASK) + c.pos, c.detail, 12) == 0;
     }
 }

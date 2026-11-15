@@ -92,8 +92,15 @@ chest_suplex.py (K, Nov 15; claude/boobplex.md): the women's chest grab Suplex. 
 331) with the women's placement fit; Gene's arms solved per frame onto the bust (bone 29 with Money's size and droop):
 two-bone IK with the elbow as a hinge, the clavicle shrugging when the reach needs it (spread over the frames round it),
 the hands on their way in and out on a curve through a point in front of the breast, her hanging right arm raised out of
-his way. `chest_suplex.py emit` writes the three women's skeletons at 1.00 and 1.20 (held: her size kept, her knees
-bent) into resources/punish_fit.txt, replacing their Suplex fits (idempotent; run after emit7): pose lines per Money
-value (0.85, 1.00, 1.30; blended by the runtime), the bust hold, frontcam with its cam lines (Camera: the punish
-camera's parts 27 / 28 per frame in Gene's model space, four ways round, CAMERAS; the runtime picks one at random). `chest_suplex.py <body file> <size> <money>
-<out.png> [frames] [yaw] [zoom]` renders a strip.
+his way. chest_grip.py (step 4, K Nov 15) is the grip it emits: the palm on the fullest point of each breast pressed
+1.5 cm, the hand turned until its deepest fingertip sinks 1.5 cm (libigl signed distance), the fingers turned up only as
+far as needed to keep each hand 5 mm off her middle line (per hand), rigid in her chest frame through the hold; a fit
+per bust (`bust=detail`: body_detail's detailed bust, transfer3 + crease, for the generic women); her left hand onto his
+left forearm (f21 -> f27, held to f30, back by f33); the hold ends before the first frame from the lift on where his
+arm would fall 1.2 cm short (at 1.20: f31). `chest_suplex.py emit` writes the three women's skeletons at 1.00 and 1.20
+(held: her size kept, her knees bent) into resources/punish_fit.txt, replacing their Suplex fits (idempotent; run after
+emit7): pose lines at whole and half frames, 2 decimals, per Money value (original bust 0.85 / 0.925 / 1.00 / 1.15 /
+1.30, detailed 1.01 / 1.15 / 1.30; blended by the runtime), her arm's victim lines per Money, the bust hold, frontcam
+with its cam lines (Camera: the punish camera's parts 27 / 28 per frame in Gene's model space, four ways round,
+CAMERAS; the runtime picks one at random). `chest_suplex.py <body file> <size> <money> <out.png> [frames] [yaw] [zoom]`
+renders a strip.

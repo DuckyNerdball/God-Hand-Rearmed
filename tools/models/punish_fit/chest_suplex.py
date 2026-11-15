@@ -49,7 +49,7 @@ def read_fit(punish, key, scale):
             if out is not None:
                 break
             if p[1] == punish and key in p[2].split(',') and 'scale=%.2f' % scale in line and ' off' not in line \
-                    and 'node=' not in line:   # a model variant's fits (node=MOHI: the mohawk women) are not the body's
+                    and 'node=' not in line and 'bust=detail' not in line:   # a model variant's fits are not the body's
                 out = dict(size=float(re.search(r'size=([\d.]+)', line).group(1)), gene={}, victim={})
         elif out is not None and line.startswith(('gene ', 'victim ')):
             p = line.split()
@@ -520,79 +520,21 @@ def view_of(yaw, pitch):
     return rx(D(pitch)) @ ry(D(yaw))
 
 
-# ---- the data the runtime plays (punish_fit.txt "pose" / "bust" lines) ----
+# ---- the data the runtime plays (punish_fit.txt "pose" / "bust" lines; chest_grip.block writes them) ----
 GENE_BONES = (5, 6, 7, 8, 10, 11, 12, 13, 14, 16)
-MONEY = (0.85, 1.0, 1.3)
 
 
 def own_local(mot, b, t):
     return rot([mot.get(b, 3 + c, t) for c in range(3)])
 
 
-def gene_pre_frames(ch, money):
-    """Per frame of the window: bone -> the whole pre-rotation (new local . the motion's own^-1), as rotation vectors
-    (degrees). Outside the window the fit's own pose applies (the runtime)."""
-    pair = ch.pair; out = {}
-    h0, h1 = ch.hold
-    for t in range(max(0, h0 - RAMP_IN), min(len(pair.frames), h1 + RAMP_OUT + 1)):
-        q, loc, w, info = ch.solve(t, money)
-        row = {}
-        for b in GENE_BONES:
-            L = loc.get(b, q['Lg'][b])
-            row[b] = Rot.from_matrix(L @ own_local(pair.gm, b, t).T).as_rotvec(degrees=True)
-        out[t] = row
-    return out
-
-
-def victim_pre_frames(ch, vmotion):
-    out = {}
-    h0, h1 = ch.hold
-    for t in range(max(0, h0 - RAMP_IN - ARM_LEAD), min(len(ch.pair.frames), h1 + RAMP_OUT + 1)):
-        pre = ch.victim_arm(t) or {}
-        out[t] = {b: Rot.from_matrix(pre.get(b, np.eye(3))).as_rotvec(degrees=True) for b in (7, 6)}
-    return out
-
-
 WOMEN = [('2ed83e81,ed288b2c,51dc32d6', 'em16'), ('3fed1598', 'em52'), ('43f1d30c', 'em77')]
+DETAILED = ('em16',)   # the bodies body_detail gives the detailed bust (Money > 100%): a second fit, bust=detail
 SIZES = ((1.0, None), (1.2, 0.95))   # enemy size, size= (None: the 1.00 fit's own)
 
 
 def fmt_curve(keys, n, prec):
     return ' '.join('%d:%s' % (t, ','.join(('%.' + str(prec[i]) + 'f') % v[i] for i in range(min(n, len(v))))) for t, v in keys)
-
-
-def block(keys, file, scale, size):
-    body = EX + '/em/' + file + '.dat'
-    pair = Pair(body, 1.0) if size is None else held_fit(body, scale, size)
-    ch = Chest(pair)
-    gk = pair.fit['gene'][333]
-    gp = (3, 3, 2, 3) + (1,) * 10
-    lines = ['fit Suplex %s scale=%.2f size=%.3f frontcam   # %s (women): the chest grab (chest_suplex.py, K Nov 15)%s'
-             % (keys, scale, pair.fit['size'], file, '' if size is None else ', her size held, her knees bent')]
-    lines.append('gene 333 ' + fmt_curve([(t, list(v)) for t, v in gk], 14 if len(gk[0][1]) > 4 else 4, gp))
-    for vm in (329, 331):
-        vk = pair.fit['victim'].get(vm) or pair.fit['victim'][329]
-        lines.append('victim %d ' % vm + fmt_curve([(t, list(v)) for t, v in vk], 2, (3, 2)))
-    for m in MONEY:
-        S = gene_pre_frames(ch, m)
-        for b in GENE_BONES:
-            lines.append('pose gene 333 %.2f %d ' % (m, b) + ' '.join('%d:%.1f,%.1f,%.1f' % ((t,) + tuple(S[t][b])) for t in sorted(S)))
-    for vm in (329, 331):
-        V = victim_pre_frames(ch, vm)
-        for b in (7, 6):
-            lines.append('pose victim %d 0 %d ' % (vm, b) + ' '.join('%d:%.1f,%.1f,%.1f' % ((t,) + tuple(V[t][b])) for t in sorted(V)))
-    # the camera (K, Nov 15): the close front shot on her chest for the grab, then round to the game's own camera by
-    # frame 60; four ways round (CAMERAS), the runtime picks one at random (never the same twice running)
-    for v, kw in enumerate(CAMERAS):
-        cam = Camera(ch, **kw)
-        keys = []
-        for t in range(0, cam.turn[1] + 1):   # every frame (every 2 was 22 cm off between); from the turn's end the game's own
-            e, g = cam.at(t)
-            keys.append('%d:%s' % (t, ','.join('%.3f' % x for x in list(e) + list(g))))
-        lines.append('cam 333 %d ' % v + ' '.join(keys))
-    h0, h1 = ch.hold
-    lines.append('bust 333 ' + ' '.join('%d:%.2f' % (t, ch.weight(t)) for t in range(h0 - RAMP_IN, h1 + RAMP_OUT + 1)))
-    return lines
 
 
 MOHAWK = '2ed83e81'  # em0d's mohawk women's skeleton (shared with other women: told apart by their MOHI mesh)
@@ -616,10 +558,12 @@ def emit(path=PF):
                     line = ' '.join(head[:3] + ['node=MOHI'] + head[3:]) + MOHAWK_NOTE
                 skip = False
             if skip and not placed:
+                import chest_grip   # step 4 (K, Nov 15): the grip on the fullest point, a fit per bust, her reaction
                 for keys, file in WOMEN:
-                    for scale, size in SIZES:
-                        out += block(keys, file, scale, size)
-                        print('emitted', file, scale)
+                    for detail in ((False, True) if file in DETAILED else (False,)):
+                        for scale, size in SIZES:
+                            out += chest_grip.block(keys, file, scale, size, detail)
+                            print('emitted', file, scale, 'detailed bust' if detail else 'original bust', flush=True)
                 placed = True
         elif skip and not line.startswith(('gene ', 'victim ', 'pose ', 'bust ', 'cam ')):
             skip = False
@@ -765,7 +709,8 @@ elif __name__ == '__main__':
     frames = [int(x) for x in (sys.argv[5] if len(sys.argv) > 5 else '8,12,15,17,20,26,32,36,40').split(',')]
     yaw = float(sys.argv[6]) if len(sys.argv) > 6 else 20.0
     zoom = float(sys.argv[7]) if len(sys.argv) > 7 else None
+    import chest_grip
     pair = Pair(EX + '/em/' + body + '.dat', esize)
-    ch = Chest(pair)
+    ch = chest_grip.Grab(pair, chest_grip.Grip(pair, {sd: (sd * chest_grip.CENTRES[body][0], chest_grip.CENTRES[body][1]) for sd in (1, -1)}))
     print('hold', ch.hold)
     strip(pair, ch, frames, money, view_of(yaw, 6), out, zoom=zoom)

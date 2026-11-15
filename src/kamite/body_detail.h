@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 class PS2Runtime;
 
 // The women's detailed bust (Money above 100%) and seat (Cash above 100%): the geometry is in body_detail_build.h.
@@ -17,4 +19,8 @@ class PS2Runtime;
 namespace kamite::body_detail
 {
     void install(PS2Runtime &runtime);
+
+    // Whether the model's body node has the detailed bust in now (its vertices as last written; Buck Breaker's chest grab
+    // picks its fit by it, punish_fit.cpp). False for a model whose body isn't one of the rebuilt ones.
+    bool bustDetailed(const uint8_t *rdram, uint32_t model);
 }

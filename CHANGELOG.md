@@ -4,6 +4,9 @@ Newest first, one line per change; the code comments say how.
 
 ## November 15, 2026
 
+- Buck Breaker: the chest grab's hands grip the fullest part of her breasts (fitted to both bust shapes).
+- Buck Breaker: in the chest grab she grabs Gene's forearm before he throws her.
+- Buck Breaker: steadier chest grab hands at 60 FPS.
 - Buck Breaker: steadier hands in the chest grab.
 - Buck Breaker: the chest grab's prompt reads BOOBPLEX (the mohawk women's stays SUPLEX).
 - Buck Breaker: the mohawk women keep the original Suplex (no chest grab on her spiked bra).
