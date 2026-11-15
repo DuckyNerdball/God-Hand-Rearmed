@@ -131,6 +131,7 @@ namespace kamite::punish_fit
         constexpr float kFeetIn = 0.6f; // a victim's legs value of 1 moves the ankles this much of the way to the middle
         constexpr uint32_t kParts = 0x144u, kPartCount = 0x2B4u, kPartOffset = 0xE0u, kPartParent = 0x148u;
         constexpr uint32_t kPartRotation = 0x100u; // the part's rotation x, y, z (radians; the motion samples into it)
+        constexpr uint32_t kPartAnchor = 0xD0u;    // -> the local matrix's position (the motion samples translations into it)
         constexpr uint32_t kMotionSample = 0x00158328u, kCalcParts = 0x00149EB8u;
         constexpr uint32_t kMotionPlaying = 0x428u, kMotionFrame = 0x430u;
         // A fit variant for models drawn with the detailed bust (Money above 100%, K Nov 15: the chest grab has a fit for
@@ -348,7 +349,22 @@ namespace kamite::punish_fit
             int bone = 0;
             std::vector<std::pair<float, mot::Mat>> keys; // motion time -> whole local rotation (every key of its lines)
         };
-        std::map<uint32_t, std::vector<FloatPose>> g_floatPoses;
+        // Every other edited channel of a posed copy in float too (K, Nov 15: the hands still trembled on her): the
+        // hold hangs off Gene's torso (bone 1, the fit's own pose) and hips (bone 0 y) and her hips (0 y) and spine bend
+        // (1 x), all keyed every frame in 8 bits as well (offline, his hands in her chest frame: up to 1 cm at frames,
+        // 2 cm at half frames; 0 with all four in float). A rotation component (+0x100) or the hips' height / depth
+        // (bone 0 y / z: the sampler writes translations through the part's anchor +0xD0), every half frame from 0.
+        struct FloatChannel
+        {
+            int bone = 0, component = 0;
+            std::vector<float> values; // at motion time i / 2
+        };
+        struct FloatSet
+        {
+            std::vector<FloatPose> poses; // the edited bones' whole rotations first, the pose lines after (they win)
+            std::vector<FloatChannel> channels;
+        };
+        std::map<uint32_t, FloatSet> g_floatPoses;
         std::map<uint32_t, float> g_sampledAt; // model -> the motion time its parts were last sampled at (while posed)
         uint32_t g_areaAt = kRewriteArea;
         std::set<uint64_t> g_logged;
@@ -960,6 +976,100 @@ namespace kamite::punish_fit
 
         // A copy of the motion at `motion` with the track's heights (and the victim's bend), in kRewriteArea; 0 if
         // nothing changes or it does not fit.
+        mot::Mat slerp(const mot::Mat &a, const mot::Mat &b, float u);
+
+        // The edits rewrite() made to a posed copy, played in float (FloatChannel above): whole rotations pre . own . post
+        // for the pre-rotated bones (own with any curve added to its rotation), values for the other curves; every half
+        // frame, from the original's own curves (sampled between frames as the game does) and the edits between frames.
+        struct CurveEdit
+        {
+            int bone = 0, component = 0;
+            std::vector<float> delta; // a frame
+        };
+        struct PreEdit
+        {
+            int bone = 0;
+            std::vector<mot::Mat> pre, post; // a frame (the last repeats; empty: none)
+        };
+        FloatSet editedFloats(const std::vector<mot::Rec> &own, int frames, const std::vector<CurveEdit> &curves,
+                              const std::vector<PreEdit> &pres)
+        {
+            FloatSet out;
+            const int steps = 2 * (frames - 1);
+            if (steps < 0)
+                return out;
+            auto ownRec = [&](int bone, int component) -> const mot::Rec * {
+                for (const mot::Rec &r : own)
+                    if (r.bone == bone && (r.channel & 0x0F) == component)
+                        return &r;
+                return nullptr;
+            };
+            auto deltaAt = [&](int bone, int component, float t) {
+                float d = 0.0f;
+                for (const CurveEdit &c : curves)
+                    if (c.bone == bone && c.component == component && !c.delta.empty())
+                    {
+                        const int n = static_cast<int>(c.delta.size());
+                        const int f = std::min(static_cast<int>(t), n - 1), g = std::min(f + 1, n - 1);
+                        const float u = t - static_cast<float>(static_cast<int>(t));
+                        d += c.delta[f] + (c.delta[g] - c.delta[f]) * u;
+                    }
+                return d;
+            };
+            auto matAt = [](const std::vector<mot::Mat> &v, float t) {
+                if (v.empty())
+                    return mot::euler(0.0f, 0.0f, 0.0f);
+                const int n = static_cast<int>(v.size());
+                const int f = std::min(static_cast<int>(t), n - 1), g = std::min(f + 1, n - 1);
+                const float u = t - static_cast<float>(static_cast<int>(t));
+                return u > 0.0f && f != g ? slerp(v[f], v[g], u) : v[f];
+            };
+            std::set<int> preBones;
+            for (const PreEdit &p : pres)
+            {
+                preBones.insert(p.bone);
+                FloatPose fp;
+                fp.bone = p.bone;
+                const mot::Rec *rec[3] = {ownRec(p.bone, 3), ownRec(p.bone, 4), ownRec(p.bone, 5)};
+                for (int i = 0; i <= steps; ++i)
+                {
+                    const float t = 0.5f * static_cast<float>(i);
+                    float e[3];
+                    for (int c = 0; c < 3; ++c)
+                        e[c] = (rec[c] ? mot::sample(*rec[c], t) : 0.0f) + deltaAt(p.bone, 3 + c, t);
+                    mot::Mat r = mot::mul(matAt(p.pre, t), mot::euler(e[0], e[1], e[2]));
+                    if (!p.post.empty())
+                        r = mot::mul(r, matAt(p.post, t));
+                    fp.keys.emplace_back(t, r);
+                }
+                out.poses.push_back(std::move(fp));
+            }
+            for (const CurveEdit &c : curves)
+            {
+                // Rotations of bones not pre-rotated; translations only the hips' height and depth (an x the sampler may
+                // mirror, the legs' IK targets are not a part's own position).
+                const bool rotation = c.component >= 3 && c.component <= 5;
+                if ((rotation && preBones.count(c.bone)) || (!rotation && !(c.bone == 0 && (c.component == 1 || c.component == 2))))
+                    continue;
+                if (std::any_of(out.channels.begin(), out.channels.end(),
+                                [&](const FloatChannel &f) { return f.bone == c.bone && f.component == c.component; }))
+                    continue;
+                const mot::Rec *rec = ownRec(c.bone, c.component);
+                if (!rotation && !rec)
+                    continue;
+                FloatChannel fc;
+                fc.bone = c.bone;
+                fc.component = c.component;
+                for (int i = 0; i <= steps; ++i)
+                {
+                    const float t = 0.5f * static_cast<float>(i);
+                    fc.values.push_back((rec ? mot::sample(*rec, t) : 0.0f) + deltaAt(c.bone, c.component, t));
+                }
+                out.channels.push_back(std::move(fc));
+            }
+            return out;
+        }
+
         uint32_t rewrite(uint8_t *rdram, uint32_t motion, const Track &track, const Fit &fit, uint32_t body, int punish, int sizeKey)
         {
             const bool posed = fit.hasPoses(track.motion, track.gene);
@@ -975,6 +1085,22 @@ namespace kamite::punish_fit
             std::vector<uint8_t> m(rdram + motion, rdram + motion + length);
             uint16_t frames;
             std::memcpy(&frames, m.data() + 4, 2);
+            // A posed copy plays every edit in float (FloatSet): the original's curves and each edit as made.
+            std::vector<mot::Rec> ownRecs;
+            if (posed)
+                mot::parse(m, ownRecs);
+            std::vector<CurveEdit> curveEdits;
+            std::vector<PreEdit> preEdits;
+            auto addCurve = [&](int bone, int component, const std::vector<float> &delta) {
+                mot::addCurve(m, bone, component, delta, 1);
+                if (posed)
+                    curveEdits.push_back({bone, component, delta});
+            };
+            auto preRotate = [&](int bone, const std::vector<mot::Mat> &pre, const std::vector<mot::Mat> &post = {}) {
+                mot::preRotate(m, bone, pre, 1, post);
+                if (posed)
+                    preEdits.push_back({bone, pre, post});
+            };
             std::vector<float> height(frames), bend(frames), lift(frames), back(frames), tilt(frames), legs(frames);
             std::vector<float> feet(frames), thighs(frames), knees(frames);
             // Gene's pose: the torso (bone 1), upper arms (13 left, 7 right), their helpers (12, 6: half), forearms (14, 8).
@@ -1052,12 +1178,12 @@ namespace kamite::punish_fit
                 return 0u;
             }
             if (anyHeight)
-                mot::addCurve(m, 0, 1, height, 1);
+                addCurve(0, 1, height);
             if (anyLift)
                 for (int bone : {20, 24}) // the leg IK targets (model space) go up with the hips: the legs keep their shape
-                    mot::addCurve(m, bone, 1, lift, 1);
+                    addCurve(bone, 1, lift);
             if (anyBend)
-                mot::addCurve(m, 1, 3, bend, 1);
+                addCurve(1, 3, bend);
             if (anyLegs)
             {
                 // The victim's hips back (bone 0 z), the pelvis tipped (17 about x) and the knees together: the thighs'
@@ -1074,12 +1200,12 @@ namespace kamite::punish_fit
                 };
                 std::vector<float> thighs[2] = {scaled(18, 4, 1.0f), scaled(22, 4, 1.0f)};
                 std::vector<float> ankles[2] = {scaled(20, 0, kFeetIn), scaled(24, 0, kFeetIn)};
-                mot::addCurve(m, 0, 2, back, 1);
-                mot::addCurve(m, 17, 3, tilt, 1);
-                mot::addCurve(m, 18, 4, thighs[0], 1);
-                mot::addCurve(m, 20, 0, ankles[0], 1);
-                mot::addCurve(m, 22, 4, thighs[1], 1);
-                mot::addCurve(m, 24, 0, ankles[1], 1);
+                addCurve(0, 2, back);
+                addCurve(17, 3, tilt);
+                addCurve(18, 4, thighs[0]);
+                addCurve(20, 0, ankles[0]);
+                addCurve(22, 4, thighs[1]);
+                addCurve(24, 0, ankles[1]);
             }
             if (anyFeet)
             {
@@ -1090,24 +1216,24 @@ namespace kamite::punish_fit
                 for (int bone : {20, 24})
                     if (std::any_of(recs.begin(), recs.end(),
                                     [&](const mot::Rec &r) { return r.bone == bone && (r.channel & 0x0F) == 2; }))
-                        mot::addCurve(m, bone, 2, feet, 1);
+                        addCurve(bone, 2, feet);
             }
             if (anyFold)
             {
                 // Motions with the legs by rotation (no IK): the thighs (18 / 22) and knees (19 / 23) about x.
                 for (int bone : {18, 22})
-                    mot::addCurve(m, bone, 3, thighs, 1);
+                    addCurve(bone, 3, thighs);
                 for (int bone : {19, 23})
-                    mot::addCurve(m, bone, 3, knees, 1);
+                    addCurve(bone, 3, knees);
             }
             if (anyPose)
                 for (int i = 0; i < 7; ++i)
-                    mot::preRotate(m, kPoseBones[i], pose[i], 1);
+                    preRotate(kPoseBones[i], pose[i]);
             if (anyTwist)
                 for (int bone : {15, 16})
-                    mot::preRotate(m, bone, {}, 1, twist);
+                    preRotate(bone, {}, twist);
             for (const auto &[bone, pre] : extra)
-                mot::preRotate(m, bone, pre, 1);
+                preRotate(bone, pre);
             if (camera)
                 setCamera(m, frames, *camera);
             const uint32_t size = (static_cast<uint32_t>(m.size()) + 0x3Fu) & ~0x3Fu;
@@ -1124,8 +1250,14 @@ namespace kamite::punish_fit
             std::memcpy(rdram + at, m.data(), m.size());
             g_areaAt += size;
             g_copies[key] = at;
-            if (!floats.empty())
-                g_floatPoses[at] = std::move(floats);
+            if (posed)
+            {
+                FloatSet set = editedFloats(ownRecs, frames, curveEdits, preEdits);
+                for (FloatPose &f : floats)
+                    set.poses.push_back(std::move(f));
+                if (!set.poses.empty() || !set.channels.empty())
+                    g_floatPoses[at] = std::move(set);
+            }
             return at;
         }
 
@@ -1222,7 +1354,23 @@ namespace kamite::punish_fit
             uint32_t parts[64];
             const int n = readParts(rdram, model, parts);
             const float t = at->second;
-            for (const FloatPose &p : it->second)
+            for (const FloatChannel &c : it->second.channels)
+            {
+                if (c.bone >= n || c.values.empty() || !(t >= 0.0f))
+                    continue;
+                const float x = 2.0f * t;
+                const int last = static_cast<int>(c.values.size()) - 1;
+                const int i = std::min(static_cast<int>(x), last), j = std::min(i + 1, last);
+                const float v = c.values[i] + (c.values[j] - c.values[i]) * (x - static_cast<float>(static_cast<int>(x)));
+                if (c.component >= 3)
+                {
+                    const uint32_t a = parts[c.bone] + kPartRotation + 4u * static_cast<uint32_t>(c.component - 3);
+                    wrF(rdram, a, mot::nearAngle(v, rdF(rdram, a)));
+                }
+                else if (const uint32_t anchor = rd32(rdram, parts[c.bone] + kPartAnchor) & 0x1FFFFFFu; inRam(anchor, 16u))
+                    wrF(rdram, anchor + 4u * static_cast<uint32_t>(c.component), v);
+            }
+            for (const FloatPose &p : it->second.poses)
             {
                 const auto &k = p.keys;
                 if (p.bone >= n || !(t >= k.front().first) || t > k.back().first)

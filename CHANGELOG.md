@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 15, 2026
 
+- Buck Breaker: fixed Gene's hands still wobbling during the chest grab's hold.
 - Fixed no punish prompt on stunned women with the Suplex pick (Buck Breaker).
 - Buck Breaker: the chest grab's hands grip the fullest part of her breasts (fitted to both bust shapes).
 - Buck Breaker: in the chest grab she grabs Gene's forearm before he throws her.
