@@ -129,6 +129,8 @@ namespace kamite::punish_fit
         constexpr int kValues = 14;
         constexpr float kFeetIn = 0.6f; // a victim's legs value of 1 moves the ankles this much of the way to the middle
         constexpr uint32_t kParts = 0x144u, kPartCount = 0x2B4u, kPartOffset = 0xE0u, kPartParent = 0x148u;
+        constexpr uint32_t kPartRotation = 0x100u; // the part's rotation x, y, z (radians; the motion samples into it)
+        constexpr uint32_t kMotionSample = 0x00158328u, kCalcParts = 0x00149EB8u;
         constexpr uint32_t kMotionPlaying = 0x428u, kMotionFrame = 0x430u;
         // The model's mesh nodes (body_detail.cpp): a list from +0x25C, next at +0x404, its info at +0x414, the name at info +8.
         constexpr uint32_t kMeshHead = 0x25Cu, kNodeNext = 0x404u, kNodeInfo = 0x414u, kInfoName = 0x8u;
@@ -327,6 +329,22 @@ namespace kamite::punish_fit
         }
         Resize g_resize[2]; // the victim, Gene
         std::map<std::tuple<uint32_t, int, uint16_t, bool, int, int, int>, uint32_t> g_copies; // (body, punish, motion, gene, size, Money, camera) -> copy
+
+        // The posed bones in float (K, Nov 15: the chest grab's hands trembled on her). A motion stores each rotation as
+        // 8-bit steps of its whole range (0.4-0.7 deg on the arms, whose ranges span the throw), so a pose keyed every
+        // frame lands up to half a step off at every frame, a different way each frame: on the arms' four bones up to
+        // ~0.8 cm at the palm, a tremble where the hands are held on her. The copy keeps the 8-bit version (the game's own
+        // logic plays it); the pose lines' bones are also kept here as whole rotations per frame (pre . the original's
+        // own), and while a copy plays they are written over the sampled rotations (part +0x100) as the parts are built
+        // (cModel_calcParts), between frames slerped at the time the motion was sampled (func_00158328 reads +0x430
+        // before it advances). Copy address -> its posed bones; cleared with g_copies.
+        struct FloatPose
+        {
+            int bone = 0;
+            std::vector<std::pair<float, mot::Mat>> keys; // motion time -> whole local rotation (every key of its lines)
+        };
+        std::map<uint32_t, std::vector<FloatPose>> g_floatPoses;
+        std::map<uint32_t, float> g_sampledAt; // model -> the motion time its parts were last sampled at (while posed)
         uint32_t g_areaAt = kRewriteArea;
         std::set<uint64_t> g_logged;
 
@@ -841,6 +859,59 @@ namespace kamite::punish_fit
             return out;
         }
 
+        // The pose lines' bones as whole rotations at each of their keys (whole frames, and half frames where the lines
+        // have them, for 60 FPS): the pre-rotation (Money blended as poseOverrides) on the original motion's own at that
+        // time (m: the copy before any edit).
+        std::vector<FloatPose> floatPoses(const Fit &fit, uint16_t motion, bool gene, const std::vector<uint8_t> &m, float money)
+        {
+            std::vector<FloatPose> out;
+            std::vector<mot::Rec> own;
+            if (!mot::parse(m, own))
+                return out;
+            std::map<int, std::vector<const Pose *>> byBone;
+            for (const Pose &p : fit.poses)
+                if (p.motion == motion && p.gene == gene && !p.keys.empty())
+                    byBone[p.bone].push_back(&p);
+            for (auto &[bone, list] : byBone)
+            {
+                std::sort(list.begin(), list.end(), [](const Pose *a, const Pose *b) { return a->money < b->money; });
+                const Pose *lo = list.front(), *hi = list.back();
+                for (const Pose *p : list)
+                    if (p->money <= money)
+                        lo = p;
+                for (auto it = list.rbegin(); it != list.rend(); ++it)
+                    if ((*it)->money >= money)
+                        hi = *it;
+                if (money <= list.front()->money)
+                    lo = hi = list.front();
+                if (money >= list.back()->money)
+                    lo = hi = list.back();
+                const float t = hi->money > lo->money ? (money - lo->money) / (hi->money - lo->money) : 0.0f;
+                const mot::Rec *channel[3] = {};
+                for (const mot::Rec &r : own)
+                    if (r.bone == bone && (r.channel & 0x0F) >= 3 && (r.channel & 0x0F) <= 5)
+                        channel[(r.channel & 0x0F) - 3] = &r;
+                FloatPose fp;
+                fp.bone = bone;
+                for (const auto &key : lo->keys)
+                {
+                    const float time = key.first;
+                    if (time < 0.0f)
+                        continue;
+                    const auto a = lo->at(time), b = hi->at(time);
+                    float e[3];
+                    for (int c = 0; c < 3; ++c)
+                        e[c] = channel[c] ? mot::sample(*channel[c], time) : 0.0f;
+                    fp.keys.emplace_back(time, mot::mul(fromRotvec({a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t,
+                                                                    a[2] + (b[2] - a[2]) * t}),
+                                                        mot::euler(e[0], e[1], e[2])));
+                }
+                if (!fp.keys.empty())
+                    out.push_back(std::move(fp));
+            }
+            return out;
+        }
+
         // The punish camera (K, Nov 15). Gene's punish motions carry the camera as two root-level parts of his model, 27 =
         // the eye, 28 = what it looks at (pl00 func_00124EC0: cCamManager_setPartsCamera, then cPartsCamera_SetParts with
         // parts 27 and 28; the parts camera puts them through Gene's matrix), keyed as translations in his model space. A
@@ -948,6 +1019,9 @@ namespace kamite::punish_fit
             // replace the fit's own pose over their frames; other bones (the clavicles, the hands, the victim's arm) get
             // their own pre-rotation, none outside their frames.
             std::vector<std::pair<int, std::vector<mot::Mat>>> extra;
+            std::vector<FloatPose> floats;
+            if (posed)
+                floats = floatPoses(fit, track.motion, track.gene, m, money);
             if (posed)
                 for (PoseOverride &o : poseOverrides(fit, track.motion, track.gene, frames, money))
                 {
@@ -1035,13 +1109,129 @@ namespace kamite::punish_fit
             if (g_areaAt + size > kRewriteAreaEnd)
             {
                 g_copies.clear(); // start over (the motions of an earlier pair are not playing any more)
+                g_floatPoses.clear();
+                g_sampledAt.clear();
                 g_areaAt = kRewriteArea;
             }
             const uint32_t at = g_areaAt;
             std::memcpy(rdram + at, m.data(), m.size());
             g_areaAt += size;
             g_copies[key] = at;
+            if (!floats.empty())
+                g_floatPoses[at] = std::move(floats);
             return at;
+        }
+
+        // A rotation as a unit quaternion (w, x, y, z) and back (row-major, column vectors).
+        std::array<float, 4> toQuat(const mot::Mat &r)
+        {
+            std::array<float, 4> q{};
+            const float t = r[0] + r[4] + r[8];
+            if (t > 0.0f)
+            {
+                const float s = std::sqrt(t + 1.0f) * 2.0f;
+                q = {0.25f * s, (r[7] - r[5]) / s, (r[2] - r[6]) / s, (r[3] - r[1]) / s};
+            }
+            else if (r[0] > r[4] && r[0] > r[8])
+            {
+                const float s = std::sqrt(1.0f + r[0] - r[4] - r[8]) * 2.0f;
+                q = {(r[7] - r[5]) / s, 0.25f * s, (r[1] + r[3]) / s, (r[2] + r[6]) / s};
+            }
+            else if (r[4] > r[8])
+            {
+                const float s = std::sqrt(1.0f + r[4] - r[0] - r[8]) * 2.0f;
+                q = {(r[2] - r[6]) / s, (r[1] + r[3]) / s, 0.25f * s, (r[5] + r[7]) / s};
+            }
+            else
+            {
+                const float s = std::sqrt(1.0f + r[8] - r[0] - r[4]) * 2.0f;
+                q = {(r[3] - r[1]) / s, (r[2] + r[6]) / s, (r[5] + r[7]) / s, 0.25f * s};
+            }
+            return q;
+        }
+        mot::Mat fromQuat(const std::array<float, 4> &q)
+        {
+            const float w = q[0], x = q[1], y = q[2], z = q[3];
+            return {1 - 2 * (y * y + z * z), 2 * (x * y - w * z),     2 * (x * z + w * y),
+                    2 * (x * y + w * z),     1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
+                    2 * (x * z - w * y),     2 * (y * z + w * x),     1 - 2 * (x * x + y * y)};
+        }
+        mot::Mat slerp(const mot::Mat &a, const mot::Mat &b, float u)
+        {
+            const auto qa = toQuat(a);
+            auto qb = toQuat(b);
+            float d = qa[0] * qb[0] + qa[1] * qb[1] + qa[2] * qb[2] + qa[3] * qb[3];
+            if (d < 0.0f)
+            {
+                for (float &c : qb)
+                    c = -c;
+                d = -d;
+            }
+            float ka = 1.0f - u, kb = u;
+            if (d < 0.9995f)
+            {
+                const float th = std::acos(std::min(d, 1.0f)), sn = std::sin(th);
+                ka = std::sin((1.0f - u) * th) / sn;
+                kb = std::sin(u * th) / sn;
+            }
+            std::array<float, 4> q{};
+            float n = 0.0f;
+            for (int i = 0; i < 4; ++i)
+            {
+                q[i] = qa[i] * ka + qb[i] * kb;
+                n += q[i] * q[i];
+            }
+            n = std::sqrt(n);
+            for (float &c : q)
+                c /= n;
+            return fromQuat(q);
+        }
+
+        // func_00158328 (a0 = the actor): it samples the actor's motion at +0x430 into its parts, then moveMotion advances
+        // +0x430. Kept only for actors playing a copy with posed bones.
+        void onMotionSample(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            if (g_floatPoses.empty())
+                return;
+            const uint32_t actor = GPR_U32(ctx, 4) & 0x1FFFFFFu;
+            if (!inRam(actor, 0x700u) || !g_floatPoses.count(rd32(rdram, actor + kMotionPlaying) & 0x1FFFFFFu))
+                return;
+            g_sampledAt[actor] = rdF(rdram, actor + kMotionFrame);
+        }
+
+        // cModel_calcParts (a0 = the model; it builds each part's matrices from +0x100): the posed bones' sampled
+        // rotations replaced by the float ones at the sampled time.
+        void onCalcParts(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            if (g_floatPoses.empty())
+                return;
+            const uint32_t model = GPR_U32(ctx, 4) & 0x1FFFFFFu;
+            if (!inRam(model, 0x700u))
+                return;
+            const auto it = g_floatPoses.find(rd32(rdram, model + kMotionPlaying) & 0x1FFFFFFu);
+            const auto at = g_sampledAt.find(model);
+            if (it == g_floatPoses.end() || at == g_sampledAt.end())
+                return;
+            uint32_t parts[64];
+            const int n = readParts(rdram, model, parts);
+            const float t = at->second;
+            for (const FloatPose &p : it->second)
+            {
+                const auto &k = p.keys;
+                if (p.bone >= n || !(t >= k.front().first) || t > k.back().first)
+                    continue;
+                size_t i = 0;
+                while (i + 1 < k.size() && k[i + 1].first <= t)
+                    ++i;
+                const float span = i + 1 < k.size() ? k[i + 1].first - k[i].first : 0.0f;
+                const float u = span > 0.0f ? (t - k[i].first) / span : 0.0f;
+                const mot::Mat r = u > 0.0f ? slerp(k[i].second, k[i + 1].second, u) : k[i].second;
+                float e[3];
+                mot::toEuler(r, e[0], e[1], e[2]);
+                const uint32_t rotAt = parts[p.bone] + kPartRotation;
+                for (int c = 0; c < 3; ++c)
+                    wrF(rdram, rotAt + 4u * static_cast<uint32_t>(c), mot::nearAngle(e[c], rdF(rdram, rotAt + 4u * static_cast<uint32_t>(c))));
+            }
         }
 
         // func_002A8578 (a0 = the actor, a1 = its motion, a2 = the motion's events): the pair's punish motions start
@@ -1140,6 +1330,8 @@ namespace kamite::punish_fit
             Resize resize[2];
             ps2x::state::fields(in, version, areaAt, s, resize[0], resize[1]);
             g_copies.clear();
+            g_floatPoses.clear();
+            g_sampledAt.clear();
             g_areaAt = areaAt >= kRewriteArea && areaAt <= kRewriteAreaEnd ? areaAt : kRewriteArea;
             g_pair = Pair{};
             g_pair.punish = s.punish;
@@ -1173,6 +1365,8 @@ namespace kamite::punish_fit
             if (!g_stateLoaded)
             {
                 g_copies.clear();
+                g_floatPoses.clear();
+                g_sampledAt.clear();
                 g_areaAt = kRewriteArea;
                 g_pair = Pair{};
                 g_resize[0] = Resize{};
@@ -1520,6 +1714,9 @@ namespace kamite::punish_fit
         g_on = envOn("KAMITE_BUCK_BREAKER");
         if (!FunctionHooks::instance().observeEntry(kStartMotion, "punish fit: motion start", &onStartMotion))
             KM_WARN(Game, "punish fit: func_002A8578 is not hookable; placement only, no heights or bend");
+        if (!FunctionHooks::instance().observeEntry(kMotionSample, "punish fit: motion sample time", &onMotionSample) ||
+            !FunctionHooks::instance().observeEntry(kCalcParts, "punish fit: posed bones in float", &onCalcParts))
+            KM_WARN(Game, "punish fit: func_00158328 / cModel_calcParts not hookable; posed bones play at the motion's 8-bit steps");
         load();
         ps2x::pnach::addFrameHook(&onVblank);
         ps2x::savestate::registerExtension("kamite.punish_fit", &saveState, &loadState);

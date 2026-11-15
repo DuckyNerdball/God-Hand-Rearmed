@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 15, 2026
 
+- Buck Breaker: steadier hands in the chest grab.
 - Buck Breaker: the chest grab's prompt reads BOOBPLEX (the mohawk women's stays SUPLEX).
 - Buck Breaker: the mohawk women keep the original Suplex (no chest grab on her spiked bra).
 - Characters keep their full detail at every distance (no more lower-detail models swapped in as they move away).
