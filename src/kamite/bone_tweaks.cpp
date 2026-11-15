@@ -238,7 +238,7 @@ namespace kamite::bone_tweaks
         // ---- Money: the women's chest bone scaled (see the header) ---------------------------------------------------
         constexpr int kChestBone = 29, kChestParent = 2;
         std::atomic<float> g_money{1.0f};
-        std::atomic<float> g_cash{1.0f}; // body_detail: above 1 the women's detailed seat (no growth of its own yet)
+        std::atomic<float> g_cash{1.0f}; // body_detail: above 1 the women's detailed seat, grown up to 130%
         constexpr float kMoneyDroop = 30.0f; // degrees the bust tips down per +100% (K: 15 at 150% looks right)
         std::vector<Saved> g_moneySaved; // game thread: the bones scaled since the frame started
 

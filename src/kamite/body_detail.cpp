@@ -132,15 +132,18 @@ namespace kamite::body_detail
             if (!b)
                 return;
             uint8_t *p = rdram + (mdb & PS2_RAM_MASK);
-            const bool want[3] = {false, b->bust && bone_tweaks::money() > kOn, b->seat && bone_tweaks::cash() > kOn};
+            const float cash = bone_tweaks::cash();
+            const bool want[3] = {false, b->bust && bone_tweaks::money() > kOn, b->seat && cash > kOn};
+            const float grow[3] = {0.0f, 0.0f, want[2] ? cashGrowthScale(cash) : 0.0f};
             for (int region = 1; region <= 2; ++region)
             {
                 const int s = b->sentinel[region];
                 if (s < 0)
                     continue;
-                const Change &c = b->changes[static_cast<size_t>(s)];
-                if (std::memcmp(p + c.pos, want[region] ? c.detail : c.flat, 12) != 0)
-                    apply(p, b->changes, region, want[region]);
+                float at[3];
+                wantedPosition(b->changes[static_cast<size_t>(s)], want[region], grow[region], at);
+                if (std::memcmp(p + b->changes[static_cast<size_t>(s)].pos, at, 12) != 0)
+                    apply(p, b->changes, region, want[region], grow[region]);
             }
         }
 
@@ -205,7 +208,7 @@ namespace kamite::body_detail
                 body.changes = std::move(b.changes);
                 std::memcpy(body.sentinel, b.sentinel, sizeof body.sentinel);
                 body.bust = m.bust && b.sentinel[1] >= 0;
-                body.seat = m.seat && b.sentinel[2] >= 0;
+                body.seat = m.seat && b.sentinel[2] >= 0; // the detailed seat and Cash's growth on it
                 g_bodies.push_back(std::move(body));
                 it = built.emplace(m.hash, std::make_pair(static_cast<int>(g_bodies.size()) - 1, std::move(b.scr))).first;
             }

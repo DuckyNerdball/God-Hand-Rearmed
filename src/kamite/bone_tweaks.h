@@ -33,8 +33,7 @@ namespace kamite::bone_tweaks
     float money();
     void setMoney(float scale);    // 0.85 .. 1.3; above 1 the women also get the detailed bust (body_detail)
     // Cash (Options / launcher under Money, 5 % steps; F2 > NPCs; KAMITE_CASH / [Game] Cash, percent): above 1 the women's
-    // detailed seat (body_detail).
-    // No growth of its own yet (Cash's own round). Any thread.
+    // detailed seat (body_detail), grown with Cash (body_detail_build.h cashGrowthScale). Any thread.
     float cash();
     void setCash(float scale);     // 1 .. 1.3
     // The player's visible hand meshes (RH_xx / LH_xx node names), for the F2 Debug tab: which hand shape the game

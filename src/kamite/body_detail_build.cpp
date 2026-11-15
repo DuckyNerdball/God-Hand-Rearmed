@@ -1794,6 +1794,76 @@ namespace kamite::body_detail
             return bufs;
         }
 
+        // ---- Cash's growth (tools/models/body_detail/cash.py) -------------------------------------------------------
+        // At 130% per height (K's side-profile reference, Nov 15): y = 0.79, 0.80, ... 1.23, mm.
+        constexpr double kCashProfile[] = {11.4, 20.3, 20.4, 20.7, 20.7, 20.7, 20.9, 19.9, 20.7, 20.0, 18.5, 17.7,
+                                           17.2, 17.6, 21.1, 30.9, 37.8, 40.8, 41.2, 39.3, 37.2, 36.0, 35.6, 35.0,
+                                           34.2, 33.4, 32.4, 30.7, 28.7, 25.0, 23.0, 18.7, 15.1, 11.0, 7.0,  4.6,
+                                           3.5,  1.9,  0.3,  0.3,  0.7,  0.0,  0.0,  0.0,  0.0};
+        constexpr double kCashY0 = 0.79, kCashDy = 0.01;
+        constexpr double kThigh = 0.35, kCrease = 0.925, kHip = 0.35, kDown = 0.45, kUp = 0.3;
+        constexpr double kAxisX = 0.06, kAxisY = 1.00, kAxisZ = -0.03; // the cheeks' centre line
+
+        double sstep(double a, double b, double x)
+        {
+            const double t = std::clamp((x - a) / (b - a), 0.0, 1.0);
+            return t * t * (3.0 - 2.0 * t);
+        }
+        double cashProfile(double y) // np.interp, the ends held (the top end 0)
+        {
+            constexpr int n = static_cast<int>(std::size(kCashProfile));
+            const double f = (y - kCashY0) / kCashDy;
+            if (f <= 0.0)
+                return kCashProfile[0] / 1000.0;
+            if (f >= n - 1)
+                return 0.0;
+            const int i = static_cast<int>(f);
+            const double t = f - i;
+            return (kCashProfile[i] * (1.0 - t) + kCashProfile[i + 1] * t) / 1000.0;
+        }
+
+        // cash.field: the move at 130% at a position (position only, so a flap or a hem over the body moves with it).
+        D3 cashField(D3 p)
+        {
+            double g = cashProfile(p.y);
+            if (p.y < kCrease)
+                g *= kThigh + (1.0 - kThigh) * sstep(kCrease - 0.03, kCrease, p.y);
+            g *= sstep(0.72, 0.80, p.y);
+            const double ax = std::fabs(p.x);
+            const double lat = (ax < 0.02 ? 0.5 + 0.5 * sstep(0.0, 0.02, ax) : 1.0) * (1.0 - (1.0 - kHip) * sstep(0.10, 0.165, ax));
+            D3 r = p - D3{std::clamp(p.x, -kAxisX, kAxisX), kAxisY, kAxisZ};
+            r = r * (1.0 / (len(r) + 1e-12));
+            const double h = std::hypot(0.6 * r.x, r.z);
+            const double slope = std::clamp(r.y / std::max(h, 1e-6), -kDown, kUp);
+            D3 d{0.6 * r.x, slope * h, r.z};
+            d = d * (1.0 / (len(d) + 1e-12));
+            const double face = std::clamp((-r.z + 0.2) / 0.5, 0.0, 1.0);
+            const double below = 1.0 - sstep(kCrease - 0.03, kCrease, p.y); // between the thighs: little
+            const double inner = 1.0 - below * (1.0 - (0.3 + 0.7 * sstep(0.02, 0.05, ax)));
+            return d * (g * lat * face * inner);
+        }
+
+        // cash.growth: each record's move at 130% (D) and its normal there (N130), from the detailed state (P, N).
+        void cashGrowth(const std::vector<D3> &P, const std::vector<D3> &N, const std::vector<int> &tris, size_t triCount,
+                        std::vector<D3> &D, std::vector<D3> &N130)
+        {
+            const size_t R = P.size();
+            D.assign(R, D3{});
+            std::vector<D3> moved(R);
+            for (size_t i = 0; i < R; ++i)
+            {
+                D[i] = cashField(P[i]);
+                moved[i] = P[i] + D[i];
+            }
+            const std::vector<D3> sn = smoothNormals(P, tris, triCount), sn2 = smoothNormals(moved, tris, triCount);
+            N130.assign(R, D3{});
+            for (size_t i = 0; i < R; ++i)
+            {
+                const D3 n = N[i] + (sn2[i] - sn[i]);
+                N130[i] = n * (1.0 / (len(n) + 1e-12));
+            }
+        }
+
         // ---- output ------------------------------------------------------------------------------------------------
         int8_t q8(double v) { return static_cast<int8_t>(std::clamp(std::lround(v * 127.0), -127L, 127L)); }
         void quantN(D3 n, bool normalize, int8_t out[3])
@@ -1814,6 +1884,8 @@ namespace kamite::body_detail
             int vb = 0;
             float flat[3] = {}, detail[3] = {};
             int8_t flatN[3] = {}, detailN[3] = {};
+            float grow[3] = {};  // Cash: the move at 130% on top of the detailed state
+            int8_t growN[3] = {};
             int16_t uv[2] = {};
             uint8_t col[4] = {};
             uint8_t wt[8] = {};
@@ -1827,6 +1899,8 @@ namespace kamite::body_detail
                 add(detail, sizeof detail);
                 add(flatN, 3);
                 add(detailN, 3);
+                add(grow, sizeof grow);
+                add(growN, 3);
                 add(uv, sizeof uv);
                 add(col, 4);
                 add(wt, 8);
@@ -1988,6 +2062,7 @@ namespace kamite::body_detail
         // Every record in both states.
         const size_t R = m.records();
         std::vector<Rec> rec(R);
+        std::vector<D3> detP(R), detN(R); // the detailed state, for Cash's growth
         for (size_t i = 0; i < R; ++i)
         {
             Rec &r = rec[i];
@@ -2019,6 +2094,8 @@ namespace kamite::body_detail
                 dn = sr.detailN[i];
                 r.region = 2;
             }
+            detP[i] = dp;
+            detN[i] = dn;
             r.flat[0] = static_cast<float>(fp.x);
             r.flat[1] = static_cast<float>(fp.y);
             r.flat[2] = static_cast<float>(fp.z);
@@ -2038,6 +2115,27 @@ namespace kamite::body_detail
             }
             if (std::memcmp(r.flat, r.detail, 12) == 0 && std::memcmp(r.flatN, r.detailN, 3) == 0)
                 r.region = 0;
+        }
+
+        // Cash's growth, on the bodies with the detailed seat (em07's dress is too coarse: 35 positions round the seat
+        // turned into big facets, Nov 15): seat-region records (2) on top of the detailed state.
+        if (seated)
+        {
+            std::vector<D3> D, N130;
+            cashGrowth(detP, detN, m.T, m.triangles(), D, N130);
+            for (size_t i = 0; i < R; ++i)
+            {
+                Rec &r = rec[i];
+                if (r.region == 1 || len(D[i]) < 1e-5)
+                    continue;
+                r.grow[0] = static_cast<float>(D[i].x);
+                r.grow[1] = static_cast<float>(D[i].y);
+                r.grow[2] = static_cast<float>(D[i].z);
+                quantN(N130[i], true, r.growN);
+                if (r.region == 0)
+                    r.region = 2; // flat = detailed: only Cash moves it
+                ++out.cashGrown;
+            }
         }
 
         // Restripped per buffer (identical records merged first), each buffer at most kMaxVerts.
@@ -2169,6 +2267,8 @@ namespace kamite::body_detail
                 std::memcpy(c.detail, r.detail, 12);
                 std::memcpy(c.flatN, r.flatN, 3);
                 std::memcpy(c.detailN, r.detailN, 3);
+                std::memcpy(c.grow, r.grow, 12);
+                std::memcpy(c.growN, r.growN, 3);
                 c.region = r.region;
                 changes.push_back(c);
             }
@@ -2242,6 +2342,16 @@ namespace kamite::body_detail
         o.resize(size, 0u);
         out.scr = std::move(o);
         out.changes = std::move(changes);
+        // Per region a change whose position tells the states apart: the largest growth (any Cash value shows), else
+        // the first whose flat and detailed positions differ.
+        float most[3] = {0.0f, 0.0f, 0.0f};
+        for (size_t i = 0; i < out.changes.size(); ++i)
+        {
+            const Change &c = out.changes[i];
+            const float g = std::fabs(c.grow[0]) + std::fabs(c.grow[1]) + std::fabs(c.grow[2]);
+            if (g > 1e-3f && g > most[c.region])
+                most[c.region] = g, out.sentinel[c.region] = static_cast<int>(i);
+        }
         for (size_t i = 0; i < out.changes.size(); ++i)
         {
             const Change &c = out.changes[i];
@@ -2257,14 +2367,33 @@ namespace kamite::body_detail
         return true;
     }
 
-    void apply(uint8_t *mdb, const std::vector<Change> &changes, int region, bool detailed)
+    float cashGrowthScale(float cash) { return std::clamp((cash - 1.0f) / 0.3f, 0.0f, 1.0f); }
+
+    void wantedPosition(const Change &c, bool detailed, float grow, float out[3])
+    {
+        for (int k = 0; k < 3; ++k)
+            out[k] = detailed ? c.detail[k] + grow * c.grow[k] : c.flat[k];
+    }
+
+    void apply(uint8_t *mdb, const std::vector<Change> &changes, int region, bool detailed, float grow)
     {
         for (const Change &c : changes)
         {
             if (c.region != region)
                 continue;
-            std::memcpy(mdb + c.pos, detailed ? c.detail : c.flat, 12);
-            std::memcpy(mdb + c.nrm, detailed ? c.detailN : c.flatN, 3);
+            float p[3];
+            wantedPosition(c, detailed, grow, p);
+            std::memcpy(mdb + c.pos, p, 12);
+            if (!detailed || grow <= 0.0f || (c.grow[0] == 0.0f && c.grow[1] == 0.0f && c.grow[2] == 0.0f))
+            {
+                std::memcpy(mdb + c.nrm, detailed ? c.detailN : c.flatN, 3);
+                continue;
+            }
+            D3 n{c.detailN[0] * (1.0 - grow) + c.growN[0] * grow, c.detailN[1] * (1.0 - grow) + c.growN[1] * grow,
+                 c.detailN[2] * (1.0 - grow) + c.growN[2] * grow};
+            int8_t q[3];
+            quantN(n, true, q);
+            std::memcpy(mdb + c.nrm, q, 3);
         }
     }
 }

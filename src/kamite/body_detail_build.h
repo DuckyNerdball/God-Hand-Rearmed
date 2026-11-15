@@ -17,6 +17,7 @@
 // One topology serves both states: each changed vertex has a flat position (on the woman's original surface: the
 // subdivision midpoints on their edges, the seat patch at its closest points on the cut surface) and a detailed one, so
 // the shape switches live by rewriting positions and normals in place (body_detail.cpp). The file carries the flat state.
+// Cash's growth rides on the detailed seat: a third position per seat-region record (+ its move at 130% x the scale).
 // The space comes from the distance meshes (*_mip / *_mi), which never draw since the LOD was dropped (model_detail):
 // they become empty nodes and the model keeps its size.
 
@@ -57,7 +58,9 @@ namespace kamite::body_detail
         uint32_t nrm = 0; // 3 x int8
         float flat[3] = {}, detail[3] = {};
         int8_t flatN[3] = {}, detailN[3] = {};
-        uint8_t region = 0; // 1 bust, 2 seat
+        float grow[3] = {};  // Cash: the move at 130% on top of the detailed state (0 outside the growth)
+        int8_t growN[3] = {}; // the normal there
+        uint8_t region = 0; // 1 bust, 2 seat (the detailed seat and / or Cash's growth)
     };
 
     struct Built
@@ -68,7 +71,7 @@ namespace kamite::body_detail
         std::vector<Change> changes;
         int sentinel[3] = {-1, -1, -1}; // per region: a change whose position differs between the states
         size_t used = 0;           // bytes before the padding
-        int bustAdded = 0, seatPatch = 0, seatShared = 0;
+        int bustAdded = 0, seatPatch = 0, seatShared = 0, cashGrown = 0;
         std::string error;
     };
 
@@ -76,6 +79,15 @@ namespace kamite::body_detail
     // a dress over it).
     bool build(const uint8_t *scr, size_t size, const Mesh &bunny, const Mesh &shannon, bool bust, bool seat, Built &out);
 
-    // The changes written into an mdb (guest RAM or a file copy): region 1 / 2 to their flat or detailed state.
-    void apply(uint8_t *mdb, const std::vector<Change> &changes, int region, bool detailed);
+    // Cash's growth (tools/models/body_detail/cash.py): every body's seat region grown from the detailed state along a
+    // side profile K picked (Nov 15), so Cash above 101% makes the seat fuller (the most in the cheeks' lower half), the
+    // hips and upper thighs a little. Linear in Cash: the move at 130% x cashGrowthScale(Cash) (0 at 100%, 1 at 130%).
+    float cashGrowthScale(float cash);
+
+    // A change's position in a state (detailed: + grow x its growth), as apply writes it.
+    void wantedPosition(const Change &c, bool detailed, float grow, float out[3]);
+
+    // The changes written into an mdb (guest RAM or a file copy): region 1 / 2 to their flat or detailed state; grow:
+    // cashGrowthScale for the seat (the normals blended to the 130% ones).
+    void apply(uint8_t *mdb, const std::vector<Change> &changes, int region, bool detailed, float grow = 0.0f);
 }
