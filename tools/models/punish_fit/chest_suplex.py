@@ -617,7 +617,8 @@ def emit(path=PF):
 
 
 # ---- the camera (K, Nov 15): a close front shot on her chest for the grab, then round to the game's own for the end ----
-CAMERAS = (dict(side=1), dict(side=-1), dict(side=1, over=55.0), dict(side=-1, over=55.0))   # K: all four, at random
+PULL = 0.3   # the camera pulls back 30% mid-swing so the whole throw stays in frame (K asked; 60% made them small)
+CAMERAS = tuple(dict(kw, pull=PULL) for kw in (dict(side=1), dict(side=-1), dict(side=1, over=55.0), dict(side=-1, over=55.0)))   # K: all four, at random
 FOV = 25.0   # part 27's rot y (0.436 rad), the parts camera's field of view (vertical: matches K's screenshots)
 
 
@@ -658,8 +659,8 @@ class Camera:
     weight coming up, to the ground contact, f37, her body down; K: the camera moves when the characters do) round the
     pair's centre to the game's own camera, kept from the contact to the end."""
 
-    def __init__(self, ch, dist=2.3, pitch=10.0, turn=(25, 37), side=1, aim_low=0.05, over=0.0):
-        self.ch = ch; self.pair = ch.pair; self.over = over
+    def __init__(self, ch, dist=2.3, pitch=10.0, turn=(25, 37), side=1, aim_low=0.05, over=0.0, pull=0.0):
+        self.ch = ch; self.pair = ch.pair; self.over = over; self.pull = pull
         self.dist, self.pitch, self.turn, self.side, self.aim_low = dist, pitch, turn, side, aim_low
         n = len(self.pair.frames)
         self.q = [self.pair.at(t) for t in range(n)]
@@ -707,7 +708,7 @@ class Camera:
         da = (a2 - a1) % (2 * math.pi)                             # round one side (side 1) ...
         if self.side < 0:
             da -= 2 * math.pi                                      # ... or the other
-        a = a1 + da * s; r = r1 + (r2 - r1) * s
+        a = a1 + da * s; r = (r1 + (r2 - r1) * s) * (1 + self.pull * math.sin(math.pi * s))   # pulled back mid-swing
         el = el1 + (el2 - el1) * s + math.radians(self.over) * math.sin(math.pi * s)
         eye = piv + r * np.array([math.cos(el) * math.sin(a), math.sin(el), math.cos(el) * math.cos(a)])
         # the look-at: her chest, then her middle (chest to hips) while she flies, then the game's own (her landing)
