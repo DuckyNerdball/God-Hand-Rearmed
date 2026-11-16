@@ -114,13 +114,13 @@ namespace kamite::settings
         constexpr const char *kMisque = "Misqu\xC3\xA9 & Risqu\xC3\xA9";
         constexpr Setting money()
         {
-            Setting s = base("Money", Tab::Gameplay, kMisque, "Money", "", "Game", "Money", "100", Kind::Slider);
+            Setting s = base("Money", Tab::Gameplay, kMisque, "Money", "Recommended: 115%", "Game", "Money", "100", Kind::Slider);
             s.values = kMoneys, s.valueCount = static_cast<int>(std::size(kMoneys)), s.unit = "%";
             return s;
         }
         constexpr Setting cash()
         {
-            Setting s = base("Cash", Tab::Gameplay, kMisque, "Cash", "", "Game", "Cash", "100", Kind::Slider);
+            Setting s = base("Cash", Tab::Gameplay, kMisque, "Cash", "Recommended: 115%", "Game", "Cash", "100", Kind::Slider);
             s.values = kCashes, s.valueCount = static_cast<int>(std::size(kCashes)), s.unit = "%";
             return s;
         }
