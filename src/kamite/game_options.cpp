@@ -924,6 +924,7 @@ namespace kamite
 
         constexpr float kSwayLagStep = 0.08f;         // the magenta's shrink after a stun, of the width a draw
         constexpr uint32_t kLastBossTint = 0x00086080u; // r 0x80, g 0x60, b 0x08 (0x80 = x1): B3's orange-yellow on his strip
+        constexpr uint32_t kLastBossTrack = 0x50000000u; // translucent black behind his gauge
         std::unordered_map<uint32_t, float> g_swayLag; // game thread: enemy -> the magenta's width (0..1)
         uint32_t g_gaugeOnly = 0u; // the mid-boss whose enemy health bar is being drawn for its gauge alone
         std::unordered_set<uint32_t> g_midStun; // mid-bosses that have built stun (their gauge shows)
@@ -1048,7 +1049,7 @@ namespace kamite
         // also reached by its early returns: its tests are repeated here) two more passes over the layout: the lag
         // copy of the bar's own pieces at half height under it (below).
         std::unordered_map<uint32_t, uint32_t> g_bossSeen; // bar -> the boss it has seen stun on
-        std::unordered_set<uint32_t> g_bossLogged, g_bossDrawn;
+        
 
         void bossGauge(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t bar, uint32_t boss, uint32_t fillEnt,
                        uint32_t lagEnt, const char *what, uint32_t hideA = 0u, uint32_t hideB = 0u, bool vertical = false);
@@ -1112,18 +1113,12 @@ namespace kamite
         }
 
         void bossGauge(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t bar, uint32_t boss, uint32_t fillEnt,
-                       uint32_t lagEnt, const char *what, uint32_t hideA, uint32_t hideB, bool vertical)
+                       uint32_t lagEnt, const char * /*what*/, uint32_t hideA, uint32_t /*hideB*/, bool vertical)
         {
             const int32_t build = static_cast<int32_t>(ram32(rdram, boss + 0x5B4u));
             float stun = ramF(rdram, boss + 0x17CCu) / kStunTime;
-            if (g_bossDrawn.insert(boss).second) // temporary (K, Nov 12: which bosses build stun)
-                KM_INFO(Game, "sway bar: boss " << std::hex << ram32(rdram, boss + 0x564u) << std::dec << " has " << what);
             if ((build > 0 || stun > 0.0f) && g_bossSeen[bar] != boss)
-            {
                 g_bossSeen[bar] = boss;
-                KM_INFO(Game, "sway bar: boss " << std::hex << ram32(rdram, boss + 0x564u) << std::dec << " builds stun (" << build
-                                                << ", " << stun * kStunTime << ")");
-            }
             const auto seen = g_bossSeen.find(bar);
             if (seen == g_bossSeen.end() || seen->second != boss)
                 return;
@@ -1139,20 +1134,6 @@ namespace kamite
                 lag = std::max(0.0f, lag - kSwayLagStep);
             }
             stun = std::clamp(stun, 0.0f, 1.0f);
-            if (g_bossLogged.insert(boss).second) // temporary: the boss bar's geometry for the first look (K, Nov 12)
-                for (uint32_t i = 0, e = ram32(rdram, bar + 0x4u); i < std::min(ram32(rdram, bar + 0xCu), 64u); ++i, e += 0xACu)
-                    KM_INFO(Game, "sway bar: boss " << std::hex << ram32(rdram, boss + 0x564u) << " entry " << e << " flags "
-                                                    << ram32(rdram, e + 0x2Cu) << " colour " << ram32(rdram, e + 0x64u) << std::dec
-                                                    << " id " << int(static_cast<int8_t>(rdram[e + 0x2Au])) << " kind "
-                                                    << int(rdram[e + 0x89u]) << " draw " << ramF(rdram, e + 0x50u) << ","
-                                                    << ramF(rdram, e + 0x54u) << " scl " << ramF(rdram, e + 0x58u) << ","
-                                                    << ramF(rdram, e + 0x5Cu) << " size " << ramF(rdram, e + 0x68u) << "x"
-                                                    << ramF(rdram, e + 0x6Cu) << " uv " << ramF(rdram, e + 0x70u) << ","
-                                                    << ramF(rdram, e + 0x74u) << "-" << ramF(rdram, e + 0x78u) << ","
-                                                    << ramF(rdram, e + 0x7Cu) << " base " << ramF(rdram, e + 0x40u) << ","
-                                                    << ramF(rdram, e + 0x44u) << " tex " << std::hex << ram32(rdram, e + 0x24u)
-                                                    << " parent " << ram32(rdram, e + 0x20u) << std::dec << " layer "
-                                                    << int(static_cast<int8_t>(rdram[e + 0x2Bu])) << (e == fillEnt ? " FILL" : e == lagEnt ? " LAG" : ""));
             struct Saved
             {
                 uint32_t flags, colour;
@@ -1192,6 +1173,18 @@ namespace kamite
                 {
                     const uint32_t e = ent + i * 0xACu;
                     const Saved &k = saved[i];
+                    if (e == hideA && hideA != fillEnt)
+                    {
+                        // The track behind it (K, Nov 16: the copy looked detached): the second life's strip, drawn
+                        // before the fill (earlier in the list), full height in translucent black like the enemies'.
+                        putF(rdram, e + 0x50u, x0 + shift + (k.x - x0) * 0.5f);
+                        putF(rdram, e + 0x54u, fs.y);
+                        putF(rdram, e + 0x58u, k.sclX * 0.5f);
+                        putF(rdram, e + 0x5Cu, ramF(rdram, e + 0x6Cu) > 0.001f ? fullH / ramF(rdram, e + 0x6Cu) : 1.0f);
+                        put32(rdram, e + 0x64u, kLastBossTrack);
+                        put32(rdram, e + 0x2Cu, k.flags & ~kEntNoDraw); // (shown even once the second life is gone)
+                        continue;
+                    }
                     if ((e != fillEnt && e != lagEnt) || (k.flags & kEntNoDraw) != 0u)
                     {
                         put32(rdram, e + 0x2Cu, k.flags | kEntNoDraw);
