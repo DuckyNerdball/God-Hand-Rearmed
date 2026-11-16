@@ -321,6 +321,18 @@ namespace kamite::bone_tweaks
         // Spanking (K, Nov 16): each slap kicks the seat's spring down the body (toward her legs) at this speed (m/s; the
         // launching slap x1.5), on top of the motion's own reaction (K, Nov 16: 200% of the first try).
         constexpr float kSlapSpeed = 0.70f;
+        // K (Nov 16): that alone barely reads (it moves the seat along the body). Each slap also dents the cheeks inward
+        // (the pelvis' z, toward her front) on a quicker, springier spring of its own that bounces back out.
+        constexpr float kDentSpeed = 0.45f, kDentRate = 1.6f, kDentDamp = 0.45f;
+        // The bust between 100% and 130% (K, Nov 16: at 115% too quick, "jell-o", flicking, raised in the dizzy idle; 130%
+        // right): the springs' rate / damping and the blend from the game's bounce follow u = 1 - (1 - t)^2, so the
+        // middle sizes are already close to the 130% weight; firm end 2.0 Hz / 0.7.
+        constexpr float kBustFirmHz = 2.0f, kBustFirmDamp = 0.7f;
+        float bustU(float money)
+        {
+            const float t = std::clamp((money - 1.0f) / 0.3f, 0.0f, 1.0f);
+            return 1.0f - (1.0f - t) * (1.0f - t);
+        }
         // The springs by size (t = (Money or Cash - 1) / 0.3, linear): at 130% K's values from play (Nov 16: rate 1.14 Hz,
         // damping 1.0, strength 1.0, side swing 0.69, left / right rates 14% apart, the same for bust and seat); a
         // smaller bust or seat is firmer (K): quicker, a little springier (jiggles in place), smaller peaks, less side
@@ -343,6 +355,7 @@ namespace kamite::bone_tweaks
             uint32_t frame = 0, seen = 0;
             bool live = false;
             Spring seat, breast[2]; // breast 0: her left (29), 1: her right (28)
+            float dent = 0.0f, dentVel = 0.0f; // the slap's dent (m, into the cheeks)
             float envGame = 0.0f, envOurs = 0.0f; // recent peak of the game's bounce / our springs' pitch (radians)
         };
         std::unordered_map<uint32_t, JigState> g_jigs; // game thread, by model
@@ -417,6 +430,7 @@ namespace kamite::bone_tweaks
                 resetSpring(st.seat, seatSpot);
                 resetSpring(st.breast[0], breastSpot[0]);
                 resetSpring(st.breast[1], breastSpot[1]);
+                st.dent = st.dentVel = 0.0f;
                 st.live = true;
                 st.frame = frame;
             }
@@ -427,10 +441,26 @@ namespace kamite::bone_tweaks
                 stepDt = dt;
                 const float spread = jig(kSpread, money); // left x (1 + spread), right x (1 - spread), as K tuned it
                 if (const float slap = punish_fit::seatSlap(rdram, model); slap > 0.0f && cash > kOn && (jg.flags & 1))
+                {
                     st.seat.vel = sub(st.seat.vel, mulf(unit(row(pelvis, 1)), kSlapSpeed * slap));
+                    st.dentVel += kDentSpeed * slap;
+                }
                 stepSpring(st.seat, seatSpot, dt, jig(kHz, cash), jig(kDamp, cash));
-                stepSpring(st.breast[0], breastSpot[0], dt, jig(kHz, money) * (1.0f + spread), jig(kDamp, money));
-                stepSpring(st.breast[1], breastSpot[1], dt, jig(kHz, money) * (1.0f - spread), jig(kDamp, money));
+                {
+                    const float w = 2.0f * 3.14159265f * jig(kHz, cash) * kDentRate, k = w * w, c = 2.0f * kDentDamp * w;
+                    const int n = std::clamp(static_cast<int>(std::ceil(dt * 240.0f)), 1, 32);
+                    const float h = dt / static_cast<float>(n);
+                    for (int i = 0; i < n; ++i)
+                    {
+                        st.dentVel += (-k * st.dent - c * st.dentVel) * h;
+                        st.dent += st.dentVel * h;
+                    }
+                }
+                const float u = bustU(money);
+                const float bustHz = kBustFirmHz + (kJigFull[kHz] - kBustFirmHz) * u;
+                const float bustDamp = kBustFirmDamp + (kJigFull[kDamp] - kBustFirmDamp) * u;
+                stepSpring(st.breast[0], breastSpot[0], dt, bustHz * (1.0f + spread), bustDamp);
+                stepSpring(st.breast[1], breastSpot[1], dt, bustHz * (1.0f - spread), bustDamp);
                 st.frame = frame;
             }
 
@@ -443,6 +473,7 @@ namespace kamite::bone_tweaks
                     const Vec D = sub(st.seat.tip, st.seat.rest);
                     const Vec ux = unit(row(pelvis, 0)), uy = unit(row(pelvis, 1));
                     d = mulf(Vec{dot(D, ux) * jig(kSide, cash), dot(D, uy), 0.0f}, jig(kGain, cash) * cash);
+                    d[2] += st.dent * cash;
                     if (const float l = length(d); l > kSeatMax)
                         d = mulf(d, kSeatMax / l);
                 }
@@ -464,14 +495,14 @@ namespace kamite::bone_tweaks
             }
             // Both breasts on their own springs: bone b of breast i = s Rb Q_i, at t29 + s Rb (Q_i (B_b - B29 - o_i) + o_i).
             // K (Nov 16): just above 100% the bust must move at least as much as the game's own bounce (Money off), the
-            // side swing as strong as that up and down, growing to his 130% tuning. So by t (0 at 100%, 1 at 130%): the
-            // pitch blends the game's bounce (bone 29 as cObjSimple_MoveBust left it) into our spring's; the springs'
+            // side swing as strong as that up and down, growing to his 130% tuning. So by t = bustU (0 at 100%, 1 at
+            // 130%): the pitch blends the game's bounce (bone 29 as cObjSimple_MoveBust left it) into our spring's; the springs'
             // response is kept at the 130% size whatever their firmness (gain x (rate / 130%'s rate)^2: quicker, not
             // smaller); the side swing is scaled from the game's bounce (recent peak of it / of our pitch) toward ours,
             // side ratio 1.0 -> K's 0.69.
             const float hold = std::clamp(punish_fit::bustHold(rdram, model), 0.0f, 1.0f);
-            const float t = std::clamp((money - 1.0f) / 0.3f, 0.0f, 1.0f);
-            const float rate = jig(kHz, money) / kJigFull[kHz];
+            const float t = bustU(money); // the blend weight (u, see bustU)
+            const float rate = (kBustFirmHz + (kJigFull[kHz] - kBustFirmHz) * t) / kJigFull[kHz];
             const float gain = kJigFull[kGain] * rate * rate;
             const float side = 1.0f + (kJigFull[kSide] - 1.0f) * t;
             Bone gameBust = bust; // bone 29 before placeMoney's scale and droop

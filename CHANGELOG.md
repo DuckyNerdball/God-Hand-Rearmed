@@ -10,8 +10,9 @@ Newest first, one line per change; the code comments say how.
 - 60 FPS: menu animations (pause menu, map, shop, continue screen) play at the original speed.
 - 60 FPS: HUD animations (roulette wheel, tutorial pop-ups, technique scrolls, money, point pop-ups, boss bars, Now Loading) play at the original speed.
 - 60 FPS: fixed the wait before the continue screen being half as long.
-- Cash above 100%: each Spanking slap jolts the seat.
+- Cash above 100%: each Spanking slap jolts and dents the seat.
 - Money above 100%: the bust moves at least as much as the original bounce, with matching side-to-side sway, growing up to 130%.
+- Money between 100% and 130%: heavier, slower bust motion (no more jelly flicks at the middle sizes).
 - Add to Steam: new cover art by masterlynx.
 
 ## November 15, 2026
