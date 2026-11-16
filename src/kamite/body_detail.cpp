@@ -257,19 +257,22 @@ namespace kamite::body_detail
             std::memcpy(&kind, rdram + ((owner + 0x2FEu) & PS2_RAM_MASK), 2);
             if (kind != 0x252u && kind != 0x2A6u)
                 return false;
+            // The step keeps its nodes by bone number (node = nodes + bone x 0xA0, func_00104010 at 0x1042E4), the chain
+            // tables (work +4 bones, +0x18 parent bones) by chain index: Shannon's are bones 33-38 with parents
+            // 255 / 33 / 34 / 255 / 36 / 37 (255: hung from the skeleton, bone 4).
             const uint32_t count = rd32(rdram, work), list = rd32(rdram, work + 4u), parents = rd32(rdram, work + 0x18u);
             if (pos < nodes + 0x40u || (pos - nodes - 0x40u) % 0xA0u != 0u || count > 32u || !inRam(list, 32u) || !inRam(parents, 32u))
                 return false;
-            const uint32_t idx = (pos - nodes - 0x40u) / 0xA0u;
+            const uint32_t bone = (pos - nodes - 0x40u) / 0xA0u;
+            uint32_t idx = count;
+            for (uint32_t i = 0; i < count; ++i)
+                if (rdram[(list + i) & PS2_RAM_MASK] == bone)
+                    idx = i;
             if (idx >= count)
                 return false;
             const uint8_t parentBone = rdram[(parents + idx) & PS2_RAM_MASK];
-            uint32_t pidx = count;
-            for (uint32_t i = 0; i < count; ++i)
-                if (rdram[(list + i) & PS2_RAM_MASK] == parentBone)
-                    pidx = i;
             const uint32_t part = pelvisPart(rdram, owner);
-            if (parentBone == 0xFFu || pidx >= count || part == 0u)
+            if (parentBone == 0xFFu || part == 0u)
                 return false;
             float A[3][3], t[3];
             for (int r = 0; r < 3; ++r)
@@ -295,7 +298,7 @@ namespace kamite::body_detail
                     out[c] = d[0] * I[0][c] + d[1] * I[1][c] + d[2] * I[2][c];
             };
             float lp[3], ln[3];
-            local(nodes + pidx * 0xA0u + 0x40u, lp);
+            local(nodes + parentBone * 0xA0u + 0x40u, lp);
             local(pos, ln);
             const float grow = bone_tweaks::cash() > kOn ? cashGrowthScale(bone_tweaks::cash()) : 0.0f;
             float need = 0.0f;
@@ -329,7 +332,15 @@ namespace kamite::body_detail
             if (ctx->pc != ra) // unwound
                 return;
             if (hairBehindSeat(rdram, pos))
+            {
                 SET_GPR_U32(ctx, 2, 1u);
+                static bool logged = false; // (strip once K confirms the fix)
+                if (!logged)
+                {
+                    logged = true;
+                    KM_INFO(Game, "body detail: Shannon's hair kept behind her seat (first push this run)");
+                }
+            }
         }
 
         bool readDonor(const char *path, const char *node, Mesh &out)
