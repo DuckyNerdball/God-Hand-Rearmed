@@ -199,6 +199,18 @@ flag = "fps60"
 address = "0x001426C0"
 value = "0x34213176"
 flag = "fps60"
+# Its glow (alpha +0x26E, 0 -> 76 -> 0 by 3 a frame while the bar fills; +0x26F = rising) pulsed twice as fast at 60:
+# 2 on the tick, 1 on the second half (immSplit), the PS2's 52-frame cycle.
+[[patches.hooks]] # lbu v0,0x26E(s2); addiu v0,v0,3
+address = "0x001425D4"
+hook = "km_fps60_tension_flash_up"
+flag = "fps60"
+replace = true
+[[patches.hooks]] # lbu v0,0x26E(s2); addiu v0,v0,-3
+address = "0x00142608"
+hook = "km_fps60_tension_flash_down"
+flag = "fps60"
+replace = true
 
 # The health bars (Nov 9, decomp cIDLifeBar.h): Gene's (func_0013F5D0), the boss bar (cCockBossBar, func_0013C950), the
 # last boss's two-segment bar (cIDLifeBar, func_0013E970) and the enemies' (func_0028F108 / func_0028F5B0, the lag
@@ -884,7 +896,7 @@ address = "0x001641E0"
 hook = "km_map_back_sound"
 replace = true
 flag = "map_back_sound"
-# Gene's coat wind in the roulette (the coat's step func_00100CE0, while the player's +0x3AC bit 0x800 is set): the
+# Gene's coat wind in the roulette (the coat's step cPartner_moveHover, while the player's +0x3AC bit 0x800 is set): the
 # push on the coat is (sin(phase) + 1) / 2 x 0.1 with the phase 0x3BC740 += 0.8 a frame, so at 60 the coat flapped
 # twice as fast. At 60 the step is 0.4 (the add.s at 0x100E50).
 [[patches.hooks]]
@@ -3187,7 +3199,7 @@ address = "0x0025DDD8"
 hook = "km_fps60_countdown_v1"
 flag = "fps60"
 replace = true
-[[patches.hooks]] # func_0025DE58 lhu +0x56E
+[[patches.hooks]] # cEm_heldByPlayerPhase lhu +0x56E
 address = "0x0025E0D0"
 hook = "km_fps60_countdown"
 flag = "fps60"
@@ -3657,12 +3669,12 @@ address = "0x00194F78"
 hook = "km_fps60_countdown_self"
 flag = "fps60"
 replace = true
-[[patches.hooks]] # func_00195068 lhu +0xAF0
+[[patches.hooks]] # cOmBreakable_stepBreak lhu +0xAF0
 address = "0x001951E0"
 hook = "km_fps60_countdown_self"
 flag = "fps60"
 replace = true
-[[patches.hooks]] # func_00195068 lhu +0xAF0
+[[patches.hooks]] # cOmBreakable_stepBreak lhu +0xAF0
 address = "0x00195208"
 hook = "km_fps60_countdown_self"
 flag = "fps60"

@@ -1976,7 +1976,7 @@ namespace kamite
             ctx->f[Dst] = skipFrame(rdram) ? ctx->f[A] : ctx->f[A] + ctx->f[B];
         }
         // A per-frame phase step taken at half size (an oscillation, smooth at 60 where the parity form would hold
-        // each value for two frames): Gene's coat wind in the roulette (func_00100CE0, phase 0x3BC740 += 0.8 a frame) and
+        // each value for two frames): Gene's coat wind in the roulette (cPartner_moveHover, phase 0x3BC740 += 0.8 a frame) and
         // the cloth step's swing phase (func_00104010, work +0x48 += frand x 1.2, and x work +0x70 in the wind).
         template <int Dst, int A, int B>
         void floatAddHalf(uint8_t *, R5900Context *ctx, PS2Runtime *)
@@ -2325,6 +2325,17 @@ namespace kamite
         {
             const int32_t step = GPR_S32(ctx, B), half = step / 2;
             SET_GPR_S32(ctx, Dst, GPR_S32(ctx, A) + (skipFrame(rdram) ? half : step - half));
+        }
+        // addiu Reg,Reg,Step with a whole per-frame step (an integer the game shows, no rate): the same split as
+        // stepSplit with the step in the instruction. The tension bar's glow (cCockPlBar's move func_00142060, alpha
+        // +0x26E going 0 -> 76 -> 0 by 3 a frame while the bar fills, +0x26F = up): 2 on the tick, 1 on the second
+        // half, so the pulse keeps the PS2's 52-frame cycle (104 vblanks) and still moves every vblank. For k: Step
+        // split into k parts.
+        template <int Reg, int Step>
+        void immSplit(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            constexpr int32_t half = Step / 2;
+            SET_GPR_S32(ctx, Reg, GPR_S32(ctx, Reg) + (skipFrame(rdram) ? half : Step - half));
         }
         // `lw v0,X(base)` before a countdown whose `addiu v0,v0,-1` sits in a branch delay slot (no hook there): on the
         // skipped frames the loaded value is raised by one and the decrement stores it back unchanged (the zero test
@@ -2752,6 +2763,8 @@ namespace kamite
         // The world lights (cWorldLight_Move; kamite.toml "World lights").
         ps2xRegisterHostHook("km_fps60_light_flicker_cd", &countdownLoadAny<16, 0x12u, 2, 1>);
         ps2xRegisterHostHook("km_fps60_light_phase_split", &stepSplit<3, 3, 2>);
+        ps2xRegisterHostHook("km_fps60_tension_flash_up", &immSplit<2, 3>);
+        ps2xRegisterHostHook("km_fps60_tension_flash_down", &immSplit<2, -3>);
         ps2xRegisterHostHook("km_fps60_countup_self", &countupSelf);
         // The 1 -> 0 step's guards (countdownGuard): the signed test loads in front of hooked decrements.
         ps2xRegisterHostHook("km_fps60_cd_guard_s1_568", &countdownGuard<17, 0x568u, 2, 2, 1>);
