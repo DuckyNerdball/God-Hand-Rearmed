@@ -289,73 +289,6 @@ namespace
     }
 }
 
-namespace
-{
-    // Fullscreen hand-off (K, Nov 16: black after Play until the Start menu or F11, borderless only, any aspect). The
-    // launcher presents with OpenGL into this window; borderless, its swap chain fills the monitor and Windows flips it
-    // straight to the screen. The game then stops presenting into it (the GS draws into the child window), so its last
-    // frame (Play's fade to black) stays on screen until a window overlaps it and Windows composes the window again,
-    // child included: what the Start menu did. So, once the GS has presented a few frames (and again a little later),
-    // a 1-pixel, nearly transparent, topmost window sits over the window's corner for a few frames, then goes.
-    HWND g_composeNudge = nullptr;
-    int g_composeNudgeTicks = 0;
-    int g_composeNudges = 0;
-    constexpr uint64_t kComposeNudgeAt[2] = {30u, 180u}; // GS presents
-
-    bool fillsMonitor(HWND window)
-    {
-        RECT rect{};
-        MONITORINFO info{};
-        info.cbSize = sizeof(info);
-        if (!GetWindowRect(window, &rect) || !GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &info))
-            return false;
-        return rect.left <= info.rcMonitor.left && rect.top <= info.rcMonitor.top && rect.right >= info.rcMonitor.right &&
-               rect.bottom >= info.rcMonitor.bottom;
-    }
-
-    void composeNudge()
-    {
-        static const wchar_t *const kClass = []
-        {
-            WNDCLASSW wc{};
-            wc.lpfnWndProc = DefWindowProcW;
-            wc.hInstance = GetModuleHandleW(nullptr);
-            wc.lpszClassName = L"ps2x_compose_nudge";
-            RegisterClassW(&wc);
-            return wc.lpszClassName;
-        }();
-        RECT rect{};
-        GetWindowRect(g_parent, &rect);
-        g_composeNudge = CreateWindowExW(WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                                         kClass, L"", WS_POPUP, rect.right - 1, rect.bottom - 1, 1, 1, nullptr, nullptr,
-                                         GetModuleHandleW(nullptr), nullptr);
-        if (!g_composeNudge)
-            return;
-        SetLayeredWindowAttributes(g_composeNudge, 0, 1, LWA_ALPHA);
-        ShowWindow(g_composeNudge, SW_SHOWNOACTIVATE);
-        g_composeNudgeTicks = 4;
-    }
-
-    void composeNudgeTick()
-    {
-        if (g_composeNudge)
-        {
-            if (--g_composeNudgeTicks <= 0)
-            {
-                DestroyWindow(g_composeNudge);
-                g_composeNudge = nullptr;
-            }
-            return;
-        }
-        if (g_composeNudges < 2 && g_presents.load(std::memory_order_relaxed) >= kComposeNudgeAt[g_composeNudges])
-        {
-            ++g_composeNudges;
-            if (fillsMonitor(g_parent))
-                composeNudge();
-        }
-    }
-}
-
 void GSPcsx2Backend::AttachHostWindow(void *parentHwnd)
 {
     if (!Requested() || !parentHwnd || g_child)
@@ -375,7 +308,6 @@ void GSPcsx2Backend::HostTick()
 {
     if (!g_child)
         return;
-    composeNudgeTick();
     // A graphics API switch: the new window under the old one (the old one keeps showing the picture until the GS
     // presents into the new one), then, once the GS has, the old one goes.
     if (g_apiStep.load(std::memory_order_acquire) == ApiStep::Window)

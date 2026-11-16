@@ -13,7 +13,6 @@ Newest first, one line per change; the code comments say how.
 - Voices slider preview: Gene now speaks on the title screen too (was a hiss).
 - Voices slider preview waits until you let go of the slider (holding it made the line hitch).
 - Screen fades cover the whole screen at 21:9 and wider (only the lower half went dark).
-- Fullscreen: the game shows after Play instead of a black screen until a key like Start or F11 was pressed.
 - Signal Style Switch is on by default.
 - New keyboard & mouse layout for new installs: WASD move, Shift + WASD dodge, Space / E / left click / right click for the face buttons, Q turn, R roulette, F taunt, G God Hand, middle click brawl / freecam, 1-4 styles, Esc pause.
 - Dodge Modifier (Shift by default, rebindable): hold it to dodge with the move keys, in brawl mode and freecam.
