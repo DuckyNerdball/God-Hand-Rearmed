@@ -12,7 +12,10 @@ game's own (options_pages.cpp from the shared settings list over the repo's GHR.
 hints' buttons (the default bindings: cross / circle / triangle on the bottom / right / top buttons, keys K / L / I).
 --page mapping: CONTROLS > BUTTON MAPPING (mapping_page.cpp) for the --prompts set's pad over the repo's GHR.ini;
 --line the selected button (south, east, l1, select, l4 ...), --swap exchanges two buttons' actions, --extra sets what
-Select or a paddle holds, --paddles the paddles the controller reports, --readonly shows a launcher layout. Needs Pillow.
+Select or a paddle holds, --paddles the paddles the controller reports, --readonly shows a launcher layout.
+--page keys: the keyboard's BUTTON MAPPING (keys_page.cpp) with the default layout's keys; --keys-row the selected row,
+--keys-mode capture / reset, --keys-label Key=Label (Cross=J) over the defaults; use --prompts keys for its hints.
+Needs Pillow.
 """
 import argparse, hashlib, os, re, shutil, struct, subprocess, tempfile
 from PIL import Image
@@ -27,7 +30,8 @@ def build(work):
     sources = [os.path.join(ROOT, 'tools/options/overlay_preview.cpp')] + \
               [os.path.join(ROOT, 'src/kamite', f) for f in ('options_overlay.cpp', 'options_overlay.h', 'options_pages.cpp',
                                                              'options_pages.h', 'settings_table.cpp', 'settings_table.h',
-                                                             'ini_file.cpp', 'mapping_page.cpp', 'mapping_page.h')]
+                                                             'ini_file.cpp', 'mapping_page.cpp', 'mapping_page.h',
+                                                             'keys_page.cpp', 'keys_page.h')]
     key = hashlib.sha1(m.group(0).encode() + b''.join(open(f, 'rb').read() for f in sources)).hexdigest()[:16]
     cached = os.path.join(tempfile.gettempdir(), 'overlay_preview_' + key)
     if os.path.exists(cached):
@@ -40,7 +44,7 @@ def build(work):
                            '-o', exe, os.path.join(ROOT, 'tools/options/overlay_preview.cpp')] +
                           [os.path.join(ROOT, 'src/kamite', f) for f in ('options_overlay.cpp', 'options_pages.cpp',
                                                                          'settings_table.cpp', 'ini_file.cpp',
-                                                                         'mapping_page.cpp')] +
+                                                                         'mapping_page.cpp', 'keys_page.cpp')] +
                           [os.path.join(IMGUI, 'src', f) for f in ('imgui.cpp', 'imgui_draw.cpp', 'imgui_widgets.cpp', 'imgui_tables.cpp')])
     shutil.copyfile(exe, cached)
     os.chmod(cached, 0o755)
@@ -51,7 +55,8 @@ HINT_ART = {'xbox': ('xbox360', '360_A', '360_B', '360_Y', '360_LB', '360_RB'),
             'playstation': ('ps3', 'PS3_Cross', 'PS3_Circle', 'PS3_Triangle', 'PS3_L1', 'PS3_R1'),
             'nintendo': ('switch', 'Switch_B', 'Switch_A', 'Switch_X', 'Switch_LB', 'Switch_RB'),
             'steam': ('steamdeck', 'SteamDeck_A', 'SteamDeck_B', 'SteamDeck_Y', 'SteamDeck_L1', 'SteamDeck_R1'),
-            'keys': ('keyboard', 'K_Key_Light', 'L_Key_Light', 'I_Key_Light', 'Q_Key_Light', 'E_Key_Light')}
+            # The keyboard in menus (K, Nov 16): its fixed keys, whatever the menu style (see hint_paths).
+            'keys': ('keyboard', 'Enter_Key_Light', 'Esc_Key_Light', 'Esc_Key_Light', 'Q_Key_Light', 'E_Key_Light')}
 
 def title_letters():
     """Each title's letters (alpha over half, as options_screen measures them): name:left:right;..."""
@@ -71,6 +76,8 @@ def hint_paths(work, menu, prompts):
         open(out + '.rgba', 'wb').write(struct.pack('<II', *im.size) + im.tobytes())
         return out
     shoulders = [path(l1), path(r1)]
+    if prompts == 'keys':  # Enter confirms, Esc goes back in every menu style
+        return [path(cross), '', path(circle)] + shoulders
     if menu == 'japanese':
         return [path(circle), '', path(cross)] + shoulders
     if menu == 'classic':
@@ -84,7 +91,10 @@ def main():
     ap.add_argument('--title', action='store_true', help='the title screen\'s list (else the pause\'s)')
     ap.add_argument('--cursor', type=int, default=0)
     ap.add_argument('--confirm', type=int, default=-1, help='row asking Yes / No')
-    ap.add_argument('--page', choices=['controls', 'display', 'graphics', 'interface', 'gameplay', 'sound', 'mapping'], help='the mockup page beside the list (or open)')
+    ap.add_argument('--page', choices=['controls', 'display', 'graphics', 'interface', 'gameplay', 'sound', 'mapping', 'keys'], help='the mockup page beside the list (or open)')
+    ap.add_argument('--keys-mode', choices=['browse', 'capture', 'reset'], default='browse', help='keys: what is armed')
+    ap.add_argument('--keys-row', type=int, default=0, help='keys: the selected row')
+    ap.add_argument('--keys-label', action='append', default=[], help='keys: Key=Label over the defaults (Cross=J)')
     ap.add_argument('--line', default='', help='mapping: the selected button')
     ap.add_argument('--swap', action='append', default=[], help='mapping: A:B exchanges two buttons\' actions')
     ap.add_argument('--extra', action='append', default=[], help='mapping: PLACE=none|quicksave|quickload|saveload|PLACE '
@@ -121,7 +131,7 @@ def main():
         open(path + '.rgba', 'wb').write(struct.pack('<II', *im.size) + im.tobytes())
         bars.append(path)
     fonts = os.path.join(ROOT, 'resources/fonts')
-    page = {'controls': 0, 'display': 1, 'graphics': 2, 'interface': 3, 'gameplay': 4, 'sound': 5, 'mapping': 0}.get(a.page, -1)
+    page = {'controls': 0, 'display': 1, 'graphics': 2, 'interface': 3, 'gameplay': 4, 'sound': 5, 'mapping': 0, 'keys': 0}.get(a.page, -1)
     env = dict(os.environ, KAMITE_PREVIEW_HINTS='|'.join(hint_paths(work, a.menu, a.prompts)),
                KAMITE_PREVIEW_TITLES=title_letters(), KAMITE_PREVIEW_SWITCH=a.switch)
     menu = {'western': 'western', 'japanese': 'japanese', 'classic': 'classic'}[a.menu]
@@ -146,6 +156,21 @@ def main():
         env['KAMITE_PREVIEW_MAPPING'] = '|'.join([work, os.path.join(art_dir, 'pad_%s.txt' % pad), folder, a.line,
                                                   '1' if a.readonly else '0', ','.join(a.swap), ';'.join(a.extra), a.drum, a.armed,
                                                   str(a.paddles)])
+    if a.page == 'keys':
+        art_dir = os.path.join(work, 'resources/options/mapping')
+        os.makedirs(art_dir, exist_ok=True)
+        src = os.path.join(ROOT, 'resources/options/mapping')
+        for name in os.listdir(src):
+            if name.endswith('.png'):
+                im = Image.open(os.path.join(src, name)).convert('RGBA')
+                open(os.path.join(art_dir, name) + '.rgba', 'wb').write(struct.pack('<II', *im.size) + im.tobytes())
+        icons = os.path.join(work, 'resources/prompts/xelu/keyboard')
+        os.makedirs(icons, exist_ok=True)
+        for name in os.listdir(os.path.join(ROOT, 'resources/prompts/xelu/keyboard')):
+            if name.endswith('.png'):
+                im = Image.open(os.path.join(ROOT, 'resources/prompts/xelu/keyboard', name)).convert('RGBA')
+                open(os.path.join(icons, name) + '.rgba', 'wb').write(struct.pack('<II', *im.size) + im.tobytes())
+        env['KAMITE_PREVIEW_KEYS'] = '|'.join([art_dir, icons, str(a.keys_row), a.keys_mode, ';'.join(a.keys_label)])
     subprocess.check_call([exe, raw_in, str(w), str(h), raw_out, '0' if a.title else '1', str(a.cursor), str(a.confirm),
                            os.path.join(fonts, 'ArchivoNarrow-SemiBold.ttf'),
                            os.path.join(fonts, 'DejaVuSans-Bold.ttf'), title] + bars[:2] +

@@ -210,6 +210,9 @@ namespace kamite::options_overlay
         constexpr float kResetSqueeze = 5519.0f / 6553.0f;
         // The hints' second line (Reset) this far above the first.
         constexpr float kHintLineStep = 27.0f;
+        // The keyboard's page (keys()): two columns kKeysGutter either side of the middle, each at most kKeysWidth wide,
+        // rows kKeysStep apart (less when they do not fit) between the CONTROLS title and the help band.
+        constexpr float kKeysTop = 58.0f, kKeysBottom = 350.0f, kKeysStep = 33.0f, kKeysWidth = 196.0f, kKeysGutter = 8.0f;
         // The panels' wash (panel.png: opaque at the outer end, nothing at the pad): the original's tan, 0.40 at the
         // outer end; a fixed line's panel, lines and text muted (K: tell the remappable ones apart).
         constexpr uint32_t kMapPanelTint = rgba(147, 115, 88, 102), kMapPanelOn = rgba(160, 125, 92, 150);
@@ -1155,6 +1158,68 @@ namespace kamite::options_overlay
                 }
             }
 
+            // CONTROLS > BUTTON MAPPING with the keyboard (K, Nov 16): two columns either side of the middle, under the
+            // CONTROLS title; each row a BUTTON MAPPING label (panel, underscore, the key's picture, the action).
+            void keys(const KeysView &k)
+            {
+                const int n = std::max(k.rowCount, 0), nl = std::clamp(k.leftCount, 0, n), nr = n - nl;
+                const int most = std::max(std::max(nl, nr), 1);
+                const float cx = 0.5f * space.area;
+                const float width = std::min(kKeysWidth, cx - kKeysGutter - kMapEdge);
+                const float step = std::min(kKeysStep, (kKeysBottom - kKeysTop) / static_cast<float>(most));
+                const float height = step - kMapRowGap, scale = std::min(1.0f, height / (kMapRow - kMapRowGap));
+                const float top = kKeysTop + 0.5f * std::max(0.0f, (kKeysBottom - kKeysTop) - step * static_cast<float>(most));
+                const float icon = std::min(kMapIcon * scale, height - 2.0f), cap = kMapCap * scale;
+                for (int i = 0; i < n; ++i)
+                {
+                    const KeysRow &r = k.rows[i];
+                    const bool right = i >= nl, on = i == k.cursor;
+                    const int at = right ? i - nl : i;
+                    const float y0 = top + step * static_cast<float>(at), y1 = y0 + height;
+                    const float inner = right ? cx + kKeysGutter : cx - kKeysGutter, outer = right ? inner + width : inner - width;
+                    const float left = std::min(inner, outer), rightEnd = std::max(inner, outer);
+                    const uint32_t tint = rgba(255, 255, 255, static_cast<uint32_t>(255.0f * (r.fixed ? kMapFixedAlpha : 1.0f)));
+                    if (!r.fixed)
+                        picture(k.panel, outer, y0, inner, y1, on ? kMapPanelOn : kMapPanelTint);
+                    stroke(on && *k.underscoreLit ? k.underscoreLit : k.underscore, inner, y1, outer, y1, kMapLine, tint);
+                    // The key: its picture, or its name (no picture), "..." while it waits for a key, a dash unbound.
+                    const float mid = y1 - 0.5f * height - 1.0f, boxL = left + 1.0f, boxR = boxL + icon * kLinesToUnits;
+                    const bool waiting = on && k.capture;
+                    if (!waiting && r.icon && *r.icon)
+                        picture(r.icon, boxL, mid - 0.5f * icon, boxR, mid + 0.5f * icon,
+                                rgba(255, 255, 255, r.fixed ? static_cast<uint32_t>(255.0f * 0.85f) : 255u));
+                    else
+                    {
+                        const char *name = waiting ? "..." : r.keyText && *r.keyText ? r.keyText : "\xE2\x80\x94";
+                        const float c = cap * 0.8f;
+                        text(name, std::strlen(name), labelFont, 0.5f * (boxL + boxR), mid + 0.5f * c, c, kNewLabel.scaleX,
+                             kMapTracking * c, on ? kLabelOn : kMapText, on ? kLabelOnStroke : kMapStroke, 0.0f, PCSX2GS_ALIGN_CENTRE);
+                    }
+                    const float x0 = boxR + kMapTextGap;
+                    const uint32_t fill = on ? kLabelOn : r.fixed ? kMapFixedText : kMapText, edge = on ? kLabelOnStroke : kMapStroke;
+                    const char *arrowPath = on ? r.arrowLit : r.arrow;
+                    const bool arrow = arrowPath && *arrowPath;
+                    const float margin = kMapArrowMargin * scale, arrowH = cap + 2.0f * margin, arrowW = arrowH * kMapArrowAspect;
+                    const float arrowGap = kMapArrowGap * cap - margin;
+                    const float room = std::max(rightEnd - kMapTextMargin - x0 - (arrow ? (arrowGap + arrowW) * kLinesToUnits : 0.0f), 8.0f);
+                    text(r.text, std::strlen(r.text), labelFont, x0, mid + 0.5f * cap, cap, kNewLabel.scaleX, kMapTracking * cap, fill,
+                         edge, room);
+                    if (arrow)
+                    {
+                        Pcsx2GsScreenItem item{};
+                        item.kind = PCSX2GS_SCREEN_IMAGE;
+                        item.align = PCSX2GS_ALIGN_AFTER_TEXT;
+                        item.text = add(arrowPath, std::strlen(arrowPath));
+                        item.fill = faded(rgba(255, 255, 255));
+                        item.x = Space::y(arrowGap);
+                        item.x1 = Space::y(arrowW);
+                        item.y = Space::y(mid - 0.5f * cap - margin);
+                        item.y1 = Space::y(mid + 0.5f * cap + margin);
+                        items.push_back(item);
+                    }
+                }
+            }
+
             // One line of a BUTTON MAPPING label at x (units) on its baseline: a \x03 in it is the line's picture
             // (SAVE / LOAD's Start button), laid after the text before it, the rest of the text after it.
             void labelLine(const char *line, const char *icon, float x, float baseline, float cap, uint32_t fill, uint32_t edge, float room)
@@ -1207,6 +1272,28 @@ namespace kamite::options_overlay
         Builder b{items, strings, Space(std::clamp(view.aspect, 1.0f, 4.0f)), std::min(view.fade, 1.0f)};
         b.labelFont = b.add(g_labelFont.data(), g_labelFont.size());
         b.helpFont = b.add(g_helpFont.data(), g_helpFont.size());
+        if (view.keys)
+        {
+            // The keyboard's BUTTON MAPPING: its columns under the CONTROLS title, the help and hints as the pad's.
+            b.keys(*view.keys);
+            if (!g_titleDir.empty())
+            {
+                const std::string path = g_titleDir + "/title_controls.png";
+                b.titleCentred(b.add(path.data(), path.size()), "CONTROLS", kMapTitleScale);
+            }
+            b.helpOnHints = true;
+            b.help(view.keys->notice, view.keys->noticeIcons);
+            const KeysView &k = *view.keys;
+            Hint confirm = view.confirmHint, cancel = view.cancelHint, reset;
+            confirm.word = k.confirmWord;
+            cancel.word = k.cancelWord;
+            reset.art[0] = k.resetArt;
+            reset.word = k.resetWord;
+            reset.squeeze = kResetSqueeze;
+            b.hints(confirm, cancel);
+            b.hints(reset, Hint{}, kHintY - kHintLineStep);
+            return;
+        }
         if (view.mapping)
         {
             // BUTTON MAPPING: the whole picture, under the CONTROLS title (a sub-screen: no list, no L1 / R1).

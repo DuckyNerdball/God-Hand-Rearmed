@@ -8,10 +8,12 @@
 #include "kamite/options_overlay.h"
 #include "kamite/options_pages.h"
 #include "kamite/mapping_page.h"
+#include "kamite/keys_page.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -260,6 +262,59 @@ int main(int argc, char **argv)
         edit.armed = f[8] == "reset" ? Armed::Reset : Armed::None;
         build(mapping, art, artDir, f[0], f[2], state, optionsFrom(ini), cursor, edit);
         v.mapping = &mapping.view;
+        v.prevHint = v.nextHint = Hint{};
+    }
+    // The keyboard's page: KAMITE_PREVIEW_KEYS="mappingArtDir|keyArtDir|cursor|mode|labels" (overlay_preview.py);
+    // mode browse / capture / reset; labels "Cross=Spc;..." over the default layout's; a label's picture is
+    // keyArtDir/<file>_Key_Light.png by prompt_hd's names for the default layout's keys.
+    static kamite::keys_page::PageData keys;
+    if (const char *spec = getenv("KAMITE_PREVIEW_KEYS"))
+    {
+        std::vector<std::string> f;
+        std::string all = spec;
+        for (size_t at = 0;;)
+        {
+            const size_t bar = all.find('|', at);
+            f.push_back(all.substr(at, bar == std::string::npos ? std::string::npos : bar - at));
+            if (bar == std::string::npos)
+                break;
+            at = bar + 1;
+        }
+        f.resize(5);
+        std::map<std::string, std::string> labels{
+            {"LUp", "W"},   {"LDown", "S"},  {"LLeft", "A"},  {"LRight", "D"}, {"DodgeModifier", "Shft"}, {"L3", ""},
+            {"Cross", "Spc"}, {"Square", "M1"}, {"Triangle", "M2"}, {"Circle", "E"}, {"L1", "Q"}, {"R1", "R"},
+            {"L2", "F"},    {"R2", "G"},     {"R3", "M3"},    {"Up", "1"},     {"Right", "2"}, {"Down", "3"}, {"Left", "4"},
+            {"Start", "Esc"}};
+        for (size_t at = 0; at < f[4].size();)
+        {
+            const size_t semi = f[4].find(';', at);
+            const std::string one = f[4].substr(at, semi == std::string::npos ? std::string::npos : semi - at);
+            if (const size_t eq = one.find('='); eq != std::string::npos)
+                labels[one.substr(0, eq)] = one.substr(eq + 1);
+            at = semi == std::string::npos ? f[4].size() : semi + 1;
+        }
+        const std::string keyDir = f[1];
+        const auto art = [&](const std::string &label) -> std::string {
+            static const std::map<std::string, std::string> kFiles{{"Spc", "Space"}, {"Shft", "Shift"}, {"M1", "Mouse_Left"},
+                                                                   {"M2", "Mouse_Right"}, {"M3", "Mouse_Middle"}, {"Del", "Del"},
+                                                                   {"Esc", "Esc"}, {"Ent", "Enter"}, {"Ctrl", "Ctrl"}, {"Tab", "Tab"}};
+            const auto found = kFiles.find(label);
+            std::string file = found != kFiles.end() ? found->second : label.size() == 1 ? label : std::string();
+            if (file.empty())
+                return {};
+            const std::string path = keyDir + "/" + file + "_Key_Light.png";
+            FILE *probe = fopen((path + ".rgba").c_str(), "rb");
+            if (!probe)
+                return {};
+            fclose(probe);
+            return path;
+        };
+        const kamite::keys_page::Mode mode = f[3] == "capture" ? kamite::keys_page::Mode::Capture
+                                             : f[3] == "reset" ? kamite::keys_page::Mode::ResetArmed
+                                                               : kamite::keys_page::Mode::Browse;
+        kamite::keys_page::build(keys, labels, art, f[0], kamite::keys_page::optionsFrom(ini), atoi(f[2].c_str()), mode, art("Del"));
+        v.keys = &keys.view;
         v.prevHint = v.nextHint = Hint{};
     }
     std::vector<Pcsx2GsScreenItem> items;

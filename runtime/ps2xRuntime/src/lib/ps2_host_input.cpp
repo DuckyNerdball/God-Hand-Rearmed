@@ -534,6 +534,7 @@ namespace ps2_host_input
         std::atomic<bool> g_menuKeysChanged{false};
         std::atomic<bool> g_menuEscStart{false};
         std::atomic<int> g_menuDigit{0};           // 1 + the digit key last pressed in the menu layer, 0: none
+        std::atomic<bool> g_menuDelete{false};     // Delete pressed in the menu layer
         std::atomic<bool> g_keyboardDodge{false};  // the Dodge Modifier was held at player 1's last sample of play
         std::atomic<bool> g_menuLayerWanted{true}; // the game layer (EE vblank); on until Gene is first in play
         std::atomic<bool> g_menuLayerUsed{true};   // the layer the last sample of player 1 was built with
@@ -2234,6 +2235,7 @@ namespace ps2_host_input
     namespace controls
     {
         void applyRequests(); // the queued edits (requestControllerSwap / Reset), window thread
+        bool updateKeyCapture(); // the keyboard page's capture: true while it holds player 1's input
     }
 
     void sample()
@@ -2249,11 +2251,16 @@ namespace ps2_host_input
         if (g_menuKeysChanged.exchange(false, std::memory_order_acq_rel))
             rebuildConfigs(); // Menu Controls changed: the keyboard's confirm and cancel keys follow
         std::array<PadInputState, kMaxPlayers> state{};
-        const bool blocked = g_blocked.load(std::memory_order_relaxed);
+        const bool capturing = controls::updateKeyCapture();
+        const bool blocked = g_blocked.load(std::memory_order_relaxed) || capturing;
         if (!blocked && g_menuLayerUsed.load(std::memory_order_relaxed) && IsWindowFocused())
+        {
             for (int digit = 0; digit <= 4; ++digit)
                 if (IsKeyPressed(KEY_ZERO + digit))
                     g_menuDigit.store(digit + 1, std::memory_order_relaxed);
+            if (IsKeyPressed(KEY_DELETE))
+                g_menuDelete.store(true, std::memory_order_relaxed);
+        }
         for (uint32_t player = 0; player < players; ++player)
         {
             state[player] = readPort(player);
@@ -2338,6 +2345,11 @@ namespace ps2_host_input
     int takeMenuDigit()
     {
         return g_menuDigit.exchange(0, std::memory_order_relaxed) - 1;
+    }
+
+    bool takeMenuDelete()
+    {
+        return g_menuDelete.exchange(false, std::memory_order_relaxed);
     }
 
     bool keyboardDodge()
@@ -2823,12 +2835,15 @@ namespace ps2_host_input
                 {
                     Swap,
                     Reset,
-                    Assign // an extra button: b = the button, a = the copied input (extra::kNoCopy: command)
+                    Assign,       // an extra button: b = the button, a = the copied input (extra::kNoCopy: command)
+                    KeyBind,      // the keyboard page: `key`'s first key / mouse binding becomes `binding`
+                    KeyboardReset // every key / mouse binding back to the defaults'
                 };
                 Kind kind = Kind::Swap;
                 uint32_t pad = 0;
                 uint8_t a = 0, b = 0;
                 extra::Command command = extra::Command::None;
+                std::string key, binding;
             };
             std::mutex g_requestMutex;
             std::vector<Request> g_requests;
@@ -2887,6 +2902,114 @@ namespace ps2_host_input
             std::lock_guard<std::mutex> lock(g_requestMutex);
             g_requests.push_back(Request{Request::Kind::Reset, pad});
             g_requested.store(true, std::memory_order_release);
+        }
+
+        void requestKeyBind(uint32_t pad, std::string_view key, std::string binding)
+        {
+            std::lock_guard<std::mutex> lock(g_requestMutex);
+            Request r{Request::Kind::KeyBind, pad};
+            r.key = std::string(key);
+            r.binding = std::move(binding);
+            g_requests.push_back(std::move(r));
+            g_requested.store(true, std::memory_order_release);
+        }
+
+        void requestKeyboardReset(uint32_t pad)
+        {
+            std::lock_guard<std::mutex> lock(g_requestMutex);
+            g_requests.push_back(Request{Request::Kind::KeyboardReset, pad});
+            g_requested.store(true, std::memory_order_release);
+        }
+
+        // ---- the keyboard page's key capture (window thread: sample(); begun / read from any thread) ----
+        namespace
+        {
+            // 0 idle, 1 armed (waiting for every key and button to go up), 2 listening, 3 done (the game gets nothing
+            // until everything is up).
+            std::atomic<int> g_captureStep{0};
+            std::atomic<int> g_captureOutcome{0}; // 1 captured, 2 cancelled (taken by captureResult)
+            std::mutex g_captureMutex;
+            std::string g_captureBinding;         // g_captureMutex
+        }
+
+        void beginKeyCapture()
+        {
+            g_captureOutcome.store(0, std::memory_order_relaxed);
+            g_captureStep.store(1, std::memory_order_release);
+        }
+
+        void cancelKeyCapture()
+        {
+            int step = g_captureStep.load(std::memory_order_acquire);
+            if (step == 1 || step == 2)
+                g_captureStep.compare_exchange_strong(step, 3, std::memory_order_acq_rel);
+        }
+
+        int captureResult(std::string &binding)
+        {
+            const int outcome = g_captureOutcome.exchange(0, std::memory_order_acq_rel);
+            if (outcome == 1)
+            {
+                std::lock_guard<std::mutex> lock(g_captureMutex);
+                binding = g_captureBinding;
+            }
+            return outcome;
+        }
+
+        // Every sample: true while the capture holds player 1's input from the game.
+        bool updateKeyCapture()
+        {
+            const int step = g_captureStep.load(std::memory_order_acquire);
+            if (step == 0)
+                return false;
+            constexpr int kMouse[] = {MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_SIDE, MOUSE_BUTTON_EXTRA};
+            const auto anyDown = [&]
+            {
+                if (IsKeyDown(KEY_ESCAPE))
+                    return true;
+                for (const int code : bindableKeys())
+                    if (IsKeyDown(code))
+                        return true;
+                for (const int button : kMouse)
+                    if (IsMouseButtonDown(button))
+                        return true;
+                return false;
+            };
+            const auto finish = [&](int outcome, std::string binding)
+            {
+                {
+                    std::lock_guard<std::mutex> lock(g_captureMutex);
+                    g_captureBinding = std::move(binding);
+                }
+                g_captureOutcome.store(outcome, std::memory_order_release);
+                g_captureStep.store(3, std::memory_order_release);
+            };
+            if (step == 1)
+            {
+                if (!anyDown())
+                    g_captureStep.store(2, std::memory_order_release);
+            }
+            else if (step == 2)
+            {
+                if (!IsWindowFocused() || IsKeyPressed(KEY_ESCAPE))
+                    finish(2, {});
+                else
+                {
+                    for (const int code : bindableKeys())
+                        if (IsKeyPressed(code))
+                            if (std::string binding = keyBinding(code); !binding.empty())
+                                return finish(1, std::move(binding)), true;
+                    for (const int button : kMouse)
+                        if (IsMouseButtonPressed(button))
+                            return finish(1, mouseBinding(button)), true;
+                }
+            }
+            else if (!anyDown())
+            {
+                g_captureStep.store(0, std::memory_order_release); // everything up: the game has the input again
+                return false;
+            }
+            return true;
         }
 
         void requestExtraAssign(uint32_t pad, extra::Button button, extra::Command command, uint8_t copyOf)
@@ -2955,6 +3078,70 @@ namespace ps2_host_input
                         section.bindings[i].insert(section.bindings[i].begin() + static_cast<std::ptrdiff_t>(at), wanted.begin(), wanted.end());
                     }
                     std::cerr << "[controls] player " << r.pad + 1u << "'s controller bindings back to the defaults" << std::endl;
+                }
+                else if (r.kind == Request::Kind::KeyboardReset)
+                {
+                    // Every key / mouse binding goes, the defaults' come back first in each list (controller bindings and
+                    // chords stay where they were).
+                    const PadSection defaults = defaultSection(r.pad);
+                    for (size_t i = 0; i < kBindingKeyCount; ++i)
+                    {
+                        std::vector<std::string> &list = section.bindings[i];
+                        list.erase(std::remove_if(list.begin(), list.end(), [](const std::string &b) { return kindOf(b) == Kind::Keys; }),
+                                   list.end());
+                        std::vector<std::string> keys;
+                        for (const std::string &b : defaults.bindings[i])
+                            if (kindOf(b) == Kind::Keys)
+                                keys.push_back(b);
+                        list.insert(list.begin(), keys.begin(), keys.end());
+                    }
+                    section.dodgeListed = true;
+                    std::cerr << "[controls] player " << r.pad + 1u << "'s keyboard and mouse bindings back to the defaults" << std::endl;
+                }
+                else if (r.kind == Request::Kind::KeyBind)
+                {
+                    const auto index = bindingKeyIndex(r.key);
+                    if (!index || kindOf(r.binding) != Kind::Keys)
+                        continue;
+                    // The first key / mouse binding of the key becomes the new one (or it is added in front).
+                    std::vector<std::string> &list = section.bindings[*index];
+                    std::string old;
+                    const auto first = std::find_if(list.begin(), list.end(), [](const std::string &b) { return kindOf(b) == Kind::Keys; });
+                    if (first != list.end())
+                    {
+                        old = *first;
+                        *first = r.binding;
+                    }
+                    else
+                        list.insert(list.begin(), r.binding);
+                    if (sameBinding(old, r.binding))
+                        continue;
+                    // Within the key: no second copy of it. Elsewhere: whoever had it as their first takes the old one;
+                    // any other holder gives it up (one action per key on the page).
+                    bool firstSeen = false;
+                    list.erase(std::remove_if(list.begin(), list.end(), [&](const std::string &b) {
+                                   if (!sameBinding(b, r.binding))
+                                       return false;
+                                   const bool again = firstSeen;
+                                   firstSeen = true;
+                                   return again; }),
+                               list.end());
+                    for (size_t i = 0; i < kBindingKeyCount; ++i)
+                    {
+                        if (i == *index)
+                            continue;
+                        std::vector<std::string> &other = section.bindings[i];
+                        const auto otherFirst = std::find_if(other.begin(), other.end(), [](const std::string &b) { return kindOf(b) == Kind::Keys; });
+                        if (otherFirst != other.end() && sameBinding(*otherFirst, r.binding) && !old.empty() &&
+                            std::none_of(other.begin(), other.end(), [&](const std::string &b) { return sameBinding(b, old); }))
+                            *otherFirst = old;
+                        other.erase(std::remove_if(other.begin(), other.end(), [&](const std::string &b) { return sameBinding(b, r.binding); }),
+                                    other.end());
+                    }
+                    if (*index == kDodgeKeyIndex)
+                        section.dodgeListed = true;
+                    std::cerr << "[controls] player " << r.pad + 1u << ": " << bindingKeyName(*index) << " = " << r.binding
+                              << (old.empty() ? "" : " (was " + old + ")") << std::endl;
                 }
                 else
                 {

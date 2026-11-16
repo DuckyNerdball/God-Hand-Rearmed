@@ -50,6 +50,8 @@ namespace ps2_host_input
     // A digit key 0-4 pressed while the menu layer was in use (the Techniques screen's direct style picks): 0..4, or
     // -1 for none since the last call. Any thread.
     [[nodiscard]] int takeMenuDigit();
+    // Delete pressed while the menu layer was in use, since the last call (the keyboard page's Reset). Any thread.
+    [[nodiscard]] bool takeMenuDelete();
     // Player 1's Dodge Modifier ([Pad1] DodgeModifier, Shift by default) was held at the last sample of play: the keys
     // and mouse buttons on the left stick moved the right stick instead (the game's dodges). For the pad filter (Modern
     // leaves that right stick to the game even in the free camera). Window thread (the filter), or any thread.
@@ -99,6 +101,19 @@ namespace ps2_host_input
         // every controller binding back to the default layout's; keyboard and mouse bindings and chords stay.
         void requestControllerSwap(uint32_t pad, uint8_t inputA, uint8_t inputB);
         void requestControllerReset(uint32_t pad);
+        // The in-game keyboard page (K, Nov 16; any thread, queued like the swaps). KeyBind: `binding` (a key or mouse
+        // button, "Keyboard/J") becomes the [PadN] key's first keyboard / mouse binding; any other key that held it
+        // gives it up, and the one whose first it was takes the replaced binding instead (a swap). KeyboardReset: every
+        // keyboard and mouse binding (and the Dodge Modifier) back to the default layout's; controller bindings stay.
+        void requestKeyBind(uint32_t pad, std::string_view key, std::string binding);
+        void requestKeyboardReset(uint32_t pad);
+        // A key capture for that page (any thread): from begin, player 1's input is held from the game, the keys and
+        // buttons down then must go up first, and the next bindable key or mouse button pressed is the result (Esc,
+        // or the window losing the focus, cancels); the game gets nothing until everything is up again.
+        // captureResult: 0 still waiting (or none begun), 1 captured (binding set), 2 cancelled. Taken once.
+        void beginKeyCapture();
+        void cancelKeyCapture();
+        [[nodiscard]] int captureResult(std::string &binding);
     }
 
     // Player 1's extra buttons (K, Nov 14): Select and the back paddles. Each holds nothing, a copy of a game action

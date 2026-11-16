@@ -75,6 +75,7 @@ set(KAMITE_HOST_SOURCES
     kamite/options_overlay.cpp
     kamite/options_screen.cpp
     kamite/options_pages.cpp
+    kamite/keys_page.cpp
     kamite/mapping_page.cpp
     kamite/settings_table.cpp
     kamite/ini_file.cpp

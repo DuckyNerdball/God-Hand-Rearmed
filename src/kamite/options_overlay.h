@@ -107,6 +107,30 @@ namespace kamite::options_overlay
         const char *resetArt = "", *resetWord = "";
         const char *confirmWord = "", *cancelWord = "";
     };
+    // CONTROLS > BUTTON MAPPING with the keyboard (keys_page.cpp fills it; K, Nov 16): two columns of rows, each the
+    // action's key picture and its name, in the BUTTON MAPPING labels' look (their panels and underscores).
+    struct KeysRow
+    {
+        const char *icon = "";    // the key's picture ("" = none: keyText is written in its place)
+        const char *keyText = ""; // the key's name when there is no picture ("" with no icon: unbound, an em dash)
+        const char *text = "";    // the action
+        const char *arrow = "", *arrowLit = ""; // a picture after the text (the ATTACKs' arrows), the selected look
+        bool fixed = false;       // not rebindable here: drawn muted
+    };
+    struct KeysView
+    {
+        const char *underscore = "", *underscoreLit = "", *panel = ""; // the BUTTON MAPPING page's
+        const KeysRow *rows = nullptr;
+        int rowCount = 0;
+        int leftCount = 0;        // rows in the left column (the rest on the right)
+        int cursor = -1;
+        bool capture = false;     // the cursor's row waits for a key (its picture blinks out)
+        const char *notice = "";  // the help band's text; \x01 / \x02 drawn as noticeIcons[0] / [1]
+        const char *noticeIcons[2] = {"", ""};
+        const char *resetArt = "", *resetWord = "";
+        const char *confirmWord = "", *cancelWord = "";
+    };
+
     // A button hint in the strip under the help band ("[A] Confirm"): the button's images (PNG paths: one, or two for
     // Classic's two confirm buttons; null = none) and the word.
     struct Hint
@@ -141,6 +165,8 @@ namespace kamite::options_overlay
         Hint prevHint, nextHint;
         // CONTROLS > BUTTON MAPPING open: the whole picture is that page (title CONTROLS, no list, no L1 / R1).
         const MappingView *mapping = nullptr;
+        // The keyboard's page instead (the same frame: title CONTROLS, no list).
+        const KeysView *keys = nullptr;
         // L1 / R1 just switched the open category (K, Nov 14: as the title screen's menu words): the old title
         // (`titleFrom`) streaks off blurred and the new one streaks in from the other side and sharpens; titleDir +1 =
         // R1 (the next category, coming in from the right), titleT 0..1 through it. titleDir 0 = still.

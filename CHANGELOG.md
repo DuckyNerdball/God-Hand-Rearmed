@@ -13,6 +13,8 @@ Newest first, one line per change; the code comments say how.
 - Switching to the keyboard shows its control style for a moment when it differs from the controller's.
 - Techniques screen with the keyboard: 0-4 pick None / S / E / X / Y; the styles read S1 E2 X3 Y4 there and round the minimap.
 - Tutorial 1 explains the keyboard's dodge.
+- Options > Controls > Button Mapping with the keyboard: a keyboard & mouse page to rebind keys in game (Delete twice resets them).
+- Restore Defaults also resets the keyboard and mouse bindings.
 - Record Case has no key by default (bind one in the launcher's Controls or the F2 menu).
 - Removed leftover diagnostic logs and probes.
 - Sway Bar: fixed the last boss's stun gauge not showing.

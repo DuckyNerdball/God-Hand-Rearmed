@@ -42,12 +42,14 @@
 #include "kamite/hud_layout.h"
 #include "kamite/ini_file.h"
 #include "kamite/log.h"
+#include "kamite/keys_page.h"
 #include "kamite/mapping_page.h"
 #include "kamite/menu_buttons.h"
 #include "kamite/modern_controls.h"
 #include "kamite/npc_poses.h"
 #include "kamite/options_overlay.h"
 #include "kamite/options_pages.h"
+#include "kamite/prompt_art.h"
 #include "kamite/prompt_hd.h"
 #include "kamite/settings_table.h"
 #include "kamite/sprint_traversal.h"
@@ -600,6 +602,11 @@ namespace kamite::options_screen
             bool inMapping = false; // CONTROLS > BUTTON MAPPING is open (B back to its row)
             uint8_t mapCursor = mapping_page::kNone; // its selected button (a place)
             mapping_page::Edit mapEdit;             // its drum and the armed second presses
+            // ... as the keyboard's page (keys_page.h): opened so with the keyboard as the device in use (K, Nov 16).
+            bool inKeys = false;
+            int keysCursor = 0;
+            keys_page::Mode keysMode = keys_page::Mode::Browse;
+            std::chrono::steady_clock::time_point keysCaptureStart;
         };
         Screen g_screen[2];
         // The last L1 / R1 category switch, for the titles' slide (options_overlay View::titleDir): the row it left.
@@ -1155,7 +1162,8 @@ namespace kamite::options_screen
             for (size_t i = 0; i < settings::kSettingCount; ++i)
                 if (settings::kSettings[i].live)
                     apply(settings::kSettings[i]);
-            ps2_host_input::controls::requestControllerReset(0); // the button mapping too (K, Nov 13); keys stay
+            ps2_host_input::controls::requestControllerReset(0); // the button mapping too (K, Nov 13)
+            ps2_host_input::controls::requestKeyboardReset(0);   // and the keyboard's (K, Nov 16: its new layout)
             KM_INFO(Game, "options screen: every setting back to its default");
         }
 
@@ -1307,6 +1315,115 @@ namespace kamite::options_screen
             g_mappingState = mappingState();
             mapping_page::build(g_mapping, found->second, std::string(dir.begin(), dir.end()), std::string(root.begin(), root.end()),
                                 folder, g_mappingState, options, s.mapCursor, s.mapEdit);
+        }
+
+        // ---- CONTROLS > BUTTON MAPPING with the keyboard (keys_page.h) -------------------------------------------
+        keys_page::PageData g_keys;
+
+        void buildKeys(const Screen &s)
+        {
+            namespace pr = ps2_host_input::prompts;
+            const pr::Snapshot snapshot = pr::snapshot();
+            // Each row's key as prompt_art names it (the pack's file names follow those).
+            const auto label = [](const pr::Binding &b) -> std::string {
+                if (b.type == pr::Type::Key)
+                    return prompt_art::keyLabel(b.code).compact;
+                if (b.type == pr::Type::Mouse)
+                    return prompt_art::mouseLabel(b.code).compact;
+                return {};
+            };
+            static constexpr const char *kInputs[pr::InputCount] = {
+                "Cross", "Circle", "Square", "Triangle", "L1", "R1", "L2", "R2", "L3", "R3", "Start", "Select",
+                "Up", "Down", "Left", "Right", "LUp", "LDown", "LLeft", "LRight", "RUp", "RDown", "RLeft", "RRight"};
+            std::map<std::string, std::string> labels;
+            for (int i = 0; i < pr::InputCount; ++i)
+                labels[kInputs[i]] = label(snapshot.keys[static_cast<size_t>(i)]);
+            labels["DodgeModifier"] = label(snapshot.dodgeModifier);
+            const auto art = [](const std::string &name) {
+                const std::u8string path = prompt_hd::artFile(prompt_hd::Set::Keyboard, name).u8string();
+                return std::string(path.begin(), path.end());
+            };
+            const std::u8string dir = (g_exeDir / "resources" / "options" / "mapping").u8string();
+            keys_page::build(g_keys, labels, art, std::string(dir.begin(), dir.end()), keys_page::optionsFrom(g_ini), s.keysCursor,
+                             s.keysMode, art("Del"));
+        }
+
+        // The keyboard's page: the arrows / WASD between the rows, confirm waits for the key that becomes the row's
+        // (the game gets nothing meanwhile; Esc cancels, so does 10 s of nothing), Delete twice resets the keyboard and
+        // mouse, cancel back to the BUTTON MAPPING row. Any other press disarms a waiting second press.
+        void keysInput(Screen &s, uint64_t pressed, uint64_t repeat, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            buildKeys(s);
+            namespace pc = ps2_host_input::controls;
+            if (s.keysMode == keys_page::Mode::Capture)
+            {
+                std::string binding;
+                const int result = pc::captureResult(binding);
+                const bool late = std::chrono::steady_clock::now() - s.keysCaptureStart > std::chrono::seconds(10);
+                if (result == 1 && s.keysCursor >= 0 && s.keysCursor < static_cast<int>(g_keys.defs.size()))
+                {
+                    pc::requestKeyBind(0, g_keys.defs[static_cast<size_t>(s.keysCursor)].key, binding);
+                    s.keysMode = keys_page::Mode::Browse;
+                    sound(rdram, ctx, runtime, kSeOk);
+                }
+                else if (result == 2 || late)
+                {
+                    if (late)
+                        pc::cancelKeyCapture();
+                    s.keysMode = keys_page::Mode::Browse;
+                    sound(rdram, ctx, runtime, kSeBack);
+                }
+                return;
+            }
+            const bool reset = ps2_host_input::takeMenuDelete();
+            const keys_page::Mode was = s.keysMode;
+            s.keysMode = keys_page::Mode::Browse; // any press but the second one disarms
+            if ((pressed & kCancel) != 0u && (pressed & kOk) == 0u)
+            {
+                s.inMapping = false;
+                s.inKeys = false;
+                sound(rdram, ctx, runtime, kSeBack);
+                return;
+            }
+            if (reset)
+            {
+                if (was == keys_page::Mode::ResetArmed)
+                {
+                    pc::requestKeyboardReset(0);
+                    sound(rdram, ctx, runtime, kSeOk);
+                }
+                else
+                {
+                    s.keysMode = keys_page::Mode::ResetArmed;
+                    sound(rdram, ctx, runtime, kSeMove);
+                }
+                return;
+            }
+            if (pressed & kOk)
+            {
+                if (s.keysCursor < 0 || s.keysCursor >= static_cast<int>(g_keys.defs.size()) ||
+                    g_keys.defs[static_cast<size_t>(s.keysCursor)].fixed)
+                    return;
+                pc::beginKeyCapture();
+                s.keysMode = keys_page::Mode::Capture;
+                s.keysCaptureStart = std::chrono::steady_clock::now();
+                sound(rdram, ctx, runtime, kSeOk);
+                return;
+            }
+            const int dy = (repeat & kUp) ? -1 : (repeat & kDown) ? 1 : 0;
+            const int dx = dy != 0 ? 0 : (repeat & kLeft) ? -1 : (repeat & kRight) ? 1 : 0;
+            if (dx == 0 && dy == 0)
+            {
+                if (pressed == 0u)
+                    s.keysMode = was; // nothing pressed: still waiting
+                return;
+            }
+            const int next = keys_page::move(g_keys, s.keysCursor, dx, dy);
+            if (next != s.keysCursor)
+            {
+                s.keysCursor = next;
+                sound(rdram, ctx, runtime, kSeMove);
+            }
         }
 
         // The pad on the page (K, Nov 13-14): d-pad / stick between the lines (the columns' and the paddles'); A opens
@@ -1476,7 +1593,12 @@ namespace kamite::options_screen
                     view.nextHint.word = k.text[s.row + 1].name;
                 }
             }
-            if (s.inMapping)
+            if (s.inMapping && s.inKeys)
+            {
+                buildKeys(s);
+                view.keys = &g_keys.view;
+            }
+            else if (s.inMapping)
             {
                 // The drum turns toward its item (eased, frame-rate free); the page is drawn from where it has got to.
                 mapping_page::Edit &e = s.mapEdit;
@@ -1618,9 +1740,22 @@ namespace kamite::options_screen
                     sound(rdram, ctx, runtime, kSeMove);
                 }
             }
+            else if ((pressed & kOk) && s.pageCursor == g_page.mappingRow && g_page.mappingRow >= 0 &&
+                     ps2_host_input::prompts::lastDevice() == ps2_host_input::prompts::Device::Keys)
+            {
+                s.inMapping = true; // the keyboard's page (K, Nov 16), the cursor on its first row
+                s.inKeys = true;
+                s.keysCursor = 0;
+                s.keysMode = keys_page::Mode::Browse;
+                (void)ps2_host_input::takeMenuDelete(); // a Delete pressed elsewhere does not arm its Reset
+                buildKeys(s);
+                sound(rdram, ctx, runtime, kSeOk);
+                return;
+            }
             else if ((pressed & kOk) && s.pageCursor == g_page.mappingRow && g_page.mappingRow >= 0)
             {
                 s.inMapping = true; // BUTTON MAPPING: its own page, the cursor on its first line (top left)
+                s.inKeys = false;
                 s.mapEdit = mapping_page::Edit{};
                 buildMapping(s);
                 s.mapCursor = mapping_page::firstLine(g_mapping);
@@ -1776,6 +1911,8 @@ namespace kamite::options_screen
             }
             else if (s.confirmRow >= 0)
                 confirm(N, s, pressed, repeat, rdram, ctx, runtime);
+            else if (s.inPage && s.inMapping && s.inKeys)
+                keysInput(s, pressed, repeat, rdram, ctx, runtime);
             else if (s.inPage && s.inMapping)
                 mappingInput(s, pressed, repeat, rdram, ctx, runtime);
             else if (s.inPage)
