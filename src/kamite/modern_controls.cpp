@@ -384,7 +384,7 @@ namespace kamite::modern
             ini.setBool("Game", "CameraInvertY", g_invertY.load());
             ini.setBool("Game", "MouseCamera", g_mouseCamera.load());
             ini.set("Game", "MouseSensitivity", number2(g_mouseSensitivity.load()));
-            ini.set("Game", "MenuButtons", menu_buttons::styleName(menu_buttons::style()));
+            ini.set("Game", "MenuButtons", menu_buttons::styleName(menu_buttons::styleSetting()));
             ini.set("Game", "ButtonPrompts", prompt_hd::choiceName(prompt_hd::choice()));
             setStatus(ini.save() ? "Saved to GHR.ini." : "Could not write GHR.ini.");
         }
@@ -467,7 +467,7 @@ namespace kamite::modern
                                                        "Classic: circle and cross confirm, triangle cancels"};
             static constexpr menu_buttons::Style kMenuStyles[] = {menu_buttons::Style::Western, menu_buttons::Style::Japanese,
                                                                   menu_buttons::Style::Classic};
-            const menu_buttons::Style menuStyle = menu_buttons::style();
+            const menu_buttons::Style menuStyle = menu_buttons::styleSetting();
             int menus = menuStyle == menu_buttons::Style::Japanese ? 1 : menuStyle == menu_buttons::Style::Classic ? 2 : 0;
             ui->set_next_width(340.0f);
             if (ui->combo("##menubuttons", &menus, kMenuButtons, 3) && menus >= 0 && menus < 3)

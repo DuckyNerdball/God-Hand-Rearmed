@@ -31,7 +31,13 @@ namespace kamite::menu_buttons
     namespace
     {
         std::atomic<int> g_style{static_cast<int>(Style::Western)};
-        Style current() { return static_cast<Style>(g_style.load(std::memory_order_relaxed)); }
+        Style setting() { return static_cast<Style>(g_style.load(std::memory_order_relaxed)); }
+        // The style in effect: the setting with a controller; with the keyboard always Western (K, Nov 16: Enter / Space
+        // confirm and Esc / Backspace go back in every country, one set of keyboard controls in menus).
+        Style current()
+        {
+            return ps2_host_input::prompts::lastDevice() == ps2_host_input::prompts::Device::Keys ? Style::Western : setting();
+        }
         uint8_t *g_ram = nullptr;
         // Set at start when every patch of the kind went onto the disc image (the file as the game reads it): the
         // run-time rewrites below are then not needed (no RAM scan thread, no core check every 30 vblanks).
@@ -421,7 +427,7 @@ namespace kamite::menu_buttons
                     if (patch.offset + original.size() > file.size() ||
                         std::memcmp(file.data() + patch.offset, original.data(), original.size()) != 0)
                         continue;
-                    patches.emplace_back(core->imageOffset + patch.offset, bytesOf(wanted(patch.original, patch.modern, current())));
+                    patches.emplace_back(core->imageOffset + patch.offset, bytesOf(wanted(patch.original, patch.modern, setting())));
                     ++matched;
                 }
                 g_coreOnDisc = matched == textPatches().size();
@@ -448,7 +454,7 @@ namespace kamite::menu_buttons
                     {
                         if (std::memcmp(file.data() + at, original.data(), original.size()) != 0)
                             continue;
-                        patches.emplace_back(menu->imageOffset + at, bytesOf(wanted(rewrites[i].original, rewrites[i].modern, current())));
+                        patches.emplace_back(menu->imageOffset + at, bytesOf(wanted(rewrites[i].original, rewrites[i].modern, setting())));
                         KM_INFO(Game, "menu buttons: " << rewrites[i].where << " reworded in " << path << " at 0x" << std::hex << at << std::dec);
                         found[i] = true;
                     }
@@ -816,6 +822,11 @@ namespace kamite::menu_buttons
     Style style()
     {
         return current();
+    }
+
+    Style styleSetting()
+    {
+        return setting();
     }
 
     bool modern()

@@ -346,6 +346,7 @@ namespace kamite::settings
         // ---- Sound ----------------------------------------------------------------------------------------------
         live(choice(Tab::Sound, "Sound", "Mode", "Select between monaural,\nstereo, or surround sound.", "Sound", "Mode",
                     "stereo", kSoundModes)), // the game's own help (its SOUND row)
+        live(toggle(Tab::Sound, "Sound", "Roulette Ratchet", "When you flick, it clicks.", "Sound", "RouletteRatchet", false)),
         live(volume("Music", "Set stage, boss, menu, and minigame music volume.", "MusicVolume")),
         live(volume("Sound Effects", "Set the volume of ingame sound effects.", "EffectsVolume")),
         live(volume("Voices",

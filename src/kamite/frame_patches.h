@@ -18,4 +18,7 @@ namespace kamite
     // Game thread: the roulette wheel is on screen (cCockRoulette's move ran within the last two game frames).
     bool rouletteUp();
     void setRouletteTimerDouble(bool on);
+    // [Sound] RouletteRatchet ("Roulette Ratchet", K Nov 16): each step of the roulette wheel ticks (the menus' tick,
+    // 0x164; the wheel steps silently on the PS2). Any thread.
+    void setRouletteRatchet(bool on);
 }

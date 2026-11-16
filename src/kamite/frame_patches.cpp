@@ -176,7 +176,9 @@ namespace kamite
         // The direction comes from the command bit that made the step (GameWork +0x1A0, pressed: 49 = left stick up,
         // the pad code's Y < -0x50; 48 = down; 40 = R1), not from the stick as it is now: a flick up read a stick already
         // on its way back (the live byte past 0x40) and stepped down. The d-pad pushes the stick (rouletteDpad).
-        void rouletteStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        std::atomic<bool> g_rouletteRatchet{false}; // [Sound] RouletteRatchet: the wheel's steps tick
+
+        void rouletteStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const int32_t cursor = GPR_S32(ctx, 3), count = GPR_S32(ctx, 4);
             uint16_t buttons = 0;
@@ -185,7 +187,23 @@ namespace kamite
             std::memcpy(&pressed, &ram8(rdram, 0x7474A0u + 0x1A0u), sizeof(pressed));
             const bool up = (pressed & (1ull << 49)) != 0u || ((pressed & (1ull << 48)) == 0u && (buttons & 0x10u) != 0u);
             g_rouletteBack = up && count > 1;
-            SET_GPR_S32(ctx, 3, up && count > 0 ? (cursor + count - 1) % count : cursor + 1);
+            const int32_t next = up && count > 0 ? (cursor + count - 1) % count : cursor + 1;
+            // Roulette Ratchet: the menus' tick on each step (the game's sound call, as the menus make it: (0x5FEE00,
+            // 0, id, -1, -1, 0, 0) to 0x2CB8A0), the registers kept.
+            if (g_rouletteRatchet.load(std::memory_order_relaxed) && count > 1 && runtime && runtime->hasFunction(0x2CB8A0u))
+                if (PS2Runtime::RecompiledFunction fn = runtime->lookupFunction(0x2CB8A0u))
+                {
+                    const R5900Context saved = *ctx;
+                    const uint32_t args[] = {0x5FEE00u, 0u, 0x164u, 0xFFFFFFFFu, 0xFFFFFFFFu, 0u, 0u};
+                    for (int i = 0; i < 7; ++i)
+                        SET_GPR_U32(ctx, 4 + i, args[i]);
+                    ctx->pc = 0x2CB8A0u;
+                    runtime->eeScheduler().beginHostCall();
+                    fn(rdram, ctx, runtime);
+                    runtime->eeScheduler().endHostCall();
+                    *ctx = saved;
+                }
+            SET_GPR_S32(ctx, 3, next);
         }
 
         // The wheel's slide (the rest of that function: progress +0x338 from 1.0 to 0 and a 32.0 offset +0x2A4, both
@@ -2627,6 +2645,7 @@ namespace kamite
         if (g_fps60)
             ps2x::asyncvif::setVu1TimingScale(0.5);
         g_l3Dash = envOn("KAMITE_L3_DASH");
+        g_rouletteRatchet = envOn("KAMITE_ROULETTE_RATCHET");
         ps2xRegisterHostHook("km_frame_start", &frameStart);
         characters::installLoadWatch();
         ps2xRegisterHostHook("km_fps60_hitbox_compare", &hitboxCompare);
@@ -2967,5 +2986,10 @@ namespace kamite
     {
         g_rouletteSlow.store(on, std::memory_order_relaxed);
         g_rouletteRequest.store(1, std::memory_order_relaxed);
+    }
+
+    void setRouletteRatchet(bool on)
+    {
+        g_rouletteRatchet.store(on, std::memory_order_relaxed);
     }
 }

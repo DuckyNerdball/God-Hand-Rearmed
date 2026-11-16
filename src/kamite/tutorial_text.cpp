@@ -250,6 +250,53 @@ namespace kamite::tutorial_text
             return out;
         }
 
+        // Tutorial 2 with the keyboard (K's wording, Nov 16): "Press [R] to open the wheel / Cycle moves up and down /
+        // Press [Left-Click] to execute technique" (the roulette's mouse: ps2_host_input setMenuRoulette). The pop-up
+        // shows play's keys, so [R] is R1's icon and the left click the icon of the button play has on it (the square
+        // on the default layout); with none, the words.
+        std::vector<uint16_t> keyboardRouletteText(int leftClickIcon)
+        {
+            constexpr uint16_t kBig = 0x96u, kNormal = 0x64u, kR1 = 5u;
+            std::vector<uint16_t> out;
+            add(out, "Press");
+            out.insert(out.end(), {kScale, kBig, kR1, kScale, kNormal});
+            add(out, "to open the wheel\nCycle moves up and down\nPress");
+            if (leftClickIcon >= 0)
+            {
+                out.insert(out.end(), {kScale, kBig, static_cast<uint16_t>(leftClickIcon), kScale, kNormal});
+                add(out, "to execute technique");
+            }
+            else
+                add(out, " Left-Click to execute technique");
+            out.insert(out.end(), {kClose, kEnd});
+            return out;
+        }
+
+        // The text icon of the PS2 button play has on the left mouse button (the keyboard in use), -1 for none; -2 with
+        // a controller in use. Cached by the bindings' generation.
+        int keyboardLeftClickIcon()
+        {
+            namespace pr = ps2_host_input::prompts;
+            if (pr::lastDevice() != pr::Device::Keys)
+                return -2;
+            static uint32_t generation = 0u;
+            static int icon = -1;
+            if (const uint32_t now = pr::generation(); now != generation)
+            {
+                generation = now;
+                const pr::Snapshot snapshot = pr::snapshot();
+                // prompts::Input 0..13 -> text icon (0 circle, 1 triangle, 2 square, 3 cross, 4..9 L1 R1 L2 R2 L3 R3,
+                // 12 Start, 13 Select).
+                static constexpr int kIcons[14] = {3, 0, 2, 1, 4, 5, 6, 7, 8, 9, 12, 13, -1, -1};
+                icon = -1;
+                for (int input = 0; input < 12 && icon < 0; ++input)
+                    if (snapshot.keys[static_cast<size_t>(input)].type == pr::Type::Mouse &&
+                        snapshot.keys[static_cast<size_t>(input)].code == 0)
+                        icon = kIcons[input];
+            }
+            return icon;
+        }
+
         // Tutorial 3 (entry 2, the unleash; K, Nov 4). The disc's: "UNLEASH THE GODHAND / Once your tension gauge is /
         // full, press [R2] to unleash / the GODHAND." (R2 = icon 7 at 150%). The first line is in the title now; Tension
         // is Placable adds "Press [R2] again to stop."; Off the Cuff swaps the first lines for "With any tension in your
@@ -389,10 +436,14 @@ namespace kamite::tutorial_text
                 pointEntry(header, 0, kEntry0Offset, kText, modern, modern ? modernText(modern::autoEnabled()) : std::vector<uint16_t>{},
                            "Tutorial 1 explains Modern's switch");
             const menu_buttons::Style style = menu_buttons::style();
-            pointEntry(header, 1, kEntry1Offset, kText + kTextBytes, true, rouletteText(style),
-                       style == menu_buttons::Style::Japanese  ? "Tutorial 2: the roulette's controls (Japanese OK)"
-                       : style == menu_buttons::Style::Classic ? "Tutorial 2: the roulette's controls (Classic OK)"
-                                                               : "Tutorial 2: the roulette's controls (Western OK)");
+            if (const int leftClick = keyboardLeftClickIcon(); leftClick != -2)
+                pointEntry(header, 1, kEntry1Offset, kText + kTextBytes, true, keyboardRouletteText(leftClick),
+                           "Tutorial 2: the roulette's controls (keyboard and mouse)");
+            else
+                pointEntry(header, 1, kEntry1Offset, kText + kTextBytes, true, rouletteText(style),
+                           style == menu_buttons::Style::Japanese  ? "Tutorial 2: the roulette's controls (Japanese OK)"
+                           : style == menu_buttons::Style::Classic ? "Tutorial 2: the roulette's controls (Classic OK)"
+                                                                   : "Tutorial 2: the roulette's controls (Western OK)");
             const bool placable = tensionPlacable();
             pointEntry(header, 2, kEntry2Offset, kText + 2u * kTextBytes, true, unleashText(placable, offTheCuff()),
                        placable ? "Tutorial 3 (the title holds its heading; Tension is Placable)" : "Tutorial 3 (the title holds its heading)");

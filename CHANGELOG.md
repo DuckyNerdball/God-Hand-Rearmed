@@ -11,7 +11,7 @@ Newest first, one line per change; the code comments say how.
 - Esc skips cutscenes and starts the title screen.
 - Control Style per device: the controller and the keyboard & mouse each have their own (keyboard: Modern, Auto off by default); the one you used last is in effect and each keeps its freecam / brawl choice.
 - Switching to the keyboard shows its control style for a moment when it differs from the controller's.
-- Techniques screen with the keyboard: 0-4 pick None / S / E / X / Y; the styles read S1 E2 X3 Y4 there.
+- Techniques screen with the keyboard: 0-4 pick None / S / E / X / Y.
 - With the keyboard the style letters sit above the level meter (as before), with a controller round the minimap; they swap with the device.
 - Tutorial 1 explains the keyboard's dodge.
 - Options > Controls > Button Mapping with the keyboard: a keyboard & mouse page to rebind keys in game (Delete twice resets them).
@@ -20,7 +20,11 @@ Newest first, one line per change; the code comments say how.
 - Menus with the keyboard: WASD only move the cursor (quick taps no longer skip or lag).
 - Roulette with the keyboard and mouse: W / S or the mouse wheel step it, left click OK, right click (or Esc) cancel, A / D switch targets with Target Select.
 - Buck Breaker's slot on the Techniques screen shows the punish key with the keyboard (was Esc).
-- See Through: the rest of a wall it opens turns partly see-through too (strength set in F2 > Camera for now).
+- See Through: the rest of a wall it opens turns partly see-through too.
+- See Through defaults: a larger oval (3 m), starting 0.5 m in front of Gene, with a softer edge.
+- Menus with the keyboard always confirm with Enter / Space and go back with Esc / Backspace, whatever Menu Controls says.
+- Tutorial 2 with the keyboard: R opens the wheel, up and down cycle, left click executes.
+- Roulette Ratchet (Options > Sound): the roulette wheel ticks as you cycle moves.
 - Record Case has no key by default (bind one in the launcher's Controls or the F2 menu).
 - Removed leftover diagnostic logs and probes.
 - Sway Bar: fixed the last boss's stun gauge not showing.

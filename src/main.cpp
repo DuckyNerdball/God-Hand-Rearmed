@@ -410,6 +410,7 @@ namespace
         {"game", "fps60", "KAMITE_FPS60"},
         {"game", "l3dash", "KAMITE_L3_DASH"},
         {"game", "roulettetimer", "KAMITE_ROULETTE_TIMER"},
+        {"sound", "rouletteratchet", "KAMITE_ROULETTE_RATCHET"},
         {"game", "unlockhard", "KAMITE_UNLOCK_HARD"},
         {"game", "skipintro", "KAMITE_SKIP_INTRO"},
         {"game", "roulettenoorbs", "KAMITE_ROULETTE_NO_ORBS"},

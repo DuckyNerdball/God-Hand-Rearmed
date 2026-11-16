@@ -35,7 +35,10 @@ namespace kamite::menu_buttons
     // Reads the setting; registers the per-vblank patch (tables and text) on the EE thread and the roulette's hooks.
     // Call before the game starts with the EE's RDRAM.
     void install(uint8_t *rdram);
+    // The style in effect: [Game] MenuButtons with a controller, Western with the keyboard (K, Nov 16).
     Style style();
+    // [Game] MenuButtons as set (F2 > Controls shows and saves it).
+    Style styleSetting();
     // Western or Japanese (the menus' buttons are not the game's own).
     bool modern();
     // F2 > Controls (any thread): the tables, the roulette and the core hint text follow at once; the save menu's text

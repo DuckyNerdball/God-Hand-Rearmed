@@ -278,11 +278,12 @@ namespace kamite
         // below his feet + 0.3 m (was his middle: sills and ledges stayed whole).
         constexpr uint32_t kPlayerPointer = game::GameWork::address(game::GameWork::kPlayerObj); // GameWork.playerObj
         std::atomic<bool> g_seeThrough{true};
-        std::atomic<float> g_seeWidth{2.3f};     // metres, half-width (the most: the oval fits what is hidden)
-        std::atomic<float> g_seeHeight{2.8f};    // metres, half-height (the most)
-        std::atomic<float> g_seeMargin{0.7f};    // metres in front of Gene
+        // Defaults: K's F2 values (Nov 16; were 2.3 / 2.8 / 0.7 / 100 / 33 from Nov 6).
+        std::atomic<float> g_seeWidth{3.0f};     // metres, half-width (the most: the oval fits what is hidden)
+        std::atomic<float> g_seeHeight{3.0f};    // metres, half-height (the most)
+        std::atomic<float> g_seeMargin{0.5f};    // metres in front of Gene
         std::atomic<float> g_seeStrength{100.0f}; // percent
-        std::atomic<float> g_seeSoftness{33.0f};  // percent of the radius
+        std::atomic<float> g_seeSoftness{50.0f};  // percent of the radius
         std::atomic<float> g_seeWall{35.0f};      // percent: the rest of a wall the oval opens, see-through (K, Nov 16)
         bool g_seeSent = false;                   // game thread: an oval went to the renderer last frame
         std::atomic<float> g_seeReadout[4] = {};  // centre x, y, radii x, y (GS pixels), for the menu
@@ -1052,11 +1053,11 @@ namespace kamite
         void loadExtras(const IniFile &ini)
         {
             g_seeThrough = ini.getBool("Video", "SeeThrough", true);
-            g_seeWidth = iniValue(ini, "Video", "SeeThroughWidth", 2.3f, 0.3f, 6.0f);
-            g_seeHeight = iniValue(ini, "Video", "SeeThroughHeight", 2.8f, 0.3f, 6.0f);
-            g_seeMargin = iniValue(ini, "Video", "SeeThroughMargin", 0.7f, 0.1f, 5.0f);
+            g_seeWidth = iniValue(ini, "Video", "SeeThroughWidth", 3.0f, 0.3f, 6.0f);
+            g_seeHeight = iniValue(ini, "Video", "SeeThroughHeight", 3.0f, 0.3f, 6.0f);
+            g_seeMargin = iniValue(ini, "Video", "SeeThroughMargin", 0.5f, 0.1f, 5.0f);
             g_seeStrength = iniValue(ini, "Video", "SeeThroughStrength", 100.0f, 0.0f, 100.0f);
-            g_seeSoftness = iniValue(ini, "Video", "SeeThroughSoftness", 33.0f, 2.0f, 100.0f);
+            g_seeSoftness = iniValue(ini, "Video", "SeeThroughSoftness", 50.0f, 2.0f, 100.0f);
             g_seeWall = iniValue(ini, "Video", "SeeThroughWall", 35.0f, 0.0f, 100.0f);
         }
 

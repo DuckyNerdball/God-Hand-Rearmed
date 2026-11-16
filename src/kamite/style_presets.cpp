@@ -270,8 +270,8 @@ namespace kamite::style_presets
         std::atomic<int> g_request{0};
         // The keyboard is the device in use (set each vblank, so a frame's text and glyph placement agree): the HUD's
         // letters are the line "S E X Y" above the level meter as before Nov 10 (K, Nov 16: round the minimap with the
-        // keys beside them looked bad), round the minimap with a controller; the Techniques screen's Style row carries
-        // each style's key (S1 E2 X3 Y4).
+        // keys beside them looked bad), round the minimap with a controller; the Techniques screen's hint reads
+        // "[0]-[4] Style" (no keys beside the Style row's letters either, K).
         std::atomic<bool> g_numbered{false};
         std::atomic<bool> g_cycleSound{false}; // a cycle on the Techniques screen: it plays its cursor sound
         // The HUD's blink after a swap in play: which style and when. Host milliseconds, not frame-hook
@@ -965,11 +965,7 @@ namespace kamite::style_presets
                 if (slot < 0)
                     append(out, "None");
                 else
-                {
                     out.push_back(glyph(g_letters[slot]));
-                    if (g_numbered.load(std::memory_order_relaxed))
-                        out.push_back(glyph(static_cast<char>('1' + slot))); // its key (K, Nov 16)
-                }
                 if (colours && colour)
                     out.push_back(kColourRestore);
             }

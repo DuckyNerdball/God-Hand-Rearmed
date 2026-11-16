@@ -860,6 +860,8 @@ namespace kamite::options_screen
                 setOffTheCuff(on);
             else if (id == "RouletteTimer")
                 setRouletteTimerDouble(value == "double");
+            else if (id == "RouletteRatchet")
+                setRouletteRatchet(on);
             else if (id == "RouletteTargetCycle")
                 setRouletteTargetCycle(on);
             else if (id == "RouletteNoOrbs")
