@@ -83,7 +83,7 @@ namespace kamite::options_pages
 
     // Numbers in a choice's values (the camera's), and the value as GHR.ini holds it.
     float number(const std::string &text) { return static_cast<float>(std::atof(text.c_str())); }
-    void buildPage(PageData &d, settings::Tab tab, const IniFile &ini, float aspect)
+    void buildPage(PageData &d, settings::Tab tab, const IniFile &ini, float aspect, bool keyboard)
     {
         d = PageData{};
         d.name = upper(settings::tabName(tab));
@@ -93,6 +93,8 @@ namespace kamite::options_pages
             const settings::Setting &s = settings::kSettings[i];
             if (s.tab != tab || !s.live || (s.wideOnly && aspect < 1.34f) || !settings::parentAllows(ini, s))
                 continue;
+            if (s.device >= 0 && s.device != (keyboard ? settings::kKeyboard : settings::kPad))
+                continue; // the other device's (K, Nov 16)
             if (!category || std::strcmp(category, s.category) != 0)
             {
                 category = s.category;
@@ -103,7 +105,7 @@ namespace kamite::options_pages
                 d.setting.push_back(nullptr);
             }
             options_overlay::PageRow row;
-            row.name = d.keep(upper(s.name));
+            row.name = d.keep(upper(s.gameName ? s.gameName : s.name));
             // The in-game note after the description: on its own line when it starts with one ("\n...").
             row.help = d.keep(wrapHelp(s.gameNote ? (std::string(s.description) + (*s.gameNote == '\n' ? "" : " ") + s.gameNote).c_str()
                                                   : s.description,

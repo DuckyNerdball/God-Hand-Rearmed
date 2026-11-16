@@ -71,7 +71,12 @@ namespace kamite::settings
         bool gameSlider = false; // a Choice of numbers: a slider in game (its choices' values are the stops)
         bool applyOnLeave = false; // in game: saved at once, applied when the cursor leaves the row (a renderer rebuild)
         bool gameList = false;     // in game: < value > even with 3 or fewer choices (words too long for a row of three)
+        // In game only while this device is the one in use (K, Nov 16: one Control Style that follows the device):
+        // kPad / kKeyboard; -1 = always. The launcher lists both.
+        int8_t device = -1;
+        const char *gameName = nullptr; // the in-game name when it differs from the launcher's
     };
+    inline constexpr int8_t kPad = 0, kKeyboard = 1;
 
     extern const Setting kSettings[];
     extern const size_t kSettingCount;

@@ -211,7 +211,8 @@ namespace kamite::options_screen
         bool valid(uint32_t address, uint32_t bytes = 4u) { return address >= 0x100000u && address + bytes <= 0x2000000u; }
 
         // A guest function run to its end on a copy of the registers (game_options' callGuest).
-        bool callGuest(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t address, std::initializer_list<uint32_t> args)
+        bool callGuest(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t address, std::initializer_list<uint32_t> args,
+                       uint32_t *result = nullptr)
         {
             if (!runtime || !runtime->hasFunction(address))
                 return false;
@@ -231,6 +232,8 @@ namespace kamite::options_screen
             runtime->eeScheduler().beginHostCall();
             fn(rdram, ctx, runtime);
             runtime->eeScheduler().endHostCall();
+            if (result)
+                *result = GPR_U32(ctx, 2);
             *ctx = saved;
             return true;
         }
@@ -238,6 +241,31 @@ namespace kamite::options_screen
         void sound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint16_t id)
         {
             callGuest(rdram, ctx, runtime, kSePlay, {kSeManager, 0u, id, 0xFFFFFFFFu, 0xFFFFFFFFu, 0u, 0u});
+        }
+
+        // The volume sliders' previews (K, Nov 16): each step plays a sound of that kind at the new volume, cutting the
+        // last one off. Sound Effects: the spank's slap (core 0xF6: Gene's Spanking motion, em00 motion 1339's SEQ at
+        // frame 5). Voices: Gene's item pickup line (0xF8: the game's own random positive line, pl00 record 48, as
+        // func_001C0678 calls it); the menus' call first, Gene's own (cSnd_SeCall with him as the owner) if refused.
+        constexpr uint16_t kSeSpank = 0xF6u, kSePickupLine = 0xF8u;
+        constexpr uint32_t kSeCallObj = 0x2CBA48u, kSeStop = 0x2CBBA0u; // cSnd_SeCall(snd, bank, id, obj, 0..), cSnd_SeStop
+        constexpr uint32_t kPlayer = game::GameWork::address(game::GameWork::kPlayerObj); // Gene (0 on the title screen)
+        uint32_t g_previewHandle = 0u;
+        void previewSound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint16_t id)
+        {
+            if (g_previewHandle)
+                callGuest(rdram, ctx, runtime, kSeStop, {kSeManager, g_previewHandle});
+            g_previewHandle = 0u;
+            callGuest(rdram, ctx, runtime, kSePlay, {kSeManager, 0u, id, 0xFFFFFFFFu, 0xFFFFFFFFu, 0u, 0u}, &g_previewHandle);
+            const uint32_t gene = rd32(kPlayer);
+            if (!g_previewHandle && gene >= 0x100000u && gene < 0x2000000u)
+                callGuest(rdram, ctx, runtime, kSeCallObj, {kSeManager, 0u, id, gene, 0u, 0u, 0u, 0u}, &g_previewHandle);
+            static bool logged[2] = {};
+            if (!logged[id == kSePickupLine])
+            {
+                logged[id == kSePickupLine] = true;
+                KM_INFO(Game, "options screen: volume preview 0x" << std::hex << id << std::dec << (g_previewHandle ? " plays" : " refused"));
+            }
         }
 
         uint32_t idEntry(uint32_t self, int id) { return rd32(self + kIds + 4u * static_cast<uint32_t>(id)); }
@@ -710,7 +738,11 @@ namespace kamite::options_screen
         using options_pages::nextOption;
         using options_pages::PageData;
         PageData g_page;
-        void buildPage(PageData &d, settings::Tab tab) { options_pages::buildPage(d, tab, g_ini, g_aspect); }
+        void buildPage(PageData &d, settings::Tab tab)
+        {
+            options_pages::buildPage(d, tab, g_ini, g_aspect,
+                                     ps2_host_input::prompts::lastDevice() == ps2_host_input::prompts::Device::Keys);
+        }
 
         // A changed setting takes effect at once (the game thread; the modules' own setters, as F2 uses them).
         void applyVolumes()
@@ -1877,6 +1909,18 @@ namespace kamite::options_screen
             sound(rdram, ctx, runtime, kSeOk);
         }
 
+        // A value changed: the move sound, or the volume slider's preview at the new volume.
+        void changedSound(const PageData &d, int row, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const settings::Setting *setting = row >= 0 && row < static_cast<int>(d.setting.size()) ? d.setting[static_cast<size_t>(row)] : nullptr;
+            if (setting && std::strcmp(setting->id, "EffectsVolume") == 0)
+                previewSound(rdram, ctx, runtime, kSeSpank);
+            else if (setting && std::strcmp(setting->id, "VoicesVolume") == 0)
+                previewSound(rdram, ctx, runtime, kSePickupLine);
+            else
+                sound(rdram, ctx, runtime, kSeMove);
+        }
+
         // LB / RB in an open page (the menu layer: the controller's default layout, byte-swapped from ps2x::iop order
         // into the game's pad word): the neighbouring category's page, PRESETS included. True when one was pressed.
         bool shoulderSwitch(int kind, Screen &s, uint16_t pad, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -2046,9 +2090,9 @@ namespace kamite::options_screen
                 return;
             }
             else if ((repeat & kLeft) && change(g_page, s.pageCursor, -1, false))
-                sound(rdram, ctx, runtime, kSeMove);
+                changedSound(g_page, s.pageCursor, rdram, ctx, runtime);
             else if ((repeat & kRight) && change(g_page, s.pageCursor, 1, false))
-                sound(rdram, ctx, runtime, kSeMove);
+                changedSound(g_page, s.pageCursor, rdram, ctx, runtime);
             buildPage(g_page, tabOf(k.actions[s.row])); // the change may add or drop sub-options
             if (s.pageCursor >= static_cast<int>(g_page.rows.size()))
                 s.pageCursor = std::max(firstOption(g_page), 0);

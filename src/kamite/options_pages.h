@@ -40,7 +40,8 @@ namespace kamite::options_pages
 
     // The live settings of a tab under their categories' headers (upper case), sub-options only while their parent
     // allows them, the 4:3-only ones left out at 4:3.
-    void buildPage(PageData &d, settings::Tab tab, const IniFile &ini, float aspect);
+    // keyboard: the keyboard & mouse is the device in use (its Control Style shows, not the controller's).
+    void buildPage(PageData &d, settings::Tab tab, const IniFile &ini, float aspect, bool keyboard = false);
     // The page's first option / the next one up (step -1) or down (+1), headers skipped; -1 when there is none.
     int firstOption(const PageData &d);
     int nextOption(const PageData &d, int from, int step);

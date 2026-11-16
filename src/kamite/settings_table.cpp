@@ -148,6 +148,11 @@ namespace kamite::settings
         }
         constexpr Setting wideOnly(Setting s) { return s.wideOnly = true, s; }
         constexpr Setting slider(Setting s, const char *unit) { return s.gameSlider = true, s.unit = unit, s; }
+        // In game only while that device is in use, under its in-game name (nullptr: the launcher's).
+        constexpr Setting onDevice(Setting s, int8_t device, const char *gameName = nullptr)
+        {
+            return s.device = device, s.gameName = gameName, s;
+        }
 
         constexpr const char *kDegrees = "\xC2\xB0";
     }
@@ -271,26 +276,32 @@ namespace kamite::settings
                     "Play at a smooth sexy silky 60FPS.\nLeave OFF if you want the OG experience.", "Game",
                     "Fps60", false)),
         // One Control Style per device (K, Nov 16): the one in effect is the device used last.
-        live(note(choice(Tab::Gameplay, "Move & Groove", "Control Style: Pad",
-                         "Classic: PS2's OG fixed facing brawling.\nModern: Toggle third-person freecam.",
-                         "Game", "ControlStyle", "classic", kControlStyles),
-                  "F2 > Controls changes it while playing.")),
-        live(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Auto",
-                        "Brawling starts when dealing or taking damage.\nPress the stick (rebindable) to go back to freecam.",
-                        "Game", "ModernAuto", true),
-                 "ControlStyle", "modern")),
-        live(choice(Tab::Gameplay, "Move & Groove", "Control Style: KBM",
-                    "Keyboard & mouse.\nClassic: PS2's OG brawling. Modern: mouse freecam.",
-                    "Game", "KbmControlStyle", "modern", kControlStyles)),
-        live(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Auto",
-                        "Brawling starts when dealing or taking damage.\nMiddle-click (rebindable) to go back to freecam.",
-                        "Game", "KbmModernAuto", false),
-                 "KbmControlStyle", "modern")),
-        live(note(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Mouse Look",
-                             "Freak...",
-                             "Game", "MouseCamera", true),
-                      "KbmControlStyle", "modern"),
-                  "F2 > Controls sets the sensitivity.")),
+        // In game one Control Style: the device in use's (K, Nov 16); the launcher lists both.
+        live(onDevice(note(choice(Tab::Gameplay, "Move & Groove", "Control Style: Pad",
+                                  "Classic: PS2's OG fixed facing brawling.\nModern: Toggle third-person freecam.",
+                                  "Game", "ControlStyle", "classic", kControlStyles),
+                           "F2 > Controls changes it while playing."),
+                      kPad, "Control Style")),
+        live(onDevice(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Auto",
+                                 "Brawling starts when dealing or taking damage.\nPress the stick (rebindable) to go back to freecam.",
+                                 "Game", "ModernAuto", true),
+                          "ControlStyle", "modern"),
+                      kPad)),
+        live(onDevice(choice(Tab::Gameplay, "Move & Groove", "Control Style: KBM",
+                             "Keyboard & mouse.\nClassic: PS2's OG brawling. Modern: mouse freecam.",
+                             "Game", "KbmControlStyle", "modern", kControlStyles),
+                      kKeyboard, "Control Style")),
+        live(onDevice(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Auto",
+                                 "Brawling starts when dealing or taking damage.\nMiddle-click (rebindable) to go back to freecam.",
+                                 "Game", "KbmModernAuto", false),
+                          "KbmControlStyle", "modern"),
+                      kKeyboard)),
+        live(onDevice(note(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Mouse Look",
+                                      "Freak...",
+                                      "Game", "MouseCamera", true),
+                               "KbmControlStyle", "modern"),
+                           "F2 > Controls sets the sensitivity."),
+                      kKeyboard)),
         live(toggle(Tab::Gameplay, "Move & Groove", "Click-Stick Dash",
                     "Press and hold the stick to dash.\nRebindable in Controls.", "Game", "L3Dash", false)),
         live(note(toggle(Tab::Gameplay, "Move & Groove", "Busta-Chan Jive",
