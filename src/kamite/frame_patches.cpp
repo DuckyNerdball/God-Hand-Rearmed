@@ -2327,10 +2327,11 @@ namespace kamite
             SET_GPR_S32(ctx, Dst, GPR_S32(ctx, A) + (skipFrame(rdram) ? half : step - half));
         }
         // addiu Reg,Reg,Step with a whole per-frame step (an integer the game shows, no rate): the same split as
-        // stepSplit with the step in the instruction. The tension bar's glow (cCockPlBar's move func_00142060, alpha
-        // +0x26E going 0 -> 76 -> 0 by 3 a frame while the bar fills, +0x26F = up): 2 on the tick, 1 on the second
-        // half, so the pulse keeps the PS2's 52-frame cycle (104 vblanks) and still moves every vblank. For k: Step
-        // split into k parts.
+        // stepSplit with the step in the instruction, so a fade lasts as many vblanks as the PS2's frames x 2 and still
+        // moves every vblank. The tension bar's glow (cCockPlBar's move func_00142060, alpha +0x26E going 0 -> 76 -> 0
+        // by 3 a frame while the bar fills, +0x26F = up: 2 / 1, the 52-frame cycle); the menus' fades (the pause menu's
+        // picture cover +48 / -32, cSubScrMenu's update func_00165638; the shop entrance +-16, func_001680D8). For k:
+        // Step split into k parts.
         template <int Reg, int Step>
         void immSplit(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
@@ -2765,6 +2766,10 @@ namespace kamite
         ps2xRegisterHostHook("km_fps60_light_phase_split", &stepSplit<3, 3, 2>);
         ps2xRegisterHostHook("km_fps60_tension_flash_up", &immSplit<2, 3>);
         ps2xRegisterHostHook("km_fps60_tension_flash_down", &immSplit<2, -3>);
+        ps2xRegisterHostHook("km_fps60_pause_cover_in", &immSplit<2, 48>);
+        ps2xRegisterHostHook("km_fps60_pause_cover_out", &immSplit<2, -32>);
+        ps2xRegisterHostHook("km_fps60_shop_fade_in", &immSplit<2, 16>);
+        ps2xRegisterHostHook("km_fps60_shop_fade_out", &immSplit<2, -16>);
         ps2xRegisterHostHook("km_fps60_countup_self", &countupSelf);
         // The 1 -> 0 step's guards (countdownGuard): the signed test loads in front of hooked decrements.
         ps2xRegisterHostHook("km_fps60_cd_guard_s1_568", &countdownGuard<17, 0x568u, 2, 2, 1>);

@@ -212,6 +212,76 @@ hook = "km_fps60_tension_flash_down"
 flag = "fps60"
 replace = true
 
+# The menus' own animations (Nov 16; claude/framerate-sheet.md family 3): the sub screens and the continue screen step
+# their own fades and slides once a game frame outside cIDBase_move's gate, so at 60 they ran twice as fast. Census of
+# the sub screens (0x160020..0x16F3B0) and cCockGameOver; steps behind a press, a sound or a list index left alone.
+# Pause menu (cSubScrMenu's update func_00165638): the cover over the item picture fades in +48 and out -32 a frame
+# (+0xDC's alpha +0x4F), and the picture swaps 10 frames after the cursor stops (+0x2A3, set by the move at 0x166060).
+[[patches.hooks]] # state 1: lbu v0,0x4F(v1); addiu v0,v0,0x30
+address = "0x00165B50"
+hook = "km_fps60_pause_cover_in"
+flag = "fps60"
+replace = true
+[[patches.hooks]] # state 4: lbu v0,0x4F(v1); addiu v0,v0,-0x20
+address = "0x00165CC4"
+hook = "km_fps60_pause_cover_out"
+flag = "fps60"
+replace = true
+[[patches.hooks]] # lbu v0,0x2A3(s4); addiu v0,v0,-1
+address = "0x00165DC4"
+hook = "km_fps60_countdown_self"
+flag = "fps60"
+replace = true
+# Shop entrance (cSubScrShopEntrance's update func_001680D8): fades +0x90 in / out by 16 a frame.
+[[patches.hooks]] # addiu v0,v0,0x10
+address = "0x0016811C"
+hook = "km_fps60_shop_fade_in"
+flag = "fps60"
+replace = true
+[[patches.hooks]] # lbu v0,0x90(t0); addiu v0,v0,-0x10
+address = "0x00168164"
+hook = "km_fps60_shop_fade_out"
+flag = "fps60"
+replace = true
+# Shop (cSubScrShopMain's update func_00168AB8): the panel +0x120 slides in / out 100.0 a frame -> 50.0.
+[[patches.conditional]]
+address = "0x00169098"
+value = "0x3C014248"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x001691B4"
+value = "0x3C014248"
+flag = "fps60"
+# Map (cSubScrMap's update, mode 1, func_001634E0): the panel's two reveals +0x108 / +0x118 += 0.1 a frame -> 0.05
+# (func_00163598), and the route marker's progress 0x3BD9D0 += 0.01 a frame -> 0.005 (to 1.0 along the route, then
+# looping to 2.0; func_00163840).
+[[patches.conditional]]
+address = "0x00163668"
+value = "0x3C013D4C"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x001636A8"
+value = "0x3C013D4C"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x0016391C"
+value = "0x3C013BA3"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x00163BE0"
+value = "0x3C013BA3"
+flag = "fps60"
+# Continue screen (cCockGameOver's update, IconScreen_stepGrow): the title grows +0x40 += 0.03 and +0x78 += 0.0207 a
+# frame -> half (lui hi - 0x80).
+[[patches.conditional]]
+address = "0x0013D69C"
+value = "0x3C013C75"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x0013D6B8"
+value = "0x3C013C29"
+flag = "fps60"
+
 # The health bars (Nov 9, decomp cIDLifeBar.h): Gene's (func_0013F5D0), the boss bar (cCockBossBar, func_0013C950), the
 # last boss's two-segment bar (cIDLifeBar, func_0013E970) and the enemies' (func_0028F108 / func_0028F5B0, the lag
 # +0x630) ease the drawn value 0.07 of the gap a frame (lui / ori at 0x3D8F5C29): 1 - 0.93^0.5 = 0.0356 at 60
