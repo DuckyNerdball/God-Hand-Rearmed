@@ -1819,6 +1819,50 @@ namespace kamite::punish_fit
         return std::clamp(b[i - 1].second + (b[i].second - b[i - 1].second) * t, 0.0f, 1.0f);
     }
 
+    float seatSlap(const uint8_t *rdram, uint32_t model)
+    {
+        // Gene's right hand meets the seat at these frames of his Spanking motions (offline, tools/models/punish_fit
+        // sim on em16: the hand's nearest pass to the pelvis): the mash loop 1339 at 4, the finish 1341 at 2 and the
+        // launching slap at 21. Fitted pairs play rewritten copies with the same timing.
+        struct Contact
+        {
+            uint16_t motion;
+            float frame, strength;
+        };
+        constexpr Contact kContacts[] = {{1339, 4.0f, 1.0f}, {1341, 2.0f, 1.0f}, {1341, 21.0f, 1.5f}};
+        static uint32_t s_ptr = 0u;
+        static float s_frame = 0.0f;
+        model &= 0x1FFFFFFu;
+        const uint32_t gene = player(rdram);
+        if (!inRam(gene, 0x700u) || (rd32(rdram, gene + kCaught) & 0x1FFFFFFu) != model || !inRam(model, 0x700u))
+            return 0.0f;
+        const uint32_t ptr = rd32(rdram, gene + kMotionPlaying) & 0x1FFFFFFu;
+        uint16_t number = 0;
+        if (ptr == entry(rdram, model, 1339))
+            number = 1339;
+        else if (ptr == entry(rdram, model, 1341))
+            number = 1341;
+        else if (g_pair.live && g_pair.enemy == model && g_pair.punish == Spanking && g_pair.geneTrack &&
+                 ptr == g_pair.geneMotionPtr)
+            number = g_pair.geneTrack->motion;
+        if (number != 1339 && number != 1341)
+        {
+            s_ptr = 0u;
+            return 0.0f;
+        }
+        const float frame = rdF(rdram, gene + kMotionFrame);
+        // A motion seen for the first time counts from where it is (no slap for frames already past); a loop back to
+        // its start counts from before 0.
+        const float prev = ptr != s_ptr ? frame : (frame < s_frame ? -1.0f : s_frame);
+        s_ptr = ptr;
+        s_frame = frame;
+        float hit = 0.0f;
+        for (const Contact &c : kContacts)
+            if (c.motion == number && prev < c.frame && frame >= c.frame)
+                hit = std::max(hit, c.strength);
+        return hit;
+    }
+
     void describe(const uint8_t *rdram, uint32_t enemy, std::string &label, std::string &status)
     {
         label.clear();

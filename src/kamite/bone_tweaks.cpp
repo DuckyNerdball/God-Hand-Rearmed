@@ -318,6 +318,10 @@ namespace kamite::bone_tweaks
         constexpr float kBreastX = 0.07f, kBreastLen = 0.08f; // the bases either side of 29's origin; the tip ahead
         constexpr float kSeatSpot[3] = {0.0f, 0.98f, -0.10f}; // the cheeks' middle (bind)
         constexpr float kSeatMax = 0.04f, kPitchMax = 30.0f, kYawMax = 20.0f;
+        // Spanking (K, Nov 16): each slap kicks the seat's spring down the body (toward her legs) at this speed (m/s; the
+        // launching slap x1.5), on top of the motion's own reaction. F2's Slap jolt slider scales it (K to tune).
+        constexpr float kSlapSpeed = 0.35f;
+        std::atomic<float> g_slapJolt{1.0f};
         // The springs by size (t = (Money or Cash - 1) / 0.3, linear): at 130% K's values from play (Nov 16: rate 1.14 Hz,
         // damping 1.0, strength 1.0, side swing 0.69, left / right rates 14% apart, the same for bust and seat); a
         // smaller bust or seat is firmer (K): quicker, a little springier (jiggles in place), smaller peaks, less side
@@ -420,6 +424,8 @@ namespace kamite::bone_tweaks
             {
                 const float dt = static_cast<float>(elapsed) / (fps60() ? 60.0f : 30.0f);
                 const float spread = jig(kSpread, money); // left x (1 + spread), right x (1 - spread), as K tuned it
+                if (const float slap = punish_fit::seatSlap(rdram, model); slap > 0.0f && cash > kOn && (jg.flags & 1))
+                    st.seat.vel = sub(st.seat.vel, mulf(unit(row(pelvis, 1)), kSlapSpeed * slap * g_slapJolt.load(std::memory_order_relaxed)));
                 stepSpring(st.seat, seatSpot, dt, jig(kHz, cash), jig(kDamp, cash));
                 stepSpring(st.breast[0], breastSpot[0], dt, jig(kHz, money) * (1.0f + spread), jig(kDamp, money));
                 stepSpring(st.breast[1], breastSpot[1], dt, jig(kHz, money) * (1.0f - spread), jig(kDamp, money));
@@ -544,6 +550,11 @@ namespace kamite::bone_tweaks
             ui->separator_text("Money");
             restingSlider(ui, "##cash", "Cash %.0f%%", 100.0f, 130.0f, "Cash", g_cash, &setCash, cashMs);
             restingSlider(ui, "##money", "Money %.0f%%", 85.0f, 130.0f, "Money", g_money, &setMoney, moneyMs);
+            // Spanking's seat jolt (K, Nov 16: to tune in play; not saved, the value K picks goes into kSlapSpeed).
+            float jolt = g_slapJolt.load(std::memory_order_relaxed) * 100.0f;
+            ui->set_next_width(340.0f);
+            if (ui->slider_float("##slapjolt", &jolt, 0.0f, 300.0f, "Slap jolt %.0f%%"))
+                g_slapJolt.store(jolt / 100.0f, std::memory_order_relaxed);
         }
     }
 #endif

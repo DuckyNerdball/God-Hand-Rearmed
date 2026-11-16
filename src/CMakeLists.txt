@@ -99,19 +99,40 @@ set(KAMITE_HOST_SOURCES
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/GHR.ini")
 file(READ "${CMAKE_SOURCE_DIR}/GHR.ini" KAMITE_DEFAULT_INI)
 string(LENGTH "${KAMITE_DEFAULT_INI}" KAMITE_DEFAULT_INI_LENGTH)
-if(KAMITE_DEFAULT_INI_LENGTH GREATER 16000)
-    message(FATAL_ERROR "GHR.ini is ${KAMITE_DEFAULT_INI_LENGTH} bytes; MSVC string literals stop at 16380 (split it)")
+# MSVC caps one string literal at 16380 bytes and a concatenation of them at 65535: the text goes in as adjacent raw
+# literals of at most 8000 bytes, each cut after a line break.
+if(KAMITE_DEFAULT_INI_LENGTH GREATER 60000)
+    message(FATAL_ERROR "GHR.ini is ${KAMITE_DEFAULT_INI_LENGTH} bytes; MSVC string literals stop at 65535 in all")
 endif()
 if(KAMITE_DEFAULT_INI MATCHES "\\)KMINI\"")
     message(FATAL_ERROR "GHR.ini must not contain )KMINI\" (the raw string delimiter)")
 endif()
+set(KAMITE_INI_REST "${KAMITE_DEFAULT_INI}")
+set(KAMITE_INI_PIECES "")
+while(NOT "${KAMITE_INI_REST}" STREQUAL "")
+    string(LENGTH "${KAMITE_INI_REST}" KAMITE_INI_REST_LENGTH)
+    if(KAMITE_INI_REST_LENGTH GREATER 8000)
+        string(SUBSTRING "${KAMITE_INI_REST}" 0 8000 KAMITE_INI_PIECE)
+        string(FIND "${KAMITE_INI_PIECE}" "\n" KAMITE_INI_CUT REVERSE)
+        if(KAMITE_INI_CUT LESS 0)
+            message(FATAL_ERROR "GHR.ini has a line over 8000 bytes")
+        endif()
+        math(EXPR KAMITE_INI_CUT "${KAMITE_INI_CUT} + 1")
+        string(SUBSTRING "${KAMITE_INI_REST}" 0 ${KAMITE_INI_CUT} KAMITE_INI_PIECE)
+        string(SUBSTRING "${KAMITE_INI_REST}" ${KAMITE_INI_CUT} -1 KAMITE_INI_REST)
+    else()
+        set(KAMITE_INI_PIECE "${KAMITE_INI_REST}")
+        set(KAMITE_INI_REST "")
+    endif()
+    string(APPEND KAMITE_INI_PIECES "\n        R\"KMINI(${KAMITE_INI_PIECE})KMINI\"")
+endwhile()
 set(KAMITE_INI_HEADER "${CMAKE_CURRENT_BINARY_DIR}/kamite_generated/kamite/default_ini.h")
 file(WRITE "${KAMITE_INI_HEADER}.tmp"
     "// Generated from GHR.ini by src/CMakeLists.txt. Do not edit.\n"
     "#pragma once\n"
     "namespace kamite\n"
     "{\n"
-    "    inline constexpr const char *kDefaultIni = R\"KMINI(${KAMITE_DEFAULT_INI})KMINI\";\n"
+    "    inline constexpr const char *kDefaultIni =${KAMITE_INI_PIECES};\n"
     "}\n")
 file(COPY_FILE "${KAMITE_INI_HEADER}.tmp" "${KAMITE_INI_HEADER}" ONLY_IF_DIFFERENT)
 
