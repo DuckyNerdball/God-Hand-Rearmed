@@ -295,13 +295,12 @@ namespace
     // launcher presents with OpenGL into this window; borderless, its swap chain fills the monitor and Windows flips it
     // straight to the screen. The game then stops presenting into it (the GS draws into the child window), so its last
     // frame (Play's fade to black) stays on screen until a window overlaps it and Windows composes the window again,
-    // child included: what the Start menu did. So, once the GS has presented a few frames (and twice more later), a
-    // 1-pixel black topmost window sits over the window's corner for a few frames, then goes. (Nov 16: a layered,
-    // nearly transparent one did nothing: Windows may not count it as covering; this one is a plain opaque window.)
+    // child included: what the Start menu did. So, once the GS has presented a few frames (and again a little later),
+    // a 1-pixel, nearly transparent, topmost window sits over the window's corner for a few frames, then goes.
     HWND g_composeNudge = nullptr;
     int g_composeNudgeTicks = 0;
     int g_composeNudges = 0;
-    constexpr uint64_t kComposeNudgeAt[3] = {30u, 120u, 300u}; // GS presents
+    constexpr uint64_t kComposeNudgeAt[2] = {30u, 180u}; // GS presents
 
     bool fillsMonitor(HWND window)
     {
@@ -321,26 +320,20 @@ namespace
             WNDCLASSW wc{};
             wc.lpfnWndProc = DefWindowProcW;
             wc.hInstance = GetModuleHandleW(nullptr);
-            wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
             wc.lpszClassName = L"ps2x_compose_nudge";
             RegisterClassW(&wc);
             return wc.lpszClassName;
         }();
         RECT rect{};
         GetWindowRect(g_parent, &rect);
-        g_composeNudge = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClass, L"", WS_POPUP,
-                                         rect.right - 1, rect.bottom - 1, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        g_composeNudge = CreateWindowExW(WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                                         kClass, L"", WS_POPUP, rect.right - 1, rect.bottom - 1, 1, 1, nullptr, nullptr,
+                                         GetModuleHandleW(nullptr), nullptr);
         if (!g_composeNudge)
-        {
-            std::fprintf(stderr, "[gs] fullscreen hand-off: nudge window failed (error %lu)\n", GetLastError());
             return;
-        }
+        SetLayeredWindowAttributes(g_composeNudge, 0, 1, LWA_ALPHA);
         ShowWindow(g_composeNudge, SW_SHOWNOACTIVATE);
-        UpdateWindow(g_composeNudge);
-        g_composeNudgeTicks = 10;
-        std::fprintf(stderr, "[gs] fullscreen hand-off: nudge %d at the GS's present %llu (window %ldx%ld)\n", g_composeNudges,
-                     static_cast<unsigned long long>(g_presents.load(std::memory_order_relaxed)),
-                     static_cast<long>(rect.right - rect.left), static_cast<long>(rect.bottom - rect.top));
+        g_composeNudgeTicks = 4;
     }
 
     void composeNudgeTick()
@@ -354,13 +347,11 @@ namespace
             }
             return;
         }
-        if (g_composeNudges < 3 && g_presents.load(std::memory_order_relaxed) >= kComposeNudgeAt[g_composeNudges])
+        if (g_composeNudges < 2 && g_presents.load(std::memory_order_relaxed) >= kComposeNudgeAt[g_composeNudges])
         {
             ++g_composeNudges;
             if (fillsMonitor(g_parent))
                 composeNudge();
-            else if (g_composeNudges == 1)
-                std::fprintf(stderr, "[gs] fullscreen hand-off: the window doesn't fill its monitor, no nudge\n");
         }
     }
 }
