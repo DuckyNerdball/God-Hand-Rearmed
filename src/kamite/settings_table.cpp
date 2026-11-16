@@ -332,8 +332,8 @@ namespace kamite::settings
                          "Game", "NpcPoses", false),
                   "F2 > NPCs sets the poses.")),
         // Money (K, Nov 14): out of F2 into Options, no help text; F2 > NPCs keeps its slider (any whole percent).
+        live(cash()), // Cash (K, Nov 16): above Money
         live(money()),
-        live(cash()), // Cash (K, Nov 15): right under Money, the same way
 
         // ---- Sound ----------------------------------------------------------------------------------------------
         live(choice(Tab::Sound, "Sound", "Mode", "Select between monaural,\nstereo, or surround sound.", "Sound", "Mode",

@@ -318,9 +318,18 @@ namespace kamite::bone_tweaks
         constexpr float kBreastX = 0.07f, kBreastLen = 0.08f; // the bases either side of 29's origin; the tip ahead
         constexpr float kSeatSpot[3] = {0.0f, 0.98f, -0.10f}; // the cheeks' middle (bind)
         constexpr float kSeatMax = 0.04f, kPitchMax = 30.0f, kYawMax = 20.0f;
-        enum JigTune { kBustHz, kBustDamp, kBustGain, kSeatHz, kSeatDamp, kSeatGain, kSide, kSpread, kJigTunes };
-        std::atomic<float> g_jigTune[kJigTunes] = {3.6f, 0.15f, 0.35f, 3.0f, 0.25f, 0.4f, 0.33f, 0.04f}; // F2 > NPCs
-        float jigTune(int i) { return g_jigTune[i].load(std::memory_order_relaxed); }
+        // The springs by size (t = (Money or Cash - 1) / 0.3, linear): at 130% K's values from play (Nov 16: rate 1.14 Hz,
+        // damping 1.0, strength 1.0, side swing 0.69, left / right rates 14% apart, the same for bust and seat); a
+        // smaller bust or seat is firmer (K): quicker, a little springier (jiggles in place), smaller peaks, less side
+        // to side.
+        enum JigTune { kHz, kDamp, kGain, kSide, kSpread, kJigTunes };
+        constexpr float kJigFirm[kJigTunes] = {2.6f, 0.55f, 0.45f, 0.30f, 0.14f};
+        constexpr float kJigFull[kJigTunes] = {1.14f, 1.0f, 1.0f, 0.69f, 0.14f};
+        float jig(int i, float size)
+        {
+            const float t = std::clamp((size - 1.0f) / 0.3f, 0.0f, 1.0f);
+            return kJigFirm[i] + (kJigFull[i] - kJigFirm[i]) * t;
+        }
 
         struct Spring
         {
@@ -410,13 +419,12 @@ namespace kamite::bone_tweaks
             else if (elapsed > 0)
             {
                 const float dt = static_cast<float>(elapsed) / (fps60() ? 60.0f : 30.0f);
-                const float spread = jigTune(kSpread);
-                stepSpring(st.seat, seatSpot, dt, jigTune(kSeatHz), jigTune(kSeatDamp));
-                stepSpring(st.breast[0], breastSpot[0], dt, jigTune(kBustHz) * (1.0f + spread), jigTune(kBustDamp));
-                stepSpring(st.breast[1], breastSpot[1], dt, jigTune(kBustHz) * (1.0f - spread), jigTune(kBustDamp));
+                const float spread = jig(kSpread, money); // left x (1 + spread), right x (1 - spread), as K tuned it
+                stepSpring(st.seat, seatSpot, dt, jig(kHz, cash), jig(kDamp, cash));
+                stepSpring(st.breast[0], breastSpot[0], dt, jig(kHz, money) * (1.0f + spread), jig(kDamp, money));
+                stepSpring(st.breast[1], breastSpot[1], dt, jig(kHz, money) * (1.0f - spread), jig(kDamp, money));
                 st.frame = frame;
             }
-            const float side = jigTune(kSide);
 
             // 27: the pelvis, moved by the seat's spring (in the pelvis' axes: up / down, the side swing x side).
             if (jg.flags & 1)
@@ -426,7 +434,7 @@ namespace kamite::bone_tweaks
                 {
                     const Vec D = sub(st.seat.tip, st.seat.rest);
                     const Vec ux = unit(row(pelvis, 0)), uy = unit(row(pelvis, 1));
-                    d = mulf(Vec{dot(D, ux) * side, dot(D, uy), 0.0f}, jigTune(kSeatGain) * cash);
+                    d = mulf(Vec{dot(D, ux) * jig(kSide, cash), dot(D, uy), 0.0f}, jig(kGain, cash) * cash);
                     if (const float l = length(d); l > kSeatMax)
                         d = mulf(d, kSeatMax / l);
                 }
@@ -448,7 +456,7 @@ namespace kamite::bone_tweaks
             }
             // Both breasts on their own springs: bone b of breast i = s Rb Q_i, at t29 + s Rb (Q_i (B_b - B29 - o_i) + o_i).
             const float hold = std::clamp(punish_fit::bustHold(rdram, model), 0.0f, 1.0f);
-            const float gain = jigTune(kBustGain) * (1.0f - hold);
+            const float gain = jig(kGain, money) * (1.0f - hold), side = jig(kSide, money);
             const int bones[2] = {kBustBone, kRightBone};
             for (int i = 0; i < 2; ++i)
             {
@@ -534,27 +542,8 @@ namespace kamite::bone_tweaks
         {
             static int64_t moneyMs = -1, cashMs = -1;
             ui->separator_text("Money");
-            restingSlider(ui, "##money", "Money %.0f%%", 85.0f, 130.0f, "Money", g_money, &setMoney, moneyMs);
             restingSlider(ui, "##cash", "Cash %.0f%%", 100.0f, 130.0f, "Cash", g_cash, &setCash, cashMs);
-            // The jiggle springs (above 100%): live, not saved (tell Claude the values you like).
-            ui->separator_text("Jiggle");
-            struct Row
-            {
-                const char *id, *format;
-                float lo, hi;
-            };
-            static const Row kRows[kJigTunes] = {
-                {"##jbhz", "Bust %.2f Hz", 1.0f, 8.0f},        {"##jbdamp", "Bust damping %.2f", 0.02f, 1.0f},
-                {"##jbgain", "Bust strength %.2f", 0.0f, 2.0f}, {"##jshz", "Seat %.2f Hz", 1.0f, 8.0f},
-                {"##jsdamp", "Seat damping %.2f", 0.02f, 1.0f}, {"##jsgain", "Seat strength %.2f", 0.0f, 2.0f},
-                {"##jside", "Side swing %.2f", 0.0f, 1.0f},     {"##jspread", "Left / right rates %.2f", 0.0f, 0.15f}};
-            for (int i = 0; i < kJigTunes; ++i)
-            {
-                float v = jigTune(i);
-                ui->set_next_width(340.0f);
-                if (ui->slider_float(kRows[i].id, &v, kRows[i].lo, kRows[i].hi, kRows[i].format))
-                    g_jigTune[i].store(v, std::memory_order_relaxed);
-            }
+            restingSlider(ui, "##money", "Money %.0f%%", 85.0f, 130.0f, "Money", g_money, &setMoney, moneyMs);
         }
     }
 #endif

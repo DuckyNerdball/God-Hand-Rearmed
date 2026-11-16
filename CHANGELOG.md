@@ -5,6 +5,7 @@ Newest first, one line per change; the code comments say how.
 ## November 16, 2026
 
 - Money and Cash above 100%: each breast and the seat jiggle on their own, with a side-to-side swing.
+- Cash is listed above Money.
 
 ## November 15, 2026
 
