@@ -1897,6 +1897,8 @@ void main()
                     for (int i = 0; i < static_cast<int>(hk::Action::Count); ++i)
                     {
                         const hk::Action action = static_cast<hk::Action>(i);
+                        if (!hk::available(action))
+                            continue; // the dev keys in a release build
                         const hk::Info &info = hk::info(action);
                         const hk::Binding binding = hk::binding(action);
                         ImGui::TableNextRow();
@@ -1927,7 +1929,8 @@ void main()
                 if (ImGui::Button("Default hotkeys"))
                 {
                     for (int i = 0; i < static_cast<int>(hk::Action::Count); ++i)
-                        storeHotkey(state, static_cast<hk::Action>(i), hk::info(static_cast<hk::Action>(i)).def);
+                        if (hk::available(static_cast<hk::Action>(i)))
+                            storeHotkey(state, static_cast<hk::Action>(i), hk::info(static_cast<hk::Action>(i)).def);
                     g_hotkeyStatus = "Default hotkeys restored.";
                 }
             }

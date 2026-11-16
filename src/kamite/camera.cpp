@@ -898,57 +898,10 @@ namespace kamite
             std::memcpy(rdram + spot + 8u, &out[1], 4);
         }
 
-        // TEMPORARY (Oct 29, strip once K's free-camera fights are right): once a second while the free camera has the
-        // view, what the enemies compared: the camera's yaw, Gene's, and per enemy the angle (from the camera's
-        // facing) and the cone.
-        struct ConeNote
-        {
-            uint32_t enemy;
-            char site;
-            float angle, cone;
-        };
-        ConeNote g_coneNotes[12];
-        int g_coneCount = 0;
-        std::chrono::steady_clock::time_point g_coneLogAt{};
-        void noteCone(const uint8_t *rdram, R5900Context *ctx, char site, float angle, float cone)
-        {
-            if (!g_freeNow)
-                return;
-            const uint32_t enemy = GPR_U32(ctx, 18);
-            for (int i = 0; i < g_coneCount; ++i)
-                if (g_coneNotes[i].enemy == enemy && g_coneNotes[i].site == site)
-                {
-                    g_coneNotes[i] = {enemy, site, angle, cone};
-                    goto logged;
-                }
-            if (g_coneCount < 12)
-                g_coneNotes[g_coneCount++] = {enemy, site, angle, cone};
-        logged:
-            const auto now = std::chrono::steady_clock::now();
-            if (now - g_coneLogAt < std::chrono::seconds(1))
-                return;
-            g_coneLogAt = now;
-            uint32_t gene = 0;
-            std::memcpy(&gene, rdram + 0x747A94u, 4);
-            const float geneYaw = (gene & 0x1FFFFFFFu) >= 0x100000u ? loadFloat(rdram, gene + 0x104u) : 0.0f;
-            char line[1024];
-            int n = std::snprintf(line, sizeof(line), "enemy cones (deg): camera yaw %.0f, Gene %.0f;", g_freeYaw / kDegToRad,
-                                  geneYaw / kDegToRad);
-            for (int i = 0; i < g_coneCount && n < static_cast<int>(sizeof(line)) - 80; ++i)
-            {
-                const ConeNote &c = g_coneNotes[i];
-                n += std::snprintf(line + n, sizeof(line) - static_cast<size_t>(n), " %x %c %.0f /%.0f", c.enemy & 0xFFFFFFu, c.site,
-                                   c.angle / kDegToRad, c.cone / kDegToRad);
-            }
-            KM_INFO(Game, line);
-            g_coneCount = 0;
-        }
-
         // Before c.le.s $f0,$f1 in func_00211C08 ($f0 = the 60-degree wedge, $f1 = the angle)
         void enemyWedge(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             ctx->f[0] = scaledCone(ctx->f[0], enemyDistance(rdram, ctx));
-            noteCone(rdram, ctx, 'w', ctx->f[1], ctx->f[0]);
         }
         // The attack decision's own facing cones (func_00262AA8, f21 = |angle from the facing| worked out at 0x263524):
         // the default rule's hold by level (c.lt.s $f1,$f21 at 0x263608, $f1 = 60/90/135/180 deg: outside it the
@@ -957,18 +910,15 @@ namespace kamite
         void enemyHoldF1(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             ctx->f[1] = scaledCone(ctx->f[1], enemyDistance(rdram, ctx));
-            noteCone(rdram, ctx, 'h', ctx->f[21], ctx->f[1]);
         }
         void enemyHoldF0(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             ctx->f[0] = scaledCone(ctx->f[0], enemyDistance(rdram, ctx));
-            noteCone(rdram, ctx, 'a', ctx->f[21], ctx->f[0]);
         }
         // Before c.lt.s $f0,$f1 in func_00262AA8 ($f0 = the angle, $f1 = the level's lunge cone)
         void enemyLunge(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             ctx->f[1] = scaledCone(ctx->f[1], enemyDistance(rdram, ctx));
-            noteCone(rdram, ctx, 'l', ctx->f[0], ctx->f[1]);
         }
 
         // ---- Camera shake -----------------------------------------------------------------------------------------
@@ -1303,18 +1253,6 @@ namespace kamite
             ui->text_disabled("The PS2 spreads a surface's lighting and shadows evenly across the screen instead of along "
                               "the surface, so the floor's shading near the camera shifts, darker and lighter, as the "
                               "camera turns. On: shading follows the surface like its texture does. Off: as the PS2.");
-            {
-                uint64_t patched = 0, cut = 0, cutNear = 0, noStitch = 0;
-                nearGeometryStats(patched, cut, cutNear, noStitch);
-                char line[256];
-                std::snprintf(line, sizeof(line),
-                              "Near geometry (on with See-through, at start): %llu renderer tests patched; "
-                              "%llu triangles cut at the screen's edges, %llu at the camera, %llu behind it left out "
-                              "(no stitch information).",
-                              static_cast<unsigned long long>(patched), static_cast<unsigned long long>(cut),
-                              static_cast<unsigned long long>(cutNear), static_cast<unsigned long long>(noStitch));
-                ui->text_wrapped(line);
-            }
             ui->separator_text("GHR.ini");
             if (ui->button("Save##graphics"))
                 saveToIni();

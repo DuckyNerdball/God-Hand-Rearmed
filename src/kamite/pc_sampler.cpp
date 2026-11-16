@@ -201,6 +201,10 @@ namespace kamite::pcsampler
 
     void installFromEnvironment(PS2Runtime &runtime)
     {
+        (void)runtime;
+#if defined(KAMITE_RELEASE)
+        return; // player releases: no profilers or tracers (claude/release.md)
+#endif
         const char *value = std::getenv("KAMITE_PC_SAMPLE");
         const int seconds = value ? std::atoi(value) : 0;
         if (seconds <= 0)

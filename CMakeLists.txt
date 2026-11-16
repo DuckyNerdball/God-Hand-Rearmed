@@ -17,6 +17,14 @@ option(KAMITE_BUILD_TOOLS "Build the offline tools in runtime/ps2xTest (vu1_reco
 set(URBAN_BUILD_RECOMP ${KAMITE_BUILD_RECOMP})
 set(URBAN_BUILD_TOOLS ${KAMITE_BUILD_TOOLS})
 
+# A player release (Make Release.cmd; claude/release.md): no developer dump keys (F4 / F6 / F8 / F10 / Shift+F10), no
+# F12 debugger key, no profilers or tracers (KAMITE_PC_SAMPLE, KAMITE_CALL_PROFILE, KAMITE_CALL_TRACE,
+# KAMITE_FIND_COUNTERS). F2, test cases and the crash logs stay.
+option(KAMITE_RELEASE "Build a player release" OFF)
+if(KAMITE_RELEASE)
+    add_compile_definitions(KAMITE_RELEASE=1)
+endif()
+
 # In-game ImGui "Runtime Debugger" (threads, kernel, IOP/SIF, RPC history, GS, DMA, memory); F1 toggles it.
 option(KAMITE_DEBUG_UI "Build the ImGui runtime debugger into GHR.exe" ON)
 set(PS2X_ENABLE_DEBUG_UI ${KAMITE_DEBUG_UI} CACHE BOOL "" FORCE)

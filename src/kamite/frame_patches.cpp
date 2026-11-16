@@ -84,7 +84,6 @@ namespace kamite
         uint8_t g_stickLast[4] = {};
         int g_stickInjected[4] = {-1, -1, -1, -1}; // the value written over the game's last frame (-1: none)
         uint8_t g_stickRaw[4] = {0x80u, 0x80u, 0x80u, 0x80u};
-        uint32_t g_staleRestores = 0, g_holds = 0, g_frames = 0;
         uint64_t g_gameFrame = 0; // every frame hook; at 60 frames/s the odd ones are the extra frames
 
         bool envOn(const char *name)
@@ -1767,7 +1766,6 @@ namespace kamite
             counterfinder::onFrame(rdram);
             hud::onFrame(rdram);
             options_screen::onFrame(rdram, ctx, runtime); // the game's own options from GHR.ini, the volumes
-            characters::onFrame(rdram);
             npc_poses::onFrame(rdram, ctx, runtime);
             debug_tools::onFrame(rdram, ctx, runtime);
             sprint_traversal::onFrame(rdram, ctx, runtime); // Busta-Chan Jive: a window with a room jump starts it
@@ -1797,10 +1795,7 @@ namespace kamite
             {
                 uint8_t &value = ram8(rdram, kStickBytes[axis]);
                 if (g_stickInjected[axis] >= 0 && value == static_cast<uint8_t>(g_stickInjected[axis]))
-                {
                     value = g_stickRaw[axis];
-                    ++g_staleRestores;
-                }
                 g_stickInjected[axis] = -1;
                 const uint8_t raw = value;
                 g_stickRaw[axis] = raw;
@@ -1817,15 +1812,8 @@ namespace kamite
                 {
                     value = last;
                     g_stickInjected[axis] = last;
-                    ++g_holds;
                 }
             }
-            if (++g_frames % 3600u == 0u) // once a minute at 60 frames/s
-                KM_INFO(Game, "fps60 stick hold: " << g_holds << " held frames, " << g_staleRestores
-                                                   << " readings restored in the last 3600 frames; left stick now "
-                                                   << int(ram8(rdram, kStickBytes[0])) << "," << int(ram8(rdram, kStickBytes[1])));
-            if (g_frames % 3600u == 0u)
-                g_holds = g_staleRestores = 0u;
             l3Dash(rdram);
             rouletteDpad(rdram);
         }
@@ -2640,7 +2628,6 @@ namespace kamite
             ps2x::asyncvif::setVu1TimingScale(0.5);
         g_l3Dash = envOn("KAMITE_L3_DASH");
         ps2xRegisterHostHook("km_frame_start", &frameStart);
-        characters::installProbe();
         characters::installLoadWatch();
         ps2xRegisterHostHook("km_fps60_hitbox_compare", &hitboxCompare);
         ps2xRegisterHostHook("km_fps60_roulette_timer", &rouletteTimer);

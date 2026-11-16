@@ -74,6 +74,8 @@ namespace kamite::hotkeys
         }
         for (int i = 0; i < kCount; ++i)
         {
+            if (!rt::available(action(i)))
+                continue; // (a release build leaves the dev keys' lines alone)
             const rt::Binding binding = rt::binding(action(i));
             ini.set("Hotkeys", rt::info(action(i)).id, binding.bound() ? rt::text(binding) : "none");
         }
@@ -123,6 +125,8 @@ namespace kamite::hotkeys
         }
         for (int i = 0; i < kCount; ++i)
         {
+            if (!rt::available(action(i)))
+                continue;
             const rt::Info &info = rt::info(action(i));
             const rt::Binding binding = rt::binding(action(i));
             ui->push_id(i);

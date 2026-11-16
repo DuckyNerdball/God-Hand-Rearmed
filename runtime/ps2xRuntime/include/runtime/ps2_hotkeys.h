@@ -54,6 +54,8 @@ namespace ps2x::hotkeys
 
     [[nodiscard]] const Info &info(Action action);
     [[nodiscard]] Binding binding(Action action);
+    // False for the developers' dump keys and the debugger in a player release (KAMITE_RELEASE): menus hide them.
+    [[nodiscard]] bool available(Action action);
     void setBinding(Action action, Binding binding);
     // Another action that already uses this binding (Count = none).
     [[nodiscard]] Action conflict(Action action, Binding binding);

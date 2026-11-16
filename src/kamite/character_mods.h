@@ -48,13 +48,8 @@ namespace kamite::characters
     };
     const Hair &hair();
 
-    // Diagnostics for the cloth attachment (Gene's coat, object 0x101 parented to his bone 17 by the player's init at
-    // 0x108068): the hook at 0x108088 remembers the player and the coat, and onFrame logs their bone matrices once
-    // a few seconds later ([cloth] lines), to work out how an attached model's root is placed.
-    void installProbe();
     // Gives a replaced player file (pl/pl00.dat, pl/pl01.dat) a buffer large enough for it where the game allocates
-    // the player's buffers (0x30EE08 called from 0x30D7A8 / 0x30D7C8), logging heap A's room; checks every read of a
-    // replaced file into a buffer (cDvd_ReadToBuffer) against the buffer's size.
+    // the player's buffers (0x30EE08 called from 0x30D7A8 / 0x30D7C8), logging heap A's room; cuts a read of a replaced
+    // file into a buffer too small for it (cDvd_ReadToBuffer; a save state from another build) to the buffer.
     void installLoadWatch();
-    void onFrame(uint8_t *rdram);
 }

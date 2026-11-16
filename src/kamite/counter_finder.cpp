@@ -60,6 +60,9 @@ namespace kamite::counterfinder
 
     void install(PS2Runtime &)
     {
+#if defined(KAMITE_RELEASE)
+        return; // player releases: no profilers or tracers (claude/release.md)
+#endif
         const char *value = std::getenv("KAMITE_FIND_COUNTERS");
         if (!value || !*value)
             return;

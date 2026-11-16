@@ -19,7 +19,7 @@ namespace ps2x::hotkeys
             {"Menu", "Dev menu (F2 menu)", {KEY_F2}},
             {"SaveState", "Save state", {KEY_F5}},
             {"LoadState", "Load state", {KEY_F9}},
-            {"RecordCase", "Record a test case (again: stop)", {KEY_F1}}, // unbound at the public release (claude/later.md)
+            {"RecordCase", "Record a test case (again: stop)", {0}}, // unbound by default since the public release: testers bind it
             {"FpsOverlay", "FPS overlay", {KEY_F3}},
             {"Fullscreen", "Full screen", {KEY_F11}},
             {"HudLayout", "HUD layout 16:9 / 4:3", {KEY_F7}},
@@ -36,13 +36,26 @@ namespace ps2x::hotkeys
         };
 
 
+        // The developers' dump keys and the debugger: left out of player releases (KAMITE_RELEASE, claude/release.md).
+#if defined(KAMITE_RELEASE)
+        constexpr bool kRelease = true;
+#else
+        constexpr bool kRelease = false;
+#endif
+        constexpr bool devOnly(int i)
+        {
+            const Action a = static_cast<Action>(i);
+            return a == Action::Dump2D || a == Action::ReloadPnach || a == Action::RamDump || a == Action::DebugDump ||
+                   a == Action::GifDump || a == Action::DrawDump || a == Action::DebugPanel;
+        }
+
         struct Defaults
         {
             Binding bindings[kCount];
             constexpr Defaults() : bindings{}
             {
                 for (int i = 0; i < kCount; ++i)
-                    bindings[i] = kInfo[i].def;
+                    bindings[i] = kRelease && devOnly(i) ? Binding{} : kInfo[i].def;
             }
         };
         constexpr Defaults kDefaults;
@@ -136,8 +149,15 @@ namespace ps2x::hotkeys
         return g_bindings[static_cast<int>(action)];
     }
 
+    bool available(Action action)
+    {
+        return !(kRelease && devOnly(static_cast<int>(action)));
+    }
+
     void setBinding(Action action, Binding binding)
     {
+        if (!available(action))
+            binding = Binding{};
         std::lock_guard<std::mutex> lock(g_mutex);
         g_bindings[static_cast<int>(action)] = binding;
     }
@@ -262,6 +282,8 @@ namespace ps2x::hotkeys
 
     bool pressed(Action action)
     {
+        if (!available(action))
+            return false;
         const Binding b = binding(action);
         if (b.key == 0 || !IsKeyPressed(b.key))
             return false;

@@ -63,8 +63,7 @@ namespace kamite
         constexpr double kNear = 0.1;               // The game's near plane (metres = clip W)
         constexpr double kRangeLo = 8.0, kRangeHi = 4087.0; // the GS's screen range, pixels, with a margin
 
-        std::atomic<uint64_t> g_patched{0}, g_cut{0}, g_cutNear{0}, g_noStitch{0};
-        std::atomic<uint64_t> g_packets{0}, g_crossing{0}, g_crossingMatched{0};
+        std::atomic<uint64_t> g_patched{0};
 
         // ---- 1. Microcode ---------------------------------------------------------------------------------------
 
@@ -342,7 +341,6 @@ namespace kamite
             std::array<bool, kPairs> kickStage{};
         };
         std::vector<std::unique_ptr<Analysis>> g_analyses; // VU1 thread only
-        std::atomic<uint64_t> g_analysisHits{0}, g_analysisMisses{0};
 
         void analyseCached(uint8_t *code, uint32_t codeSize)
         {
@@ -355,11 +353,9 @@ namespace kamite
                     g_program = a->program;
                     g_programSkinned = a->programSkinned;
                     g_kickStage = a->kickStage;
-                    g_analysisHits.fetch_add(1, std::memory_order_relaxed);
                     return;
                 }
             analyse(code, codeSize);
-            g_analysisMisses.fetch_add(1, std::memory_order_relaxed);
             if (g_analyses.size() >= 64u)
                 g_analyses.erase(g_analyses.begin());
             auto a = std::make_unique<Analysis>();
@@ -590,7 +586,6 @@ namespace kamite
                 for (const Vertex *p : v)
                     poly.push_back(screenOf(*p));
                 emitPolygon(out, poly, scratch, c, flat);
-                g_cut.fetch_add(1, std::memory_order_relaxed);
                 return;
             }
             if (behind == 3)
@@ -610,12 +605,8 @@ namespace kamite
                 if (backFace)
                     return;
             }
-            else
-            {
-                g_noStitch.fetch_add(1, std::memory_order_relaxed);
-                if (c.adc || (behind & 1))
-                    return;
-            }
+            else if (c.adc || (behind & 1))
+                return;
             // Its depth line Z = A + B Q, from the two corners farthest apart in Q.
             int i0 = 0, i1 = 1;
             double best = -1.0;
@@ -668,7 +659,6 @@ namespace kamite
                     !std::isfinite(k.q))
                     return;
             emitPolygon(out, poly, scratch, c, flat);
-            g_cutNear.fetch_add(1, std::memory_order_relaxed);
         }
 
         int32_t s32(uint32_t value) { return static_cast<int32_t>(value); }
@@ -716,19 +706,6 @@ namespace kamite
             t_sinceMark = 0;
             put64(before, 1u | (1ull << 15) | (1ull << 60), 0xEull);            // NLOOP 1, EOP, A+D
             put64(before, (0x4B4D5345ull << 32) | cls, 0x0F);                   // NOP: "KMSE" | class
-        }
-
-        // The log line now and then (both walks count their packets).
-        void countPacket()
-        {
-            if (g_packets.fetch_add(1, std::memory_order_relaxed) % 200000u == 199999u)
-                KM_INFO(Game, "near geometry: " << g_patched.load() << " clip tests patched; " << g_crossing.load()
-                                                << " packets needed cutting, " << g_crossingMatched.load()
-                                                << " of them matched to their input (stitch flags); triangles cut: "
-                                                << g_cut.load() << " at the screen's edges, " << g_cutNear.load()
-                                                << " at the camera; " << g_noStitch.load()
-                                                << " reaching behind it without stitch flags; microcode analyses: "
-                                                << g_analysisHits.load() << " from the cache, " << g_analysisMisses.load() << " fresh");
         }
 
         // Nearly every packet of the patched renderers has all its vertices on the screen and in front of the camera
@@ -842,16 +819,12 @@ namespace kamite
             if (!g_programPatched[pair])
                 return;
             if (!needsFullWalk(packet, size))
-            {
-                countPacket();
                 return;
-            }
             thread_local std::vector<Cut> poly, scratch;
             Out out{extra};
             TagInfo outTag{};
             uint32_t inputQw = 0, stride = 0;
             const bool haveInput = findInput(packet, size, sourceAddress, vuData, vuDataSize, kickPc, inputQw, stride);
-            bool crossing = false;
             const uint32_t vuQwords = vuDataSize / 16u;
             bool firstTag = true;
             uint32_t pos = 0;
@@ -991,7 +964,6 @@ namespace kamite
                                 }
                                 if (outside || unknown)
                                 {
-                                    crossing = true;
                                     // The GS must not draw it as it is.
                                     packet[v.xyzOffset + 13u] |= 0x80u; // ADC: bit 15 of the fourth word
                                     if (!unknown && cuttable)
@@ -1032,13 +1004,6 @@ namespace kamite
                 if (eop)
                     break;
             }
-            if (crossing)
-            {
-                g_crossing.fetch_add(1, std::memory_order_relaxed);
-                if (haveInput)
-                    g_crossingMatched.fetch_add(1, std::memory_order_relaxed);
-            }
-            countPacket();
             if (!out.tag)
             {
                 extra.clear();
@@ -1072,20 +1037,4 @@ namespace kamite
         KM_INFO(Game, "near geometry: on (triangles at the screen edges and behind the camera are cut and drawn)");
     }
 
-    void nearGeometryProgramAt(uint32_t pair, uint32_t &program, bool &patched, uint32_t &layout, bool &skinned)
-    {
-        pair %= kPairs;
-        program = g_program[pair];
-        patched = g_programPatched[pair];
-        layout = g_programLayout[pair];
-        skinned = g_programSkinned[pair];
-    }
-
-    void nearGeometryStats(uint64_t &patched, uint64_t &cut, uint64_t &cutNear, uint64_t &noStitch)
-    {
-        patched = g_patched.load();
-        cut = g_cut.load();
-        cutNear = g_cutNear.load();
-        noStitch = g_noStitch.load();
-    }
 }

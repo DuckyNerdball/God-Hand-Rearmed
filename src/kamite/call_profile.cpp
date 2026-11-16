@@ -39,6 +39,9 @@ namespace kamite::callprofile
 
     void installFromEnvironment(PS2Runtime &runtime)
     {
+#if defined(KAMITE_RELEASE)
+        return; // player releases: no profilers or tracers (claude/release.md)
+#endif
         (void)runtime;
         const char *value = std::getenv("KAMITE_CALL_PROFILE");
         if (!value || *value != '1')

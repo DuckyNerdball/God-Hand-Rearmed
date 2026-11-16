@@ -180,6 +180,10 @@ namespace kamite::calltrace
 
     void installFromEnvironment(PS2Runtime &runtime)
     {
+        (void)runtime;
+#if defined(KAMITE_RELEASE)
+        return; // player releases: no profilers or tracers (claude/release.md)
+#endif
 #if defined(_WIN32)
         if (const char *hw = std::getenv("KAMITE_HW_WATCH"); hw && *hw)
         {

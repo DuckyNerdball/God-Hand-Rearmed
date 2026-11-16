@@ -21,7 +21,6 @@ namespace kamite::texture_slots
         constexpr uint8_t kTable16[8][4] = {{0, 2, 8, 10},   {1, 3, 9, 11},   {4, 6, 12, 14},  {5, 7, 13, 15},
                                             {16, 18, 24, 26}, {17, 19, 25, 27}, {20, 22, 28, 30}, {21, 23, 29, 31}};
 
-        std::atomic<uint32_t> g_grown{0u};
 
         // At 0x151C70 in func_00151990 (the TIM2 loader), before `srl v1,v1,8` turns the picture's size into blocks.
         void onTimSize(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
@@ -53,10 +52,6 @@ namespace kamite::texture_slots
             if (need > GPR_U32(ctx, 3))
             {
                 SET_GPR_U32(ctx, 3, need);
-                if (g_grown.fetch_add(1u, std::memory_order_relaxed) < 3u)
-                    KM_INFO(Game, "texture slots: a " << width << "x" << height << " texture (PSM 0x" << std::hex << psm
-                                                      << std::dec << ") takes " << need / 256u
-                                                      << " blocks, not its size's; the next one goes after them");
             }
         }
     }
