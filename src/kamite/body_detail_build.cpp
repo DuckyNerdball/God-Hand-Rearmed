@@ -2367,57 +2367,182 @@ namespace kamite::body_detail
         return true;
     }
 
-    bool growOnly(const uint8_t *scr, size_t size, std::vector<GrownNode> &out)
+    namespace
+    {
+        constexpr double kApex = 0.965, kMargin = 0.002;
+
+        D3 axisPoint(D3 p) { return {std::clamp(p.x, -kAxisX, kAxisX), kAxisY, kAxisZ}; }
+
+        D3 skirtField(D3 p) // cash.skirt_field
+        {
+            if (p.y >= kApex)
+                return cashField(p);
+            D3 d = cashField({p.x, kApex, p.z});
+            d.y = 0.0;
+            return d;
+        }
+
+        // cash.ray_hits: the distance along a unit ray to the nearest triangle in front of it (inf: none).
+        double rayHit(D3 o, D3 d, const std::vector<D3> &V, const std::vector<int> &T, size_t triCount)
+        {
+            double best = std::numeric_limits<double>::infinity();
+            for (size_t t = 0; t < triCount; ++t)
+            {
+                const D3 a = V[T[3 * t]], e1 = V[T[3 * t + 1]] - a, e2 = V[T[3 * t + 2]] - a;
+                const D3 p = cross(d, e2);
+                const double det = dot(e1, p);
+                if (std::fabs(det) <= 1e-12)
+                    continue;
+                const double inv = 1.0 / det;
+                const D3 s = o - a;
+                const double u = dot(s, p) * inv;
+                const D3 q = cross(s, e1);
+                const double v = dot(d, q) * inv, h = dot(e2, q) * inv;
+                if (u >= 0.0 && v >= 0.0 && u + v <= 1.0 && h > 1e-6)
+                    best = std::min(best, h);
+            }
+            return best;
+        }
+
+        struct Ray
+        {
+            D3 c, u;
+            double d;
+        };
+        Ray rayOf(D3 p)
+        {
+            Ray r;
+            r.c = axisPoint(p);
+            const D3 v = p - r.c;
+            r.d = len(v);
+            r.u = v * (1.0 / std::max(r.d, 1e-12));
+            return r;
+        }
+    }
+
+    bool growOnly(const uint8_t *scr, size_t size, const GrowRules &rules, std::vector<GrownNode> &out)
     {
         out.clear();
         std::vector<NodeRef> nodes;
         if (!readNodes(scr, size, nodes))
             return false;
+        struct Loaded
+        {
+            NodeRef ref;
+            Mesh m;
+            std::vector<VbRef> vbs;
+            std::vector<D3> D;
+        };
+        std::vector<Loaded> all;
         for (const NodeRef &r : nodes)
         {
             if (r.flags & 0x01000000u) // a distance mesh: never drawn (model_detail)
                 continue;
-            Mesh m;
-            std::vector<VbRef> vbs;
-            if (!loadMesh(scr, size, r.mdb, m, &vbs))
+            Loaded l;
+            l.ref = r;
+            if (!loadMesh(scr, size, r.mdb, l.m, &l.vbs))
                 continue;
-            const size_t R = m.records();
-            std::vector<D3> D(R), moved(R);
-            bool any = false;
-            for (size_t i = 0; i < R; ++i)
+            const bool skirt = rules.skirt && std::strncmp(r.name, rules.skirt, 8) == 0;
+            l.D.resize(l.m.records());
+            for (size_t i = 0; i < l.D.size(); ++i)
+                l.D[i] = skirt ? skirtField(l.m.P[i]) : cashField(l.m.P[i]);
+            all.push_back(std::move(l));
+        }
+        const auto find = [&](const char *name) -> Loaded * {
+            if (!name)
+                return nullptr;
+            for (Loaded &l : all)
+                if (std::strncmp(l.ref.name, name, 8) == 0)
+                    return &l;
+            return nullptr;
+        };
+        const auto grown = [](const Loaded &l) {
+            std::vector<D3> g(l.m.P.size());
+            for (size_t i = 0; i < g.size(); ++i)
+                g[i] = l.m.P[i] + l.D[i];
+            return g;
+        };
+        Loaded *skirt = find(rules.skirt), *under = find(rules.under), *plate = find(rules.plate);
+        if (skirt && under) // the body under the skirt stays inside it
+        {
+            const std::vector<D3> sg = grown(*skirt);
+            for (size_t i = 0; i < under->D.size(); ++i)
             {
-                D[i] = cashField(m.P[i]);
-                moved[i] = m.P[i] + D[i];
-                any = any || len(D[i]) >= 1e-5;
+                if (under->D[i].z >= -1e-5)
+                    continue;
+                const Ray r0 = rayOf(under->m.P[i]), r1 = rayOf(under->m.P[i] + under->D[i]);
+                const double h0 = rayHit(r0.c, r0.u, skirt->m.P, skirt->m.T, skirt->m.triangles());
+                const double h1 = rayHit(r1.c, r1.u, sg, skirt->m.T, skirt->m.triangles());
+                if (!std::isfinite(h0) || !std::isfinite(h1))
+                    continue;
+                const double allowed = h1 - std::min(kMargin, h0 - r0.d);
+                if (r1.d > allowed)
+                    under->D[i] = r1.c + r1.u * allowed - under->m.P[i];
             }
-            if (!any)
+        }
+        if (plate) // a belt plate over the skirt: pushed out so what is under it stays under it
+        {
+            D3 lo{1e9, 1e9, 1e9}, hi{-1e9, -1e9, -1e9};
+            for (const D3 &p : plate->m.P)
+                lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)},
+                hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+            const std::vector<D3> pg = grown(*plate);
+            double need = 0.0;
+            for (Loaded *l : {skirt, under})
+            {
+                if (!l)
+                    continue;
+                for (size_t i = 0; i < l->D.size(); ++i)
+                {
+                    const D3 p = l->m.P[i];
+                    if (p.x < lo.x - 0.012 || p.x > hi.x + 0.012 || p.y < lo.y - 0.012 || p.y > hi.y + 0.012 || p.z >= -0.05)
+                        continue;
+                    const Ray r0 = rayOf(p), r1 = rayOf(p + l->D[i]);
+                    const double h0 = rayHit(r0.c, r0.u, plate->m.P, plate->m.T, plate->m.triangles());
+                    const double h1 = rayHit(r1.c, r1.u, pg, plate->m.T, plate->m.triangles());
+                    if (std::isfinite(h0) && std::isfinite(h1))
+                        need = std::max(need, std::min(h0 - r0.d, kMargin) - (h1 - r1.d));
+                }
+            }
+            if (need > 0.0)
+                for (size_t i = 0; i < plate->D.size(); ++i)
+                    plate->D[i] = plate->D[i] + rayOf(pg[i]).u * need;
+        }
+        for (Loaded &l : all)
+        {
+            const Mesh &m = l.m;
+            double big = 0.0;
+            for (const D3 &d : l.D)
+                big = std::max({big, std::fabs(d.x), std::fabs(d.y), std::fabs(d.z)});
+            if (big < 1e-3) // (boots near the thighs move under 1 mm: left alone)
                 continue;
+            const std::vector<D3> moved = grown(l);
             const std::vector<D3> sn = smoothNormals(m.P, m.T, m.triangles()), sn2 = smoothNormals(moved, m.T, m.triangles());
             GrownNode g;
-            std::memcpy(g.name, r.name, 8);
-            g.mdb = r.mdb;
-            uint32_t end = r.mdb + 32u + 4u * static_cast<uint32_t>(vbs.size());
+            std::memcpy(g.name, l.ref.name, 8);
+            g.mdb = l.ref.mdb;
+            uint32_t end = l.ref.mdb + 32u + 4u * static_cast<uint32_t>(l.vbs.size());
             float most = 0.0f;
             size_t i = 0;
-            for (const VbRef &b : vbs)
+            for (const VbRef &b : l.vbs)
             {
                 const uint32_t n = b.count;
                 end = std::max({end, b.at + 32u, b.at + b.pos + 16u * n, b.at + b.uv + 4u * n, b.nrm ? b.at + b.nrm + 4u * n : 0u,
                                 b.col ? b.at + b.col + 4u * n : 0u, b.wt ? b.at + b.wt + 8u * n : 0u});
                 for (uint32_t k = 0; k < n; ++k, ++i)
                 {
-                    if (!b.nrm || len(D[i]) < 1e-5)
+                    if (!b.nrm || len(l.D[i]) < 1e-5)
                         continue;
                     Change c;
-                    c.pos = b.at + b.pos + 16u * k - r.mdb;
-                    c.nrm = b.at + b.nrm + 4u * k - r.mdb;
-                    std::memcpy(c.flat, scr + r.mdb + c.pos, 12);
+                    c.pos = b.at + b.pos + 16u * k - l.ref.mdb;
+                    c.nrm = b.at + b.nrm + 4u * k - l.ref.mdb;
+                    std::memcpy(c.flat, scr + l.ref.mdb + c.pos, 12);
                     std::memcpy(c.detail, c.flat, 12);
-                    std::memcpy(c.flatN, scr + r.mdb + c.nrm, 3);
+                    std::memcpy(c.flatN, scr + l.ref.mdb + c.nrm, 3);
                     std::memcpy(c.detailN, c.flatN, 3);
-                    c.grow[0] = static_cast<float>(D[i].x);
-                    c.grow[1] = static_cast<float>(D[i].y);
-                    c.grow[2] = static_cast<float>(D[i].z);
+                    c.grow[0] = static_cast<float>(l.D[i].x);
+                    c.grow[1] = static_cast<float>(l.D[i].y);
+                    c.grow[2] = static_cast<float>(l.D[i].z);
                     quantN(m.N[i] + (sn2[i] - sn[i]), true, c.growN);
                     c.region = 2;
                     const float gl = std::fabs(c.grow[0]) + std::fabs(c.grow[1]) + std::fabs(c.grow[2]);
@@ -2426,8 +2551,8 @@ namespace kamite::body_detail
                     g.changes.push_back(c);
                 }
             }
-            g.mdbSize = end - r.mdb;
-            if (g.sentinel >= 0 && most >= 1e-3f && end <= size) // (boots near the thighs move under 1 mm: left alone)
+            g.mdbSize = end - l.ref.mdb;
+            if (g.sentinel >= 0 && end <= size)
                 out.push_back(std::move(g));
         }
         return true;

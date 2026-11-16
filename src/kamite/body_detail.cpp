@@ -37,15 +37,17 @@ namespace kamite::body_detail
             const char *file;
             uint32_t offset, size;
             uint64_t hash;
+            GrowRules rules; // clothing layers (skirt, the body under it, a belt plate)
         };
+        constexpr GrowRules kOliviaSkirt{"skirt00", "dress", "z_blt00"}, kOliviaSkirt2{"skirt00", "dress2", "z_blt00"};
         constexpr GrowModel kGrowModels[] = {
-            {"em/em52.dat", 0x31580u, 0x47640u, 0x97A8C864A29AC1F0ULL}, // Shannon
-            {"em/ema0.dat", 0x28060u, 0x47700u, 0xF37EDAD64FF2AE63ULL}, // Olivia
-            {"el/el0a.dat", 0x577A0u, 0x21640u, 0x7E94290CBD92FD0FULL}, // Olivia, cutscenes (dress)
-            {"el/elf5.dat", 0x273E0u, 0x29D80u, 0xDBA0ADACA05FA7D8ULL}, // Olivia, cutscenes (dress + extras)
-            {"el/elf4.dat", 0x25A20u, 0x1E700u, 0x16E4FA36326B5C40ULL}, // Olivia, cutscenes (bunny suit)
-            {"el/el15.dat", 0x24EE0u, 0x1C840u, 0x2C2C47653973ABDAULL}, // Shannon, cutscenes
-            {"el/el1a.dat", 0xF460u, 0x46200u, 0x045B558E999D846BULL},  // Shannon, cutscenes (whole)
+            {"em/em52.dat", 0x31580u, 0x47640u, 0x97A8C864A29AC1F0ULL, {}},           // Shannon
+            {"em/ema0.dat", 0x28060u, 0x47700u, 0xF37EDAD64FF2AE63ULL, kOliviaSkirt},  // Olivia
+            {"el/el0a.dat", 0x577A0u, 0x21640u, 0x7E94290CBD92FD0FULL, kOliviaSkirt2}, // Olivia, cutscenes (dress)
+            {"el/elf5.dat", 0x273E0u, 0x29D80u, 0xDBA0ADACA05FA7D8ULL, kOliviaSkirt2}, // Olivia, cutscenes (dress + extras)
+            {"el/elf4.dat", 0x25A20u, 0x1E700u, 0x16E4FA36326B5C40ULL, {}},           // Olivia, cutscenes (bunny suit)
+            {"el/el15.dat", 0x24EE0u, 0x1C840u, 0x2C2C47653973ABDAULL, {}},           // Shannon, cutscenes
+            {"el/el1a.dat", 0xF460u, 0x46200u, 0x045B558E999D846BULL, {}},            // Shannon, cutscenes (whole)
             // not el09 (the bathtub Olivia: no hips)
         };
 
@@ -259,7 +261,7 @@ namespace kamite::body_detail
             std::vector<uint8_t> block;
             std::vector<GrownNode> nodes;
             if (!file || !disc_files::readRange(*file, g.offset, g.size, block) || block.size() != g.size || fnv(block) != g.hash ||
-                !growOnly(block.data(), block.size(), nodes))
+                !growOnly(block.data(), block.size(), g.rules, nodes))
             {
                 ++other;
                 continue;

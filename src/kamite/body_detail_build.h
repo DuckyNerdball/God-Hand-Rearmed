@@ -94,7 +94,13 @@ namespace kamite::body_detail
         std::vector<Change> changes;
         int sentinel = -1;             // the largest growth
     };
-    bool growOnly(const uint8_t *scr, size_t size, std::vector<GrownNode> &out);
+    // Clothing layers (cash.py grow_layers): a skirt node hangs from the fullest point (below it the growth there,
+    // straight back); the body node under it is kept inside it; a belt plate node over it is pushed out as one piece.
+    struct GrowRules
+    {
+        const char *skirt = nullptr, *under = nullptr, *plate = nullptr;
+    };
+    bool growOnly(const uint8_t *scr, size_t size, const GrowRules &rules, std::vector<GrownNode> &out);
 
     // A change's position in a state (detailed: + grow x its growth), as apply writes it.
     void wantedPosition(const Change &c, bool detailed, float grow, float out[3]);

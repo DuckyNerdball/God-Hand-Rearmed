@@ -68,3 +68,80 @@ def at(P, N, D, N130, cash):
     k = np.clip((cash - 1.0) / 0.3, 0.0, 1.0)
     n = N * (1 - k) + N130 * k
     return P + k * D, n / (np.linalg.norm(n, axis=1)[:, None] + 1e-12)
+
+# ---- models kept as they are with clothing layers (growOnly; Olivia's skirt and belt, Nov 16) ----------------------
+# A skirt hangs from the fullest point: below it the skirt takes the growth there, straight back (no crease drop: K saw
+# a sharp edge). The body under it is kept inside it (pulled in where the grown body would poke out between the skirt's
+# coarse triangles: K saw her panties through the skirt), as deep as it sat at 100% or MARGIN. A belt plate over the
+# skirt is pushed out as one piece so what is under it stays under it (K: the strap through its silver plate).
+APEX, MARGIN = 0.965, 0.002
+
+def axis_point(P):
+    return np.stack([np.clip(P[:, 0], -AXIS_X, AXIS_X), np.full(len(P), AXIS_Y), np.full(len(P), AXIS_Z)], 1)
+
+def skirt_field(P):
+    Q = P.copy()
+    low = Q[:, 1] < APEX
+    Q[low, 1] = APEX
+    D = field(Q)
+    D[low, 1] = 0.0
+    return D
+
+def ray_hits(orig, dirs, V, T):
+    """Distance along each unit ray to the nearest triangle of (V, T) in front of it (inf: none)."""
+    a, b, c = V[T[:, 0]], V[T[:, 1]], V[T[:, 2]]
+    e1, e2 = b - a, c - a
+    out = np.full(len(orig), np.inf)
+    for i, (o, d) in enumerate(zip(orig, dirs)):
+        p = np.cross(d, e2); det = (e1 * p).sum(1); ok = np.abs(det) > 1e-12
+        inv = np.where(ok, 1 / np.where(ok, det, 1), 0); s = o - a; u = (s * p).sum(1) * inv
+        q = np.cross(s, e1); v = (d * q).sum(1) * inv; t = (e2 * q).sum(1) * inv
+        m = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-6)
+        if m.any():
+            out[i] = t[m].min()
+    return out
+
+def _rays(P):
+    c = axis_point(P); r = P - c; d = np.linalg.norm(r, axis=1)
+    return c, r / np.maximum(d, 1e-12)[:, None], d
+
+def grow_layers(nodes, skirt=None, under=None, plate=None):
+    """nodes: {name: (P, T, N)} of one model. Returns {name: (D, N130)} for the nodes the growth reaches."""
+    D = {n: (skirt_field(P) if n == skirt else field(P)) for n, (P, T, N) in nodes.items()}
+    if skirt in nodes and under in nodes:
+        Ps, Ts, _ = nodes[skirt]; Pu = nodes[under][0]
+        idx = np.where(D[under][:, 2] < -1e-5)[0]
+        c0, u0, d0 = _rays(Pu[idx]); h0 = ray_hits(c0, u0, Ps, Ts)
+        G = Pu[idx] + D[under][idx]
+        c1, u1, d1 = _rays(G); h1 = ray_hits(c1, u1, Ps + D[skirt], Ts)
+        allowed = h1 - np.minimum(MARGIN, h0 - d0)
+        over = np.isfinite(h0) & np.isfinite(h1) & (d1 > allowed)
+        D[under][idx[over]] = c1[over] + u1[over] * allowed[over][:, None] - Pu[idx[over]]
+    if plate in nodes:
+        Pp, Tp, _ = nodes[plate]
+        lo, hi = Pp.min(0), Pp.max(0)
+        need = 0.0
+        for n in (skirt, under):
+            if n not in nodes:
+                continue
+            P = nodes[n][0]
+            idx = np.where((P[:, 0] >= lo[0] - 0.012) & (P[:, 0] <= hi[0] + 0.012) & (P[:, 1] >= lo[1] - 0.012) &
+                           (P[:, 1] <= hi[1] + 0.012) & (P[:, 2] < -0.05))[0]
+            if not len(idx):
+                continue
+            c0, u0, d0 = _rays(P[idx]); h0 = ray_hits(c0, u0, Pp, Tp)
+            c1, u1, d1 = _rays(P[idx] + D[n][idx]); h1 = ray_hits(c1, u1, Pp + D[plate], Tp)
+            ok = np.isfinite(h0) & np.isfinite(h1)
+            if ok.any():
+                need = max(need, float(np.max(np.minimum(h0 - d0, MARGIN)[ok] - (h1 - d1)[ok])))
+        if need > 0:
+            _, up, _ = _rays(Pp + D[plate])
+            D[plate] = D[plate] + up * need
+    out = {}
+    for n, (P, T, N) in nodes.items():
+        if np.abs(D[n]).max() < 1e-3:
+            continue
+        sn, _ = xfer.smooth_normals(P, T); sn2, _ = xfer.smooth_normals(P + D[n], T)
+        N2 = N + (sn2 - sn)
+        out[n] = (D[n], N2 / (np.linalg.norm(N2, axis=1)[:, None] + 1e-12))
+    return out

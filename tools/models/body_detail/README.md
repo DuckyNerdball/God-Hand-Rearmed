@@ -20,7 +20,9 @@ Offline prototypes for the Money > 100% bust and Cash > 100% seat (claude/female
 - `cash.py`: Cash's growth above 101% on the detailed seat (`growth(P, T, N)` -> the move at 130% and the normals
   there, `at(...)` for a Cash value): a function of position only, along K's side-profile reference (Nov 15); the C++
   (`cashGrowth` in body_detail_build.cpp) matches it to 0.001 mm. Not on em07 (her dress is too coarse). Shannon and
-  Olivia (em52 / ema0 and their el/ cutscene models) keep their models: `growOnly` grows every node the field reaches.
+  Olivia (em52 / ema0 and their el/ cutscene models) keep their models: `growOnly` grows every node the field reaches;
+  `grow_layers` (= GrowRules in C++) for clothing: a skirt held from the fullest point, the body under it kept inside it,
+  a belt plate pushed out over it (Olivia; matched to 0.001 mm).
 - `texr.py`: textured offline raster (per-pixel UV, Gouraud from vertex normals when the object has `N`).
 
 **Bust recipe:** `transfer3(woman, bunny, levels=1)` with its defaults `back=(0.02, 0.05), anchor=0.8` (Nov 15 fix: pushed
