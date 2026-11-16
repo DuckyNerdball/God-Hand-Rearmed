@@ -36,20 +36,23 @@ namespace kamite::launcher::steam
 
         constexpr const char *kAppName = "God Hand: Rearmed";
 
-        // The library art (K's SteamGridDB picks, downloaded when the button is pressed, never shipped; README
-        // credits their makers). A dead link is a one-line swap here. The logo and the icon are ours
-        // (resources/images/steam_logo.png: the launcher's layers flattened; steam_icon.png: ghr.ico's 256 px frame).
-        // The icon is a PNG of its own: Steam reads GHR.exe's PNG-compressed icon frames with a black background.
+        // The library art. The cover ships in resources/images (steam_cover.jpg: masterlynx's art with our logo, used
+        // with the artist's permission; README credit); the wide cover and the hero are K's SteamGridDB picks,
+        // downloaded when the button is pressed, never shipped (README credits their makers; a dead link is a one-line
+        // swap here). The logo and the icon are ours (resources/images/steam_logo.png: the launcher's layers
+        // flattened; steam_icon.png: ghr.ico's 256 px frame). The icon is a PNG of its own: Steam reads GHR.exe's
+        // PNG-compressed icon frames with a black background.
         struct Art
         {
             const char *name;   // for the popup: "Couldn't download the <name>."
             const char *suffix; // Steam's grid file: <appid><suffix>.<ext>
-            const char *url;
+            const char *url;    // downloaded, or
+            const char *file;   // read from resources/images
         };
         constexpr Art kArt[] = {
-            {"cover", "p", "https://cdn2.steamgriddb.com/grid/991c548e1dbad52115bb48b158407334.png"}, // 600x900 (K: stand-in)
-            {"wide cover", "", "https://cdn2.steamgriddb.com/grid/78434f3b63efa331e51d1e41dd47cfb0.png"}, // 920x430
-            {"hero banner", "_hero", "https://cdn2.steamgriddb.com/hero/7cff4ce87d7f2179d73e7959bf213529.jpg"}, // 3840x1240
+            {"cover", "p", nullptr, "steam_cover.jpg"}, // 600x900
+            {"wide cover", "", "https://cdn2.steamgriddb.com/grid/78434f3b63efa331e51d1e41dd47cfb0.png", nullptr}, // 920x430
+            {"hero banner", "_hero", "https://cdn2.steamgriddb.com/hero/7cff4ce87d7f2179d73e7959bf213529.jpg", nullptr}, // 3840x1240
         };
 
         std::string utf8(const fs::path &path)
@@ -608,10 +611,11 @@ namespace kamite::launcher::steam
         bool got[std::size(kArt)] = {};
         for (size_t i = 0; i < std::size(kArt); ++i)
         {
-            got[i] = download(kArt[i].url, art[i]) && art[i].size() > 8 &&
+            got[i] = (kArt[i].file ? readFile(resources / "images" / kArt[i].file, art[i]) : download(kArt[i].url, art[i])) &&
+                     art[i].size() > 8 &&
                      ((art[i][0] == 0x89 && art[i][1] == 'P' && art[i][2] == 'N' && art[i][3] == 'G') ||
                       (art[i][0] == 0xFF && art[i][1] == 0xD8 && art[i][2] == 0xFF));
-            KM_INFO(Boot, "launcher: steam: " << kArt[i].name << (got[i] ? " downloaded (" : " not downloaded (") << art[i].size() << " bytes)");
+            KM_INFO(Boot, "launcher: steam: " << kArt[i].name << (got[i] ? " ready (" : " missing (") << art[i].size() << " bytes)");
         }
 
         const bool wasRunning = steamRunning();
@@ -668,7 +672,7 @@ namespace kamite::launcher::steam
         {
             if (!got[i])
             {
-                missing += std::string("\nThe ") + kArt[i].name + " couldn't be downloaded.";
+                missing += std::string("\nThe ") + kArt[i].name + (kArt[i].file ? " is missing from the resources folder." : " couldn't be downloaded.");
                 continue;
             }
             const char *ext = art[i][0] == 0x89 ? ".png" : ".jpg";

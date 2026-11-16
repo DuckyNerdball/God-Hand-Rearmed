@@ -35,3 +35,6 @@ library logo Add to Steam writes (src/kamite/launcher_steam.cpp). Rebuild it the
 
 `steam_icon.png`: src/kamite/ghr.ico's 256 px frame as a PNG, the Steam entry's icon (Steam reads the exe's
 PNG-compressed icon frames with a black background).
+
+`steam_cover.jpg`: the Steam entry's 600x900 cover (masterlynx's art with our logo, used with the artist's permission),
+scaled from K's full-size file; Add to Steam writes it as the library cover.

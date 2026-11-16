@@ -67,6 +67,8 @@ See [CHANGELOG.md](CHANGELOG.md) for what changed and when.
 - [Quaternius](https://quaternius.com): the Universal Animation Library 1 and 2 (CC0), the NPC poses' rail lean, dance and
   folded-arms idle.
 - [Denys Almaral](https://denysalmaral.com): the Free Animation Pack for City People, two of the NPC poses' idles.
+- masterlynx: the cover art of the Steam library entry (`resources/images/steam_cover.jpg`, used with the artist's
+  permission).
 - Harold Lohner ([haroldsfonts.com](http://www.haroldsfonts.com)): the Dominican font of the launcher's splash text.
 - The Archivo Narrow Project Authors: [Archivo Narrow](https://github.com/Omnibus-Type/ArchivoNarrow) (OFL-1.1), the
   OPTIONS screen's labels (a SemiBold instance in `resources/fonts`).

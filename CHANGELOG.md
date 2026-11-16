@@ -8,6 +8,7 @@ Newest first, one line per change; the code comments say how.
 - Cash is listed above Money, both with a recommended value (115%).
 - 60 FPS: the tension bar's glow pulses at the original pace.
 - 60 FPS: menu animations (pause menu, map, shop, continue screen) play at the original speed.
+- Add to Steam: new cover art by masterlynx.
 
 ## November 15, 2026
 
