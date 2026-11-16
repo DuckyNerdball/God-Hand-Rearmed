@@ -102,6 +102,17 @@ namespace kamite::body_detail
     };
     bool growOnly(const uint8_t *scr, size_t size, const GrowRules &rules, std::vector<GrownNode> &out);
 
+    // Shannon's hair chains kept behind her seat (body_detail.cpp clothCollide): the rearmost surface of the given nodes
+    // on a 1 cm grid in bone 17's frame (rest model space less the pelvis' rest height), and Cash's growth there at 130%.
+    struct SeatTable
+    {
+        static constexpr int kNx = 33, kNy = 41;           // x -0.16..0.16, y -0.35..0.05
+        static constexpr float kX0 = -0.16f, kY0 = -0.35f, kStep = 0.01f, kNone = 1e9f;
+        float z0[kNy][kNx] = {}, gz[kNy][kNx] = {};
+        bool ok = false;
+    };
+    bool seatTable(const uint8_t *scr, size_t size, const char *const *nodeNames, int nodeCount, float pelvisY, SeatTable &out);
+
     // A change's position in a state (detailed: + grow x its growth), as apply writes it.
     void wantedPosition(const Change &c, bool detailed, float grow, float out[3]);
 

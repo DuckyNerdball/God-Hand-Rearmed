@@ -2558,6 +2558,47 @@ namespace kamite::body_detail
         return true;
     }
 
+    bool seatTable(const uint8_t *scr, size_t size, const char *const *nodeNames, int nodeCount, float pelvisY, SeatTable &out)
+    {
+        out.ok = false;
+        std::vector<NodeRef> nodes;
+        if (!readNodes(scr, size, nodes))
+            return false;
+        std::vector<D3> V;
+        std::vector<int> T;
+        for (const NodeRef &r : nodes)
+            for (int k = 0; k < nodeCount; ++k)
+            {
+                Mesh m;
+                if (std::strncmp(r.name, nodeNames[k], 8) != 0 || (r.flags & 0x01000000u) || !loadMesh(scr, size, r.mdb, m))
+                    continue;
+                const int base = static_cast<int>(V.size());
+                V.insert(V.end(), m.P.begin(), m.P.end());
+                for (int i : m.T)
+                    T.push_back(base + i);
+            }
+        if (T.empty())
+            return false;
+        int hits = 0;
+        for (int iy = 0; iy < SeatTable::kNy; ++iy)
+            for (int ix = 0; ix < SeatTable::kNx; ++ix)
+            {
+                const double x = SeatTable::kX0 + SeatTable::kStep * ix, y = pelvisY + SeatTable::kY0 + SeatTable::kStep * iy;
+                const double h = rayHit({x, y, -1.0}, {0.0, 0.0, 1.0}, V, T, T.size() / 3); // the rearmost surface
+                if (!std::isfinite(h) || h > 1.2)
+                {
+                    out.z0[iy][ix] = SeatTable::kNone, out.gz[iy][ix] = 0.0f;
+                    continue;
+                }
+                const D3 p{x, y, -1.0 + h};
+                out.z0[iy][ix] = static_cast<float>(p.z);
+                out.gz[iy][ix] = static_cast<float>(cashField(p).z);
+                ++hits;
+            }
+        out.ok = hits > 0;
+        return out.ok;
+    }
+
     float cashGrowthScale(float cash) { return std::clamp((cash - 1.0f) / 0.3f, 0.0f, 1.0f); }
 
     void wantedPosition(const Change &c, bool detailed, float grow, float out[3])
