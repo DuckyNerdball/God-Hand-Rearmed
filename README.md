@@ -70,6 +70,10 @@ See [CHANGELOG.md](CHANGELOG.md) for what changed and when.
 - masterlynx: the cover art of the Steam library entry (`resources/images/steam_cover.jpg`, used with the artist's
   permission).
 - Harold Lohner ([haroldsfonts.com](http://www.haroldsfonts.com)): the Dominican font of the launcher's splash text.
+- Dennis Ludlow / Sharkshock ([sharkshock.net](http://www.sharkshock.net)): the Wendyville font of the first-run
+  posters' titles (baked into `resources/presets`; its readme in `docs/licenses`).
+- The Holtwood One SC Project Authors: [Holtwood One SC](https://fonts.google.com/specimen/Holtwood+One+SC) (OFL-1.1),
+  the posters' SELECTED stamp.
 - The Archivo Narrow Project Authors: [Archivo Narrow](https://github.com/Omnibus-Type/ArchivoNarrow) (OFL-1.1), the
   OPTIONS screen's labels (a SemiBold instance in `resources/fonts`).
 - Bitstream and the DejaVu fonts team: [DejaVu Sans](https://dejavu-fonts.github.io) (Bitstream Vera licence), the

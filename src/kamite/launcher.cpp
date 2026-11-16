@@ -213,6 +213,7 @@ namespace kamite::launcher
             Home,
             Install,
             Options,
+            FirstRun, // the wanted posters: a preset to start with (once, on a new install)
         };
 
         struct State
@@ -282,6 +283,15 @@ namespace kamite::launcher
             bool presetPhotosRead = false;
             int presetAsk = -1;
             bool presetOpenPopup = false;
+            // The first run's wanted posters (resources/presets: tools/launcher/make_posters.py), shown once on a new
+            // install (no boot ELF in game_data yet and no [Launcher] PresetPicked): the poster picked, the layers.
+            bool firstRunPending = false;
+            int firstRunPick = presets::kClassic;
+            bool postersLoaded = false;
+            Texture2D poster[presets::kCount]{}, posterTape[presets::kCount]{}, posterShadow[presets::kCount]{}, stamp{};
+            float posterW = 0.0f, posterH = 0.0f, posterPad = 0.0f;
+            float photoBox[presets::kCount][4]{}, stampAt[presets::kCount][2]{};
+            float pickShown = 0.0f; // the raised poster, eased toward firstRunPick
 #if KAMITE_LAUNCHER_STEAM
             // Add to Steam (launcher_steam.h): the lower left corner's button and its popup.
             enum class SteamPopup
@@ -1290,6 +1300,12 @@ void main()
 
         void drawHome(State &state)
         {
+            if (state.installed && state.firstRunPending)
+            {
+                state.screen = Screen::FirstRun; // a new install whose disc image was found without the Install screen
+                state.focusFirst = true;
+                return;
+            }
             title(state);
             const float buttonWidth = fontSize(state, 420.0f);
             if (!state.installed)
@@ -1424,7 +1440,7 @@ void main()
             {
                 if (!state.installed)
                     menuSound(state, kCancel);
-                state.screen = Screen::Home;
+                state.screen = state.installed && state.firstRunPending ? Screen::FirstRun : Screen::Home;
                 state.focusFirst = true;
             }
             ImGui::EndChild();
@@ -2481,6 +2497,183 @@ void main()
             ImGui::EndPopup();
         }
 
+        // ---- the first run: a wanted poster per preset (K, Nov 16) ---------------------------------------------------
+        void loadPosters(State &state)
+        {
+            if (state.postersLoaded)
+                return;
+            state.postersLoaded = true;
+            const fs::path dir = state.context->exeDir / "resources" / "presets";
+            std::ifstream layout(dir / "posters.txt");
+            std::string word;
+            while (layout >> word)
+            {
+                if (word == "size")
+                    layout >> state.posterW >> state.posterH >> state.posterPad;
+                else if (word == "poster")
+                {
+                    int n = -1;
+                    float v[6] = {};
+                    layout >> n >> v[0] >> v[1] >> v[2] >> v[3] >> v[4] >> v[5];
+                    if (n >= 0 && n < presets::kCount)
+                    {
+                        std::copy(v, v + 4, state.photoBox[n]);
+                        std::copy(v + 4, v + 6, state.stampAt[n]);
+                    }
+                }
+                else
+                    std::getline(layout, word); // a comment
+            }
+            const auto load = [&](Texture2D &texture, const std::string &name) {
+                const fs::path path = dir / name;
+                std::error_code error;
+                if (!fs::is_regular_file(path, error))
+                    return;
+                texture = LoadTexture(utf8(path).c_str());
+                if (texture.id != 0u)
+                {
+                    GenTextureMipmaps(&texture);
+                    SetTextureFilter(texture, TEXTURE_FILTER_TRILINEAR);
+                }
+            };
+            for (int n = 0; n < presets::kCount; ++n)
+            {
+                load(state.poster[n], "poster_" + std::to_string(n) + ".png");
+                load(state.posterTape[n], "poster_" + std::to_string(n) + "_tape.png");
+                load(state.posterShadow[n], "poster_" + std::to_string(n) + "_shadow.png");
+            }
+            load(state.stamp, "stamp.png");
+            readPresetPhotos(state);
+        }
+
+        // One layer of a poster: its rectangle (x, y, w, h in the poster's pixels) drawn with the poster at `centre`,
+        // `scale` screen pixels per poster pixel, turned `angle` degrees (clockwise) round the poster's centre.
+        void posterLayer(const State &state, const Texture2D &texture, float x, float y, float w, float h, Vector2 centre,
+                         float scale, float angle, Color tint)
+        {
+            if (texture.id == 0u)
+                return;
+            DrawTexturePro(texture, Rectangle{0.0f, 0.0f, static_cast<float>(texture.width), static_cast<float>(texture.height)},
+                           Rectangle{centre.x, centre.y, w * scale, h * scale},
+                           Vector2{(0.5f * state.posterW - x) * scale, (0.5f * state.posterH - y) * scale}, angle, tint);
+        }
+
+        // Where the posters go this frame (screen pixels): the first one's left, their top, width and the gap.
+        struct PosterRow
+        {
+            float left = 0.0f, top = 0.0f, width = 0.0f, height = 0.0f, gap = 0.0f;
+        };
+        PosterRow posterRow(const State &state)
+        {
+            PosterRow row;
+            const float screenW = static_cast<float>(GetScreenWidth());
+            row.gap = fontSize(state, 22.0f);
+            const float margin = fontSize(state, 40.0f);
+            row.width = std::min(fontSize(state, 267.0f), (screenW - 2.0f * margin - 3.0f * row.gap) / 4.0f);
+            row.height = row.width * (state.posterH > 0.0f ? state.posterH / state.posterW : 1.6f);
+            row.left = 0.5f * (screenW - 4.0f * row.width - 3.0f * row.gap);
+            row.top = fontSize(state, 112.0f);
+            return row;
+        }
+
+        // The posters (after ImGui: raylib draws them over the launcher's window): the picked one raised and stamped,
+        // the others a little lower and darker, each turned a little, on its own soft shadow.
+        void drawPosters(State &state)
+        {
+            if (state.screen != Screen::FirstRun || state.posterW <= 0.0f)
+                return;
+            constexpr float kTurn[presets::kCount] = {1.6f, -1.1f, 0.8f, -1.4f}; // degrees, clockwise (the mockup's)
+            state.pickShown += (static_cast<float>(state.firstRunPick) - state.pickShown) * std::min(1.0f, GetFrameTime() * 14.0f);
+            const PosterRow row = posterRow(state);
+            const float scale = row.width / state.posterW;
+            for (int n = 0; n < presets::kCount; ++n)
+            {
+                const float lift = std::clamp(1.0f - std::fabs(state.pickShown - static_cast<float>(n)), 0.0f, 1.0f);
+                const Vector2 centre{row.left + (row.width + row.gap) * static_cast<float>(n) + 0.5f * row.width,
+                                     row.top + 0.5f * row.height + fontSize(state, 9.0f) * (1.0f - lift)};
+                const float angle = kTurn[n];
+                const unsigned char shade = static_cast<unsigned char>(184.0f + 71.0f * lift);
+                const Color tint{shade, shade, shade, 255};
+                const Vector2 shadowAt{centre.x + fontSize(state, 3.3f + 3.4f * lift), centre.y + fontSize(state, 5.3f + 5.4f * lift)};
+                posterLayer(state, state.posterShadow[n], -state.posterPad, -state.posterPad, state.posterW + 2.0f * state.posterPad,
+                            state.posterH + 2.0f * state.posterPad, shadowAt, scale, angle,
+                            Color{255, 255, 255, static_cast<unsigned char>(120.0f + 40.0f * lift)});
+                posterLayer(state, state.poster[n], 0.0f, 0.0f, state.posterW, state.posterH, centre, scale, angle, tint);
+                const float *box = state.photoBox[n];
+                posterLayer(state, state.presetPhotos[n], box[0], box[1], box[2] - box[0], box[3] - box[1], centre, scale, angle, tint);
+                posterLayer(state, state.posterTape[n], box[0], box[1], box[2] - box[0], box[3] - box[1], centre, scale, angle, tint);
+                if (n == state.firstRunPick && state.stamp.id != 0u)
+                {
+                    const float sw = static_cast<float>(state.stamp.width), sh = static_cast<float>(state.stamp.height);
+                    posterLayer(state, state.stamp, state.stampAt[n][0] - 0.5f * sw, state.stampAt[n][1] - 0.5f * sh, sw, sh, centre,
+                                scale, angle, WHITE);
+                }
+            }
+        }
+
+        // "How do you want to play?": left / right (or a click) pick a poster, Continue uses its preset.
+        void drawFirstRun(State &state)
+        {
+            loadPosters(state);
+            ImGui::Dummy(ImVec2(0.0f, fontSize(state, 26.0f)));
+            pushSize(state, 40.0f);
+            centeredText("How do you want to play?", kHeading);
+            ImGui::PopFont();
+            pushSize(state, 20.0f);
+            centeredText("Pick a preset to start with. You can change it, or any single option, later in Options or in game.",
+                         kTextSoft);
+            ImGui::PopFont();
+            int pick = state.firstRunPick;
+            const bool popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
+            if (!popup)
+            {
+                const auto pressed = [](std::initializer_list<ImGuiKey> keys) {
+                    for (const ImGuiKey key : keys)
+                        if (ImGui::IsKeyPressed(key, true))
+                            return true;
+                    return false;
+                };
+                if (pressed({ImGuiKey_LeftArrow, ImGuiKey_A, ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadLStickLeft}))
+                    pick = std::max(pick - 1, 0);
+                else if (pressed({ImGuiKey_RightArrow, ImGuiKey_D, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickRight}))
+                    pick = std::min(pick + 1, static_cast<int>(presets::kCount) - 1);
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    const PosterRow row = posterRow(state);
+                    const ImVec2 mouse = ImGui::GetMousePos();
+                    for (int n = 0; n < presets::kCount; ++n)
+                    {
+                        const float x = row.left + (row.width + row.gap) * static_cast<float>(n);
+                        if (mouse.x >= x && mouse.x < x + row.width && mouse.y >= row.top && mouse.y < row.top + row.height)
+                            pick = n;
+                    }
+                }
+            }
+            if (pick != state.firstRunPick)
+            {
+                state.firstRunPick = pick;
+                playMenuSound(state, kTick);
+            }
+            const PosterRow row = posterRow(state);
+            ImGui::SetCursorPosY(row.top + row.height + fontSize(state, 40.0f));
+            const std::string label = std::string("Continue with ") + presets::kText[state.firstRunPick].name;
+            if (state.focusFirst)
+            {
+                ImGui::SetKeyboardFocusHere();
+                ImGui::SetNavCursorVisible(true);
+            }
+            if (bigButton(state, label.c_str(), fontSize(state, 420.0f), true))
+            {
+                usePreset(state, state.firstRunPick);
+                state.ini.setBool("Launcher", "PresetPicked", true);
+                state.ini.save();
+                state.firstRunPending = false;
+                state.screen = Screen::Home;
+                state.focusFirst = true;
+            }
+            state.focusFirst = false;
+        }
+
         void drawOptions(State &state)
         {
             g_captureFrame = false;
@@ -2566,6 +2759,9 @@ void main()
             state.ini.set("Video", "CameraZoomOut", text);
         }
         std::error_code error;
+        // A new install (K, Nov 16): no boot ELF checked out yet and no preset picked: the wanted posters once.
+        state.firstRunPending = !state.ini.getBool("Launcher", "PresetPicked", false) &&
+                                !fs::exists(context.cacheDir / kBootElfPath, error);
         state.installed = !context.iso.empty() && fs::is_regular_file(context.iso, error) && context.message.empty();
         if (!context.iso.empty())
             std::snprintf(state.isoText, sizeof(state.isoText), "%s", utf8(context.iso).c_str());
@@ -2739,6 +2935,9 @@ void main()
                 case Screen::Options:
                     drawOptions(state);
                     break;
+                case Screen::FirstRun:
+                    drawFirstRun(state);
+                    break;
                 }
                 if (state.screen != Screen::Options)
                     drawVolume(state);
@@ -2760,6 +2959,7 @@ void main()
                 drawLogo(state);
                 drawSplash(state);
             }
+            drawPosters(state);
             if (playing)
             {
                 DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(),
@@ -2781,6 +2981,12 @@ void main()
         for (Texture2D &photo : state.presetPhotos)
             if (photo.id != 0u)
                 UnloadTexture(photo);
+        for (int n = 0; n < presets::kCount; ++n)
+            for (Texture2D *texture : {&state.poster[n], &state.posterTape[n], &state.posterShadow[n]})
+                if (texture->id != 0u)
+                    UnloadTexture(*texture);
+        if (state.stamp.id != 0u)
+            UnloadTexture(state.stamp);
         if (state.background.id != 0u)
             UnloadTexture(state.background);
         if (state.backgroundShader.id != 0u && state.backgroundShader.id != rlGetShaderIdDefault())

@@ -1,0 +1,7 @@
+# The first-run posters (tools/launcher/make_posters.py): poster size, then per poster N its photo box
+# (left top right bottom) and the stamp centre (x y), in the poster's pixels.
+size 600 960 40
+poster 0 45 189 555 540 300 840
+poster 1 45 190 555 541 300 840
+poster 2 45 190 555 541 300 840
+poster 3 45 189 555 540 300 840
