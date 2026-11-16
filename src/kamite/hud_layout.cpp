@@ -426,25 +426,6 @@ namespace kamite::hud
                         setMenuAspect(true);
                 }
                 dumpPrim(tag, caller, x0, x1, y0, y1, "fullwidth", none);
-                // TRACE (Nov 16, strip once found): K's fades at 21:9 darken only the lower half of the screen. Each
-                // caller's first full-width quad at a wide shape (whether it reaches top to bottom).
-                if (g_wide && y1 - y0 > 100.0f)
-                {
-                    static uint32_t traced[16] = {};
-                    if (std::find(std::begin(traced), std::end(traced), caller) == std::end(traced))
-                    {
-                        for (uint32_t &t : traced)
-                            if (!t)
-                            {
-                                t = caller;
-                                break;
-                            }
-                        KM_INFO(Game, "fade trace: full-width quad from 0x" << std::hex << caller << std::dec << " (" << tag
-                                                                            << ", " << n << " vertices) x " << x0 << ".." << x1
-                                                                            << " y " << y0 << ".." << y1 << " (width " << width
-                                                                            << ", y offset " << read32(rdram, kScreenYOffset) << ")");
-                    }
-                }
                 return; // full-screen quad: backgrounds, fades
             }
             // The Modern roulette bar (roulette_bar.h): drawn as it is (4:3, or past the right edge), cut on the left.

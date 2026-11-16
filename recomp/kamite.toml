@@ -2243,6 +2243,15 @@ hook = "km_ws_camera_width"
 flag = "widescreen"
 replace = true
 
+# The screen fade's own vertical scale (classFADE's draw func_00307388 -> func_0015C928, lwc1 $f4,0x6B88(v0)): the game
+# reads the camera's 0x586B88 there, which the camera hook above makes wider; at 21:9 the fade covered only the lower
+# half of the screen (K, Nov 16). The fade gets the PS2's own 0.9333.
+[[patches.hooks]]
+address = "0x0015CB44"
+hook = "km_ws_fade_scale"
+flag = "widescreen"
+replace = true
+
 # Font width (lui at,0x3F66 / ori at,at,0x6666 = 0.9).
 [[patches.hooks]]
 address = "0x002AF4FC"

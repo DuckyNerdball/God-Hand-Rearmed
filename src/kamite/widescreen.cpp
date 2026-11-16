@@ -109,6 +109,9 @@ namespace kamite
         }
 
         void cameraWidth(uint8_t *, R5900Context *ctx, PS2Runtime *) { setAt(ctx, g_camera); }
+        // classFADE's draw reads the camera's value (0x586B88) as its vertical scale: the PS2's own instead (the wider
+        // camera's cut the fade short at 21:9, K Nov 16).
+        void fadeScale(uint8_t *, R5900Context *ctx, PS2Runtime *) { ctx->f[4] = asFloat(kCameraWidth); }
 
         void fontWidth(uint8_t *, R5900Context *ctx, PS2Runtime *) { setAt(ctx, hud::narrowFont() ? g_font : kFontWidth); }
         void gaugeWidth(uint8_t *, R5900Context *ctx, PS2Runtime *) { setAt(ctx, hud::narrowGauge() ? g_gauge : 0x3F800000u); }
@@ -151,6 +154,7 @@ namespace kamite
         const bool wide = setValues(aspect);
         const float wider = aspect / kNative;
         ps2xRegisterHostHook("km_ws_camera_width", &cameraWidth);
+        ps2xRegisterHostHook("km_ws_fade_scale", &fadeScale);
         installCamera(aspect); // the field of view and framing (camera.cpp): the enemies' cones use the aspect
         ps2xRegisterHostHook("km_ws_font_width", &fontWidth);
         ps2xRegisterHostHook("km_ws_gauge_width", &gaugeWidth);
