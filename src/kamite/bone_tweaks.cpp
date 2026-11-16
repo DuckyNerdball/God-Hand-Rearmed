@@ -319,9 +319,8 @@ namespace kamite::bone_tweaks
         constexpr float kSeatSpot[3] = {0.0f, 0.98f, -0.10f}; // the cheeks' middle (bind)
         constexpr float kSeatMax = 0.04f, kPitchMax = 30.0f, kYawMax = 20.0f;
         // Spanking (K, Nov 16): each slap kicks the seat's spring down the body (toward her legs) at this speed (m/s; the
-        // launching slap x1.5), on top of the motion's own reaction. F2's Slap jolt slider scales it (K to tune).
-        constexpr float kSlapSpeed = 0.35f;
-        std::atomic<float> g_slapJolt{1.0f};
+        // launching slap x1.5), on top of the motion's own reaction (K, Nov 16: 200% of the first try).
+        constexpr float kSlapSpeed = 0.70f;
         // The springs by size (t = (Money or Cash - 1) / 0.3, linear): at 130% K's values from play (Nov 16: rate 1.14 Hz,
         // damping 1.0, strength 1.0, side swing 0.69, left / right rates 14% apart, the same for bust and seat); a
         // smaller bust or seat is firmer (K): quicker, a little springier (jiggles in place), smaller peaks, less side
@@ -344,6 +343,7 @@ namespace kamite::bone_tweaks
             uint32_t frame = 0, seen = 0;
             bool live = false;
             Spring seat, breast[2]; // breast 0: her left (29), 1: her right (28)
+            float envGame = 0.0f, envOurs = 0.0f; // recent peak of the game's bounce / our springs' pitch (radians)
         };
         std::unordered_map<uint32_t, JigState> g_jigs; // game thread, by model
         std::vector<uint32_t> g_jigDone;               // the models placed this frame
@@ -420,12 +420,14 @@ namespace kamite::bone_tweaks
                 st.live = true;
                 st.frame = frame;
             }
-            else if (elapsed > 0)
+            float stepDt = 0.0f; // > 0 when the springs stepped this draw
+            if (st.frame != frame && elapsed > 0)
             {
                 const float dt = static_cast<float>(elapsed) / (fps60() ? 60.0f : 30.0f);
+                stepDt = dt;
                 const float spread = jig(kSpread, money); // left x (1 + spread), right x (1 - spread), as K tuned it
                 if (const float slap = punish_fit::seatSlap(rdram, model); slap > 0.0f && cash > kOn && (jg.flags & 1))
-                    st.seat.vel = sub(st.seat.vel, mulf(unit(row(pelvis, 1)), kSlapSpeed * slap * g_slapJolt.load(std::memory_order_relaxed)));
+                    st.seat.vel = sub(st.seat.vel, mulf(unit(row(pelvis, 1)), kSlapSpeed * slap));
                 stepSpring(st.seat, seatSpot, dt, jig(kHz, cash), jig(kDamp, cash));
                 stepSpring(st.breast[0], breastSpot[0], dt, jig(kHz, money) * (1.0f + spread), jig(kDamp, money));
                 stepSpring(st.breast[1], breastSpot[1], dt, jig(kHz, money) * (1.0f - spread), jig(kDamp, money));
@@ -461,14 +463,44 @@ namespace kamite::bone_tweaks
                 return;
             }
             // Both breasts on their own springs: bone b of breast i = s Rb Q_i, at t29 + s Rb (Q_i (B_b - B29 - o_i) + o_i).
+            // K (Nov 16): just above 100% the bust must move at least as much as the game's own bounce (Money off), the
+            // side swing as strong as that up and down, growing to his 130% tuning. So by t (0 at 100%, 1 at 130%): the
+            // pitch blends the game's bounce (bone 29 as cObjSimple_MoveBust left it) into our spring's; the springs'
+            // response is kept at the 130% size whatever their firmness (gain x (rate / 130%'s rate)^2: quicker, not
+            // smaller); the side swing is scaled from the game's bounce (recent peak of it / of our pitch) toward ours,
+            // side ratio 1.0 -> K's 0.69.
             const float hold = std::clamp(punish_fit::bustHold(rdram, model), 0.0f, 1.0f);
-            const float gain = jig(kGain, money) * (1.0f - hold), side = jig(kSide, money);
-            const int bones[2] = {kBustBone, kRightBone};
+            const float t = std::clamp((money - 1.0f) / 0.3f, 0.0f, 1.0f);
+            const float rate = jig(kHz, money) / kJigFull[kHz];
+            const float gain = kJigFull[kGain] * rate * rate;
+            const float side = 1.0f + (kJigFull[kSide] - 1.0f) * t;
+            Bone gameBust = bust; // bone 29 before placeMoney's scale and droop
+            for (const Saved &sv : g_moneySaved)
+                if (sv.address == parts[kBustBone])
+                    gameBust.m = sv.original;
+            const Vec gy = row(gameBust, 1);
+            const float game = std::atan2(dot(gy, pz), dot(gy, py));
+            float pitchOurs[2], yawOurs[2];
             for (int i = 0; i < 2; ++i)
             {
                 const Vec D = sub(st.breast[i].tip, st.breast[i].rest);
-                const float pitch = std::clamp(-dot(D, ey) / kBreastLen * gain, -kPitchMax * kRad, kPitchMax * kRad);
-                const float yaw = std::clamp(dot(D, ex) / kBreastLen * gain * side, -kYawMax * kRad, kYawMax * kRad);
+                pitchOurs[i] = -dot(D, ey) / kBreastLen * gain;
+                yawOurs[i] = dot(D, ex) / kBreastLen * gain * side;
+            }
+            if (stepDt > 0.0f)
+            {
+                const float fade = std::exp(-stepDt / 1.5f); // the peaks fade over ~1.5 s
+                st.envGame = std::max(std::fabs(game), st.envGame * fade);
+                st.envOurs = std::max(0.5f * (std::fabs(pitchOurs[0]) + std::fabs(pitchOurs[1])), st.envOurs * fade);
+            }
+            const float toGame = std::clamp(st.envGame / std::max(st.envOurs, 0.01f), 0.0f, 3.0f);
+            const float yawWeight = (1.0f - t) * toGame + t;
+            const int bones[2] = {kBustBone, kRightBone};
+            for (int i = 0; i < 2; ++i)
+            {
+                const float pitch = std::clamp(((1.0f - t) * game + t * pitchOurs[i]) * (1.0f - hold), -kPitchMax * kRad,
+                                               kPitchMax * kRad);
+                const float yaw = std::clamp(yawWeight * yawOurs[i] * (1.0f - hold), -kYawMax * kRad, kYawMax * kRad);
                 const Mat q = mul(rotY(yaw), rotX(pitch));
                 const Vec bind = i == 0 ? bBust : Vec{0, 0, 0};
                 const Vec local = add(applyRot(q, sub(sub(bind, bBust), base[i])), base[i]);
@@ -550,11 +582,6 @@ namespace kamite::bone_tweaks
             ui->separator_text("Money");
             restingSlider(ui, "##cash", "Cash %.0f%%", 100.0f, 130.0f, "Cash", g_cash, &setCash, cashMs);
             restingSlider(ui, "##money", "Money %.0f%%", 85.0f, 130.0f, "Money", g_money, &setMoney, moneyMs);
-            // Spanking's seat jolt (K, Nov 16: to tune in play; not saved, the value K picks goes into kSlapSpeed).
-            float jolt = g_slapJolt.load(std::memory_order_relaxed) * 100.0f;
-            ui->set_next_width(340.0f);
-            if (ui->slider_float("##slapjolt", &jolt, 0.0f, 300.0f, "Slap jolt %.0f%%"))
-                g_slapJolt.store(jolt / 100.0f, std::memory_order_relaxed);
         }
     }
 #endif

@@ -1860,6 +1860,12 @@ namespace kamite::punish_fit
         for (const Contact &c : kContacts)
             if (c.motion == number && prev < c.frame && frame >= c.frame)
                 hit = std::max(hit, c.strength);
+        static int s_logged = 0; // temporary (strip list): the first slaps of a run, to confirm they land
+        if (hit > 0.0f && s_logged < 4)
+        {
+            ++s_logged;
+            KM_INFO(Game, "punish fit: Spanking slap on the seat (motion " << number << ", frame " << frame << ")");
+        }
         return hit;
     }
 
