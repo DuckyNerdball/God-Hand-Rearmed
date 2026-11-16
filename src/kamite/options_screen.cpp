@@ -262,6 +262,10 @@ namespace kamite::options_screen
             return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         }
         uint32_t g_previewHandle = 0u;
+        // The Voices slider's line: due this long after its last step (the menu's key repeat steps it every ~0.1 s
+        // while held, so it plays once the slider is let go). 0 = none waiting.
+        constexpr int64_t kVoiceSettleMs = 450;
+        int64_t g_voiceDueMs = 0;
         uint32_t g_pickupPatched = 0u; // record 48 while it points at a preview's line
         int64_t g_pickupBackAt = 0;
         int g_lastLine = -1;
@@ -293,11 +297,16 @@ namespace kamite::options_screen
             g_pickupPatched = 0u;
         }
 
-        void previewSound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint16_t id)
+        void stopPreview(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             if (g_previewHandle)
                 callGuest(rdram, ctx, runtime, kSeStop, {kSeManager, g_previewHandle});
             g_previewHandle = 0u;
+        }
+
+        void previewSound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint16_t id)
+        {
+            stopPreview(rdram, ctx, runtime);
             if (id == kSePickupLine)
             {
                 const uint32_t record = pickupRecord();
@@ -1977,7 +1986,12 @@ namespace kamite::options_screen
             if (setting && std::strcmp(setting->id, "EffectsVolume") == 0)
                 previewSound(rdram, ctx, runtime, kSeSpank);
             else if (setting && std::strcmp(setting->id, "VoicesVolume") == 0)
-                previewSound(rdram, ctx, runtime, kSePickupLine);
+            {
+                // K (Nov 16): held, a line a step hitched; the line waits until the slider is let go (previewVoiceLater).
+                stopPreview(rdram, ctx, runtime);
+                g_voiceDueMs = nowMsSteady() + kVoiceSettleMs;
+                sound(rdram, ctx, runtime, kSeMove);
+            }
             else
                 sound(rdram, ctx, runtime, kSeMove);
         }
@@ -2290,6 +2304,21 @@ namespace kamite::options_screen
                 return;
             }
             const uint64_t pressed = rd64(kCommand), repeat = rd64(kCommandRepeat);
+            if (g_voiceDueMs)
+            {
+                // Still held on the d-pad (the keyboard's arrows drive it too): wait on. The stick has no held word here,
+                // so its steps (the menu repeats every few frames) keep pushing the time out instead.
+                const auto gameBit = [](uint16_t iop) { return static_cast<uint16_t>((iop >> 8) | (iop << 8)); };
+                uint16_t held = 0;
+                std::memcpy(&held, at(game::GameWork::address(game::GameWork::kPadHeld)), sizeof(held));
+                if (held & (gameBit(ps2x::iop::PadButton::Left) | gameBit(ps2x::iop::PadButton::Right)))
+                    g_voiceDueMs = std::max(g_voiceDueMs, nowMsSteady() + 100);
+            }
+            if (g_voiceDueMs && nowMsSteady() >= g_voiceDueMs)
+            {
+                g_voiceDueMs = 0;
+                previewSound(rdram, ctx, runtime, kSePickupLine); // the Voices slider settled
+            }
             if ((pressed & (kOk | kStart)) == kStart)
             {
                 sound(rdram, ctx, runtime, kSeBack);
