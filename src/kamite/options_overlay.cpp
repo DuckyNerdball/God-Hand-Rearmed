@@ -134,6 +134,12 @@ namespace kamite::options_overlay
         constexpr float kBracketX = 240.0f, kBracketTick = 9.0f, kBracketGap = 7.0f, kBracketReach = 17.0f;
         constexpr float kPageCursorGap = kLabelX - kCursorX, kPageNameGap = kLabelX - kCursorX + kLabelX - kCursorX;
         constexpr float kPageWidth = 470.0f, kValueBlock = 136.0f, kScrollWidth = 8.0f, kScrollGap = 14.0f;
+        // The PRESETS carousel (lines): the name's centre, IN USE, the photo, the list under it.
+        constexpr float kPresetNameY = 100.0f, kPresetInUseY = 118.0f, kPresetInUseCap = 9.5f, kPresetArrowGap = 4.0f;
+        constexpr float kPresetArtTop = 128.0f, kPresetArtBottom = 280.0f;
+        constexpr float kPresetListTop = 290.0f, kPresetListBottom = 352.0f, kPresetListPitch = 14.0f, kPresetItemCap = 10.5f;
+        constexpr float kPresetColumn = 128.0f;
+        constexpr float kPresetArtFull = 203.0f, kPresetTaglineGap = 7.0f; // fullArt: the pause menu's own size
         constexpr float kSubIndent = 12.0f, kSubCap = 18.5f, kHeaderCap = 13.0f, kHeaderTracking = 3.0f;
         constexpr float kLinesToUnits = 6.0f / 7.0f;
 
@@ -263,6 +269,7 @@ namespace kamite::options_overlay
             float fade;
             uint32_t labelFont = 0, helpFont = 0;
             float dim = 1.0f; // a page shown before it is opened: half strength
+            float helpCap = kHelpCap, helpLine = kHelpLine; // the PRESETS list in the band (fullArt) is smaller
             bool helpOnHints = false; // BUTTON MAPPING (K, Nov 14): the help's last line on the hints' line, bottom left
 
             uint32_t add(const char *text, size_t length)
@@ -445,16 +452,116 @@ namespace kamite::options_overlay
                 items.push_back(item);
             }
 
+            // OPTIONS > PRESETS: the carousel across x0..x1 (layout units). Before the page is opened (open false) no
+            // arrows, at the page's half strength (dim).
+            void presets(const PresetsView &v, float x0, float x1, bool open)
+            {
+                const float cx = 0.5f * (x0 + x1);
+                const float artBottom = v.fullArt ? kPresetArtTop + kPresetArtFull : kPresetArtBottom;
+                const float artH = artBottom - kPresetArtTop;
+                const float artW = artH * v.artAspect * kLinesToUnits;
+                // < NAME >
+                const float nameCap = kLabelCap;
+                text(v.name, std::strlen(v.name), labelFont, cx, kPresetNameY + 0.5f * nameCap, nameCap, kNewLabel.scaleX,
+                     kNewLabel.tracking, open ? kLabelOn : kLabel, open ? kLabelOnStroke : 0u, artW,
+                     PCSX2GS_ALIGN_CENTRE);
+                if (open)
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        Pcsx2GsScreenItem item = base();
+                        item.kind = PCSX2GS_SCREEN_TRIANGLE;
+                        item.fill = faded(kLabelOn);
+                        item.stroke = faded(kLabelOnStroke);
+                        item.stroke_width = Space::y(kStroke);
+                        // Outside the photo's edges, pointing away from it.
+                        const float backX = cx + side * (0.5f * artW + kPresetArrowGap), tipX = backX + side * 2.0f * kCursorHalfW;
+                        item.x = space.x(backX);
+                        item.y = Space::y(kPresetNameY - kCursorHalfH);
+                        item.x1 = space.x(tipX);
+                        item.y1 = Space::y(kPresetNameY);
+                        item.x2 = space.x(backX);
+                        item.y2 = Space::y(kPresetNameY + kCursorHalfH);
+                        items.push_back(item);
+                    }
+                if (v.inUse)
+                    text(v.inUseWord, std::strlen(v.inUseWord), labelFont, cx, kPresetInUseY + 0.5f * kPresetInUseCap,
+                         kPresetInUseCap, kNewLabel.scaleX, kHeaderTracking, kValueOn, kValueOnStroke, 0.0f, PCSX2GS_ALIGN_CENTRE);
+                // The photo, with the text's drop shadow setting it off the wall.
+                if (v.art && *v.art)
+                {
+                    Pcsx2GsScreenItem item{};
+                    item.kind = PCSX2GS_SCREEN_IMAGE;
+                    item.text = add(v.art, std::strlen(v.art));
+                    item.fill = faded(rgba(255, 255, 255));
+                    item.x = space.x(cx - 0.5f * artW);
+                    item.x1 = space.x(cx + 0.5f * artW);
+                    item.y = Space::y(kPresetArtTop);
+                    item.y1 = Space::y(artBottom);
+                    items.push_back(item);
+                }
+                if (v.fullArt && !v.asking)
+                {
+                    const float tc = v.taglineCap > 0.0f ? v.taglineCap : kHelpCap;
+                    text(v.tagline, std::strlen(v.tagline), helpFont, cx, artBottom + kPresetTaglineGap + tc, tc,
+                         kHelpScaleX, 0.0f, kHelp, 0u, x1 - x0, PCSX2GS_ALIGN_CENTRE);
+                    Pcsx2GsScreenItem &item = items.back();
+                    item.shadow = faded(kHelpShadow);
+                    item.shadow_x = Space::y(0.12f * tc);
+                    item.shadow_y = Space::y(0.11f * tc);
+                    return;
+                }
+                if (v.asking)
+                {
+                    const float at = v.fullArt ? artBottom + kPresetTaglineGap + 0.5f * kValueCap : kPresetListTop + kPresetListPitch;
+                    text("YES", 3, labelFont, cx - 0.5f * kValueGap, at + 0.5f * kValueCap, kValueCap, kNewLabel.scaleX,
+                         kNewLabel.tracking, v.yes ? kValueOn : kValue, v.yes ? kValueOnStroke : 0u, 0.0f, PCSX2GS_ALIGN_CENTRE);
+                    text("NO", 2, labelFont, cx + 0.5f * kValueGap, at + 0.5f * kValueCap, kValueCap, kNewLabel.scaleX,
+                         kNewLabel.tracking, !v.yes ? kValueOn : kValue, !v.yes ? kValueOnStroke : 0u, 0.0f, PCSX2GS_ALIGN_CENTRE);
+                    return;
+                }
+                const auto shadowed = [&](float cap) {
+                    Pcsx2GsScreenItem &item = items.back();
+                    item.shadow = faded(kHelpShadow);
+                    item.shadow_x = Space::y(0.12f * cap);
+                    item.shadow_y = Space::y(0.11f * cap);
+                };
+                float y = kPresetListTop;
+                if (v.listHeader && *v.listHeader)
+                {
+                    text(v.listHeader, std::strlen(v.listHeader), labelFont, cx, y + 0.5f * kHeaderCap, kHeaderCap, kNewLabel.scaleX,
+                         kHeaderTracking, kHelp, 0u, x1 - x0, PCSX2GS_ALIGN_CENTRE);
+                    shadowed(kHeaderCap);
+                    y += kPresetListPitch + 2.0f;
+                }
+                // The items in columns (as many rows as the space holds), each centred in its column.
+                const int rows = std::max(1, static_cast<int>((kPresetListBottom - y) / kPresetListPitch) + 1);
+                const int columns = std::max(1, (v.itemCount + rows - 1) / rows);
+                const int perColumn = (v.itemCount + columns - 1) / std::max(columns, 1);
+                // Columns no wider than a long item needs, the block centred (a short list stays together).
+                const float colW = std::min((x1 - x0) / static_cast<float>(columns), kPresetColumn);
+                x0 = cx - 0.5f * colW * static_cast<float>(columns);
+                for (int i = 0; i < v.itemCount; ++i)
+                {
+                    const int c = i / std::max(perColumn, 1), r = i % std::max(perColumn, 1);
+                    const char *item = v.items[i];
+                    text(item, std::strlen(item), helpFont, x0 + colW * (static_cast<float>(c) + 0.5f),
+                         y + kPresetItemCap + kPresetListPitch * static_cast<float>(r) - 0.5f * kPresetItemCap, kPresetItemCap,
+                         kHelpScaleX, 0.0f, kHelp, 0u, colW - 4.0f, PCSX2GS_ALIGN_CENTRE);
+                    shadowed(kPresetItemCap);
+                }
+            }
+
             // Two lines at most.
             void help(const char *body, const char *const *icons = nullptr)
             {
+                const float hc = helpCap, hl = helpLine;
                 int lines = body && *body ? 1 : 0;
                 for (const char *c = body; c && *c; ++c)
                     lines += *c == '\n' && c[1] ? 1 : 0;
-                const float block = kHelpCap + kHelpLine * static_cast<float>(std::max(lines - 1, 0));
-                float baseline = 0.5f * (kHelpBandTop + kHelpBandBottom - block) + kHelpCap;
+                const float block = hc + hl * static_cast<float>(std::max(lines - 1, 0));
+                float baseline = 0.5f * (kHelpBandTop + kHelpBandBottom - block) + hc;
                 if (helpOnHints) // clear of the paddle block whatever it holds
-                    baseline = kHintY - kHelpLine * static_cast<float>(std::max(lines - 1, 0));
+                    baseline = kHintY - hl * static_cast<float>(std::max(lines - 1, 0));
                 for (const char *line = body; line && *line;)
                 {
                     const char *end = std::strchr(line, '\n');
@@ -462,12 +569,12 @@ namespace kamite::options_overlay
                     const auto shadowed = [&]() {
                         Pcsx2GsScreenItem &item = items.back();
                         item.shadow = faded(kHelpShadow);
-                        item.shadow_x = Space::y(kHelpShadowX);
-                        item.shadow_y = Space::y(kHelpShadowY);
+                        item.shadow_x = Space::y((0.12f * hc));
+                        item.shadow_y = Space::y((0.11f * hc));
                     };
                     if (!icons || std::find_if(line, line + length, [](char c) { return c == '\x01' || c == '\x02'; }) == line + length)
                     {
-                        text(line, length, helpFont, kHelpX, baseline, kHelpCap, kHelpScaleX, 0.0f, kHelp, 0u, space.area - 2.0f * kHelpX);
+                        text(line, length, helpFont, kHelpX, baseline, hc, kHelpScaleX, 0.0f, kHelp, 0u, space.area - 2.0f * kHelpX);
                         shadowed();
                     }
                     else
@@ -489,8 +596,8 @@ namespace kamite::options_overlay
                                     item.fill = faded(rgba(255, 255, 255));
                                     item.x = Space::y(kHelpIconGap);
                                     item.x1 = Space::y(kHelpIcon);
-                                    item.y = Space::y(baseline - 0.5f * kHelpCap - 0.5f * kHelpIcon);
-                                    item.y1 = Space::y(baseline - 0.5f * kHelpCap + 0.5f * kHelpIcon);
+                                    item.y = Space::y(baseline - 0.5f * hc - 0.5f * kHelpIcon);
+                                    item.y1 = Space::y(baseline - 0.5f * hc + 0.5f * kHelpIcon);
                                     items.push_back(item);
                                 }
                                 ++at;
@@ -499,7 +606,7 @@ namespace kamite::options_overlay
                             const char *stop = at;
                             while (stop < line + length && *stop != '\x01' && *stop != '\x02')
                                 ++stop;
-                            text(at, static_cast<size_t>(stop - at), helpFont, first ? kHelpX : kHelpIconGap, baseline, kHelpCap,
+                            text(at, static_cast<size_t>(stop - at), helpFont, first ? kHelpX : kHelpIconGap, baseline, hc,
                                  kHelpScaleX, 0.0f, kHelp, 0u);
                             if (!first)
                             {
@@ -511,7 +618,7 @@ namespace kamite::options_overlay
                             at = stop;
                         }
                     }
-                    baseline += kHelpLine;
+                    baseline += hl;
                     line = end ? end + 1 : nullptr;
                 }
             }
@@ -1346,8 +1453,21 @@ namespace kamite::options_overlay
         if (open && !split)
         {
             // Narrow: the page replaces the list.
-            b.page(*page, view.pageScroll, view.pageCursor, kCursorX, b.space.area - kLabelX);
-            b.help(view.pageCursor >= 0 && view.pageCursor < page->rowCount ? page->rows[view.pageCursor].help : "");
+            if (view.presets)
+            {
+                b.presets(*view.presets, kCursorX, b.space.area - kCursorX, true);
+                if (view.presets->fullArt && !view.presets->asking)
+                {
+                    b.helpCap = view.presets->helpCap > 0.0f ? view.presets->helpCap : kHelpCap;
+                    b.helpLine = kHelpLine * b.helpCap / kHelpCap;
+                }
+                b.help(view.presets->asking ? view.presets->question : view.presets->help);
+            }
+            else
+            {
+                b.page(*page, view.pageScroll, view.pageCursor, kCursorX, b.space.area - kLabelX);
+                b.help(view.pageCursor >= 0 && view.pageCursor < page->rowCount ? page->rows[view.pageCursor].help : "");
+            }
             b.hints(view.confirmHint, view.cancelHint);
             return;
         }
@@ -1366,15 +1486,26 @@ namespace kamite::options_overlay
 
         if (split && page && open)
         {
-            const auto [first, last] = pageExtent(*page, view.pageScroll);
-            b.bracket(kBracketX, centre, std::min(first, centre) - kBracketReach, std::max(last, centre) + kBracketReach);
-            b.page(*page, view.pageScroll, view.pageCursor, kBracketX + kPageCursorGap, pageRight);
+            if (view.presets)
+            {
+                b.bracket(kBracketX, centre, std::min(kPresetNameY, centre) - kBracketReach, kPresetListBottom);
+                b.presets(*view.presets, kBracketX + kPageCursorGap, pageRight, true);
+            }
+            else
+            {
+                const auto [first, last] = pageExtent(*page, view.pageScroll);
+                b.bracket(kBracketX, centre, std::min(first, centre) - kBracketReach, std::max(last, centre) + kBracketReach);
+                b.page(*page, view.pageScroll, view.pageCursor, kBracketX + kPageCursorGap, pageRight);
+            }
         }
         else if (split && page)
         {
             // Before it is opened: the page's names only, at half strength (K, Nov 13).
             b.dim = 0.5f;
-            b.page(*page, 0, -1, kBracketX + kPageCursorGap, pageRight, true);
+            if (view.presets)
+                b.presets(*view.presets, kBracketX + kPageCursorGap, pageRight, false);
+            else
+                b.page(*page, 0, -1, kBracketX + kPageCursorGap, pageRight, true);
             b.dim = 1.0f;
         }
 
@@ -1384,6 +1515,15 @@ namespace kamite::options_overlay
             b.value("YES", kValueX, at, view.confirmYes);
             b.value("NO", kValueX + kValueGap, at, !view.confirmYes);
             b.help(view.question);
+        }
+        else if (open && view.presets)
+        {
+            if (view.presets->fullArt && !view.presets->asking)
+            {
+                b.helpCap = view.presets->helpCap > 0.0f ? view.presets->helpCap : kHelpCap;
+                b.helpLine = kHelpLine * b.helpCap / kHelpCap;
+            }
+            b.help(view.presets->asking ? view.presets->question : view.presets->help);
         }
         else if (open)
             b.help(view.pageCursor >= 0 && view.pageCursor < page->rowCount ? page->rows[view.pageCursor].help : "");

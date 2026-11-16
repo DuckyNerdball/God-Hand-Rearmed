@@ -171,6 +171,104 @@ int main(int argc, char **argv)
             }
         }
     }
+    // OPTIONS > PRESETS: KAMITE_PREVIEW_PRESETS="N[:inuse[:ask]]" (N 0..4 = Classic .. Sleazy, Custom), the list's
+    // cursor on PRESETS (a mockup of options_screen's carousel; the photos in KAMITE_PREVIEW_PRESET_ART/NN.png).
+    static Row presetRows[16];
+    static Page presetPage;
+    static PresetsView pv;
+    static std::string presetArt;
+    if (const char *pp = getenv("KAMITE_PREVIEW_PRESETS"))
+    {
+        int n = 0, inUse = -1, ask = 0;
+        sscanf(pp, "%d:%d:%d", &n, &inUse, &ask);
+        static const char *classic[] = {"30 FPS", "4:3 picture", "PS2 camera", "Classic controls", "Original HUD"};
+        static const char *remastered[] = {"60 FPS", "Fits your screen", "Wider camera", "Modern controls", "Auto brawl mode",
+                                           "Wide HUD", "Intro Skipper", "Hard-On", "Roulette Ratchet"};
+        static const char *rearmed[] = {"Action camera", "Click-Stick Dash", "Target Select", "Dry Spinning", "Sway Bar",
+                                        "Moveset Presets", "Buck Breaker", "Tension is Placable", "Misqu\xC3\xA9 & Risqu\xC3\xA9"};
+        static const char *sleazy[] = {"Busta-Chan Jive", "Cunt Punter", "Wild Curry Funk", "Off the Cuff"};
+        struct P { const char *name; int art; const char *header; const char **items; int count; const char *help; };
+        static const P presets[] = {
+            {"CLASSIC", 13, "AS ON THE PS2", classic, 5, "As close to the PS2 as it gets."},
+            {"REMASTERED", 17, "EVERYTHING IN CLASSIC, PLUS", remastered, 9, "The original, modernised."},
+            {"REARMED", 18, "EVERYTHING IN REMASTERED, PLUS", rearmed, 9, "New moves, new toys."},
+            {"SLEAZY MODE", 15, "EVERYTHING IN REARMED, PLUS", sleazy, 4, "...is Now Selectable. You know what you came for."},
+            {"CUSTOM", 1, "YOUR OWN MIX", nullptr, 0, "Your own mix. Pick a preset to replace it."}};
+        const P &p = presets[std::clamp(n, 0, 4)];
+        char path[64];
+        snprintf(path, sizeof(path), "/%02d.png", p.art);
+        presetArt = std::string(getenv("KAMITE_PREVIEW_PRESET_ART")) + path;
+        pv.name = p.name;
+        pv.art = presetArt.c_str();
+        pv.inUse = inUse == n;
+        pv.listHeader = p.header;
+        pv.items = p.items;
+        pv.itemCount = p.count;
+        pv.help = p.help;
+        pv.asking = ask != 0;
+        pv.question = "Replace your custom settings?";
+        if (getenv("KAMITE_PREVIEW_PRESET_FULL"))
+        {
+            // The list in the help band, wrapped at about the band's width (the real code measures).
+            static std::string helpText;
+            static const char *prev[] = {"", "Classic", "Remastered", "Rearmed", ""};
+            const int clampN = std::clamp(n, 0, 4);
+            std::string body = clampN == 0 ? std::string("As on the PS2: ") : clampN == 4 ? std::string("Your own mix of options.") : std::string(getenv("KAMITE_PREVIEW_PREFIX") ? "" : "Everything in ") + prev[clampN] + (getenv("KAMITE_PREVIEW_PREFIX") ? " + " : ", plus: ");
+            for (int i = 0; i < p.count; ++i)
+                body += std::string(p.items[i]) + (i + 1 < p.count ? ", " : ".");
+            const size_t width = static_cast<size_t>(atoi(getenv("KAMITE_PREVIEW_PRESET_FULL")));
+            helpText.clear();
+            size_t line = 0;
+            for (size_t at = 0; at < body.size();)
+            {
+                size_t next = body.find(' ', at + 1);
+                if (next == std::string::npos) next = body.size();
+                if (line + (next - at) > width && line > 0) { helpText += '\n'; line = 0; if (body[at] == ' ') ++at; }
+                helpText.append(body, at, next - at);
+                line += next - at;
+                at = next;
+            }
+            pv.fullArt = true;
+            pv.tagline = p.help;
+            pv.help = helpText.c_str();
+            // K's text, wrapped and fitted by the caller: "NAME|tagline|band (\n between lines)|bandCap|taglineCap".
+            static std::string fields[5];
+            if (const char *t = getenv("KAMITE_PREVIEW_PRESET_TEXT"))
+            {
+                std::string all = t;
+                for (int i = 0; i < 5; ++i)
+                {
+                    const size_t bar = all.find('|');
+                    fields[i] = all.substr(0, bar);
+                    all = bar == std::string::npos ? "" : all.substr(bar + 1);
+                }
+                for (size_t at; (at = fields[2].find("\\n")) != std::string::npos;)
+                    fields[2].replace(at, 2, "\n");
+                pv.name = fields[0].c_str();
+                pv.tagline = fields[1].c_str();
+                pv.help = fields[2].c_str();
+                pv.helpCap = static_cast<float>(atof(fields[3].c_str()));
+                pv.taglineCap = static_cast<float>(atof(fields[4].c_str()));
+            }
+        }
+        presetRows[0] = {"PRESETS", "Ready-made setups, from the PS2 original\nto everything Rearmed has."};
+        for (int i = 0; i < v.rowCount && i < 15; ++i)
+            presetRows[i + 1] = v.rows[i];
+        v.rows = presetRows;
+        v.rowCount += 1;
+        v.cursor = 0;
+        presetPage.name = "PRESETS";
+        presetPage.rows = nullptr;
+        presetPage.rowCount = 1;
+        v.page = &presetPage;
+        v.presets = &pv;
+        if (v.inPage)
+        {
+            v.prevHint = {};
+            v.nextHint.art[0] = hintPaths[4].c_str();
+            v.nextHint.word = "CONTROLS";
+        }
+    }
     // An L1 / R1 switch under way: KAMITE_PREVIEW_SWITCH="FROM:DIR:T" (the category left, +1 = R1, 0..1 through it).
     static std::string switchFrom;
     if (const char *sw = getenv("KAMITE_PREVIEW_SWITCH"); sw && *sw && v.inPage)

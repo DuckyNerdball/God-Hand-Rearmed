@@ -131,6 +131,32 @@ namespace kamite::options_overlay
         const char *confirmWord = "", *cancelWord = "";
     };
 
+    // OPTIONS > PRESETS (K, Nov 16): a carousel. "< NAME >" over the preset's photo (the pause menu's Olivia pictures,
+    // decoded from the disc), "IN USE" under the name when it is the one in effect, and under the photo what the preset
+    // turns on, under a header line. Left / right turn it; the help band holds the preset's description.
+    struct PresetsView
+    {
+        const char *name = "";
+        const char *art = "";            // the photo (PNG path)
+        float artAspect = 295.0f / 203.0f;
+        bool inUse = false;
+        const char *inUseWord = "IN USE";
+        const char *listHeader = "";     // "EVERYTHING IN REMASTERED, PLUS" ("" = none)
+        const char *const *items = nullptr;
+        int itemCount = 0;
+        const char *help = "";           // the help band (two lines at most)
+        // K's alternative (Nov 16): the photo at the pause menu's own size, `tagline` as one line under it and the
+        // list in the help band (the caller puts it in `help`); listHeader / items unused.
+        bool fullArt = false;
+        const char *tagline = "";
+        // Text sizes in lines (0 = the help text's): the caller shrinks the band's list until it wraps to two lines
+        // and the tagline until it fits the page's width on one (K, Nov 16), measuring with the help font.
+        float helpCap = 0.0f, taglineCap = 0.0f;
+        bool asking = false;             // "Replace your custom settings?": YES / NO in place of the list
+        bool yes = false;
+        const char *question = "";
+    };
+
     // A button hint in the strip under the help band ("[A] Confirm"): the button's images (PNG paths: one, or two for
     // Classic's two confirm buttons; null = none) and the word.
     struct Hint
@@ -167,6 +193,8 @@ namespace kamite::options_overlay
         const MappingView *mapping = nullptr;
         // The keyboard's page instead (the same frame: title CONTROLS, no list).
         const KeysView *keys = nullptr;
+        // The PRESETS category's carousel in place of `page`'s rows (page still names the category).
+        const PresetsView *presets = nullptr;
         // L1 / R1 just switched the open category (K, Nov 14: as the title screen's menu words): the old title
         // (`titleFrom`) streaks off blurred and the new one streaks in from the other side and sharpens; titleDir +1 =
         // R1 (the next category, coming in from the right), titleT 0..1 through it. titleDir 0 = still.
