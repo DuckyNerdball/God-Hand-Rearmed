@@ -12,7 +12,6 @@ Newest first, one line per change; the code comments say how.
 - Cash above 100% grows the women's seat: fuller, heavier cheeks, a little on the hips and thighs.
 - Cash also grows Shannon's and Olivia's seats, in play and in cutscenes (skirts and tails follow).
 - Cash on Olivia: her skirt hangs from the fuller seat, and her belt and the body under the skirt no longer poke through.
-- Shannon's long hair no longer falls through her seat (at any Cash).
 - Fixed the women's bust jiggle running twice as fast at 60 FPS.
 - Buck Breaker: fixed Gene's hands still wobbling during the chest grab's hold.
 - Fixed no punish prompt on stunned women with the Suplex pick (Buck Breaker).
