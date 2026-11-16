@@ -79,6 +79,7 @@
 #include <iterator>
 #include <map>
 #include <mutex>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -245,26 +246,86 @@ namespace kamite::options_screen
 
         // The volume sliders' previews (K, Nov 16): each step plays a sound of that kind at the new volume, cutting the
         // last one off. Sound Effects: the spank's slap (core 0xF6: Gene's Spanking motion, em00 motion 1339's SEQ at
-        // frame 5). Voices: Gene's item pickup line (0xF8: the game's own random positive line, pl00 record 48, as
-        // func_001C0678 calls it); the menus' call first, Gene's own (cSnd_SeCall with him as the owner) if refused.
+        // frame 5), the menus' call. Voices: one of Gene's item pickup lines. The game's own pickup sound (0xF8 -> pl00
+        // record 48, type 0x31) only plays with Gene as its owner in play: without one (the title screen) it hissed
+        // (K, Nov 16). So, as Signal Style Switch does, record 48 is pointed at one line (type 0x30, +0x28 = the afd
+        // entry: plays without an owner, like the title's narration) and put back 2 s later. pl00.afs lines 0..13 are the
+        // positive ones in pairs (Wow, Real!, Nice, I love it, Awesome, Cool, Well how?, Great); 14 is "Shit!".
         constexpr uint16_t kSeSpank = 0xF6u, kSePickupLine = 0xF8u;
         constexpr uint32_t kSeCallObj = 0x2CBA48u, kSeStop = 0x2CBBA0u; // cSnd_SeCall(snd, bank, id, obj, 0..), cSnd_SeStop
         constexpr uint32_t kPlayer = game::GameWork::address(game::GameWork::kPlayerObj); // Gene (0 on the title screen)
+        constexpr uint32_t kSdeBanks = 0x76DF10u, kGeneBank = 3u, kPickupRecord = 48u; // style_presets.cpp has the layout
+        constexpr uint16_t kPickupOwnLine = 14u, kPositiveLines = 14u;
+        constexpr int64_t kRecordBackMs = 2000;
+        int64_t nowMsSteady()
+        {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        }
         uint32_t g_previewHandle = 0u;
+        uint32_t g_pickupPatched = 0u; // record 48 while it points at a preview's line
+        int64_t g_pickupBackAt = 0;
+        int g_lastLine = -1;
+
+        uint32_t pickupRecord()
+        {
+            const uint32_t bank = kSdeBanks + kGeneBank * 0x20u;
+            const int16_t count = static_cast<int16_t>(rd32(bank) & 0xFFFFu);
+            const uint32_t list = rd32(bank + 4u);
+            if (count <= static_cast<int16_t>(kPickupRecord) || !valid(list, static_cast<uint32_t>(count) * 0x30u))
+                return 0u;
+            const uint32_t r = list + kPickupRecord * 0x30u;
+            const uint8_t type = *at(r + 6u);
+            return (type == 0x31u || type == 0x30u) && (*at(r + 0xFu) & 0x80u) == 0u ? r : 0u;
+        }
+        void pointRecord(uint32_t record, uint8_t type, uint16_t line)
+        {
+            *at(record + 6u) = type;
+            *at(record + 0x28u) = static_cast<uint8_t>(line);
+            *at(record + 0x29u) = static_cast<uint8_t>(line >> 8);
+        }
+        // Record 48 back to the game's own pickup sound (onFrame, every frame on or off the screen, once its time is up).
+        void pickupRecordBack()
+        {
+            if (!g_pickupPatched || nowMsSteady() < g_pickupBackAt)
+                return;
+            if (valid(g_pickupPatched, 0x30u) && *at(g_pickupPatched + 6u) == 0x30u)
+                pointRecord(g_pickupPatched, 0x31u, kPickupOwnLine);
+            g_pickupPatched = 0u;
+        }
+
         void previewSound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint16_t id)
         {
             if (g_previewHandle)
                 callGuest(rdram, ctx, runtime, kSeStop, {kSeManager, g_previewHandle});
             g_previewHandle = 0u;
-            callGuest(rdram, ctx, runtime, kSePlay, {kSeManager, 0u, id, 0xFFFFFFFFu, 0xFFFFFFFFu, 0u, 0u}, &g_previewHandle);
+            if (id == kSePickupLine)
+            {
+                const uint32_t record = pickupRecord();
+                if (!record)
+                {
+                    KM_INFO(Game, "options screen: Gene's sound bank not as expected, no voice preview");
+                    return;
+                }
+                static std::mt19937 random{std::random_device{}()};
+                int line = static_cast<int>(random() % kPositiveLines);
+                if (line == g_lastLine)
+                    line = (line + 1 + static_cast<int>(random() % (kPositiveLines - 1))) % kPositiveLines; // never twice
+                g_lastLine = line;
+                pointRecord(record, 0x30u, static_cast<uint16_t>(line));
+                g_pickupPatched = record;
+                g_pickupBackAt = nowMsSteady() + kRecordBackMs;
+            }
             const uint32_t gene = rd32(kPlayer);
-            if (!g_previewHandle && gene >= 0x100000u && gene < 0x2000000u)
+            if (id == kSePickupLine && gene >= 0x100000u && gene < 0x2000000u) // in play: Gene's own call, as the game's
                 callGuest(rdram, ctx, runtime, kSeCallObj, {kSeManager, 0u, id, gene, 0u, 0u, 0u, 0u}, &g_previewHandle);
+            else
+                callGuest(rdram, ctx, runtime, kSePlay, {kSeManager, 0u, id, 0xFFFFFFFFu, 0xFFFFFFFFu, 0u, 0u}, &g_previewHandle);
             static bool logged[2] = {};
             if (!logged[id == kSePickupLine])
             {
                 logged[id == kSePickupLine] = true;
-                KM_INFO(Game, "options screen: volume preview 0x" << std::hex << id << std::dec << (g_previewHandle ? " plays" : " refused"));
+                KM_INFO(Game, "options screen: volume preview 0x" << std::hex << id << std::dec << (g_previewHandle ? " plays" : " refused")
+                                                                << (id == kSePickupLine ? (gene ? " (in play)" : " (title)") : ""));
             }
         }
 
@@ -2386,6 +2447,7 @@ namespace kamite::options_screen
     {
         if (!g_ram)
             return;
+        pickupRecordBack(); // the voice preview's line back to the game's pickup sound
         // A graphics API switch that ended outside the screen's fade (the screen closed with it waiting).
         if (g_apiWatch && !GSPcsx2Backend::GraphicsApiBusy())
             graphicsApiSwitched();
