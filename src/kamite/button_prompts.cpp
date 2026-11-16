@@ -399,10 +399,11 @@ namespace kamite::button_prompts
             }
         }
 
-        sheets::PromptLabels labelsFor(const bindings::Snapshot &snapshot, bindings::Device device)
+        // menu: the keyboard's menu-layer keys (menu_buttons::menuPrompts(): Enter, Esc, the arrows, Q / E there).
+        sheets::PromptLabels labelsFor(const bindings::Snapshot &snapshot, bindings::Device device, bool menu)
         {
             const bool pad = device == bindings::Device::Controller;
-            const auto &set = pad ? snapshot.controller : snapshot.keys;
+            const auto &set = pad ? snapshot.controller : menu ? snapshot.menuKeys : snapshot.keys;
             sheets::PromptLabels labels;
             const auto put = [&](sheets::Icon icon, bindings::Input input) { labels.icon[icon] = labelOf(set[input]); };
             // Each cell shows its own button whatever [Game] MenuButtons says: a move slot's label is the button that
@@ -419,6 +420,13 @@ namespace kamite::button_prompts
             put(sheets::R3, bindings::R3);
             put(sheets::Start, bindings::Start);
             put(sheets::Select, bindings::Select);
+            // The keyboard's menus: the trigger cells carry the 0 and 4 keys, for the Techniques screen's "[0]-[4] Style"
+            // (style_presets hintText; no menu uses the triggers, K Nov 7, and the art there is ours).
+            if (!pad && menu)
+            {
+                labels.icon[sheets::L2] = "0";
+                labels.icon[sheets::R2] = "4";
+            }
             // Sticks: on keys an inverted T of the four direction keys (Up Right Down Left); a controller's stick keeps
             // the original stick art (all four empty).
             if (!pad)
@@ -431,12 +439,17 @@ namespace kamite::button_prompts
                     anyLeft |= set[left[d]].type != bindings::Type::None;
                     anyRight |= set[right[d]].type != bindings::Type::None;
                 }
+                // No keys on the right stick but a Dodge Modifier (the default layout): the dodges are the move keys
+                // held with it, so the right stick's art shows those keys (the hints name the modifier in words).
+                const bool dodgeKeys = !anyRight && anyLeft && snapshot.dodgeModifier.type != bindings::Type::None;
                 for (int d = 0; d < 4; ++d)
                 {
                     if (anyLeft)
                         labels.leftStick[d] = labelOf(set[left[d]]);
                     if (anyRight)
                         labels.rightStick[d] = labelOf(set[right[d]]);
+                    else if (dodgeKeys)
+                        labels.rightStick[d] = labelOf(set[left[d]]);
                 }
             }
             return labels;
@@ -664,6 +677,7 @@ namespace kamite::button_prompts
             bindings::Device lastDevice = bindings::Device::Keys;
             bindings::PadStyle lastStyle = bindings::PadStyle::Unknown;
             bool lastModern = false;
+            bool lastMenu = false;
             bool built = false;
             uint64_t version = 0u;
             for (;;)
@@ -686,10 +700,13 @@ namespace kamite::button_prompts
                 const bool crateNew = g_crateRebuild.exchange(false, std::memory_order_acq_rel);
                 const bool setNew = g_promptsRebuild.exchange(false, std::memory_order_acq_rel);
                 const bool modern = modern::enabled();
+                // The keyboard's art follows the menu layer (its fixed keys); a controller's never changes with it.
+                const bool menu = device == bindings::Device::Keys && menu_buttons::menuPrompts();
                 if (built && !crateNew && !setNew && generation == lastGeneration && device == lastDevice && style == lastStyle &&
-                    modern == lastModern)
+                    modern == lastModern && menu == lastMenu)
                     continue;
                 lastModern = modern;
+                lastMenu = menu;
                 built = true;
                 lastGeneration = generation;
                 lastDevice = device;
@@ -718,7 +735,7 @@ namespace kamite::button_prompts
                     }
                 }
                 const bool playStation = set == prompt_hd::Set::PlayStation;
-                const sheets::PromptLabels labels = labelsFor(bindings::snapshot(), device);
+                const sheets::PromptLabels labels = labelsFor(bindings::snapshot(), device, menu);
                 {
                     std::lock_guard<std::mutex> lock(g_menuArtMutex);
                     // The menus' buttons by their place on the pad (menu_buttons.h "Pinned menus"): cross = the south

@@ -40,6 +40,20 @@ namespace ps2_host_input
     // game layer sets it (any thread); on until then. menuLayer(): the layer the last sample was built with.
     void setMenuLayer(bool on);
     [[nodiscard]] bool menuLayer();
+    // The keyboard in the menu layer (K, Nov 16): fixed keys on top of player 1's keyboard bindings. Arrows and WASD
+    // the d-pad (WASD stay the left stick too), Enter / Space the menus' confirm button(s), Esc / Backspace their cancel
+    // button(s), Q / E L1 / R1; the play bindings of those keys and every key on the d-pad are dropped there (so the
+    // style keys 1-4 do not move cursors). okButtons / cancelButtons: PadButton masks by Menu Controls (any thread;
+    // applied at the next sample). escStart: Esc also presses Start (no sub-screen up: cutscenes, the title, dialogs).
+    void setMenuKeys(uint16_t okButtons, uint16_t cancelButtons);
+    void setMenuEscStart(bool on);
+    // A digit key 0-4 pressed while the menu layer was in use (the Techniques screen's direct style picks): 0..4, or
+    // -1 for none since the last call. Any thread.
+    [[nodiscard]] int takeMenuDigit();
+    // Player 1's Dodge Modifier ([Pad1] DodgeModifier, Shift by default) was held at the last sample of play: the keys
+    // and mouse buttons on the left stick moved the right stick instead (the game's dodges). For the pad filter (Modern
+    // leaves that right stick to the game even in the free camera). Window thread (the filter), or any thread.
+    [[nodiscard]] bool keyboardDodge();
 
     // Sweep CR-9: Windows' Sticky/Toggle/Filter Keys hotkeys are off while the game window has the focus (sample()
     // follows the focus). This puts the user's settings back for good: the window closed or the run ended. Any thread.
@@ -218,6 +232,10 @@ namespace ps2_host_input
             uint32_t generation = 0u; // 0: not published yet
             std::array<Binding, InputCount> keys{};
             std::array<Binding, InputCount> controller{}; // Xbox-style names whatever the pad (see padStyle())
+            // The keys in the menu layer (setMenuKeys): per input, the play key when it still gives that input there,
+            // else the first fixed menu key that does (Enter, Esc, an arrow, Q / E). For the menus' button art.
+            std::array<Binding, InputCount> menuKeys{};
+            Binding dodgeModifier{}; // [Pad1] DodgeModifier's first key (None: no modifier)
             // How many controller bindings (a controller button or axis on its own, or a chord with one) each input has:
             // the BUTTON MAPPING page edits only a layout where each of its buttons has exactly one.
             std::array<uint8_t, InputCount> controllerCount{};

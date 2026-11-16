@@ -26,6 +26,7 @@
 #include "kamite/frame_patches.h"
 #include "kamite/debug_tools.h"
 #include "kamite/npc_tools.h"
+#include "kamite/modern_controls.h"
 #include "kamite/game_layout.h"
 #include "kamite/git_commit.h" // KAMITE_GIT_COMMIT (generated at build time)
 #include "kamite/log.h"
@@ -1438,6 +1439,11 @@ namespace kamite::test_mode
                     resolved = number;
                     value = resolved.c_str();
                 }
+                // The control style in effect (the device used last: K, Nov 16, one per device), not the controller's.
+                if (std::strcmp(name, "KAMITE_CONTROL_STYLE") == 0)
+                    value = modern::caseStyle().modern ? "modern" : "classic";
+                else if (std::strcmp(name, "KAMITE_MODERN_AUTO") == 0)
+                    value = modern::caseStyle().autoOn ? "1" : "0";
                 if (value)
                     rec.settings += std::string("env.") + name + "=" + value + "\n";
             }
@@ -1720,6 +1726,18 @@ namespace kamite::test_mode
 #endif
             notes.push_back(std::string("case: ") + d.name + "=" + d.value + " (not in the case: the game's default)");
         }
+        // One control style for both devices (the recorder's in effect): the replay has no device switches.
+        for (const auto &[from, to] : {std::pair<const char *, const char *>{"KAMITE_CONTROL_STYLE", "KAMITE_KBM_CONTROL_STYLE"},
+                                       std::pair<const char *, const char *>{"KAMITE_MODERN_AUTO", "KAMITE_KBM_MODERN_AUTO"}})
+            if (const char *value = std::getenv(from))
+            {
+                const std::string copy = value;
+#if defined(_WIN32)
+                _putenv_s(to, copy.c_str());
+#else
+                setenv(to, copy.c_str(), 1);
+#endif
+            }
         return notes;
     }
 

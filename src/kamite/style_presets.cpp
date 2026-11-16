@@ -1,6 +1,7 @@
 // Style presets, stage 1. See style_presets.h.
 #include "kamite/menu_buttons.h"
 #include "kamite/style_presets.h"
+#include "ps2_host_input.h"
 #include "kamite/style_pose.h"
 #include "kamite/style_sfx.h"
 #include "kamite/hud_layout.h"
@@ -267,6 +268,9 @@ namespace kamite::style_presets
         // Pad filter / F2 -> EE thread: 1..5 pick None, S..Y (F2); 11..14 in play, the d-pad's style; 21 / 22 the
         // Techniques screen's R2 / L2 (next / previous, wrapping).
         std::atomic<int> g_request{0};
+        // The keyboard is the device in use: each style shows its key after the letter (S1 E2 X3 Y4; K, Nov 16). Set
+        // each vblank, so the text and the glyph placement of a frame agree.
+        std::atomic<bool> g_numbered{false};
         std::atomic<bool> g_cycleSound{false}; // a cycle on the Techniques screen: it plays its cursor sound
         // The HUD's blink after a swap in play: which style and when. Host milliseconds, not frame-hook
         // ticks: the hook runs once a game frame, so a tick count made the blinking last twice as long at 30 fps
@@ -538,6 +542,8 @@ namespace kamite::style_presets
         void onVblank()
         {
             ++g_vblanks;
+            g_numbered.store(ps2_host_input::prompts::lastDevice() == ps2_host_input::prompts::Device::Keys,
+                             std::memory_order_relaxed);
             const uint32_t data = dataPointer();
             const uint32_t subScr = rd32(kSubScrPointer);
             const bool subScreenOpen = validPointer(subScr, 0x1000u) && static_cast<int32_t>(rd32(subScr + game::SubScr::kKind)) >= 0;
@@ -899,6 +905,7 @@ namespace kamite::style_presets
         constexpr int kOutlineCopies = 8;
         std::vector<uint16_t> hudText(const Store &store, bool colours)
         {
+            const bool numbered = g_numbered.load(std::memory_order_relaxed);
             const int64_t now = steadyMs();
             const bool blinkOn = (now / kBlinkMs) % 2 == 0;
             const bool flash = now - g_lastActionMs.load(std::memory_order_relaxed) < kFlashMs;
@@ -909,7 +916,11 @@ namespace kamite::style_presets
             if (!colours)
             {
                 for (int slot = 0; slot < kStyles; ++slot)
+                {
                     out.insert(out.end(), kOutlineCopies, glyph(g_letters[slot]));
+                    if (numbered)
+                        out.insert(out.end(), kOutlineCopies, glyph(static_cast<char>('1' + slot)));
+                }
                 out.push_back(kEnd);
                 return out;
             }
@@ -924,6 +935,8 @@ namespace kamite::style_presets
                 if (colours)
                     out.insert(out.end(), {kColour, static_cast<uint16_t>(colour >> 16), static_cast<uint16_t>(colour & 0xFFFFu)});
                 out.push_back(glyph(g_letters[slot]));
+                if (numbered)
+                    out.push_back(glyph(static_cast<char>('1' + slot)));
             }
             out.push_back(kEnd);
             return out;
@@ -953,7 +966,11 @@ namespace kamite::style_presets
                 if (slot < 0)
                     append(out, "None");
                 else
+                {
                     out.push_back(glyph(g_letters[slot]));
+                    if (g_numbered.load(std::memory_order_relaxed))
+                        out.push_back(glyph(static_cast<char>('1' + slot))); // its key (K, Nov 16)
+                }
                 if (colours && colour)
                     out.push_back(kColourRestore);
             }
@@ -965,6 +982,15 @@ namespace kamite::style_presets
         {
             // "[L2] [R2] Cycle Style" (K, Nov 7): the game's trigger icons, which follow the prompt set, by their place (the
             // Techniques screen is a menu: the physical triggers, whatever the gameplay mapping put on them).
+            // With the keyboard: "[0]-[4] Style" (K, Nov 16): the digits pick the styles directly; the keyboard's menu
+            // art puts the 0 and 4 keys in the trigger cells (button_prompts labelsFor; no menu uses the triggers).
+            if (g_numbered.load(std::memory_order_relaxed))
+            {
+                std::vector<uint16_t> out{kL2Icon, glyph('-'), kR2Icon};
+                append(out, " Style");
+                out.push_back(kEnd);
+                return out;
+            }
             std::vector<uint16_t> out{menu_buttons::placeIcon(kL2Icon), kSpace, menu_buttons::placeIcon(kR2Icon)};
             append(out, "Cycle Style");
             out.push_back(kEnd);
@@ -1467,6 +1493,7 @@ namespace kamite::style_presets
     {
         if (player != 0u || !g_ram)
             return;
+        const int digit = ps2_host_input::takeMenuDigit(); // taken every sample: one pressed elsewhere never waits
         const uint16_t dpad = static_cast<uint16_t>(state.buttons & kAllDpad);
         const uint16_t pressed = static_cast<uint16_t>(dpad & ~g_dpadWas);
         g_dpadWas = dpad;
@@ -1485,6 +1512,8 @@ namespace kamite::style_presets
                 g_request = 21;
             else if (pulled & lt)
                 g_request = 22;
+            else if (digit >= 0)
+                g_request = digit + 1; // the keyboard's 0-4: None, S, E, X, Y (K, Nov 16)
             hideTriggers(state, lt | rt);
         }
         else if (moment == Play)
@@ -1528,20 +1557,33 @@ namespace kamite::style_presets
         setEnvValue("KAMITE_STYLE_SIGNAL", on ? "1" : "0");
     }
 
-    int hudGlyph(uint32_t entry, int index, float &dx, float &dy)
+    int hudGlyph(uint32_t entry, int index, float &dx, float &dy, float &pair)
     {
         entry &= 0x1FFFFFFu;
-        dx = dy = 0.0f;
+        dx = dy = pair = 0.0f;
         if (!g_ram || !g_hudShown || (entry != g_hudText && entry != g_hudShadow) || index < 0)
             return -1;
-        if (entry == g_hudText)
-            return index < kStyles ? index : -1;
-        if (index >= kStyles * kOutlineCopies)
+        const int per = g_numbered.load(std::memory_order_relaxed) ? 2 : 1; // glyphs per style
+        int glyphAt = index;
+        if (entry == g_hudShadow)
+        {
+            if (index >= kStyles * per * kOutlineCopies)
+                return -1;
+            static constexpr float kDir[kOutlineCopies][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+            dx = kDir[index % kOutlineCopies][0];
+            dy = kDir[index % kOutlineCopies][1];
+            glyphAt = index / kOutlineCopies;
+        }
+        if (glyphAt >= kStyles * per)
             return -1;
-        static constexpr float kDir[kOutlineCopies][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
-        dx = kDir[index % kOutlineCopies][0];
-        dy = kDir[index % kOutlineCopies][1];
-        return index / kOutlineCopies;
+        if (per == 2)
+            pair = glyphAt % 2 == 0 ? -0.5f : 0.5f;
+        return glyphAt / per;
+    }
+
+    bool numberedStyles()
+    {
+        return g_numbered.load(std::memory_order_relaxed);
     }
 
     bool onHudEntry(uint32_t entry)

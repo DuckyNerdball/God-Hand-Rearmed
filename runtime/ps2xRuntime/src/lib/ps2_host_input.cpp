@@ -188,6 +188,10 @@ namespace ps2_host_input
                     element.code = MOUSE_BUTTON_RIGHT;
                 else if (button == "middlebutton")
                     element.code = MOUSE_BUTTON_MIDDLE;
+                else if (button == "button4") // the side buttons (Windows' XBUTTON1 / XBUTTON2: back, forward)
+                    element.code = MOUSE_BUTTON_SIDE;
+                else if (button == "button5")
+                    element.code = MOUSE_BUTTON_EXTRA;
                 else
                     return std::nullopt;
                 return element;
@@ -265,6 +269,7 @@ namespace ps2_host_input
         {
             std::array<Bindings, kPadButtonKeys.size()> buttons;
             std::array<Bindings, StickHalfCount> sticks;
+            Bindings dodge;              // [PadN] DodgeModifier: held, the keys on the left stick move the right one
             std::vector<int> largeMotor; // devices that play each motor
             std::vector<int> smallMotor;
             bool enabled = true;         // Type = None: no controller on this port/slot
@@ -328,6 +333,8 @@ namespace ps2_host_input
             for (size_t i = 0; i < kStickKeys.size(); ++i)
                 if (name == lowerName(kStickKeys[i]))
                     return void(config.sticks[i] = bindings());
+            if (name == "dodgemodifier")
+                return void(config.dodge = bindings());
             if (name == "largemotor" || name == "smallmotor")
             {
                 std::vector<int> &devices = name == "largemotor" ? config.largeMotor : config.smallMotor;
@@ -365,12 +372,17 @@ namespace ps2_host_input
         }
 
         // ---- bindings: controls file, environment, defaults ----------------------------------------------------------
-        // The 24 binding keys of a [PadN] section (16 buttons, then the 8 stick halves); every other key is a setting.
-        constexpr size_t kBindingKeyCount = kPadButtonKeys.size() + kStickKeys.size();
+        // The 25 binding keys of a [PadN] section (16 buttons, the 8 stick halves, then the Dodge Modifier); every other
+        // key is a setting.
+        constexpr size_t kDodgeKeyIndex = kPadButtonKeys.size() + kStickKeys.size();
+        constexpr size_t kBindingKeyCount = kDodgeKeyIndex + 1u;
+        constexpr std::string_view kDodgeKey = "DodgeModifier";
 
         std::string_view bindingKeyName(size_t index)
         {
-            return index < kPadButtonKeys.size() ? kPadButtonKeys[index].first : kStickKeys[index - kPadButtonKeys.size()];
+            return index < kPadButtonKeys.size() ? kPadButtonKeys[index].first
+                   : index < kDodgeKeyIndex      ? kStickKeys[index - kPadButtonKeys.size()]
+                                                 : kDodgeKey;
         }
 
         std::optional<size_t> bindingKeyIndex(std::string_view key)
@@ -388,6 +400,7 @@ namespace ps2_host_input
             bool present = false;
             std::vector<std::pair<std::string, std::string>> settings;
             std::array<std::vector<std::string>, kBindingKeyCount> bindings;
+            bool dodgeListed = false;          // the section names DodgeModifier (an older file does not: its default)
             std::vector<std::string> comments; // '#' / ';' lines, written back right after the [PadN] header
         };
 
@@ -405,6 +418,8 @@ namespace ps2_host_input
             {
                 for (std::string_view part : splitList(value, ';'))
                     section.bindings[*index].emplace_back(part);
+                if (*index == kDodgeKeyIndex)
+                    section.dodgeListed = true;
                 return;
             }
             const std::string name = lowerName(key);
@@ -491,6 +506,7 @@ namespace ps2_host_input
                 read(key);
             for (std::string_view key : kStickKeys)
                 read(key);
+            read(kDodgeKey);
             return config;
         }
 
@@ -510,6 +526,15 @@ namespace ps2_host_input
         // The menu layer (setMenuLayer): player 1's config with every controller binding replaced by the default
         // layout's (on the controller player 1's bindings name first); keyboard and mouse bindings as bound.
         PadConfig g_menuConfig;
+        PadConfig g_menuConfigEsc;                 // the same with Esc also on Start (setMenuEscStart)
+        // The keyboard's fixed menu keys (setMenuKeys): the buttons Enter / Space and Esc / Backspace press there, by
+        // Menu Controls (Western until the game layer says otherwise).
+        std::atomic<uint16_t> g_menuOk{PadButton::Cross};
+        std::atomic<uint16_t> g_menuCancel{PadButton::Circle};
+        std::atomic<bool> g_menuKeysChanged{false};
+        std::atomic<bool> g_menuEscStart{false};
+        std::atomic<int> g_menuDigit{0};           // 1 + the digit key last pressed in the menu layer, 0: none
+        std::atomic<bool> g_keyboardDodge{false};  // the Dodge Modifier was held at player 1's last sample of play
         std::atomic<bool> g_menuLayerWanted{true}; // the game layer (EE vblank); on until Gene is first in play
         std::atomic<bool> g_menuLayerUsed{true};   // the layer the last sample of player 1 was built with
         bool g_latchLayer = true;                  // window thread: readPort(0)'s last layer
@@ -635,7 +660,11 @@ namespace ps2_host_input
                 break;
             case Source::Pointer:
                 binding.type = prompts::Type::Mouse;
-                label = element.code == MOUSE_BUTTON_LEFT ? "M1" : element.code == MOUSE_BUTTON_RIGHT ? "M2" : "M3";
+                label = element.code == MOUSE_BUTTON_LEFT    ? "M1"
+                        : element.code == MOUSE_BUTTON_RIGHT ? "M2"
+                        : element.code == MOUSE_BUTTON_SIDE  ? "M4"
+                        : element.code == MOUSE_BUTTON_EXTRA ? "M5"
+                                                             : "M3";
                 break;
             case Source::PadButton:
                 binding.type = prompts::Type::PadButton;
@@ -668,11 +697,13 @@ namespace ps2_host_input
             };
             return std::equal(a.keys.begin(), a.keys.end(), b.keys.begin(), same) &&
                    std::equal(a.controller.begin(), a.controller.end(), b.controller.begin(), same) &&
-                   a.controllerCount == b.controllerCount;
+                   std::equal(a.menuKeys.begin(), a.menuKeys.end(), b.menuKeys.begin(), same) &&
+                   same(a.dodgeModifier, b.dodgeModifier) && a.controllerCount == b.controllerCount;
         }
 
         // Player 1's labels from the live table (the end of rebuildConfigs); a new generation only when one changed.
-        void publishPrompts(const PadConfig &config)
+        // menu: player 1's menu layer (its keys give menuKeys).
+        void publishPrompts(const PadConfig &config, const PadConfig &menu)
         {
             // prompts::Input order -> binding key index (kPadButtonKeys, then kStickKeys).
             static const std::array<size_t, prompts::InputCount> kInputKeys = []
@@ -709,6 +740,34 @@ namespace ps2_host_input
                 }
             }
             g_promptBoundPad = std::max(boundPad, 0);
+            // The menus' keys: the play key where it still gives the input there, else the first fixed menu key.
+            const auto keysElement = [](const Chord &chord)
+            {
+                return chord.size() == 1u && (chord.front().source == Source::Keyboard || chord.front().source == Source::Pointer);
+            };
+            for (size_t input = 0; input < kInputKeys.size(); ++input)
+            {
+                const size_t index = kInputKeys[input];
+                const Bindings &list = index < kPadButtonKeys.size() ? menu.buttons[index] : menu.sticks[index - kPadButtonKeys.size()];
+                const prompts::Binding &play = next.keys[input];
+                const Element *first = nullptr;
+                bool playKept = false;
+                for (const Chord &chord : list)
+                {
+                    if (!keysElement(chord))
+                        continue;
+                    const Element &e = chord.front();
+                    if (!first)
+                        first = &e;
+                    const prompts::Type type = e.source == Source::Keyboard ? prompts::Type::Key : prompts::Type::Mouse;
+                    if (play.type == type && play.code == static_cast<int16_t>(e.code))
+                        playKept = true;
+                }
+                next.menuKeys[input] = playKept ? play : first ? promptBinding(*first) : prompts::Binding{};
+            }
+            for (const Chord &chord : config.dodge)
+                if (keysElement(chord) && next.dodgeModifier.type == prompts::Type::None)
+                    next.dodgeModifier = promptBinding(chord.front());
             std::lock_guard<std::mutex> lock(g_promptMutex);
             if (g_prompts.generation != 0u && samePrompts(next, g_prompts))
                 return;
@@ -814,6 +873,70 @@ namespace ps2_host_input
             return out;
         }
 
+        // The keyboard's fixed menu keys (setMenuKeys) on a menu-layer config: the chords holding one of those keys and
+        // every key chord on the d-pad go (WASD stay on the sticks), then the fixed keys are added. escStart: Esc also
+        // presses Start.
+        bool fixedMenuKey(int code)
+        {
+            switch (code)
+            {
+            case KEY_UP: case KEY_DOWN: case KEY_LEFT: case KEY_RIGHT: case KEY_ENTER: case KEY_KP_ENTER: case KEY_SPACE:
+            case KEY_ESCAPE: case KEY_BACKSPACE: case KEY_Q: case KEY_E: case KEY_W: case KEY_A: case KEY_S: case KEY_D:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        void addMenuKeys(PadConfig &config, uint16_t ok, uint16_t cancel, bool escStart)
+        {
+            const auto holdsFixed = [](const Chord &chord, bool wasdKept)
+            {
+                return std::any_of(chord.begin(), chord.end(), [&](const Element &e)
+                                   { return e.source == Source::Keyboard && fixedMenuKey(e.code) &&
+                                            !(wasdKept && (e.code == KEY_W || e.code == KEY_A || e.code == KEY_S || e.code == KEY_D)); });
+            };
+            constexpr uint16_t kDpad = PadButton::Up | PadButton::Right | PadButton::Down | PadButton::Left;
+            for (size_t i = 0; i < kPadButtonKeys.size(); ++i)
+            {
+                Bindings kept;
+                for (Chord &chord : config.buttons[i])
+                    if (!holdsFixed(chord, false) && !((kPadButtonKeys[i].second & kDpad) != 0u && !controllerChord(chord)))
+                        kept.push_back(std::move(chord));
+                config.buttons[i] = std::move(kept);
+            }
+            for (Bindings &list : config.sticks)
+            {
+                Bindings kept;
+                for (Chord &chord : list)
+                    if (!holdsFixed(chord, true))
+                        kept.push_back(std::move(chord));
+                list = std::move(kept);
+            }
+            const auto add = [&](uint16_t mask, std::initializer_list<int> codes)
+            {
+                for (size_t i = 0; i < kPadButtonKeys.size(); ++i)
+                    if ((kPadButtonKeys[i].second & mask) != 0u)
+                        for (const int code : codes)
+                        {
+                            Element element;
+                            element.source = Source::Keyboard;
+                            element.code = code;
+                            config.buttons[i].push_back(Chord{element});
+                        }
+            };
+            add(PadButton::Up, {KEY_UP, KEY_W});
+            add(PadButton::Down, {KEY_DOWN, KEY_S});
+            add(PadButton::Left, {KEY_LEFT, KEY_A});
+            add(PadButton::Right, {KEY_RIGHT, KEY_D});
+            add(ok, {KEY_ENTER, KEY_KP_ENTER, KEY_SPACE});
+            add(cancel, {KEY_ESCAPE, KEY_BACKSPACE});
+            add(PadButton::L1, {KEY_Q});
+            add(PadButton::R1, {KEY_E});
+            if (escStart)
+                add(PadButton::Start, {KEY_ESCAPE});
+        }
+
         // Precedence per pad: PS2X_PAD<n> in the environment, then the file's [PadN], then the defaults.
         void rebuildConfigs()
         {
@@ -827,8 +950,12 @@ namespace ps2_host_input
                     g_configs[pad] = configFromSection(defaultSection(pad), pad);
             }
             g_menuConfig = menuConfigOf(g_configs[0], 0u);
+            g_menuConfigEsc = g_menuConfig;
+            const uint16_t ok = g_menuOk.load(std::memory_order_relaxed), cancel = g_menuCancel.load(std::memory_order_relaxed);
+            addMenuKeys(g_menuConfig, ok, cancel, false);
+            addMenuKeys(g_menuConfigEsc, ok, cancel, true);
             g_configsValid = true;
-            publishPrompts(g_configs[0]); // every rebuild: file load, the 1-s file poll, the page's edits, reset
+            publishPrompts(g_configs[0], g_menuConfig); // every rebuild: file load, the 1-s file poll, the page's edits, reset
             publishExtra(g_configs[0]);
         }
 
@@ -970,6 +1097,20 @@ namespace ps2_host_input
                 }
                 addSectionLine(parsed.pads[static_cast<size_t>(pad)], line.substr(0, equals), line.substr(equals + 1u));
             }
+            // A file from before the Dodge Modifier (Nov 16): player 1 gets the default one, unless a Shift already does
+            // something there. Not written back until the file is saved for another reason (the layout stays the player's).
+            if (PadSection &first = parsed.pads[0]; first.present && !first.dodgeListed)
+            {
+                bool shiftUsed = false;
+                for (const std::vector<std::string> &list : first.bindings)
+                    for (const std::string &binding : list)
+                        if (const auto element = parseElement(binding); element && element->source == Source::Keyboard &&
+                                                                        (element->code == kAnyShift || element->code == KEY_LEFT_SHIFT ||
+                                                                         element->code == KEY_RIGHT_SHIFT))
+                            shiftUsed = true;
+                if (!shiftUsed)
+                    first.bindings[kDodgeKeyIndex] = defaultSection(0u).bindings[kDodgeKeyIndex];
+            }
             model = std::move(parsed);
             return true;
         }
@@ -989,14 +1130,15 @@ namespace ps2_host_input
                 out << preamble << '\n'; // the file's own header (and the player's notes in it), as written
             else
                 out << "# God Hand: Rearmed controls (GHR.exe). The launcher's Controls tab edits and saves this file.\n"
-                   "# PCSX2 syntax, one binding per line: <Key> = Keyboard/<key> | Pointer-0/LeftButton, RightButton, MiddleButton |\n"
+                   "# PCSX2 syntax, one binding per line: <Key> = Keyboard/<key> | Pointer-0/LeftButton, RightButton, MiddleButton, Button4, Button5 |\n"
                    "#   SDL-<n>/<button> (controller n: FaceSouth FaceEast FaceWest FaceNorth Back Start LeftStick RightStick\n"
                    "#   LeftShoulder RightShoulder DPadUp DPadDown DPadLeft DPadRight Paddle1-4) | SDL-<n>/+<axis> or -<axis> (LeftX LeftY\n"
                    "#   RightX RightY LeftTrigger RightTrigger). Repeat a key for more bindings; \"<Key> =\" = unbound; \"a & b\" = both.\n"
                    "# Keys: Up Right Down Left Triangle Circle Cross Square Select Start L1 L2 R1 R2 L3 R3, LUp LRight LDown LLeft\n"
                    "#   (left stick), RUp RRight RDown RLeft (right stick); settings Type Deadzone AxisScale ButtonDeadzone InvertL InvertR\n"
                    "#   LargeMotor SmallMotor LargeMotorScale SmallMotorScale; Select's and the back paddles' commands SelectCommand\n"
-                   "#   L4Command R4Command L5Command R5Command = None QuickSave QuickLoad SaveLoad (Select: SaveLoad by default).\n"
+                   "#   L4Command R4Command L5Command R5Command = None QuickSave QuickLoad SaveLoad (Select: SaveLoad by default);\n"
+                   "#   DodgeModifier (player 1: held, the keys on the left stick move the right stick, the dodges; Shift by default).\n"
                    "# Changes saved here are picked up while the game runs. Delete this file to get the default layout back.\n";
             for (uint32_t pad = 0; pad < kMaxPlayers; ++pad)
             {
@@ -1010,6 +1152,8 @@ namespace ps2_host_input
                     out << key << " = " << value << '\n';
                 for (size_t i = 0; i < kBindingKeyCount; ++i)
                 {
+                    if (section.bindings[i].empty() && i == kDodgeKeyIndex && pad != 0u)
+                        continue; // player 1's keyboard only
                     if (section.bindings[i].empty())
                         out << bindingKeyName(i) << " =\n";
                     for (const std::string &binding : section.bindings[i])
@@ -1556,6 +1700,24 @@ namespace ps2_host_input
             return value;
         }
 
+        // Like bindingsValue, over the key and mouse chords only (keys) or the chords with a controller element.
+        float bindingsKindValue(const Bindings &bindings, bool keys)
+        {
+            float value = 0.0f;
+            for (const Chord &chord : bindings)
+            {
+                const bool controller = std::any_of(chord.begin(), chord.end(), [](const Element &e)
+                                                    { return e.source == Source::PadButton || e.source == Source::PadAxis; });
+                if (controller == keys)
+                    continue;
+                float held = 1.0f;
+                for (const Element &element : chord)
+                    held = std::min(held, elementValue(element));
+                value = std::max(value, held);
+            }
+            return value;
+        }
+
         // A pad counts as plugged in when one of its bindings can be pressed: the keyboard and the mouse always, a
         // controller while it is connected.
         bool padPresent(const PadConfig &config)
@@ -1731,6 +1893,16 @@ namespace ps2_host_input
             const uint32_t padEdge = padsHeld & ~g_promptPadsHeld;
             g_promptKeysHeld = keysHeld;
             g_promptPadsHeld = padsHeld;
+            // Before anything was pressed, player 1's controller being connected makes it the device (K, Nov 16: each
+            // device has its own control style, so a controller player starts with the controller's, not the keys').
+            static bool anyPress = false;
+            anyPress = anyPress || keyEdge != 0u || padEdge != 0u;
+            if (!anyPress && ps2_host_gamepads::connected(g_promptBoundPad) &&
+                g_promptDevice.load(std::memory_order_relaxed) != prompts::Device::Controller)
+            {
+                g_promptDevice.store(prompts::Device::Controller, std::memory_order_relaxed);
+                std::cerr << "[prompts] device: controller (connected at start)" << std::endl;
+            }
             if ((keyEdge != 0u || padEdge != 0u) && IsWindowFocused())
             {
                 if (padEdge != 0u && pad >= 0)
@@ -1766,7 +1938,8 @@ namespace ps2_host_input
                 *rawStick = 0.0f;
             const bool menuLayer = player == 0u && g_menuLayerWanted.load(std::memory_order_relaxed);
             const PadConfig &mapped = padConfigs()[player];
-            const PadConfig &config = menuLayer ? g_menuConfig : mapped;
+            const PadConfig &menu = g_menuEscStart.load(std::memory_order_relaxed) ? g_menuConfigEsc : g_menuConfig;
+            const PadConfig &config = menuLayer ? menu : mapped;
             // PS2X_FAKE_PADS=<n> (tests): players 1..n count as connected, idle, without a controller behind them.
             static const uint32_t fakePads = []
             { const char *v = std::getenv("PS2X_FAKE_PADS"); return v ? static_cast<uint32_t>(std::max(std::atoi(v), 0)) : 0u; }();
@@ -1804,7 +1977,7 @@ namespace ps2_host_input
                 // with it, does not also press what A means on the other side.
                 if (menuLayer != g_latchLayer)
                 {
-                    const PadConfig &other = menuLayer ? mapped : g_menuConfig;
+                    const PadConfig &other = menuLayer ? mapped : menu;
                     uint16_t before = 0u;
                     for (size_t i = 0; i < kPadButtonKeys.size(); ++i)
                         if (bindingsValue(other.buttons[i]) > std::max(other.buttonDeadzone, 0.2f))
@@ -1836,6 +2009,20 @@ namespace ps2_host_input
             }
             if (player == 0u)
                 notePromptInput(keysHeld, padsHeld, pad);
+            if (player == 0u)
+            {
+                // The Dodge Modifier (play only): the keys and mouse buttons on the left stick move the right stick (the
+                // dodges); the left stick keeps a controller's.
+                const bool dodge = !menuLayer && !config.dodge.empty() && bindingsValue(config.dodge) > 0.5f;
+                if (dodge)
+                    for (size_t i = 0; i < 4u; ++i)
+                    {
+                        const float keys = bindingsKindValue(config.sticks[LUp + i], true);
+                        halves[LUp + i] = bindingsKindValue(config.sticks[LUp + i], false);
+                        halves[RUp + i] = std::max(halves[RUp + i], keys);
+                    }
+                g_keyboardDodge.store(dodge, std::memory_order_relaxed);
+            }
             if (rawStick)
                 for (const size_t up : {static_cast<size_t>(LUp), static_cast<size_t>(RUp)})
                     *rawStick = std::max(*rawStick, std::hypot(halves[up + 1u] - halves[up + 3u], halves[up + 2u] - halves[up]));
@@ -2059,8 +2246,14 @@ namespace ps2_host_input
         const uint32_t taps = multitapPorts();
         const uint32_t players = 2u + ((taps & 1u) ? 3u : 0u) + ((taps & 2u) ? 3u : 0u);
         updateExtra();
+        if (g_menuKeysChanged.exchange(false, std::memory_order_acq_rel))
+            rebuildConfigs(); // Menu Controls changed: the keyboard's confirm and cancel keys follow
         std::array<PadInputState, kMaxPlayers> state{};
         const bool blocked = g_blocked.load(std::memory_order_relaxed);
+        if (!blocked && g_menuLayerUsed.load(std::memory_order_relaxed) && IsWindowFocused())
+            for (int digit = 0; digit <= 4; ++digit)
+                if (IsKeyPressed(KEY_ZERO + digit))
+                    g_menuDigit.store(digit + 1, std::memory_order_relaxed);
         for (uint32_t player = 0; player < players; ++player)
         {
             state[player] = readPort(player);
@@ -2127,6 +2320,29 @@ namespace ps2_host_input
     void setMenuLayer(bool on)
     {
         g_menuLayerWanted.store(on, std::memory_order_relaxed);
+    }
+
+    void setMenuKeys(uint16_t okButtons, uint16_t cancelButtons)
+    {
+        const bool okChanged = g_menuOk.exchange(okButtons, std::memory_order_relaxed) != okButtons;
+        const bool cancelChanged = g_menuCancel.exchange(cancelButtons, std::memory_order_relaxed) != cancelButtons;
+        if (okChanged || cancelChanged)
+            g_menuKeysChanged.store(true, std::memory_order_release);
+    }
+
+    void setMenuEscStart(bool on)
+    {
+        g_menuEscStart.store(on, std::memory_order_relaxed);
+    }
+
+    int takeMenuDigit()
+    {
+        return g_menuDigit.exchange(0, std::memory_order_relaxed) - 1;
+    }
+
+    bool keyboardDodge()
+    {
+        return g_keyboardDodge.load(std::memory_order_relaxed);
     }
 
     bool menuLayer()
@@ -2292,7 +2508,11 @@ namespace ps2_host_input
                 case Source::Keyboard:
                     return keyName(element.code);
                 case Source::Pointer:
-                    return element.code == MOUSE_BUTTON_LEFT ? "Mouse left" : element.code == MOUSE_BUTTON_RIGHT ? "Mouse right" : "Mouse middle";
+                    return element.code == MOUSE_BUTTON_LEFT    ? "Mouse left"
+                           : element.code == MOUSE_BUTTON_RIGHT ? "Mouse right"
+                           : element.code == MOUSE_BUTTON_SIDE  ? "Mouse 4"
+                           : element.code == MOUSE_BUTTON_EXTRA ? "Mouse 5"
+                                                                : "Mouse middle";
                 case Source::PadButton:
                     text = std::string(kPadButtonDisplay[static_cast<size_t>(element.code)]);
                     break;
@@ -2349,7 +2569,9 @@ namespace ps2_host_input
             const Bindings *liveBindings(uint32_t pad, size_t index)
             {
                 const PadConfig &config = padConfigs()[pad];
-                return index < kPadButtonKeys.size() ? &config.buttons[index] : &config.sticks[index - kPadButtonKeys.size()];
+                return index < kPadButtonKeys.size() ? &config.buttons[index]
+                       : index < kDodgeKeyIndex      ? &config.sticks[index - kPadButtonKeys.size()]
+                                                     : &config.dodge;
             }
         }
 
@@ -2517,6 +2739,8 @@ namespace ps2_host_input
             case MOUSE_BUTTON_LEFT: return "Pointer-0/LeftButton";
             case MOUSE_BUTTON_RIGHT: return "Pointer-0/RightButton";
             case MOUSE_BUTTON_MIDDLE: return "Pointer-0/MiddleButton";
+            case MOUSE_BUTTON_SIDE: return "Pointer-0/Button4";
+            case MOUSE_BUTTON_EXTRA: return "Pointer-0/Button5";
             default: return {};
             }
         }
@@ -2811,9 +3035,12 @@ namespace ps2_host_input
             {"SmallMotorScale", "1"},
         };
         const std::string sdl = "SDL-" + std::to_string(pad) + "/";
-        // Player 1 also has the keyboard. The layout (2026-10-17, the GHR.ini PS2X_PAD1_* lines it replaces): D-pad
-        // on the arrow keys (menus move with the D-pad), face buttons on I/L/K/J, left stick on WASD, Start = Return,
-        // Select = Backspace, L1/R1 = Q/E, L2/R2 = 1/3, L3/R3 = F/G (R3 also the middle mouse button); the right stick (evade) has no keys by default.
+        // Player 1 also has the keyboard and mouse. The layout (K, Nov 16; new installs, an existing controls.ini keeps
+        // its own until a reset): WASD move, Shift + WASD dodge (the Dodge Modifier: the right stick), Space cross, E
+        // circle (interact), left click square, right click triangle, Q L1 (quick turn), R R1 (roulette), F L2 (taunt), G
+        // R2 (God Hand), middle click R3 (Modern's brawl / freecam), 1-4 the d-pad (the styles: 1 up, 2 right, 3 down, 4
+        // left), Esc Start (pause; it frees the mouse too). No keys on Select, L3 (the stick's double tap dashes) or the
+        // right stick; Tab stays free. The menus add their fixed keys (setMenuKeys).
         const bool keyboard = pad == 0u;
         auto add = [&](const char *key, const char *keyboardBinding, const char *padElement)
         {
@@ -2821,24 +3048,22 @@ namespace ps2_host_input
                 settings.emplace_back(key, keyboardBinding);
             settings.emplace_back(key, sdl + padElement);
         };
-        add("Up", "Keyboard/Up", "DPadUp");
-        add("Right", "Keyboard/Right", "DPadRight");
-        add("Down", "Keyboard/Down", "DPadDown");
-        add("Left", "Keyboard/Left", "DPadLeft");
-        add("Triangle", "Keyboard/I", "FaceNorth");
-        add("Circle", "Keyboard/L", "FaceEast");
-        add("Cross", "Keyboard/K", "FaceSouth");
-        add("Square", "Keyboard/J", "FaceWest");
-        add("Select", "Keyboard/Backspace", "Back");
-        add("Start", "Keyboard/Return", "Start");
+        add("Up", "Keyboard/1", "DPadUp");
+        add("Right", "Keyboard/2", "DPadRight");
+        add("Down", "Keyboard/3", "DPadDown");
+        add("Left", "Keyboard/4", "DPadLeft");
+        add("Triangle", "Pointer-0/RightButton", "FaceNorth");
+        add("Circle", "Keyboard/E", "FaceEast");
+        add("Cross", "Keyboard/Space", "FaceSouth");
+        add("Square", "Pointer-0/LeftButton", "FaceWest");
+        add("Select", nullptr, "Back");
+        add("Start", "Keyboard/Escape", "Start");
         add("L1", "Keyboard/Q", "LeftShoulder");
-        add("L2", "Keyboard/1", "+LeftTrigger");
-        add("R1", "Keyboard/E", "RightShoulder");
-        add("R2", "Keyboard/3", "+RightTrigger");
-        add("L3", "Keyboard/F", "LeftStick");
-        add("R3", "Keyboard/G", "RightStick");
-        if (keyboard)
-            settings.emplace_back("R3", "Pointer-0/MiddleButton"); // Modern's camera switch on the mouse (K, Nov 3)
+        add("L2", "Keyboard/F", "+LeftTrigger");
+        add("R1", "Keyboard/R", "RightShoulder");
+        add("R2", "Keyboard/G", "+RightTrigger");
+        add("L3", nullptr, "LeftStick");
+        add("R3", "Pointer-0/MiddleButton", "RightStick");
         add("LUp", "Keyboard/W", "-LeftY");
         add("LRight", "Keyboard/D", "+LeftX");
         add("LDown", "Keyboard/S", "+LeftY");
@@ -2847,6 +3072,8 @@ namespace ps2_host_input
         add("RRight", nullptr, "+RightX");
         add("RDown", nullptr, "+RightY");
         add("RLeft", nullptr, "-RightX");
+        if (keyboard)
+            settings.emplace_back(std::string(kDodgeKey), "Keyboard/Shift");
         settings.emplace_back("LargeMotor", sdl + "LargeMotor");
         settings.emplace_back("SmallMotor", sdl + "SmallMotor");
         return settings;

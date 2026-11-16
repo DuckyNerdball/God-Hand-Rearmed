@@ -452,6 +452,8 @@ namespace
         {"game", "menubuttons", "KAMITE_MENU_BUTTONS"},
         {"game", "buttonprompts", "KAMITE_BUTTON_PROMPTS"},
         {"game", "modernauto", "KAMITE_MODERN_AUTO"},
+        {"game", "kbmcontrolstyle", "KAMITE_KBM_CONTROL_STYLE"},
+        {"game", "kbmmodernauto", "KAMITE_KBM_MODERN_AUTO"},
         {"game", "cameraspeed", "KAMITE_CAMERA_SPEED"},
         {"game", "camerapitchspeed", "KAMITE_CAMERA_PITCH_SPEED"},
         {"game", "camerainvertx", "KAMITE_CAMERA_INVERT_X"},

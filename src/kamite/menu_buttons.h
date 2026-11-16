@@ -65,6 +65,10 @@ namespace kamite::menu_buttons
     // controller binding is the physical button that PS2 button `place` (0..15) has on the default layout; 0xFF: none.
     uint8_t inputOnPlace(const ps2_host_input::prompts::Snapshot &snapshot, uint8_t place, uint8_t from = 0);
 
+    // The keyboard's button art shows the menu layer's keys (ps2_host_input prompts::Snapshot::menuKeys): the menu
+    // layer is on and no tutorial pop-up is up (those explain play's buttons). Any thread.
+    bool menuPrompts();
+
     // modern_controls' pad filter (window thread), player 1: the right stick's x (0..255), which turns Gene on the
     // Techniques screen (every menu style; turnTechniquesGene).
     void noteRightStick(uint8_t x);

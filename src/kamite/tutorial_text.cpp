@@ -29,6 +29,7 @@
 #include "kamite/log.h"
 #include "kamite/menu_buttons.h"
 #include "kamite/modern_controls.h"
+#include "ps2_host_input.h"
 #include "runtime/ps2_pnach.h"
 
 #include <atomic>
@@ -164,6 +165,55 @@ namespace kamite::tutorial_text
             }
             out.insert(out.end(), {kClose, kEnd});
             return out;
+        }
+
+        // The keyboard (K, Nov 16; Claude's draft wording, K edits): the dodges are the Dodge Modifier held with the move
+        // keys (the RS icon shows the move keys then: button_prompts labelsFor), in the free camera too. Classic keeps
+        // the disc's layout (its big stick picture) and scale; Modern is modernText's layout.
+        std::vector<uint16_t> keyboardText(bool modern, bool autoOn, const std::string &modifier)
+        {
+            std::vector<uint16_t> out;
+            if (!modern)
+            {
+                add(out, ("Hold " + modifier + " and move to\nevade enemy attacks!").c_str());
+                out.insert(out.end(), {kClose, kEnd});
+                return out;
+            }
+            out.insert(out.end(), {kScale, kTextScale});
+            iconLine(out, kStickIcon, ("Hold " + modifier + " and move to evade").c_str());
+            indentedLine(out, "enemy attacks.");
+            gap(out);
+            indent(out);
+            add(out, "Press");
+            out.insert(out.end(), {kScale, kIconScale, kSwitchIcon, kScale, kTextScale});
+            add(out, "to switch between\n");
+            indentedLine(out, "brawling and freecam.", !autoOn);
+            if (autoOn)
+            {
+                gap(out);
+                indentedLine(out, "AUTO: Brawling starts automatically");
+                indentedLine(out, "when you deal or take damage.", true);
+            }
+            out.insert(out.end(), {kClose, kEnd});
+            return out;
+        }
+
+        // The Dodge Modifier's key name while the keyboard is the device in use ("Shift"); empty otherwise (or with no
+        // modifier). Cached by the bindings' generation (the snapshot is a copy under a lock).
+        std::string keyboardModifier()
+        {
+            namespace pr = ps2_host_input::prompts;
+            if (pr::lastDevice() != pr::Device::Keys)
+                return {};
+            static uint32_t generation = 0u;
+            static std::string name;
+            if (const uint32_t now = pr::generation(); now != generation)
+            {
+                generation = now;
+                const pr::Snapshot snapshot = pr::snapshot();
+                name = snapshot.dodgeModifier.type == pr::Type::Key ? snapshot.dodgeModifier.label : "";
+            }
+            return name;
         }
 
         // Tutorial 2 (entry 1, the roulette), every control style (K, Nov 4). The disc's: "GODHAND ROULETTE WHEEL / Press
@@ -331,8 +381,13 @@ namespace kamite::tutorial_text
             if (!header || !isBank(header))
                 return;
             const bool modern = modern::enabled();
-            pointEntry(header, 0, kEntry0Offset, kText, modern, modern ? modernText(modern::autoEnabled()) : std::vector<uint16_t>{},
-                       "Tutorial 1 explains Modern's switch");
+            const std::string modifier = keyboardModifier();
+            if (!modifier.empty())
+                pointEntry(header, 0, kEntry0Offset, kText, true, keyboardText(modern, modern::autoEnabled(), modifier),
+                           "Tutorial 1 for the keyboard (the Dodge Modifier)");
+            else
+                pointEntry(header, 0, kEntry0Offset, kText, modern, modern ? modernText(modern::autoEnabled()) : std::vector<uint16_t>{},
+                           "Tutorial 1 explains Modern's switch");
             const menu_buttons::Style style = menu_buttons::style();
             pointEntry(header, 1, kEntry1Offset, kText + kTextBytes, true, rouletteText(style),
                        style == menu_buttons::Style::Japanese  ? "Tutorial 2: the roulette's controls (Japanese OK)"

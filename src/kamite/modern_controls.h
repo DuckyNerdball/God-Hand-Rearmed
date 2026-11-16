@@ -33,7 +33,7 @@ namespace kamite::modern
     // setCamUpdate (a cut, a new room): back behind Gene.
     void resetCamera();
 
-    // [Game] ControlStyle=modern is on (whatever is in effect now).
+    // Modern is the style of the device used last (whatever is in effect now).
     bool enabled();
     // Modern's Auto is on (F2 or [Game] ModernAuto). Any thread.
     bool autoEnabled();
@@ -41,6 +41,17 @@ namespace kamite::modern
     void setModern(bool on);
     void setAuto(bool on);
     void setMouseCamera(bool on);
+    // The keyboard & mouse's own Control Style and Auto ([Game] KbmControlStyle / KbmModernAuto; K, Nov 16). enabled()
+    // and autoEnabled() answer for the device used last.
+    void setKbmModern(bool on);
+    void setKbmAuto(bool on);
+    // What a test case records as KAMITE_CONTROL_STYLE / KAMITE_MODERN_AUTO: the style in effect when it starts.
+    struct CaseStyle
+    {
+        bool modern = false;
+        bool autoOn = false;
+    };
+    CaseStyle caseStyle();
     // A hit between Gene and an enemy landed (either way; game thread, the damage steps): with Auto, brawl mode.
     void noteContact();
 

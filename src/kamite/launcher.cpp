@@ -1566,6 +1566,7 @@ void main()
             const char *key;    // controls.ini [Pad1] key
             const char *action; // what it does in the game ("" = nothing known)
             const char *button; // the PS2 button
+            bool keysOnly = false; // keyboard & mouse only (the Dodge Modifier)
         };
         // The rows: the PS2 inputs in controls.ini's order.
         constexpr ControlRow kControlRows[] = {
@@ -1581,10 +1582,10 @@ void main()
             {"R3", "", "R3 (right stick click)"},
             {"Start", "Pause menu", "Start"},
             {"Select", "", "Select"},
-            {"Up", "Menu up", "D-pad up"},
-            {"Down", "Menu down", "D-pad down"},
-            {"Left", "Menu left", "D-pad left"},
-            {"Right", "Menu right", "D-pad right"},
+            {"Up", "Style S / menu up", "D-pad up"},
+            {"Down", "Style X / menu down", "D-pad down"},
+            {"Left", "Style Y / menu left", "D-pad left"},
+            {"Right", "Style E / menu right", "D-pad right"},
             {"LUp", "Move forward", "Left stick up"},
             {"LDown", "Step back", "Left stick down"},
             {"LLeft", "Move left", "Left stick left"},
@@ -1593,6 +1594,7 @@ void main()
             {"RDown", "Back flip", "Right stick down"},
             {"RLeft", "Sidestep left", "Right stick left"},
             {"RRight", "Sidestep right", "Right stick right"},
+            {"DodgeModifier", "Hold: the move keys dodge", "Dodge modifier", true},
         };
         constexpr int kControlRowCount = static_cast<int>(std::size(kControlRows));
         constexpr int kKeyColumns = 2; // Key 1, Key 2 (a third binding in the file is kept as it is)
@@ -1792,7 +1794,7 @@ void main()
                             return true;
                         }
                     }
-                for (int mouse : {MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE})
+                for (int mouse : {MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_SIDE, MOUSE_BUTTON_EXTRA})
                     if (IsMouseButtonPressed(mouse))
                     {
                         bindCell(g_capture.row, false, g_capture.column, pc::mouseBinding(mouse));
@@ -2055,7 +2057,8 @@ void main()
                                                   "trigger it should be. Right-click (or X) clears it. Esc cancels."
                                                 : "Click a box, then press the key or click the mouse button it should be. "
                                                   "Right-click (or Delete) clears it. Esc cancels; F-keys stay the port's "
-                                                  "shortcuts.");
+                                                  "shortcuts. Menus always take the arrows / WASD, Enter / Space (confirm), "
+                                                  "Esc / Backspace (back) and Q / E (tabs).");
             if (pc::envOverride(kPlayer))
                 ImGui::TextWrapped("PS2X_PAD1 is set in the environment: it wins over these bindings while it is set.");
             ImGui::PopStyleColor();
@@ -2073,6 +2076,8 @@ void main()
                 ImGui::TableHeadersRow();
                 for (int row = 0; row < kControlRowCount; ++row)
                 {
+                    if (controller && kControlRows[row].keysOnly)
+                        continue;
                     const Split split = splitRow(row);
                     ImGui::TableNextRow();
                     ImGui::TableSetColumnIndex(0);

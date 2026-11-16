@@ -4,6 +4,15 @@ Newest first, one line per change; the code comments say how.
 
 ## November 16, 2026
 
+- New keyboard & mouse layout for new installs: WASD move, Shift + WASD dodge, Space / E / left click / right click for the face buttons, Q turn, R roulette, F taunt, G God Hand, middle click brawl / freecam, 1-4 styles, Esc pause.
+- Dodge Modifier (Shift by default, rebindable): hold it to dodge with the move keys, in brawl mode and freecam.
+- Mouse side buttons can be bound.
+- Menus with the keyboard: arrows / WASD move, Enter / Space confirm, Esc / Backspace back, Q / E switch tabs; button pictures show those keys.
+- Esc skips cutscenes and starts the title screen.
+- Control Style per device: the controller and the keyboard & mouse each have their own (keyboard: Modern, Auto off by default); the one you used last is in effect and each keeps its freecam / brawl choice.
+- Switching to the keyboard shows its control style for a moment when it differs from the controller's.
+- Techniques screen with the keyboard: 0-4 pick None / S / E / X / Y; the styles read S1 E2 X3 Y4 there and round the minimap.
+- Tutorial 1 explains the keyboard's dodge.
 - Record Case has no key by default (bind one in the launcher's Controls or the F2 menu).
 - Removed leftover diagnostic logs and probes.
 - Sway Bar: fixed the last boss's stun gauge not showing.

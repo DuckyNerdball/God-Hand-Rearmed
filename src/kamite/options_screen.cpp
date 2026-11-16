@@ -839,6 +839,10 @@ namespace kamite::options_screen
                 modern::setModern(value == "modern");
             else if (id == "ModernAuto")
                 modern::setAuto(on);
+            else if (id == "KbmControlStyle")
+                modern::setKbmModern(value == "modern");
+            else if (id == "KbmModernAuto")
+                modern::setKbmAuto(on);
             else if (id == "MouseCamera")
                 modern::setMouseCamera(on);
             else if (id == "BallBusterWomen")

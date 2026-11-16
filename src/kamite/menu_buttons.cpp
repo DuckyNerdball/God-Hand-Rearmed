@@ -560,6 +560,33 @@ namespace kamite::menu_buttons
             const uint32_t game = rd32(0x3BD6E8u);
             return !(ramPointer(game, 0x2000u) && g_ram[game + 0x1AD8u] != 0u); // a tutorial pop-up
         }
+        // A sub screen is up (the pause menu and its pages, the shops, the save screen).
+        bool subScreenUp()
+        {
+            const uint32_t subScr = rd32(game::SubScr::kPointer);
+            return ramPointer(subScr, 0x1000u) && (static_cast<int32_t>(rd32(subScr + game::SubScr::kKind)) >= 0 ||
+                                                   static_cast<int16_t>(rd32(subScr + game::SubScr::kOpen)) != 0);
+        }
+        // Gene's roulette is open (mode 0 phase 0x2B).
+        bool rouletteOpen()
+        {
+            const uint32_t player = rd32(game::GameWork::address(game::GameWork::kPlayerObj));
+            return ramPointer(player, 0x700u) && g_ram[player + 0x2F4u] == 0u && g_ram[player + 0x2F5u] == 0x2Bu;
+        }
+        // A cutscene or talk (the soft event flag, STA 0x40), or no Gene at all (the title, the boot).
+        bool eventOrTitle()
+        {
+            const uint32_t player = rd32(game::GameWork::address(game::GameWork::kPlayerObj));
+            return !ramPointer(player, 0x700u) || (rd32(game::GameWork::address(game::GameWork::kFlags5E4)) & 0x40u) != 0u;
+        }
+        // A tutorial pop-up is up.
+        bool tutorialPopUp()
+        {
+            const uint32_t game = rd32(0x3BD6E8u);
+            return ramPointer(game, 0x2000u) && g_ram[game + 0x1AD8u] != 0u;
+        }
+        std::atomic<bool> g_menuPrompts{true}; // the keyboard's button art shows the menu layer's keys (menuPrompts())
+
         // Play comes back at once; the menus take the pad after 4 vblanks of not playing, so a moment's freeze in a fight
         // never moves the buttons under the player's fingers.
         void applyLayer()
@@ -573,6 +600,18 @@ namespace kamite::menu_buttons
                 menu = want;
                 ps2_host_input::setMenuLayer(menu);
             }
+            // The keyboard's fixed menu keys (K, Nov 16): Enter / Space confirm and Esc / Backspace cancel as Menu
+            // Controls says; Esc also presses Start in cutscenes, talks and the title (no sub screen, roulette or pop-up
+            // up): Start skips and starts there.
+            namespace PadButton = ps2x::iop::PadButton;
+            const Style style = current();
+            ps2_host_input::setMenuKeys(style == Style::Japanese ? PadButton::Circle : PadButton::Cross,
+                                        style == Style::Western    ? PadButton::Circle
+                                        : style == Style::Japanese ? PadButton::Cross
+                                                                   : PadButton::Triangle);
+            const bool popUp = tutorialPopUp();
+            ps2_host_input::setMenuEscStart(menu && eventOrTitle() && !subScreenUp() && !rouletteOpen() && !popUp);
+            g_menuPrompts.store(menu && !popUp, std::memory_order_relaxed);
         }
 
         void onVblank()
@@ -764,6 +803,11 @@ namespace kamite::menu_buttons
         ps2x::pnach::addFrameHook(&onVblank);
         if (!g_menuFilesOnDisc)
             std::thread(scanLoop).detach();
+    }
+
+    bool menuPrompts()
+    {
+        return g_menuPrompts.load(std::memory_order_relaxed);
     }
 
     Style style()

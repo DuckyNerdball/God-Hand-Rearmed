@@ -27,6 +27,13 @@
 // the free camera at MouseSensitivity degrees per pixel. The mouse never reaches the game as a right stick, so it
 // cannot dodge; while the original controls are in effect it does nothing.
 //
+// Per device (K, Nov 16): the controller and the keyboard & mouse each have their own Control Style and Auto ([Game]
+// ControlStyle / ModernAuto and KbmControlStyle / KbmModernAuto); the one in effect is the device used last (the button
+// prompts' detector: a bound key, mouse button, controller button or stick past half; never mouse movement), and each
+// device comes back to the free camera or brawl mode it left. Switching to the keyboard says its style in a short
+// notice when it differs from the controller's. The keyboard's Dodge Modifier (Shift + the move keys) reaches the game
+// as the right stick even in the free camera (the mouse is that camera).
+//
 // Directions: the camera's yaw is in Gene's convention (the original camera's yaw is his + the offset at +0x414),
 // "right" on the stick is the direction a camera turned right by the stick would face (yaw decreasing).
 #include "kamite/modern_controls.h"
@@ -76,9 +83,11 @@ namespace kamite::modern
         constexpr float kTurnRate = 900.0f * (3.14159265f / 180.0f); // Gene turned toward the stick, radians a second
         constexpr uint32_t kPlayerPointer = game::GameWork::address(game::GameWork::kPlayerObj); // GameWork.playerObj (Getplayer)
 
-        // Settings (F2 menu on the GS thread, read by the window and game threads).
+        // Settings (F2 menu on the GS thread, read by the window and game threads): the controller's, the keyboard's.
         std::atomic<bool> g_modern{false};
         std::atomic<bool> g_auto{true};
+        std::atomic<bool> g_kbmModern{true};
+        std::atomic<bool> g_kbmAuto{false};
         std::atomic<float> g_yawSpeed{200.0f};  // degrees a second at full stick
         std::atomic<float> g_pitchSpeed{80.0f};
         std::atomic<bool> g_invertX{false};
@@ -94,9 +103,9 @@ namespace kamite::modern
         std::atomic<float> g_cameraYaw{0.0f};   // the free camera's yaw
         std::atomic<float> g_geneYaw{0.0f};
 
-        // Input side -> camera side.
-        std::atomic<bool> g_classic{false};     // the player's choice (R3, or Auto at a fight's start): original controls
-        std::atomic<bool> g_classicByAuto{false}; // ... set by Auto (for the F2 status line)
+        // Input side -> camera side. Per device: [0] the controller, [1] the keyboard and mouse.
+        std::atomic<bool> g_classic[2]{};       // the player's choice (R3, or Auto at a fight's start): original controls
+        std::atomic<bool> g_classicByAuto[2]{}; // ... set by Auto (for the F2 status line)
         std::atomic<float> g_stickX{0.0f}, g_stickY{0.0f};
         std::atomic<bool> g_moving{false};      // the left stick asks for a direction (Modern movement)
         // The game has Gene's controls off (0x747A78: 0x02000000 KeyStop, 0x80000000 / 0x40000000 player off): menus
@@ -121,6 +130,14 @@ namespace kamite::modern
             return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
         }
 
+        // The device in effect: 1 = the keyboard and mouse were used last, 0 = a controller.
+        int device()
+        {
+            return ps2_host_input::prompts::lastDevice() == ps2_host_input::prompts::Device::Keys ? 1 : 0;
+        }
+        bool modernNow() { return (device() ? g_kbmModern : g_modern).load(std::memory_order_relaxed); }
+        bool autoNow() { return (device() ? g_kbmAuto : g_auto).load(std::memory_order_relaxed); }
+
         bool gameHasCamera()
         {
             return g_gameCamera.load(std::memory_order_relaxed) ||
@@ -130,7 +147,7 @@ namespace kamite::modern
         // The original controls are in effect (besides the game having the camera).
         bool classicByChoice()
         {
-            return g_classic.load(std::memory_order_relaxed);
+            return g_classic[device()].load(std::memory_order_relaxed);
         }
 
         float stickAxis(uint8_t value)
@@ -152,6 +169,33 @@ namespace kamite::modern
             return angle;
         }
 
+        // Window thread, every sample: switching to the keyboard says its style when it differs from the controller's
+        // (K, Nov 16: a line in the top-left corner for 3 s; switching to a controller is silent).
+        void noteDevice()
+        {
+            static int last = -1;
+            const int d = device();
+            if (d == last)
+                return;
+            const bool first = last < 0;
+            last = d;
+            if (first || d != 1 || g_kbmModern.load(std::memory_order_relaxed) == g_modern.load(std::memory_order_relaxed))
+                return;
+            if (!g_kbmModern.load(std::memory_order_relaxed))
+            {
+                ps2x::menu::notify("KBM: Classic Controls", 3.0f);
+                return;
+            }
+            // The key or button brawl mode is on (R3's first keyboard / mouse binding).
+            const ps2_host_input::prompts::Binding r3 = ps2_host_input::prompts::snapshot().keys[ps2_host_input::prompts::R3];
+            std::string key;
+            if (r3.type == ps2_host_input::prompts::Type::Mouse && r3.code == 2 /* MOUSE_BUTTON_MIDDLE */)
+                key = "Middle-click";
+            else if (r3.type != ps2_host_input::prompts::Type::None)
+                key = r3.label;
+            ps2x::menu::notify(key.empty() ? std::string("KBM: Modern") : "KBM: [" + key + "] Brawl/Freecam", 3.0f);
+        }
+
         // ps2_host_input's pad filter (window thread), player 1 only.
         void padFilter(uint32_t player, ps2x::iop::PadInputState &state)
         {
@@ -159,8 +203,11 @@ namespace kamite::modern
             if (player != 0u)
                 return;
             menu_buttons::noteRightStick(state.connected ? state.rightX : 0x80u); // the Techniques screen's Gene turn
-            if (!g_modern.load(std::memory_order_relaxed))
+            noteDevice();
+            if (!modernNow())
                 return;
+            // The keyboard's Dodge Modifier: the right stick is a dodge for the game, never the camera's.
+            const bool keyDodge = ps2_host_input::keyboardDodge();
             const bool r3 = (state.buttons & ps2x::iop::PadButton::R3) != 0u;
             state.buttons = static_cast<uint16_t>(state.buttons & ~ps2x::iop::PadButton::R3); // the switch's, never the game's
             const float rx = (static_cast<float>(state.rightX) - 128.0f) / 127.0f;
@@ -183,8 +230,9 @@ namespace kamite::modern
             {
                 if (!g_r3Stray)
                 {
-                    g_classic = !g_classic.load(std::memory_order_relaxed);
-                    g_classicByAuto = false;
+                    const int d = device();
+                    g_classic[d] = !g_classic[d].load(std::memory_order_relaxed);
+                    g_classicByAuto[d] = false;
                 }
                 g_r3Stray = false;
             }
@@ -200,11 +248,20 @@ namespace kamite::modern
                 g_stickX = 0.0f;
                 g_stickY = 0.0f;
                 g_moving = false;
-                if (!classicByChoice())
+                if (!classicByChoice() && !keyDodge)
                 {
                     state.rightX = 0x80u; // easing out of a quick turn: no dodges from the camera stick
                     state.rightY = 0x80u;
                 }
+                return;
+            }
+            if (keyDodge)
+            {
+                // Shift + the move keys in the free camera: the game's dodge from Gene's facing (the left stick's keys
+                // went to the right stick); the camera keeps still.
+                g_stickX = 0.0f;
+                g_stickY = 0.0f;
+                g_moving = false;
                 return;
             }
             // The free camera has the right stick; the game sees it centred (no dodges).
@@ -251,7 +308,8 @@ namespace kamite::modern
         // frame (always taken, so nothing piles up while it is not used).
         ps2_host_input::MouseCameraInput takeMouse()
         {
-            const int wanted = (g_modern.load(std::memory_order_relaxed) && g_mouseCamera.load(std::memory_order_relaxed)) ? 1 : 0;
+            // The mouse is the keyboard's: its camera follows the keyboard & mouse Control Style.
+            const int wanted = (g_kbmModern.load(std::memory_order_relaxed) && g_mouseCamera.load(std::memory_order_relaxed)) ? 1 : 0;
             if (wanted != g_mouseState)
             {
                 g_mouseState = wanted;
@@ -318,6 +376,8 @@ namespace kamite::modern
             }
             ini.set("Game", "ControlStyle", g_modern.load() ? "modern" : "classic");
             ini.setBool("Game", "ModernAuto", g_auto.load());
+            ini.set("Game", "KbmControlStyle", g_kbmModern.load() ? "modern" : "classic");
+            ini.setBool("Game", "KbmModernAuto", g_kbmAuto.load());
             ini.set("Game", "CameraSpeed", number(g_yawSpeed.load()));
             ini.set("Game", "CameraPitchSpeed", number(g_pitchSpeed.load()));
             ini.setBool("Game", "CameraInvertX", g_invertX.load());
@@ -355,20 +415,34 @@ namespace kamite::modern
             ui->separator_text("Control style");
             static const char *const kStyles[] = {"Classic: as on the PS2", "Modern: free camera on the right stick"};
             int style = g_modern.load() ? 1 : 0;
+            ui->text("Controller");
             ui->set_next_width(340.0f);
             if (ui->combo("##style", &style, kStyles, 2))
                 g_modern = style == 1;
-            // The Modern settings show only with Modern selected (K, Oct 27).
             if (style == 1)
-            {
-                ui->text_wrapped("The right stick press switches between the free camera and brawl mode (classic controls); the choice "
-                                 "stays across rooms. L1 is the game's quick turn.");
                 checkbox(ui, "Auto: fighting starts brawl mode (the right stick press switches back)##auto", g_auto);
+            static const char *const kKbmStyles[] = {"Classic: as on the PS2", "Modern: free camera on the mouse"};
+            int kbmStyle = g_kbmModern.load() ? 1 : 0;
+            ui->text("Keyboard & mouse");
+            ui->set_next_width(340.0f);
+            if (ui->combo("##kbmstyle", &kbmStyle, kKbmStyles, 2))
+                g_kbmModern = kbmStyle == 1;
+            if (kbmStyle == 1)
+                checkbox(ui, "Auto: fighting starts brawl mode (the middle click switches back)##kbmauto", g_kbmAuto);
+            ui->text_disabled("The style in effect is the device used last.");
+            // The Modern settings show only with Modern selected (K, Oct 27).
+            if (style == 1 || kbmStyle == 1)
+            {
+                ui->text_wrapped("The stick press (middle click) switches between the free camera and brawl mode (classic "
+                                 "controls); each device keeps its choice across rooms. L1 is the game's quick turn.");
                 ui->separator_text("Free camera");
                 slider(ui, "Turn speed##yaw", g_yawSpeed, 40.0f, 400.0f, "%.0f deg/s");
                 slider(ui, "Up/down speed##pitch", g_pitchSpeed, 20.0f, 250.0f, "%.0f deg/s");
                 checkbox(ui, "Invert left/right##invx", g_invertX);
                 checkbox(ui, "Invert up/down##invy", g_invertY);
+            }
+            if (kbmStyle == 1)
+            {
                 ui->separator_text("Mouse");
                 checkbox(ui, "The mouse turns the free camera##mouse", g_mouseCamera);
                 ui->begin_disabled(!g_mouseCamera.load());
@@ -378,10 +452,11 @@ namespace kamite::modern
             }
 
             ui->separator_text("Now");
-            const char *now = !g_modern.load()    ? "Classic"
+            const int d = device();
+            const char *now = !modernNow()        ? (d ? "Keyboard & mouse: Classic" : "Controller: Classic")
                               : gameHasCamera()   ? "The game has the camera: brawl mode"
-                              : classicByChoice() ? (g_classicByAuto.load() ? "Brawl mode (Auto: a hit landed)"
-                                                                            : "Brawl mode (right stick press)")
+                              : classicByChoice() ? (g_classicByAuto[d].load() ? "Brawl mode (Auto: a hit landed)"
+                                                                               : "Brawl mode (stick press / middle click)")
                                                   : "Free camera, camera-relative movement";
             ui->text(now);
 
@@ -513,7 +588,7 @@ namespace kamite::modern
         FreeCamera out;
         g_geneYaw.store(geneYaw, std::memory_order_relaxed);
         const ps2_host_input::MouseCameraInput mouse = takeMouse();
-        if (!g_modern.load(std::memory_order_relaxed))
+        if (!modernNow())
         {
             g_tracking = true;
             g_free = false;
@@ -606,34 +681,43 @@ namespace kamite::modern
 
     bool enabled()
     {
-        return g_modern.load(std::memory_order_relaxed);
+        return modernNow();
     }
 
     void setModern(bool on) { g_modern = on; }
     void setAuto(bool on) { g_auto = on; }
+    void setKbmModern(bool on) { g_kbmModern = on; }
+    void setKbmAuto(bool on) { g_kbmAuto = on; }
     void setMouseCamera(bool on) { g_mouseCamera = on; }
 
-    bool autoEnabled() { return g_auto.load(std::memory_order_relaxed); }
+    bool autoEnabled() { return autoNow(); }
+
+    CaseStyle caseStyle()
+    {
+        return CaseStyle{modernNow(), autoNow()};
+    }
 
     void noteContact()
     {
-        if (g_auto.load(std::memory_order_relaxed) && g_modern.load(std::memory_order_relaxed) &&
-            !g_classic.load(std::memory_order_relaxed))
+        const int d = device();
+        if (autoNow() && modernNow() && !g_classic[d].load(std::memory_order_relaxed))
         {
-            g_classic = true;
-            g_classicByAuto = true;
+            g_classic[d] = true;
+            g_classicByAuto[d] = true;
         }
     }
 
     bool freeCameraNow()
     {
-        return g_modern.load(std::memory_order_relaxed) && !gameHasCamera() && !classicByChoice();
+        return modernNow() && !gameHasCamera() && !classicByChoice();
     }
 
     void install()
     {
         g_modern = envIs("KAMITE_CONTROL_STYLE", "modern");
         g_auto = envBool("KAMITE_MODERN_AUTO", true);
+        g_kbmModern = !envIs("KAMITE_KBM_CONTROL_STYLE", "classic"); // keyboard & mouse: Modern unless set (K, Nov 16)
+        g_kbmAuto = envBool("KAMITE_KBM_MODERN_AUTO", false);
         g_yawSpeed = envFloat("KAMITE_CAMERA_SPEED", 200.0f, 40.0f, 400.0f);
         g_pitchSpeed = envFloat("KAMITE_CAMERA_PITCH_SPEED", 80.0f, 20.0f, 250.0f);
         g_invertX = envBool("KAMITE_CAMERA_INVERT_X", false);
@@ -642,8 +726,9 @@ namespace kamite::modern
         g_mouseSensitivity = envFloat("KAMITE_MOUSE_SENSITIVITY", 0.1f, 0.01f, 1.0f);
         g_iniPath = cameraIniPath();
         ps2_host_input::setPadFilter(&padFilter);
-        KM_INFO(Game, "control style: " << (g_modern.load() ? "modern" : "classic")
-                                        << (g_modern.load() ? (g_auto.load() ? " (R3 switches; auto in battle)" : " (R3 switches)") : ""));
+        KM_INFO(Game, "control style: controller " << (g_modern.load() ? (g_auto.load() ? "modern, auto" : "modern") : "classic")
+                                                    << "; keyboard & mouse "
+                                                    << (g_kbmModern.load() ? (g_kbmAuto.load() ? "modern, auto" : "modern") : "classic"));
 #if defined(KAMITE_HAS_GS_MENU)
         static bool s_panel = false;
         if (!s_panel)
