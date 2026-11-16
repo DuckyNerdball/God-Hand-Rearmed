@@ -22,7 +22,7 @@ Newest first, one line per change; the code comments say how.
 - Buck Breaker's slot on the Techniques screen shows the punish key with the keyboard (was Esc).
 - See Through: the rest of a wall it opens turns partly see-through too.
 - See Through defaults: a larger oval (3 m), starting 0.5 m in front of Gene, with a softer edge.
-- Menus with the keyboard always confirm with Enter / Space and go back with Esc / Backspace, whatever Menu Controls says.
+- Menus with the keyboard always confirm with Enter / Space and go back with Esc / Backspace, whatever Menu Controls says; their button hints (the save menu's too) follow, and a controller gets your Menu Controls back.
 - Tutorial 2 with the keyboard: R opens the wheel, up and down cycle, left click executes.
 - Roulette Ratchet (Options > Sound): the roulette wheel ticks as you cycle moves.
 - Record Case has no key by default (bind one in the launcher's Controls or the F2 menu).

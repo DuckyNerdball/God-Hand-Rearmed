@@ -472,8 +472,8 @@ namespace kamite::modern
             ui->set_next_width(340.0f);
             if (ui->combo("##menubuttons", &menus, kMenuButtons, 3) && menus >= 0 && menus < 3)
                 menu_buttons::setStyle(kMenuStyles[menus]);
-            ui->text_disabled("Menus, dialogs and the roulette; the moves keep their buttons. The save menu's own wording "
-                              "follows at the next start.");
+            ui->text_disabled("Menus, dialogs and the roulette; the moves keep their buttons. With the keyboard the menus are "
+                              "always Western.");
 
             ui->separator_text("GHR.ini");
             if (ui->button("Save##controls"))

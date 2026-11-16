@@ -95,9 +95,10 @@ namespace kamite::menu_buttons
     const std::vector<TextPatch> &textPatches();
 
     // The same for strings in the menu files (id/local/us/*.idd), which the game loads where it likes. Both kinds are
-    // written over the files on the disc image at start (PS2DiscOverlay, checked against the disc's bytes); only when
-    // that is not possible (no image, another language, a changed file) are they rewritten in RAM: the core text every
-    // 30 vblanks, the menu files found by a thread scanning RAM for `original` twice a second.
+    // written over the files on the disc image at start (PS2DiscOverlay, checked against the disc's bytes, in the
+    // setting's style); the core text is also kept in the style in effect in RAM every 30 vblanks, and the menu files'
+    // strings, found by a thread scanning RAM twice a second, when that is not possible (no image, another language, a
+    // changed file) or the style in effect is not the image's (the keyboard's Western, an F2 change).
     struct TextRewrite
     {
         const char *where;

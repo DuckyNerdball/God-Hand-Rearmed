@@ -334,32 +334,73 @@ namespace kamite::menu_buttons
             }
         }
 
-        // Menu-file strings: the scanner thread lists where each rewrite's original text is, the EE thread rewrites.
+        // Menu-file strings: the scanner thread lists where each rewrite's text is in RAM, in any form it may have (the
+        // disc's, the one written onto the disc image at start, any this file wrote since), and the EE thread rewrites
+        // it to the style in effect. Needed when the image could not be patched, while the style in effect is not the
+        // one written onto the image (K, Nov 16: the keyboard locks the menus to Western, a controller gets the setting
+        // back; an F2 change too) and for a few seconds after the style in effect changed (to put the text back).
         std::mutex g_foundMutex;
         std::vector<std::pair<size_t, uint32_t>> g_found; // rewrite index, guest address
+        std::mutex g_formsMutex;
+        std::vector<std::vector<std::vector<uint16_t>>> g_forms; // per rewrite: the forms its text can have in RAM
+        std::atomic<int64_t> g_styleChangedMs{0};                 // when the style in effect last changed
+        std::atomic<int> g_imageStyle{-1};                         // the style written onto the disc image (-1: none)
+
+        int64_t steadyNowMs()
+        {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        }
+
+        void addForm(size_t index, std::vector<uint16_t> form)
+        {
+            std::lock_guard<std::mutex> lock(g_formsMutex);
+            if (g_forms.size() <= index)
+                g_forms.resize(index + 1u);
+            auto &forms = g_forms[index];
+            if (std::find(forms.begin(), forms.end(), form) == forms.end())
+                forms.push_back(std::move(form));
+        }
+
+        bool scanNeeded()
+        {
+            return !g_menuFilesOnDisc || static_cast<int>(current()) != g_imageStyle.load(std::memory_order_relaxed) ||
+                   steadyNowMs() - g_styleChangedMs.load(std::memory_order_relaxed) < 3000;
+        }
 
         void scanLoop()
         {
             const auto &rewrites = textRewrites();
+            for (size_t i = 0; i < rewrites.size(); ++i)
+                addForm(i, rewrites[i].original);
             for (;;)
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                if (!scanNeeded())
+                    continue;
+                std::vector<std::vector<std::vector<uint16_t>>> forms;
+                {
+                    std::lock_guard<std::mutex> lock(g_formsMutex);
+                    forms = g_forms;
+                }
                 std::vector<std::pair<size_t, uint32_t>> found;
                 const uint8_t *begin = g_ram + 0x100000u, *end = g_ram + kRamBytes;
-                for (size_t i = 0; i < rewrites.size(); ++i)
-                {
-                    const uint8_t *pat = reinterpret_cast<const uint8_t *>(rewrites[i].original.data());
-                    const size_t bytes = rewrites[i].original.size() * 2u;
-                    for (const uint8_t *p = begin; p + bytes <= end;)
+                for (size_t i = 0; i < forms.size(); ++i)
+                    for (const std::vector<uint16_t> &form : forms[i])
                     {
-                        p = static_cast<const uint8_t *>(std::memchr(p, pat[0], static_cast<size_t>(end - bytes - p) + 1u));
-                        if (!p)
-                            break;
-                        if (std::memcmp(p, pat, bytes) == 0)
-                            found.emplace_back(i, static_cast<uint32_t>(p - g_ram));
-                        ++p;
+                        const uint8_t *pat = reinterpret_cast<const uint8_t *>(form.data());
+                        const size_t bytes = form.size() * 2u;
+                        if (bytes == 0u)
+                            continue;
+                        for (const uint8_t *p = begin; p + bytes <= end;)
+                        {
+                            p = static_cast<const uint8_t *>(std::memchr(p, pat[0], static_cast<size_t>(end - bytes - p) + 1u));
+                            if (!p)
+                                break;
+                            if (std::memcmp(p, pat, bytes) == 0)
+                                found.emplace_back(i, static_cast<uint32_t>(p - g_ram));
+                            ++p;
+                        }
                     }
-                }
                 if (found.empty())
                     continue;
                 std::lock_guard<std::mutex> lock(g_foundMutex);
@@ -384,12 +425,20 @@ namespace kamite::menu_buttons
                 if (address + bytes > kRamBytes)
                     continue;
                 uint8_t *guest = g_ram + address;
-                if (std::memcmp(guest, rw.original.data(), bytes) != 0)
+                bool known = false;
+                {
+                    std::lock_guard<std::mutex> lock(g_formsMutex);
+                    if (index < g_forms.size())
+                        for (const std::vector<uint16_t> &form : g_forms[index])
+                            known = known || (form.size() * 2u == bytes && std::memcmp(guest, form.data(), bytes) == 0);
+                }
+                if (!known)
                     continue; // gone since the scan
-                const std::vector<uint16_t> want = wanted(rw.original, rw.modern, current());
-                if (want == rw.original)
-                    continue; // Classic on the default layout: the text as it is
+                std::vector<uint16_t> want = wanted(rw.original, rw.modern, current());
+                if (std::memcmp(guest, want.data(), bytes) == 0)
+                    continue;
                 std::memcpy(guest, want.data(), bytes);
+                addForm(index, std::move(want)); // found again when the style in effect changes back
                 KM_INFO(Game, "menu buttons: " << rw.where << " reworded at 0x" << std::hex << address << std::dec);
             }
         }
@@ -455,6 +504,7 @@ namespace kamite::menu_buttons
                         if (std::memcmp(file.data() + at, original.data(), original.size()) != 0)
                             continue;
                         patches.emplace_back(menu->imageOffset + at, bytesOf(wanted(rewrites[i].original, rewrites[i].modern, setting())));
+                        addForm(i, wanted(rewrites[i].original, rewrites[i].modern, setting())); // what RAM gets from it
                         KM_INFO(Game, "menu buttons: " << rewrites[i].where << " reworded in " << path << " at 0x" << std::hex << at << std::dec);
                         found[i] = true;
                     }
@@ -463,6 +513,7 @@ namespace kamite::menu_buttons
             for (bool f : found)
                 foundAll += f ? 1u : 0u;
             g_menuFilesOnDisc = foundAll == rewrites.size();
+            g_imageStyle.store(static_cast<int>(setting()), std::memory_order_relaxed);
             PS2DiscOverlay::add(std::move(patches));
         }
 
@@ -635,8 +686,14 @@ namespace kamite::menu_buttons
                 applyCoreText();
                 applyCoreFixes();
             }
-            if (!g_menuFilesOnDisc)
-                applyFoundText();
+            // The style in effect (the keyboard: Western) changed: the menu files' text follows (scanLoop).
+            static Style last = current();
+            if (const Style now = current(); now != last)
+            {
+                last = now;
+                g_styleChangedMs.store(steadyNowMs(), std::memory_order_relaxed);
+            }
+            applyFoundText();
         }
 
         // The roulette (part of play, so the command tables do not reach it; flag menu_roulette, on in every style:
@@ -810,8 +867,7 @@ namespace kamite::menu_buttons
         installDiscText();
         g_controllerPlaces = false;
         ps2x::pnach::addFrameHook(&onVblank);
-        if (!g_menuFilesOnDisc)
-            std::thread(scanLoop).detach();
+        std::thread(scanLoop).detach(); // idle unless scanNeeded()
     }
 
     PromptMode promptMode()
@@ -837,7 +893,7 @@ namespace kamite::menu_buttons
     void setStyle(Style style)
     {
         if (static_cast<Style>(g_style.exchange(static_cast<int>(style))) != style)
-            KM_INFO(Game, "menu buttons: " << styleName(style) << " (F2); the save menu's own wording follows at the next start");
+            KM_INFO(Game, "menu buttons: " << styleName(style) << " (F2)");
     }
 
     const std::vector<TextPatch> &textPatches()
