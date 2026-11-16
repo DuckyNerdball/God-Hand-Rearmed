@@ -63,6 +63,13 @@ namespace kamite::body_detail
         uint8_t region = 0; // 1 bust, 2 seat (the detailed seat and / or Cash's growth)
     };
 
+    // The jiggle bones (see jiggleWeights below): which are re-skinned, and the binds the runtime places them from.
+    constexpr int kJiggleSeat = 1, kJiggleBust = 2;
+    struct JiggleBind
+    {
+        float pelvis[3] = {}, bust[3] = {}; // bind positions of bones 17 and 29
+    };
+
     struct Built
     {
         std::vector<uint8_t> scr;  // the model rebuilt, zero-padded to the original's size, flat state
@@ -72,6 +79,8 @@ namespace kamite::body_detail
         int sentinel[3] = {-1, -1, -1}; // per region: a change whose position differs between the states
         size_t used = 0;           // bytes before the padding
         int bustAdded = 0, seatPatch = 0, seatShared = 0, cashGrown = 0;
+        int jiggle = 0, jiggleRecords = 0; // kJiggle* re-skinned, records changed
+        JiggleBind bind;
         std::string error;
     };
 
@@ -112,6 +121,21 @@ namespace kamite::body_detail
         bool ok = false;
     };
     bool seatTable(const uint8_t *scr, size_t size, const char *const *nodeNames, int nodeCount, float pelvisY, SeatTable &out);
+
+    // The jiggle bones (claude/cash.md "Jiggle"): bones 27 / 28 are spare on the women's skeleton (no parent, no offset,
+    // no weights). The seat's pelvis share goes to 27 under a mask (seatMask: Cash's growth field, normalised: the
+    // cheeks' lower two thirds whole, nothing at the waist or the front), the bust's (29) right half (x < 0) to 28 with a
+    // cleavage blend. At draw time 27 is placed as the pelvis (17) and 28 as 29 (bone_tweaks), so with no jiggle the
+    // body draws exactly as before; the springs move them only with Cash / Money above 100%.
+    float seatMask(D3 p);
+    float rightShare(double x);
+    // One vertex's 8-byte weight record (bytes 1-3 bone x 4, 4-6 percent) re-skinned at its rest position; true if
+    // it changed.
+    bool jiggleWeights(uint8_t wt[8], D3 p, bool seat, bool bust);
+    // Bones 27 and 28 spare in an mdb's bone table (and bones 17 / 29 where the women's skeleton has them); the binds.
+    bool jiggleSpare(const uint8_t *scr, size_t size, uint32_t mdb, JiggleBind *bind);
+    // A kept model's nodes re-skinned in place (Shannon's body_u1 / BY_00, Olivia's dress); the flags applied (0: none).
+    int reskin(uint8_t *scr, size_t size, const char *const *names, int count, int jiggle);
 
     // A change's position in a state (detailed: + grow x its growth), as apply writes it.
     void wantedPosition(const Change &c, bool detailed, float grow, float out[3]);

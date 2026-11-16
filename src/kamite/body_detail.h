@@ -23,4 +23,14 @@ namespace kamite::body_detail
     // Whether the model's body node has the detailed bust in now (its vertices as last written; Buck Breaker's chest grab
     // picks its fit by it, punish_fit.cpp). False for a model whose body isn't one of the rebuilt ones.
     bool bustDetailed(const uint8_t *rdram, uint32_t model);
+
+    // The jiggle bones a model's drawn body is skinned to (claude/cash.md "Jiggle"): flags 1 the seat (27, a share of
+    // the pelvis 17), 2 the bust's right half (28, a share of 29); 0 for any other model. bone_tweaks places them at
+    // every draw (27 as the pelvis, 28 as 29, moved by the springs only with Cash / Money above 100%), from the binds.
+    struct Jiggle
+    {
+        int flags = 0;
+        float pelvis[3] = {}, bust[3] = {}; // bind positions of bones 17 and 29
+    };
+    Jiggle jiggleOf(const uint8_t *rdram, uint32_t model);
 }

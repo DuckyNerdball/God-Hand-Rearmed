@@ -39,11 +39,13 @@ namespace kamite::body_detail
             uint32_t offset, size;
             uint64_t hash;
             GrowRules rules; // clothing layers (skirt, the body under it, a belt plate)
+            int jiggle = 0;  // the jiggle bones (kJiggle*) on the nodes below, re-skinned in place (body_detail_build reskin)
+            const char *reskin[2] = {nullptr, nullptr};
         };
         constexpr GrowRules kOliviaSkirt{"skirt00", "dress", "z_blt00"}, kOliviaSkirt2{"skirt00", "dress2", "z_blt00"};
         constexpr GrowModel kGrowModels[] = {
-            {"em/em52.dat", 0x31580u, 0x47640u, 0x97A8C864A29AC1F0ULL, {}},           // Shannon
-            {"em/ema0.dat", 0x28060u, 0x47700u, 0xF37EDAD64FF2AE63ULL, kOliviaSkirt},  // Olivia
+            {"em/em52.dat", 0x31580u, 0x47640u, 0x97A8C864A29AC1F0ULL, {}, kJiggleSeat | kJiggleBust, {"body_u1", "BY_00"}}, // Shannon
+            {"em/ema0.dat", 0x28060u, 0x47700u, 0xF37EDAD64FF2AE63ULL, kOliviaSkirt, kJiggleBust, {"dress", nullptr}}, // Olivia (skirt: no seat)
             {"el/el0a.dat", 0x577A0u, 0x21640u, 0x7E94290CBD92FD0FULL, kOliviaSkirt2}, // Olivia, cutscenes (dress)
             {"el/elf5.dat", 0x273E0u, 0x29D80u, 0xDBA0ADACA05FA7D8ULL, kOliviaSkirt2}, // Olivia, cutscenes (dress + extras)
             {"el/elf4.dat", 0x25A20u, 0x1E700u, 0x16E4FA36326B5C40ULL, {}},           // Olivia, cutscenes (bunny suit)
@@ -65,6 +67,8 @@ namespace kamite::body_detail
             std::vector<Change> changes;
             int sentinel[3] = {-1, -1, -1};
             bool bust = false, seat = false;
+            int jiggle = 0; // kJiggle*: the jiggle bones its records use (bone_tweaks places them every draw)
+            JiggleBind bind;
         };
         std::vector<Body> g_bodies; // set at boot, read-only afterwards
         std::vector<std::string> g_nodeNames{"body"}; // the nodes check() looks at (the grown models' too)
@@ -397,6 +401,8 @@ namespace kamite::body_detail
                 std::memcpy(body.sentinel, b.sentinel, sizeof body.sentinel);
                 body.bust = m.bust && b.sentinel[1] >= 0;
                 body.seat = m.seat && b.sentinel[2] >= 0; // the detailed seat and Cash's growth on it
+                body.jiggle = b.jiggle;
+                body.bind = b.bind;
                 g_bodies.push_back(std::move(body));
                 it = built.emplace(m.hash, std::make_pair(static_cast<int>(g_bodies.size()) - 1, std::move(b.scr))).first;
             }
@@ -423,6 +429,23 @@ namespace kamite::body_detail
                 static const char *const kSeatNodes[] = {"body_u1", "BY_00"};
                 seatTable(block.data(), block.size(), kSeatNodes, 2, kPelvisY, g_seat);
             }
+            // The jiggle bones on her own nodes: only when every node to re-skin is one the runtime knows (a grown
+            // node), since a re-skinned node drawn without its bones placed would fall apart.
+            const int named = (g.reskin[0] ? 1 : 0) + (g.reskin[1] ? 1 : 0);
+            const auto isReskinned = [&g](const char *name) {
+                for (const char *r : g.reskin)
+                    if (r && std::strncmp(name, r, 8) == 0)
+                        return true;
+                return false;
+            };
+            int known = 0;
+            for (const GrownNode &n : nodes)
+                known += isReskinned(n.name) ? 1 : 0;
+            int jiggle = 0;
+            if (g.jiggle && known == named && (jiggle = reskin(block.data(), block.size(), g.reskin, named, g.jiggle)) != 0)
+                patches.emplace_back(file->imageOffset + g.offset, block);
+            else if (g.jiggle)
+                KM_WARN(Boot, "body detail: " << g.file << ": no jiggle bones (" << known << " of " << named << " nodes known)");
             for (GrownNode &n : nodes)
             {
                 Body body;
@@ -430,6 +453,8 @@ namespace kamite::body_detail
                 body.changes = std::move(n.changes);
                 body.sentinel[2] = n.sentinel;
                 body.seat = true;
+                if (jiggle && isReskinned(n.name) && jiggleSpare(block.data(), block.size(), n.mdb, &body.bind))
+                    body.jiggle = jiggle;
                 g_bodies.push_back(std::move(body));
                 if (std::find(g_nodeNames.begin(), g_nodeNames.end(), std::string(n.name)) == g_nodeNames.end())
                     g_nodeNames.emplace_back(n.name);
@@ -459,6 +484,35 @@ namespace kamite::body_detail
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
         KM_INFO(Boot, "body detail: " << models << " women's models rebuilt, " << grown << " grown as they are (" << g_bodies.size() << " bodies, " << ms << " ms"
                                      << (other ? ", " + std::to_string(other) + " listed blocks differ" : std::string()) << ")");
+    }
+
+    Jiggle jiggleOf(const uint8_t *rdram, uint32_t model)
+    {
+        Jiggle out;
+        if (!inRam(model, 0x2E4u))
+            return out;
+        uint32_t node = rd32(rdram, model + kMeshHead);
+        for (int i = 0; i < 64 && inRam(node, 0x418u); ++i)
+        {
+            const uint32_t info = rd32(rdram, node + kNodeInfo);
+            if (inRam(info, 16u))
+            {
+                const char *name = reinterpret_cast<const char *>(rdram + ((info + kInfoName) & PS2_RAM_MASK));
+                for (const std::string &n : g_nodeNames)
+                    if (std::strncmp(name, n.c_str(), 8) == 0)
+                    {
+                        if (const Body *b = bodyOf(rdram, rd32(rdram, node + kNodeMdb)); b && b->jiggle)
+                        {
+                            out.flags |= b->jiggle;
+                            std::memcpy(out.pelvis, b->bind.pelvis, sizeof out.pelvis);
+                            std::memcpy(out.bust, b->bind.bust, sizeof out.bust);
+                        }
+                        break;
+                    }
+            }
+            node = rd32(rdram, node + kNodeNext);
+        }
+        return out;
     }
 
     bool bustDetailed(const uint8_t *rdram, uint32_t model)

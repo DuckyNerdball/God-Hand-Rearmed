@@ -1,6 +1,8 @@
 #include "kamite/bone_tweaks.h"
+#include "kamite/body_detail.h"
 #include "kamite/character_mods.h"
 #include "kamite/dev_menu.h"
+#include "kamite/frame_patches.h"
 #include "kamite/function_hooks.h"
 #include "kamite/game_layout.h"
 #include "kamite/log.h"
@@ -21,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace kamite::bone_tweaks
@@ -302,6 +305,181 @@ namespace kamite::bone_tweaks
             g_applied = true;
         }
 
+        // ---- the jiggle bones (claude/cash.md "Jiggle"; body_detail.h jiggleOf) ------------------------------------
+        // The rebuilt women (and Shannon / Olivia) have the seat's pelvis share on bone 27 and the bust's right half on
+        // 28 (body_detail_build reskin). Every draw places 27 as the pelvis (17) and 28 as 29, so with nothing moving
+        // them the body draws as before. Above 100%: Cash moves 27 by the seat's spring (up / down, a side swing), Money
+        // turns each breast (29 her left, 28 her right) round its own base by its own spring instead of the game's
+        // single-bone bounce. Each spring is a point mass on its spot (the cheeks' middle, ahead of each breast's base),
+        // pulled back to it and damped against the spot's own motion, so the body's moves (a run's bob, a landing, a
+        // hit, a turn) drive it; stepped per game frame in fixed 1/240 s sub-steps (the same at 30 and 60 FPS).
+        constexpr int kPelvisBone = 17, kSeatBone = 27, kRightBone = 28, kBustBone = 29, kBustParent = 2;
+        constexpr float kOn = 1.0005f;                       // Money / Cash above 100%
+        constexpr float kBreastX = 0.07f, kBreastLen = 0.08f; // the bases either side of 29's origin; the tip ahead
+        constexpr float kSeatSpot[3] = {0.0f, 0.98f, -0.10f}; // the cheeks' middle (bind)
+        constexpr float kSeatMax = 0.04f, kPitchMax = 30.0f, kYawMax = 20.0f;
+        enum JigTune { kBustHz, kBustDamp, kBustGain, kSeatHz, kSeatDamp, kSeatGain, kSide, kSpread, kJigTunes };
+        std::atomic<float> g_jigTune[kJigTunes] = {3.6f, 0.15f, 0.35f, 3.0f, 0.25f, 0.4f, 0.33f, 0.04f}; // F2 > NPCs
+        float jigTune(int i) { return g_jigTune[i].load(std::memory_order_relaxed); }
+
+        struct Spring
+        {
+            Vec tip{}, vel{}, rest{};
+        };
+        struct JigState
+        {
+            uint32_t frame = 0, seen = 0;
+            bool live = false;
+            Spring seat, breast[2]; // breast 0: her left (29), 1: her right (28)
+        };
+        std::unordered_map<uint32_t, JigState> g_jigs; // game thread, by model
+        std::vector<uint32_t> g_jigDone;               // the models placed this frame
+
+        void stepSpring(Spring &sp, const Vec &rest, float dt, float hz, float zeta)
+        {
+            const float w = 2.0f * 3.14159265f * std::max(hz, 0.1f), k = w * w, c = 2.0f * std::max(zeta, 0.0f) * w;
+            const Vec spotVel = mulf(sub(rest, sp.rest), 1.0f / dt);
+            const int n = std::clamp(static_cast<int>(std::ceil(dt * 240.0f)), 1, 32);
+            const float h = dt / static_cast<float>(n);
+            for (int i = 1; i <= n; ++i)
+            {
+                const Vec r = add(sp.rest, mulf(sub(rest, sp.rest), static_cast<float>(i) / static_cast<float>(n)));
+                const Vec acc = sub(mulf(sub(r, sp.tip), k), mulf(sub(sp.vel, spotVel), c));
+                sp.vel = add(sp.vel, mulf(acc, h));
+                sp.tip = add(sp.tip, mulf(sp.vel, h));
+            }
+            sp.rest = rest;
+        }
+        void resetSpring(Spring &sp, const Vec &rest) { sp = Spring{rest, {0, 0, 0}, rest}; }
+        Mat rotY(float a) { const float c = std::cos(a), s = std::sin(a); return {c, 0, s, 0, 1, 0, -s, 0, c}; }
+        Mat columns(const Vec &x, const Vec &y, const Vec &z) { return {x[0], y[0], z[0], x[1], y[1], z[1], x[2], y[2], z[2]}; }
+        Mat scaled(const Mat &m, float s) { Mat r = m; for (float &v : r) v *= s; return r; }
+
+        void placeJiggle(uint8_t *rdram, uint32_t model)
+        {
+            const body_detail::Jiggle jg = body_detail::jiggleOf(rdram, model);
+            if (jg.flags == 0 || std::find(g_jigDone.begin(), g_jigDone.end(), model) != g_jigDone.end())
+                return;
+            const int n = rdram[(model + kPartNum) & 0x01FFFFFFu];
+            if (n <= kBustBone || n > 64)
+                return;
+            uint32_t parts[kBustBone + 1] = {};
+            uint32_t part = rd32(rdram, model + kPartsFirst);
+            for (int i = 0; i <= kBustBone; ++i)
+            {
+                if (!inRam(part, 0x160u))
+                    return;
+                parts[i] = part;
+                part = rd32(rdram, part + kPartNext);
+            }
+            g_jigDone.push_back(model);
+            constexpr float kRad = 3.14159265f / 180.0f;
+            const float money = g_money.load(std::memory_order_relaxed), cash = g_cash.load(std::memory_order_relaxed);
+            const Vec bPelvis{jg.pelvis[0], jg.pelvis[1], jg.pelvis[2]}, bBust{jg.bust[0], jg.bust[1], jg.bust[2]};
+            auto row = [](const Bone &m, int r) { return Vec{m.m[r * 4], m.m[r * 4 + 1], m.m[r * 4 + 2]}; };
+
+            // The spots: the cheeks' middle on the pelvis; ahead of each breast's base on the bust as Money shapes it
+            // (the parent's axes tipped by the droop, scaled; placeMoney's frame without any bounce).
+            const Bone pelvis = readBone(rdram, parts[kPelvisBone]), bust = readBone(rdram, parts[kBustBone]);
+            const Bone parent = readBone(rdram, parts[kBustParent]);
+            const float s = money;
+            const float droop = (s - 1.0f) * kMoneyDroop * kRad, dc = std::cos(droop), ds = std::sin(droop);
+            const Vec px = unit(row(parent, 0)), py = unit(row(parent, 1)), pz = unit(row(parent, 2));
+            const Vec ex = px, ey = add(mulf(py, dc), mulf(pz, ds)), ez = sub(mulf(pz, dc), mulf(py, ds));
+            const Mat rb = columns(ex, ey, ez);
+            const Vec t29 = bust.pos(), t17 = pelvis.pos();
+            const Vec base[2] = {Vec{kBreastX, 0.0f, 0.0f}, Vec{-kBreastX, 0.0f, 0.0f}}; // relative to 29's bind
+            Vec breastSpot[2];
+            for (int i = 0; i < 2; ++i)
+                breastSpot[i] = add(t29, applyRot(scaled(rb, s), add(base[i], Vec{0.0f, 0.0f, kBreastLen})));
+            const Vec seatSpot = add(t17, applyRot(pelvis.rot(), sub(Vec{kSeatSpot[0], kSeatSpot[1], kSeatSpot[2]}, bPelvis)));
+
+            JigState &st = g_jigs[model];
+            st.seen = g_frame;
+            uint32_t frame = 0;
+            std::memcpy(&frame, rdram + (GameWork::address(GameWork::kFrameCount) & 0x01FFFFFFu), 4);
+            const int32_t elapsed = static_cast<int32_t>(frame - st.frame);
+            if (!st.live || elapsed < 0 || elapsed > 4 || length(sub(seatSpot, st.seat.rest)) > 0.5f)
+            {
+                resetSpring(st.seat, seatSpot);
+                resetSpring(st.breast[0], breastSpot[0]);
+                resetSpring(st.breast[1], breastSpot[1]);
+                st.live = true;
+                st.frame = frame;
+            }
+            else if (elapsed > 0)
+            {
+                const float dt = static_cast<float>(elapsed) / (fps60() ? 60.0f : 30.0f);
+                const float spread = jigTune(kSpread);
+                stepSpring(st.seat, seatSpot, dt, jigTune(kSeatHz), jigTune(kSeatDamp));
+                stepSpring(st.breast[0], breastSpot[0], dt, jigTune(kBustHz) * (1.0f + spread), jigTune(kBustDamp));
+                stepSpring(st.breast[1], breastSpot[1], dt, jigTune(kBustHz) * (1.0f - spread), jigTune(kBustDamp));
+                st.frame = frame;
+            }
+            const float side = jigTune(kSide);
+
+            // 27: the pelvis, moved by the seat's spring (in the pelvis' axes: up / down, the side swing x side).
+            if (jg.flags & 1)
+            {
+                Vec d{0.0f, 0.0f, 0.0f};
+                if (cash > kOn)
+                {
+                    const Vec D = sub(st.seat.tip, st.seat.rest);
+                    const Vec ux = unit(row(pelvis, 0)), uy = unit(row(pelvis, 1));
+                    d = mulf(Vec{dot(D, ux) * side, dot(D, uy), 0.0f}, jigTune(kSeatGain) * cash);
+                    if (const float l = length(d); l > kSeatMax)
+                        d = mulf(d, kSeatMax / l);
+                }
+                Bone b = readBone(rdram, parts[kSeatBone]);
+                b.set(pelvis.rot(), add(t17, applyRot(pelvis.rot(), add(sub(Vec{0, 0, 0}, bPelvis), d))));
+                writeBone(rdram, parts[kSeatBone], b);
+                g_applied = true;
+            }
+            if (!(jg.flags & 2))
+                return;
+            if (money <= kOn)
+            {
+                // 28 as 29 (the game's bounce, or Money's scale below 100% / the chest grab's hold as placeMoney left it).
+                Bone b = readBone(rdram, parts[kRightBone]);
+                b.set(bust.rot(), add(t29, applyRot(bust.rot(), sub(Vec{0, 0, 0}, bBust))));
+                writeBone(rdram, parts[kRightBone], b);
+                g_applied = true;
+                return;
+            }
+            // Both breasts on their own springs: bone b of breast i = s Rb Q_i, at t29 + s Rb (Q_i (B_b - B29 - o_i) + o_i).
+            const float hold = std::clamp(punish_fit::bustHold(rdram, model), 0.0f, 1.0f);
+            const float gain = jigTune(kBustGain) * (1.0f - hold);
+            const int bones[2] = {kBustBone, kRightBone};
+            for (int i = 0; i < 2; ++i)
+            {
+                const Vec D = sub(st.breast[i].tip, st.breast[i].rest);
+                const float pitch = std::clamp(-dot(D, ey) / kBreastLen * gain, -kPitchMax * kRad, kPitchMax * kRad);
+                const float yaw = std::clamp(dot(D, ex) / kBreastLen * gain * side, -kYawMax * kRad, kYawMax * kRad);
+                const Mat q = mul(rotY(yaw), rotX(pitch));
+                const Vec bind = i == 0 ? bBust : Vec{0, 0, 0};
+                const Vec local = add(applyRot(q, sub(sub(bind, bBust), base[i])), base[i]);
+                Bone b = readBone(rdram, parts[bones[i]]);
+                b.set(scaled(mul(rb, q), s), add(t29, applyRot(scaled(rb, s), local)));
+                writeBone(rdram, parts[bones[i]], b);
+                if (i == 0) // 29 goes back at the next frame's start, like placeMoney's
+                {
+                    bool kept = false;
+                    for (Saved &sv : g_moneySaved)
+                        if (sv.address == parts[kBustBone])
+                            sv.mirrored = b.m, kept = true;
+                    if (!kept)
+                    {
+                        Saved sv;
+                        sv.address = parts[kBustBone];
+                        sv.original = bust.m;
+                        sv.mirrored = b.m;
+                        g_moneySaved.push_back(sv);
+                    }
+                }
+            }
+            g_applied = true;
+        }
+
         void onGetMeshPtr(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             if (GPR_U32(ctx, 31) != kTransCallSite)
@@ -310,6 +488,7 @@ namespace kamite::bone_tweaks
             if (model != rd32(rdram, GameWork::address(GameWork::kPlayerObj)))
             {
                 placeMoney(rdram, model);
+                placeJiggle(rdram, model);
                 return;
             }
             if (model != rd32(rdram, GameWork::address(GameWork::kPlayerObj)))
@@ -357,6 +536,25 @@ namespace kamite::bone_tweaks
             ui->separator_text("Money");
             restingSlider(ui, "##money", "Money %.0f%%", 85.0f, 130.0f, "Money", g_money, &setMoney, moneyMs);
             restingSlider(ui, "##cash", "Cash %.0f%%", 100.0f, 130.0f, "Cash", g_cash, &setCash, cashMs);
+            // The jiggle springs (above 100%): live, not saved (tell Claude the values you like).
+            ui->separator_text("Jiggle");
+            struct Row
+            {
+                const char *id, *format;
+                float lo, hi;
+            };
+            static const Row kRows[kJigTunes] = {
+                {"##jbhz", "Bust %.2f Hz", 1.0f, 8.0f},        {"##jbdamp", "Bust damping %.2f", 0.02f, 1.0f},
+                {"##jbgain", "Bust strength %.2f", 0.0f, 2.0f}, {"##jshz", "Seat %.2f Hz", 1.0f, 8.0f},
+                {"##jsdamp", "Seat damping %.2f", 0.02f, 1.0f}, {"##jsgain", "Seat strength %.2f", 0.0f, 2.0f},
+                {"##jside", "Side swing %.2f", 0.0f, 1.0f},     {"##jspread", "Left / right rates %.2f", 0.0f, 0.15f}};
+            for (int i = 0; i < kJigTunes; ++i)
+            {
+                float v = jigTune(i);
+                ui->set_next_width(340.0f);
+                if (ui->slider_float(kRows[i].id, &v, kRows[i].lo, kRows[i].hi, kRows[i].format))
+                    g_jigTune[i].store(v, std::memory_order_relaxed);
+            }
         }
     }
 #endif
@@ -393,6 +591,7 @@ namespace kamite::bone_tweaks
     void onFrame(uint8_t *rdram, R5900Context *, PS2Runtime *)
     {
         ++g_frame;
+        g_jigDone.clear();
         if (!g_applied)
             return;
         g_applied = false;
@@ -414,6 +613,9 @@ namespace kamite::bone_tweaks
                 std::memcpy(rdram + ((s.address + kPartMtx) & 0x01FFFFFFu), s.original.data(), 64);
         }
         g_moneySaved.clear();
+        if (g_frame % 600u == 0u)
+            for (auto it = g_jigs.begin(); it != g_jigs.end();)
+                it = g_frame - it->second.seen > 600u ? g_jigs.erase(it) : std::next(it);
     }
 
     float money() { return g_money.load(std::memory_order_relaxed); }

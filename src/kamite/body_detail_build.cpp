@@ -1965,6 +1965,178 @@ namespace kamite::body_detail
         }
     }
 
+    // ---- the jiggle bones (body_detail_build.h) -------------------------------------------------------------------
+    namespace
+    {
+        constexpr int kPelvisBone = 17, kSeatBone = 27, kRightBone = 28, kBustBone = 29;
+        constexpr double kCleavage = 0.02; // the bust's blend half width round x = 0
+        double cashPeak()
+        {
+            double m = 0.0;
+            for (const double v : kCashProfile)
+                m = std::max(m, v);
+            return m / 1000.0;
+        }
+    }
+
+    // The cheeks under the growth (none at the front, the hip sides or the waist), faded out above y 1.00..1.12: the
+    // upper cheeks are nearly all pelvis, the lower ones half thigh, so without the fade the bounce sat at the waist.
+    float seatMask(D3 p)
+    {
+        return static_cast<float>(sstep(0.15, 0.6, len(cashField(p)) / cashPeak()) * (1.0 - sstep(1.00, 1.12, p.y)));
+    }
+    float rightShare(double x) { return static_cast<float>(sstep(kCleavage, -kCleavage, x)); }
+
+    bool jiggleWeights(uint8_t wt[8], D3 p, bool seat, bool bust)
+    {
+        std::vector<std::pair<int, double>> mix;
+        int total = 0;
+        for (int s = 0; s < 3; ++s)
+        {
+            const int j = wt[1 + s] / 4, w = wt[4 + s];
+            if (w <= 0)
+                continue;
+            if (j == kSeatBone || j == kRightBone)
+                return false; // already re-skinned
+            total += w;
+            bool found = false;
+            for (auto &e : mix)
+                if (e.first == j)
+                    e.second += w, found = true;
+            if (!found)
+                mix.emplace_back(j, w);
+        }
+        if (total <= 0)
+            return false;
+        const auto move = [&mix](int from, int to, double share) {
+            if (share <= 0.0)
+                return;
+            for (size_t i = 0; i < mix.size(); ++i)
+                if (mix[i].first == from)
+                {
+                    const double m = mix[i].second * share;
+                    mix[i].second -= m;
+                    mix.emplace_back(to, m);
+                    return;
+                }
+        };
+        // A record with no free slot (Shannon's cleft line: pelvis and both thighs) moves all or nothing: dropping a
+        // thigh would pull a centre vertex to one side.
+        double seatShare = seat ? seatMask(p) : 0.0, bustShare = bust ? rightShare(p.x) : 0.0;
+        const auto has = [&mix](int b) {
+            for (const auto &e : mix)
+                if (e.first == b)
+                    return true;
+            return false;
+        };
+        const size_t extra = (seatShare > 0.0 && has(kPelvisBone) ? 1u : 0u) + (bustShare > 0.0 && has(kBustBone) ? 1u : 0u);
+        if (mix.size() + extra > 3u)
+        {
+            seatShare = seatShare > 0.5 ? 1.0 : 0.0;
+            bustShare = bustShare > 0.5 ? 1.0 : 0.0;
+        }
+        move(kPelvisBone, kSeatBone, seatShare);
+        move(kBustBone, kRightBone, bustShare);
+        mix.erase(std::remove_if(mix.begin(), mix.end(), [](const auto &e) { return e.second <= 0.0; }), mix.end());
+        // The three heaviest in whole percents summing to the record's own total (largest remainder).
+        std::stable_sort(mix.begin(), mix.end(), [](const auto &a, const auto &b) { return a.second > b.second; });
+        if (mix.size() > 3)
+            mix.resize(3);
+        double sum = 0.0;
+        for (const auto &e : mix)
+            sum += e.second;
+        int J[3] = {0, 0, 0}, W[3] = {0, 0, 0}, used = 0;
+        double rem[3] = {0.0, 0.0, 0.0};
+        for (size_t k = 0; k < mix.size(); ++k)
+        {
+            const double exact = total * mix[k].second / sum;
+            J[k] = mix[k].first;
+            W[k] = static_cast<int>(std::floor(exact));
+            rem[k] = exact - W[k];
+            used += W[k];
+        }
+        for (; used < total; ++used)
+        {
+            size_t best = 0;
+            for (size_t k = 1; k < mix.size(); ++k)
+                if (rem[k] > rem[best])
+                    best = k;
+            ++W[best];
+            rem[best] = -1.0;
+        }
+        bool changed = false;
+        for (int k = 0; k < 3; ++k)
+            if (W[k] > 0 && (J[k] == kSeatBone || J[k] == kRightBone))
+                changed = true;
+        if (!changed)
+            return false; // the moved share rounded away: the record stays as it was
+        for (int k = 0; k < 3; ++k)
+        {
+            wt[1 + k] = static_cast<uint8_t>(W[k] > 0 ? J[k] * 4 : 0);
+            wt[4 + k] = static_cast<uint8_t>(W[k]);
+        }
+        return true;
+    }
+
+    bool jiggleSpare(const uint8_t *scr, size_t size, uint32_t mdb, JiggleBind *bind)
+    {
+        if (!inside(size, mdb, 32))
+            return false;
+        const uint16_t nb = r16(scr + mdb + 8);
+        const uint32_t at = mdb + r32(scr + mdb + 4);
+        if (nb < 30 || !inside(size, at, 16u * nb))
+            return false;
+        const auto parent = [&](int i) { int16_t v; std::memcpy(&v, scr + at + 16 * i + 14, 2); return static_cast<int>(v); };
+        const auto t = [&](int i, int k) { return rf(scr + at + 16 * i + 4 * k); };
+        for (const int b : {kSeatBone, kRightBone})
+            if (parent(b) != -1 || t(b, 0) != 0.0f || t(b, 1) != 0.0f || t(b, 2) != 0.0f)
+                return false;
+        if (parent(kBustBone) != 2 || parent(kPelvisBone) != 0)
+            return false;
+        if (bind)
+        {
+            const auto place = [&](int i, float out[3]) {
+                double x = 0, y = 0, z = 0;
+                for (int b = i, guard = 0; b >= 0 && b < nb && guard < 64; b = parent(b), ++guard)
+                    x += t(b, 0), y += t(b, 1), z += t(b, 2);
+                out[0] = static_cast<float>(x), out[1] = static_cast<float>(y), out[2] = static_cast<float>(z);
+            };
+            place(kPelvisBone, bind->pelvis);
+            place(kBustBone, bind->bust);
+        }
+        return true;
+    }
+
+    int reskin(uint8_t *scr, size_t size, const char *const *names, int count, int jiggle)
+    {
+        std::vector<NodeRef> nodes;
+        if (jiggle == 0 || !readNodes(scr, size, nodes))
+            return 0;
+        int applied = 0;
+        for (const NodeRef &r : nodes)
+        {
+            bool named = false;
+            for (int k = 0; k < count; ++k)
+                named = named || std::strncmp(r.name, names[k], 8) == 0;
+            std::vector<VbRef> vbs;
+            if (!named || (r.flags & 0x01000000u) || !jiggleSpare(scr, size, r.mdb, nullptr) || !readVbs(scr, size, r.mdb, vbs))
+                continue;
+            for (const VbRef &b : vbs)
+            {
+                if (!b.wt)
+                    continue;
+                for (uint32_t k = 0; k < b.count; ++k)
+                {
+                    const uint8_t *q = scr + b.at + b.pos + 16 * k;
+                    jiggleWeights(scr + b.at + b.wt + 8 * k, D3{rf(q), rf(q + 4), rf(q + 8)}, (jiggle & kJiggleSeat) != 0,
+                                  (jiggle & kJiggleBust) != 0);
+                }
+            }
+            applied = jiggle;
+        }
+        return applied;
+    }
+
     bool loadDonor(const uint8_t *dat, size_t size, const char *node, Mesh &out)
     {
         if (size < 8)
@@ -2115,6 +2287,15 @@ namespace kamite::body_detail
             }
             if (std::memcmp(r.flat, r.detail, 12) == 0 && std::memcmp(r.flatN, r.detailN, 3) == 0)
                 r.region = 0;
+        }
+
+        // The jiggle bones: the seat's pelvis share to 27 (with the detailed seat only), the bust's right half to 28.
+        if (jiggleSpare(scr, size, body->mdb, &out.bind))
+        {
+            for (size_t i = 0; i < R; ++i)
+                if (jiggleWeights(rec[i].wt, detP[i], seated, true))
+                    ++out.jiggleRecords;
+            out.jiggle = (seated ? kJiggleSeat : 0) | kJiggleBust;
         }
 
         // Cash's growth, on the bodies with the detailed seat (em07's dress is too coarse: 35 positions round the seat
