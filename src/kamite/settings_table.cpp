@@ -302,7 +302,7 @@ namespace kamite::settings
                     "Game", "StyleSwitching", false)),
         live(sub(toggle(Tab::Gameplay, "Style Shuffle", "Signal Style Switch",
                         "Gene calls out each style as you switch to it, and his God Hand flashes.", "Game", "StyleSignal",
-                        false),
+                        true),
                  "StyleSwitching")),
         live(toggle(Tab::Gameplay, "Style Shuffle", "Buck Breaker",
                     "Pick how to punish stunned enemies.\nWorks with Moveset Presets. Some restrictions apply.",

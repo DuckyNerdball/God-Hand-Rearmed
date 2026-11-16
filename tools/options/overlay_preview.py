@@ -15,6 +15,8 @@ hints' buttons (the default bindings: cross / circle / triangle on the bottom / 
 Select or a paddle holds, --paddles the paddles the controller reports, --readonly shows a launcher layout.
 --page keys: the keyboard's BUTTON MAPPING (keys_page.cpp) with the default layout's keys; --keys-row the selected row,
 --keys-mode capture / reset, --keys-label Key=Label (Cross=J) over the defaults; use --prompts keys for its hints.
+PRESETS (the list's cursor on it, its carousel beside / instead of the list): set KAMITE_PREVIEW_PRESETS="N[:inuse[:ask[:dir[:t]]]]"
+(N 0..3 Classic..Sleazy Mode, 4 Custom; dir / t a turn under way) and KAMITE_PREVIEW_PRESET_ART=<dir of NN.png + NN.png.rgba>.
 Needs Pillow.
 """
 import argparse, hashlib, os, re, shutil, struct, subprocess, tempfile
@@ -31,7 +33,8 @@ def build(work):
               [os.path.join(ROOT, 'src/kamite', f) for f in ('options_overlay.cpp', 'options_overlay.h', 'options_pages.cpp',
                                                              'options_pages.h', 'settings_table.cpp', 'settings_table.h',
                                                              'ini_file.cpp', 'mapping_page.cpp', 'mapping_page.h',
-                                                             'keys_page.cpp', 'keys_page.h')]
+                                                             'keys_page.cpp', 'keys_page.h', 'presets.cpp', 'presets.h',
+                                                             'help_font_widths.inc')]
     key = hashlib.sha1(m.group(0).encode() + b''.join(open(f, 'rb').read() for f in sources)).hexdigest()[:16]
     cached = os.path.join(tempfile.gettempdir(), 'overlay_preview_' + key)
     if os.path.exists(cached):
@@ -44,7 +47,7 @@ def build(work):
                            '-o', exe, os.path.join(ROOT, 'tools/options/overlay_preview.cpp')] +
                           [os.path.join(ROOT, 'src/kamite', f) for f in ('options_overlay.cpp', 'options_pages.cpp',
                                                                          'settings_table.cpp', 'ini_file.cpp',
-                                                                         'mapping_page.cpp', 'keys_page.cpp')] +
+                                                                         'mapping_page.cpp', 'keys_page.cpp', 'presets.cpp')] +
                           [os.path.join(IMGUI, 'src', f) for f in ('imgui.cpp', 'imgui_draw.cpp', 'imgui_widgets.cpp', 'imgui_tables.cpp')])
     shutil.copyfile(exe, cached)
     os.chmod(cached, 0o755)
@@ -61,7 +64,7 @@ HINT_ART = {'xbox': ('xbox360', '360_A', '360_B', '360_Y', '360_LB', '360_RB'),
 def title_letters():
     """Each title's letters (alpha over half, as options_screen measures them): name:left:right;..."""
     out = []
-    for name in ('controls', 'display', 'graphics', 'interface', 'gameplay', 'sound'):
+    for name in ('presets', 'controls', 'display', 'graphics', 'interface', 'gameplay', 'sound'):
         im = Image.open(os.path.join(ROOT, 'resources/options', 'title_%s.png' % name)).convert('RGBA')
         box = im.getchannel('A').point(lambda a: 255 if a > 127 else 0).getbbox()
         if box:

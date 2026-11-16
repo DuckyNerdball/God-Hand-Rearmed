@@ -97,6 +97,7 @@ namespace kamite::options_overlay
         // Placement: x in layout units, y and sizes in lines.
         constexpr float kLabelX = 37.0f, kLabelCap = 21.5f, kStroke = 1.0f;
         constexpr float kFirstRowY = 110.0f, kLastRowY = 347.0f, kRowStep = 34.0f; // row centres (the pause's 8 rows)
+        constexpr float kListCapPerStep = 0.8f; // the names' largest cap height for a step
         constexpr float kCursorX = 24.0f, kCursorHalfW = 6.0f, kCursorHalfH = 8.0f;
         constexpr float kValueX = 262.0f, kValueGap = 58.0f, kValueCap = 17.0f;
         // The help is centred up and down in the wall's lower band (lines 363.5..417), one line or two (K, Nov 12: as the
@@ -136,10 +137,11 @@ namespace kamite::options_overlay
         constexpr float kPageWidth = 470.0f, kValueBlock = 136.0f, kScrollWidth = 8.0f, kScrollGap = 14.0f;
         // The PRESETS carousel (lines): the name's centre, IN USE, the photo, the list under it.
         constexpr float kPresetNameY = 100.0f, kPresetInUseY = 118.0f, kPresetInUseCap = 9.5f, kPresetArrowGap = 4.0f;
-        constexpr float kPresetArtTop = 128.0f, kPresetArtBottom = 280.0f;
-        constexpr float kPresetListTop = 290.0f, kPresetListBottom = 352.0f, kPresetListPitch = 14.0f, kPresetItemCap = 10.5f;
-        constexpr float kPresetColumn = 128.0f;
-        constexpr float kPresetArtFull = 203.0f, kPresetTaglineGap = 7.0f; // fullArt: the pause menu's own size
+        constexpr float kPresetArtTop = 128.0f, kPresetArtFull = 203.0f, kPresetTaglineGap = 7.0f; // the pause menu's size
+        // A turn: the faces slide kPresetSlide units, their streak's copies trailing up to kPresetStreak behind.
+        constexpr float kPresetSlide = 60.0f, kPresetStreak = 24.0f;
+        // The tagline's line across the carousel: kPresetTextMargin units in from each end.
+        constexpr float kPresetTextMargin = 6.0f;
         constexpr float kSubIndent = 12.0f, kSubCap = 18.5f, kHeaderCap = 13.0f, kHeaderTracking = 3.0f;
         constexpr float kLinesToUnits = 6.0f / 7.0f;
 
@@ -269,7 +271,7 @@ namespace kamite::options_overlay
             float fade;
             uint32_t labelFont = 0, helpFont = 0;
             float dim = 1.0f; // a page shown before it is opened: half strength
-            float helpCap = kHelpCap, helpLine = kHelpLine; // the PRESETS list in the band (fullArt) is smaller
+            float helpCap = kHelpCap, helpLine = kHelpLine; // the PRESETS band text may be smaller (fitPresetText)
             bool helpOnHints = false; // BUTTON MAPPING (K, Nov 14): the help's last line on the hints' line, bottom left
 
             uint32_t add(const char *text, size_t length)
@@ -454,17 +456,48 @@ namespace kamite::options_overlay
 
             // OPTIONS > PRESETS: the carousel across x0..x1 (layout units). Before the page is opened (open false) no
             // arrows, at the page's half strength (dim).
+            void presetFace(const char *name, const char *art, float cx, float artW, bool open, float shift, float alpha)
+            {
+                const float keep = dim;
+                dim *= alpha;
+                text(name, std::strlen(name), labelFont, cx + shift, kPresetNameY + 0.5f * kLabelCap, kLabelCap,
+                     kNewLabel.scaleX, kNewLabel.tracking, open ? kLabelOn : kLabel, open ? kLabelOnStroke : 0u, artW,
+                     PCSX2GS_ALIGN_CENTRE);
+                picture(art, cx + shift - 0.5f * artW, kPresetArtTop, cx + shift + 0.5f * artW, kPresetArtTop + kPresetArtFull,
+                        rgba(255, 255, 255));
+                dim = keep;
+            }
+
+            // A face sliding: drawn where it is, with fainter copies trailing it (the title switch's streak).
+            void presetSliding(const char *name, const char *art, float cx, float artW, bool open, float shift, float alpha,
+                               float streak)
+            {
+                for (int i = 3; i >= 1; --i)
+                    if (streak > 0.5f || streak < -0.5f)
+                        presetFace(name, art, cx, artW, open, shift + streak * static_cast<float>(i) / 3.0f,
+                                   alpha * 0.22f * static_cast<float>(4 - i) / 3.0f);
+                presetFace(name, art, cx, artW, open, shift, alpha);
+            }
+
             void presets(const PresetsView &v, float x0, float x1, bool open)
             {
                 const float cx = 0.5f * (x0 + x1);
-                const float artBottom = v.fullArt ? kPresetArtTop + kPresetArtFull : kPresetArtBottom;
-                const float artH = artBottom - kPresetArtTop;
-                const float artW = artH * v.artAspect * kLinesToUnits;
-                // < NAME >
-                const float nameCap = kLabelCap;
-                text(v.name, std::strlen(v.name), labelFont, cx, kPresetNameY + 0.5f * nameCap, nameCap, kNewLabel.scaleX,
-                     kNewLabel.tracking, open ? kLabelOn : kLabel, open ? kLabelOnStroke : 0u, artW,
-                     PCSX2GS_ALIGN_CENTRE);
+                const float artBottom = kPresetArtTop + kPresetArtFull;
+                const float artW = kPresetArtFull * v.artAspect * kLinesToUnits;
+                // < NAME > over the photo; a turn slides the old pair out and the new one in (K: the title switch's
+                // streak), both moving the way the carousel turned.
+                if (v.turnDir != 0 && v.turnT < 1.0f && open)
+                {
+                    const float d = v.turnDir > 0 ? 1.0f : -1.0f, t = std::clamp(v.turnT, 0.0f, 1.0f);
+                    const float out = std::clamp(t / 0.55f, 0.0f, 1.0f), in = std::clamp((t - 0.1f) / 0.9f, 0.0f, 1.0f);
+                    const float easeOut = out * out, easeIn = 1.0f - (1.0f - in) * (1.0f - in) * (1.0f - in);
+                    presetSliding(v.fromName, v.fromArt, cx, artW, open, -d * kPresetSlide * easeOut, 1.0f - out,
+                                  d * kPresetStreak * out);
+                    presetSliding(v.name, v.art, cx, artW, open, d * kPresetSlide * (1.0f - easeIn), std::min(1.0f, 3.0f * in),
+                                  d * kPresetStreak * (1.0f - easeIn));
+                }
+                else
+                    presetFace(v.name, v.art, cx, artW, open, 0.0f, 1.0f);
                 if (open)
                     for (int side = -1; side <= 1; side += 2)
                     {
@@ -486,69 +519,38 @@ namespace kamite::options_overlay
                 if (v.inUse)
                     text(v.inUseWord, std::strlen(v.inUseWord), labelFont, cx, kPresetInUseY + 0.5f * kPresetInUseCap,
                          kPresetInUseCap, kNewLabel.scaleX, kHeaderTracking, kValueOn, kValueOnStroke, 0.0f, PCSX2GS_ALIGN_CENTRE);
-                // The photo, with the text's drop shadow setting it off the wall.
-                if (v.art && *v.art)
-                {
-                    Pcsx2GsScreenItem item{};
-                    item.kind = PCSX2GS_SCREEN_IMAGE;
-                    item.text = add(v.art, std::strlen(v.art));
-                    item.fill = faded(rgba(255, 255, 255));
-                    item.x = space.x(cx - 0.5f * artW);
-                    item.x1 = space.x(cx + 0.5f * artW);
-                    item.y = Space::y(kPresetArtTop);
-                    item.y1 = Space::y(artBottom);
-                    items.push_back(item);
-                }
-                if (v.fullArt && !v.asking)
-                {
-                    const float tc = v.taglineCap > 0.0f ? v.taglineCap : kHelpCap;
-                    text(v.tagline, std::strlen(v.tagline), helpFont, cx, artBottom + kPresetTaglineGap + tc, tc,
-                         kHelpScaleX, 0.0f, kHelp, 0u, x1 - x0, PCSX2GS_ALIGN_CENTRE);
-                    Pcsx2GsScreenItem &item = items.back();
-                    item.shadow = faded(kHelpShadow);
-                    item.shadow_x = Space::y(0.12f * tc);
-                    item.shadow_y = Space::y(0.11f * tc);
-                    return;
-                }
                 if (v.asking)
                 {
-                    const float at = v.fullArt ? artBottom + kPresetTaglineGap + 0.5f * kValueCap : kPresetListTop + kPresetListPitch;
+                    const float at = artBottom + kPresetTaglineGap + 0.5f * kValueCap;
                     text("YES", 3, labelFont, cx - 0.5f * kValueGap, at + 0.5f * kValueCap, kValueCap, kNewLabel.scaleX,
                          kNewLabel.tracking, v.yes ? kValueOn : kValue, v.yes ? kValueOnStroke : 0u, 0.0f, PCSX2GS_ALIGN_CENTRE);
                     text("NO", 2, labelFont, cx + 0.5f * kValueGap, at + 0.5f * kValueCap, kValueCap, kNewLabel.scaleX,
                          kNewLabel.tracking, !v.yes ? kValueOn : kValue, !v.yes ? kValueOnStroke : 0u, 0.0f, PCSX2GS_ALIGN_CENTRE);
                     return;
                 }
-                const auto shadowed = [&](float cap) {
+                const float tc = v.taglineCap > 0.0f ? v.taglineCap : kHelpCap;
+                text(v.tagline, std::strlen(v.tagline), helpFont, cx, artBottom + kPresetTaglineGap + tc, tc, kHelpScaleX, 0.0f,
+                     kHelp, 0u, x1 - x0 - 2.0f * kPresetTextMargin, PCSX2GS_ALIGN_CENTRE);
+                if (v.tagline && *v.tagline)
+                {
                     Pcsx2GsScreenItem &item = items.back();
                     item.shadow = faded(kHelpShadow);
-                    item.shadow_x = Space::y(0.12f * cap);
-                    item.shadow_y = Space::y(0.11f * cap);
-                };
-                float y = kPresetListTop;
-                if (v.listHeader && *v.listHeader)
-                {
-                    text(v.listHeader, std::strlen(v.listHeader), labelFont, cx, y + 0.5f * kHeaderCap, kHeaderCap, kNewLabel.scaleX,
-                         kHeaderTracking, kHelp, 0u, x1 - x0, PCSX2GS_ALIGN_CENTRE);
-                    shadowed(kHeaderCap);
-                    y += kPresetListPitch + 2.0f;
+                    item.shadow_x = Space::y(0.12f * tc);
+                    item.shadow_y = Space::y(0.11f * tc);
                 }
-                // The items in columns (as many rows as the space holds), each centred in its column.
-                const int rows = std::max(1, static_cast<int>((kPresetListBottom - y) / kPresetListPitch) + 1);
-                const int columns = std::max(1, (v.itemCount + rows - 1) / rows);
-                const int perColumn = (v.itemCount + columns - 1) / std::max(columns, 1);
-                // Columns no wider than a long item needs, the block centred (a short list stays together).
-                const float colW = std::min((x1 - x0) / static_cast<float>(columns), kPresetColumn);
-                x0 = cx - 0.5f * colW * static_cast<float>(columns);
-                for (int i = 0; i < v.itemCount; ++i)
+            }
+
+            // The PRESETS page's help band: the preset's text at its fitted size, or the question while asking.
+            void presetHelp(const PresetsView &v)
+            {
+                if (!v.asking && v.helpCap > 0.0f)
                 {
-                    const int c = i / std::max(perColumn, 1), r = i % std::max(perColumn, 1);
-                    const char *item = v.items[i];
-                    text(item, std::strlen(item), helpFont, x0 + colW * (static_cast<float>(c) + 0.5f),
-                         y + kPresetItemCap + kPresetListPitch * static_cast<float>(r) - 0.5f * kPresetItemCap, kPresetItemCap,
-                         kHelpScaleX, 0.0f, kHelp, 0u, colW - 4.0f, PCSX2GS_ALIGN_CENTRE);
-                    shadowed(kPresetItemCap);
+                    helpCap = v.helpCap;
+                    helpLine = kHelpLine * v.helpCap / kHelpCap;
                 }
+                help(v.asking ? v.question : v.help);
+                helpCap = kHelpCap;
+                helpLine = kHelpLine;
             }
 
             // Two lines at most.
@@ -1370,6 +1372,91 @@ namespace kamite::options_overlay
         items.push_back(item);
     }
 
+    // ---- PRESETS text fitting ------------------------------------------------------------------------------------
+    namespace
+    {
+#include "kamite/help_font_widths.inc"
+        // The help font's size per cap height (an em in lines for a line of cap height), as the renderer sizes it
+        // (calibrated against the overlay preview's render, which is the DLL's own drawing code).
+        constexpr float kHelpEmPerCap = 1.5888f;
+
+        // The text's advance in ems (UTF-8: Latin-1 and the ASCII range; other characters count as '?').
+        float helpEms(const char *text, size_t length)
+        {
+            float units = 0.0f;
+            for (size_t i = 0; i < length; ++i)
+            {
+                uint32_t c = static_cast<uint8_t>(text[i]);
+                if ((c & 0xE0u) == 0xC0u && i + 1 < length)
+                    c = ((c & 0x1Fu) << 6) | (static_cast<uint8_t>(text[++i]) & 0x3Fu);
+                else if (c >= 0x80u)
+                {
+                    while (i + 1 < length && (static_cast<uint8_t>(text[i + 1]) & 0xC0u) == 0x80u)
+                        ++i;
+                    c = '?';
+                }
+                units += kHelpAdvance[(c >= 0x20u && c <= 0xFFu ? c : '?') - 0x20u];
+            }
+            return units / kHelpUnitsPerEm;
+        }
+
+        // Greedy word wrap at `width` units: the lines.
+        std::vector<std::string> wrapAt(const char *text, float cap, float width)
+        {
+            std::vector<std::string> lines(1);
+            const char *c = text;
+            while (c && *c)
+            {
+                while (*c == ' ')
+                    ++c;
+                const char *end = c;
+                while (*end && *end != ' ')
+                    ++end;
+                if (end == c)
+                    break;
+                std::string &line = lines.back();
+                const std::string candidate = line.empty() ? std::string(c, end) : line + " " + std::string(c, end);
+                if (!line.empty() && helpTextWidth(candidate.data(), candidate.size(), cap) > width)
+                    lines.emplace_back(c, end);
+                else
+                    line = candidate;
+                c = end;
+            }
+            return lines;
+        }
+    }
+
+    float helpTextWidth(const char *text, size_t length, float cap)
+    {
+        return helpEms(text, length) * cap * kHelpEmPerCap * kHelpScaleX * kLinesToUnits;
+    }
+
+    PresetFit fitPresetText(const char *tagline, const char *band, float aspect)
+    {
+        const Space space(std::clamp(aspect, 1.0f, 4.0f));
+        PresetFit fit;
+        // The band: the help's width; down from the help's size in small steps until two lines hold it.
+        const float bandWidth = space.area - 2.0f * kHelpX;
+        float cap = kHelpCap;
+        std::vector<std::string> lines = wrapAt(band, cap, bandWidth);
+        while (lines.size() > 2u && cap > 6.0f)
+        {
+            cap -= 0.25f;
+            lines = wrapAt(band, cap, bandWidth);
+        }
+        fit.bandCap = cap;
+        for (size_t i = 0; i < lines.size(); ++i)
+            fit.band += (i ? "\n" : "") + lines[i];
+        // The tagline: across the carousel (beside the list on 16:10 and wider, else the whole width), one line.
+        const bool split = aspect >= kSplitAspect;
+        const float x0 = split ? kBracketX + kPageCursorGap : kCursorX;
+        const float x1 = split ? std::min(space.area - kLabelX, kBracketX + kPageWidth) : space.area - kCursorX;
+        const float width = x1 - x0 - 2.0f * kPresetTextMargin;
+        const float full = tagline ? helpTextWidth(tagline, std::strlen(tagline), kHelpCap) : 0.0f;
+        fit.taglineCap = full > width ? kHelpCap * width / full : kHelpCap;
+        return fit;
+    }
+
     void build(const View &view, std::vector<Pcsx2GsScreenItem> &items, std::string &strings)
     {
         items.clear();
@@ -1424,7 +1511,7 @@ namespace kamite::options_overlay
             return;
         }
         const bool split = view.aspect >= kSplitAspect;
-        const Page *page = view.page && view.page->rowCount > 0 ? view.page : nullptr;
+        const Page *page = view.page && (view.page->rowCount > 0 || view.presets) ? view.page : nullptr;
         const bool open = page && view.inPage;
 
         // The title: OPTIONS, or the open category's (K, Nov 13: it replaces OPTIONS until the page is left).
@@ -1456,12 +1543,7 @@ namespace kamite::options_overlay
             if (view.presets)
             {
                 b.presets(*view.presets, kCursorX, b.space.area - kCursorX, true);
-                if (view.presets->fullArt && !view.presets->asking)
-                {
-                    b.helpCap = view.presets->helpCap > 0.0f ? view.presets->helpCap : kHelpCap;
-                    b.helpLine = kHelpLine * b.helpCap / kHelpCap;
-                }
-                b.help(view.presets->asking ? view.presets->question : view.presets->help);
+                b.presetHelp(*view.presets);
             }
             else
             {
@@ -1472,15 +1554,17 @@ namespace kamite::options_overlay
             return;
         }
 
-        // The pause's rows fill the original's span; the title's (fewer) keep its spacing.
-        const float step = view.pause && view.rowCount > 1 ? std::min(kRowStep, (kLastRowY - kFirstRowY) / static_cast<float>(view.rowCount - 1))
-                                                           : kRowStep;
+        // The pause's rows fill the original's span; the title's (fewer) keep its spacing while they fit in it.
+        const float step = view.rowCount > 1 ? std::min(kRowStep, (kLastRowY - kFirstRowY) / static_cast<float>(view.rowCount - 1))
+                                             : kRowStep;
         const int cursor = std::clamp(view.cursor, 0, view.rowCount - 1);
+        // A list that needs a tighter step than the original's (PRESETS made the pause's eleven rows) gets smaller names.
+        const float cap = std::min(kLabelCap, kListCapPerStep * step);
         for (int i = 0; i < view.rowCount; ++i)
             if (i != cursor)
-                b.label(view.rows[i].name, kFirstRowY + step * static_cast<float>(i), false);
+                b.label(view.rows[i].name, kFirstRowY + step * static_cast<float>(i), false, kLabelX, kMaxLabel, cap);
         const float centre = kFirstRowY + step * static_cast<float>(cursor);
-        b.label(view.rows[cursor].name, centre, true); // last, so the bracket starts at its end
+        b.label(view.rows[cursor].name, centre, true, kLabelX, kMaxLabel, cap); // last, so the bracket starts at its end
         if (!open)
             b.cursor(centre);
 
@@ -1488,7 +1572,8 @@ namespace kamite::options_overlay
         {
             if (view.presets)
             {
-                b.bracket(kBracketX, centre, std::min(kPresetNameY, centre) - kBracketReach, kPresetListBottom);
+                b.bracket(kBracketX, centre, std::min(kPresetNameY, centre) - kBracketReach,
+                          std::max(kPresetArtTop + kPresetArtFull, centre) + kBracketReach);
                 b.presets(*view.presets, kBracketX + kPageCursorGap, pageRight, true);
             }
             else
@@ -1518,12 +1603,7 @@ namespace kamite::options_overlay
         }
         else if (open && view.presets)
         {
-            if (view.presets->fullArt && !view.presets->asking)
-            {
-                b.helpCap = view.presets->helpCap > 0.0f ? view.presets->helpCap : kHelpCap;
-                b.helpLine = kHelpLine * b.helpCap / kHelpCap;
-            }
-            b.help(view.presets->asking ? view.presets->question : view.presets->help);
+            b.presetHelp(*view.presets);
         }
         else if (open)
             b.help(view.pageCursor >= 0 && view.pageCursor < page->rowCount ? page->rows[view.pageCursor].help : "");

@@ -49,6 +49,7 @@
 #include "kamite/npc_poses.h"
 #include "kamite/options_overlay.h"
 #include "kamite/options_pages.h"
+#include "kamite/presets.h"
 #include "kamite/prompt_art.h"
 #include "kamite/prompt_hd.h"
 #include "kamite/settings_table.h"
@@ -117,6 +118,7 @@ namespace kamite::options_screen
 
         enum class Action : uint8_t
         {
+            Presets, // K, Nov 16: the carousel (claude/presets-design.md)
             Controls,
             Display,
             Graphics,
@@ -132,6 +134,7 @@ namespace kamite::options_screen
         using Text = options_overlay::Row;
 
         // Help lines (K's, Nov 13; SOUND and the game's own rows: drafts / the game's wording).
+        constexpr Text kPresetsText{"PRESETS", "Ready-made setups, from the PS2 original\nto everything Rearmed has."}; // DRAFT
         constexpr Text kControlsText{"CONTROLS", "Camera and input settings."};
         // DISPLAY's draft and GRAPHICS taking K's old DISPLAY line (Nov 15: the picture moved to GRAPHICS).
         constexpr Text kDisplayText{"DISPLAY", "Window and screen settings."};
@@ -146,15 +149,17 @@ namespace kamite::options_screen
         constexpr const char *kResetQuestion = "Would you really like to reset?"; // the game's own (message 0x2008)
         constexpr const char *kRestoreQuestion = "Set every option back to its default?";
 
-        constexpr std::array<Text, 10> kPauseText{kControlsText, kDisplayText, kGraphicsText, kInterfaceText, kGameplayText,
-                                                  kSoundText,    kLoadText,    kResetText,    kRestoreText,   kExitText};
-        constexpr std::array<Action, 10> kPauseActions{Action::Controls,  Action::Display, Action::Graphics, Action::Interface,
-                                                       Action::Gameplay,  Action::Sound,   Action::LoadGame, Action::ResetGame,
-                                                       Action::Restore,   Action::Exit};
-        constexpr std::array<Text, 8> kTitleText{kControlsText, kDisplayText, kGraphicsText, kInterfaceText,
-                                                 kGameplayText, kSoundText,   kRestoreText,  kExitText};
-        constexpr std::array<Action, 8> kTitleActions{Action::Controls, Action::Display, Action::Graphics, Action::Interface,
-                                                      Action::Gameplay, Action::Sound,   Action::Restore,  Action::Exit};
+        constexpr std::array<Text, 11> kPauseText{kPresetsText,   kControlsText, kDisplayText, kGraphicsText,
+                                                  kInterfaceText, kGameplayText, kSoundText,   kLoadText,
+                                                  kResetText,     kRestoreText,  kExitText};
+        constexpr std::array<Action, 11> kPauseActions{Action::Presets,  Action::Controls,  Action::Display, Action::Graphics,
+                                                       Action::Interface, Action::Gameplay, Action::Sound,   Action::LoadGame,
+                                                       Action::ResetGame, Action::Restore,  Action::Exit};
+        constexpr std::array<Text, 9> kTitleText{kPresetsText,  kControlsText, kDisplayText, kGraphicsText, kInterfaceText,
+                                                 kGameplayText, kSoundText,    kRestoreText, kExitText};
+        constexpr std::array<Action, 9> kTitleActions{Action::Presets,  Action::Controls, Action::Display,
+                                                      Action::Graphics, Action::Interface, Action::Gameplay,
+                                                      Action::Sound,    Action::Restore,  Action::Exit};
 
         struct Kind
         {
@@ -579,7 +584,8 @@ namespace kamite::options_screen
         {
             FadeStep step = FadeStep::Idle;
             const settings::Setting *setting = nullptr; // the change, or
-            bool restore = false;                       // RESTORE DEFAULTS
+            bool restore = false;                       // RESTORE DEFAULTS, or
+            std::vector<const settings::Setting *> preset; // a preset's changes (PRESETS)
             bool aspect = false;                        // it changes the aspect ratio: hold for the wall
             uint32_t generation = 0;                    // the wall's prepare to wait for
             bool api = false;                           // a graphics API switch is under way: hold for it
@@ -607,7 +613,14 @@ namespace kamite::options_screen
             int keysCursor = 0;
             keys_page::Mode keysMode = keys_page::Mode::Browse;
             std::chrono::steady_clock::time_point keysCaptureStart;
+            // PRESETS (K, Nov 16): the carousel's preset (presets::kClassic.., kCustomSlot = CUSTOM), the turn under way,
+            // and "Replace your custom settings?" (YES / NO, NO first).
+            int presetShown = 0;
+            int presetFrom = -1, presetDir = 0;
+            std::chrono::steady_clock::time_point presetTurnStart;
+            bool presetAsking = false, presetYes = false;
         };
+        constexpr int kCustomSlot = presets::kCount; // CUSTOM's place in the carousel: after Sleazy Mode
         Screen g_screen[2];
         // The last L1 / R1 category switch, for the titles' slide (options_overlay View::titleDir): the row it left.
         struct TitleSwitch
@@ -689,6 +702,8 @@ namespace kamite::options_screen
             return action == Action::Controls || action == Action::Display || action == Action::Graphics ||
                    action == Action::Interface || action == Action::Gameplay || action == Action::Sound;
         }
+        // A row with a page: the categories and PRESETS (its carousel).
+        bool isPage(Action action) { return action == Action::Presets || isCategory(action); }
 
         // The pages (options_pages.cpp), from the GHR.ini read as the screen opened.
         using options_pages::firstOption;
@@ -1092,6 +1107,9 @@ namespace kamite::options_screen
                 // Black: the change (an aspect change's wall was started with the fade).
                 if (g_fade.restore)
                     restoreDefaults();
+                else if (!g_fade.preset.empty())
+                    for (const settings::Setting *setting : g_fade.preset)
+                        apply(*setting);
                 else if (g_fade.setting)
                     apply(*g_fade.setting);
                 g_wallStarted = false;
@@ -1167,6 +1185,37 @@ namespace kamite::options_screen
             ps2_host_input::controls::requestControllerReset(0); // the button mapping too (K, Nov 13)
             ps2_host_input::controls::requestKeyboardReset(0);   // and the keyboard's (K, Nov 16: its new layout)
             KM_INFO(Game, "options screen: every setting back to its default");
+        }
+
+        // PRESETS: a preset written to GHR.ini and applied live, behind one fade when it rebuilds something (an aspect
+        // change, as RESTORE DEFAULTS does). Intro Skipper and Hard-On take effect at the next start.
+        void applyPreset(int preset)
+        {
+            const std::vector<const settings::Setting *> changed = presets::write(g_ini, preset);
+            if (!g_ini.save())
+                KM_WARN(Game, "options screen: could not write GHR.ini");
+            std::vector<const settings::Setting *> live;
+            bool rebuild = false;
+            const settings::Setting *aspect = settings::find("AspectRatio");
+            bool aspectChanged = false;
+            for (const settings::Setting *setting : changed)
+            {
+                if (!setting->live)
+                    continue;
+                live.push_back(setting);
+                rebuild = rebuild || setting->applyOnLeave;
+                aspectChanged = aspectChanged || setting == aspect;
+            }
+            if (rebuild)
+            {
+                const std::string newAspect = aspectChanged ? settings::value(g_ini, *aspect) : std::string();
+                beginFade(nullptr, false, aspectChanged ? newAspect.c_str() : nullptr);
+                g_fade.preset = std::move(live);
+            }
+            else
+                for (const settings::Setting *setting : live)
+                    apply(*setting);
+            KM_INFO(Game, "options screen: preset " << presets::text(preset).name << " (" << changed.size() << " settings changed)");
         }
 
         // Keeps the page's cursor among the rows shown.
@@ -1563,6 +1612,112 @@ namespace kamite::options_screen
             }
         }
 
+        // ---- PRESETS (claude/presets-design.md) ---------------------------------------------------------------
+        // The photos (the pause menu's Olivia pictures from the player's disc, decoded once into cache/presets; never
+        // shipped): by carousel slot, CUSTOM last. A path is set once its file is written.
+        std::array<std::string, presets::kCount + 1> g_presetPhoto;
+
+        void preparePresetPhotos(const fs::path &exeDir)
+        {
+            const fs::path dir = exeDir / "cache" / "presets";
+            std::error_code ec;
+            fs::create_directories(dir, ec);
+            for (int slot = 0; slot <= presets::kCount; ++slot)
+            {
+                const presets::Text &text = presets::text(slot < presets::kCount ? slot : presets::kCustom);
+                char name[32];
+                std::snprintf(name, sizeof(name), "photo_%02d.png", text.photo);
+                const fs::path path = dir / name;
+                if (!fs::exists(path, ec))
+                {
+                    std::vector<uint8_t> tm2;
+                    hd_textures::Image image;
+                    const auto file = disc_files::open() ? disc_files::find(presets::photoPath(text.photo)) : std::nullopt;
+                    if (!file || !disc_files::read(*file, tm2) || !presets::decodePhoto(tm2, image.width, image.height, image.rgba) ||
+                        !hd_textures::savePng(path, image))
+                    {
+                        KM_WARN(Game, "options screen: the " << text.name << " preset's photo (" << presets::photoPath(text.photo)
+                                                             << ") could not be read; its page shows none");
+                        continue;
+                    }
+                }
+                const std::u8string native = path.u8string();
+                g_presetPhoto[static_cast<size_t>(slot)] = std::string(native.begin(), native.end());
+            }
+        }
+
+        int presetOfSlot(int slot) { return slot >= presets::kCount ? presets::kCustom : slot; }
+        int slotOfPreset(int preset) { return preset < 0 ? kCustomSlot : preset; }
+
+        // The carousel's text fitted to the screen (fitPresetText), kept while the slot and the aspect stay.
+        struct PresetText
+        {
+            int slot = -1;
+            float aspect = 0.0f;
+            options_overlay::PresetFit fit;
+        };
+        PresetText g_presetText[presets::kCount + 1];
+        const options_overlay::PresetFit &presetFit(int slot)
+        {
+            PresetText &t = g_presetText[std::clamp(slot, 0, static_cast<int>(presets::kCount))];
+            if (t.slot != slot || t.aspect != g_aspect)
+            {
+                const presets::Text &text = presets::text(presetOfSlot(slot));
+                t.fit = options_overlay::fitPresetText(text.tagline, text.band, g_aspect);
+                t.slot = slot;
+                t.aspect = g_aspect;
+            }
+            return t.fit;
+        }
+
+        options_overlay::PresetsView g_presetsView;
+        options_overlay::Page g_presetsPage{"PRESETS", nullptr, 0};
+
+        // The carousel as shown: the preset in use while the page is not open, else the one turned to.
+        void buildPresetsView(const Screen &s)
+        {
+            const int now = presets::current(g_ini);
+            const int slot = s.inPage ? s.presetShown : slotOfPreset(now);
+            const presets::Text &text = presets::text(presetOfSlot(slot));
+            const options_overlay::PresetFit &fit = presetFit(slot);
+            options_overlay::PresetsView &v = g_presetsView;
+            v = options_overlay::PresetsView{};
+            v.name = text.title;
+            v.art = g_presetPhoto[static_cast<size_t>(slot)].c_str();
+            v.artAspect = presets::kPhotoAspect;
+            v.inUse = slot == slotOfPreset(now);
+            v.tagline = text.tagline;
+            v.help = fit.band.c_str();
+            v.helpCap = fit.bandCap;
+            v.taglineCap = fit.taglineCap;
+            v.asking = s.inPage && s.presetAsking;
+            v.yes = s.presetYes;
+            v.question = "Replace your custom settings?";
+            if (s.inPage && s.presetDir != 0 && s.presetFrom >= 0)
+            {
+                const float t = std::chrono::duration<float>(std::chrono::steady_clock::now() - s.presetTurnStart).count() /
+                                options_overlay::kPresetTurnSeconds;
+                if (t < 1.0f)
+                {
+                    v.fromName = presets::text(presetOfSlot(s.presetFrom)).title;
+                    v.fromArt = g_presetPhoto[static_cast<size_t>(s.presetFrom)].c_str();
+                    v.turnDir = s.presetDir;
+                    v.turnT = t;
+                }
+            }
+        }
+
+        // Into the carousel, on the preset in use (CUSTOM while the settings match none).
+        void openPresets(Screen &s)
+        {
+            s.inPage = true;
+            s.presetShown = slotOfPreset(presets::current(g_ini));
+            s.presetFrom = -1;
+            s.presetDir = 0;
+            s.presetAsking = false;
+            s.presetYes = false;
+        }
+
         void sendOverlay(int kind, Screen &s, float fade)
         {
 #if defined(KAMITE_HAS_SCREEN_OVERLAY)
@@ -1588,6 +1743,13 @@ namespace kamite::options_screen
                 view.pageCursor = s.inPage ? s.pageCursor : -1;
                 view.pageScroll = s.inPage ? s.pageScroll : 0;
             }
+            else if (k.actions[s.row] == Action::Presets)
+            {
+                buildPresetsView(s);
+                view.page = &g_presetsPage;
+                view.presets = &g_presetsView;
+                view.inPage = s.inPage;
+            }
             const HintArt &hints = hintArt();
             view.confirmHint.art[0] = hints.confirm[0].c_str();
             view.confirmHint.art[1] = hints.confirm[1].c_str();
@@ -1610,12 +1772,12 @@ namespace kamite::options_screen
             }
             if (s.inPage)
             {
-                if (s.row > 0 && isCategory(k.actions[s.row - 1]))
+                if (s.row > 0 && isPage(k.actions[s.row - 1]))
                 {
                     view.prevHint.art[0] = hints.l1.c_str();
                     view.prevHint.word = k.text[s.row - 1].name;
                 }
-                if (s.row + 1 < k.rowCount && isCategory(k.actions[s.row + 1]))
+                if (s.row + 1 < k.rowCount && isPage(k.actions[s.row + 1]))
                 {
                     view.nextHint.art[0] = hints.r1.c_str();
                     view.nextHint.word = k.text[s.row + 1].name;
@@ -1697,6 +1859,12 @@ namespace kamite::options_screen
         void enterPage(int kind, Screen &s, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const Kind &k = kKinds[kind];
+            if (k.actions[s.row] == Action::Presets)
+            {
+                openPresets(s);
+                sound(rdram, ctx, runtime, kSeOk);
+                return;
+            }
             if (!isCategory(k.actions[s.row]))
                 return;
             buildPage(g_page, tabOf(k.actions[s.row]));
@@ -1707,6 +1875,103 @@ namespace kamite::options_screen
             s.pageCursor = first;
             s.pageScroll = 0;
             sound(rdram, ctx, runtime, kSeOk);
+        }
+
+        // LB / RB in an open page (the menu layer: the controller's default layout, byte-swapped from ps2x::iop order
+        // into the game's pad word): the neighbouring category's page, PRESETS included. True when one was pressed.
+        bool shoulderSwitch(int kind, Screen &s, uint16_t pad, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const Kind &k = kKinds[kind];
+            const auto gameBit = [](uint16_t iop) { return static_cast<uint16_t>((iop >> 8) | (iop << 8)); };
+            const uint16_t lb = gameBit(ps2x::iop::PadButton::L1);
+            const uint16_t rb = gameBit(ps2x::iop::PadButton::R1);
+            if ((pad & (lb | rb)) == 0u)
+                return false;
+            const int step = (pad & rb) ? 1 : -1;
+            const int next = s.row + step;
+            if (next >= 0 && next < k.rowCount && isPage(k.actions[next]))
+            {
+                g_titleSwitch = TitleSwitch{s.row, step, std::chrono::steady_clock::now()};
+                s.row = next;
+                if (k.actions[s.row] == Action::Presets)
+                    openPresets(s);
+                else
+                {
+                    buildPage(g_page, tabOf(k.actions[s.row]));
+                    s.pageCursor = std::max(firstOption(g_page), 0);
+                    s.pageScroll = 0;
+                }
+                sound(rdram, ctx, runtime, kSeBack); // the swoosh, as left / right on the title screen (K, Nov 14)
+            }
+            return true;
+        }
+
+        // The carousel (K, Nov 16): left / right turn it (round, CUSTOM after Sleazy Mode only while the settings are
+        // custom), A uses the preset turned to (nothing on the one in use; from custom settings it asks first, NO
+        // selected), LB / RB the neighbouring category, B back to the list.
+        void presetsInput(int kind, Screen &s, uint64_t pressed, uint64_t repeat, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const int now = presets::current(g_ini);
+            if (s.presetAsking)
+            {
+                if ((pressed & (kOk | kCancel)) == kCancel || ((pressed & kOk) && !s.presetYes))
+                {
+                    s.presetAsking = false;
+                    sound(rdram, ctx, runtime, kSeBack);
+                }
+                else if (pressed & kOk)
+                {
+                    s.presetAsking = false;
+                    sound(rdram, ctx, runtime, kSeOk);
+                    applyPreset(presetOfSlot(s.presetShown));
+                }
+                else if ((repeat & kLeft) && !s.presetYes)
+                {
+                    s.presetYes = true;
+                    sound(rdram, ctx, runtime, kSeMove);
+                }
+                else if ((repeat & kRight) && s.presetYes)
+                {
+                    s.presetYes = false;
+                    sound(rdram, ctx, runtime, kSeMove);
+                }
+                return;
+            }
+            if ((pressed & kCancel) != 0u && (pressed & kOk) == 0u)
+            {
+                s.inPage = false;
+                sound(rdram, ctx, runtime, kSeBack);
+                return;
+            }
+            uint16_t pad = 0;
+            std::memcpy(&pad, at(kPadPressed), sizeof(pad));
+            if (shoulderSwitch(kind, s, pad, rdram, ctx, runtime))
+                return;
+            const int slots = now == presets::kCustom ? kCustomSlot + 1 : presets::kCount;
+            if (s.presetShown >= slots)
+                s.presetShown = 0; // CUSTOM went away (a preset was used)
+            const int dir = (repeat & kLeft) ? -1 : (repeat & kRight) ? 1 : 0;
+            if (dir != 0)
+            {
+                s.presetFrom = s.presetShown;
+                s.presetShown = ((s.presetShown + dir) % slots + slots) % slots;
+                s.presetDir = dir;
+                s.presetTurnStart = std::chrono::steady_clock::now();
+                sound(rdram, ctx, runtime, kSeMove);
+            }
+            else if (pressed & kOk)
+            {
+                if (s.presetShown == slotOfPreset(now))
+                    return; // the one in use
+                sound(rdram, ctx, runtime, kSeOk);
+                if (now == presets::kCustom)
+                {
+                    s.presetAsking = true;
+                    s.presetYes = false;
+                }
+                else
+                    applyPreset(presetOfSlot(s.presetShown));
+            }
         }
 
         // The pad inside a page: up / down between options (round the ends), left / right change the value (saved and
@@ -1731,26 +1996,8 @@ namespace kamite::options_screen
                 sound(rdram, ctx, runtime, kSeBack);
                 return;
             }
-            // LB / RB (the menu layer: the controller's default layout), byte-swapped from ps2x::iop order into the
-            // game's pad word.
-            const auto gameBit = [](uint16_t iop) { return static_cast<uint16_t>((iop >> 8) | (iop << 8)); };
-            const uint16_t lb = gameBit(ps2x::iop::PadButton::L1);
-            const uint16_t rb = gameBit(ps2x::iop::PadButton::R1);
-            if (pad & (lb | rb))
-            {
-                const int step = (pad & rb) ? 1 : -1;
-                const int next = s.row + step;
-                if (next >= 0 && next < k.rowCount && isCategory(k.actions[next]))
-                {
-                    g_titleSwitch = TitleSwitch{s.row, step, std::chrono::steady_clock::now()};
-                    s.row = next;
-                    buildPage(g_page, tabOf(k.actions[s.row]));
-                    s.pageCursor = std::max(firstOption(g_page), 0);
-                    s.pageScroll = 0;
-                    sound(rdram, ctx, runtime, kSeBack); // the swoosh, as left / right on the title screen (K, Nov 14)
-                }
+            if (shoulderSwitch(kind, s, pad, rdram, ctx, runtime))
                 return;
-            }
             int move = 0;
             if (repeat & kUp)
                 move = -1;
@@ -1812,7 +2059,10 @@ namespace kamite::options_screen
         void pageInput(int kind, Screen &s, uint64_t pressed, uint64_t repeat, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const int row = s.row, cursor = s.pageCursor;
-            pageInputMoves(kind, s, pressed, repeat, rdram, ctx, runtime);
+            if (kKinds[kind].actions[s.row] == Action::Presets)
+                presetsInput(kind, s, pressed, repeat, rdram, ctx, runtime);
+            else
+                pageInputMoves(kind, s, pressed, repeat, rdram, ctx, runtime);
             if (!s.inPage || s.row != row || s.pageCursor != cursor)
                 leavePending(rdram, ctx, runtime);
         }
@@ -1903,6 +2153,9 @@ namespace kamite::options_screen
             {
                 if (g_fade.restore)
                     restoreDefaults();
+                else if (!g_fade.preset.empty())
+                    for (const settings::Setting *setting : g_fade.preset)
+                        apply(*setting);
                 else if (g_fade.setting)
                     apply(*g_fade.setting);
             }
@@ -1954,7 +2207,7 @@ namespace kamite::options_screen
                 sound(rdram, ctx, runtime, kSeBack);
                 wr32(self + kResult, static_cast<uint32_t>(kResultBack));
             }
-            else if ((pressed & kRight) && splitView() && isCategory(k.actions[s.row]))
+            else if ((pressed & kRight) && splitView() && isPage(k.actions[s.row]))
                 enterPage(N, s, rdram, ctx, runtime); // the page beside the list (K, Nov 14)
             else if ((repeat & (kUp | kDown)) && k.rowCount > 1)
             {
@@ -2065,7 +2318,7 @@ namespace kamite::options_screen
                                       utf8(exeDir / "resources" / "options" / "scroll_thumb.png"));
         options_overlay::setSliderFill(utf8(exeDir / "resources" / "options" / "slider_fill.png"));
         // The titles' letters (their glow left out): where the L1 / R1 hints go beside them.
-        for (const char *name : {"controls", "display", "graphics", "interface", "gameplay", "sound"})
+        for (const char *name : {"presets", "controls", "display", "graphics", "interface", "gameplay", "sound"})
         {
             const std::string path = utf8(exeDir / "resources" / "options" / (std::string("title_") + name + ".png"));
             ::Image title = LoadImage(path.c_str());
@@ -2078,6 +2331,7 @@ namespace kamite::options_screen
             }
         }
         g_exeDir = exeDir;
+        preparePresetPhotos(exeDir); // the disc's photos once into cache/presets (milliseconds; before the game runs)
         ps2_host_display::setModeListener(&onWindowMode);
         ps2_host_display::setFpsCounterListener([](bool on) { g_fpsCounterKey.store(on ? 1 : 0, std::memory_order_relaxed); });
         std::thread(prepare, exeDir, g_aspect, g_wallGeneration.load(), 0).detach();

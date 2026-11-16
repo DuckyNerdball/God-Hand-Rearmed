@@ -11,6 +11,7 @@
 #define KAMITE_LAUNCHER_STEAM 1
 #endif
 #include "kamite/log.h"
+#include "kamite/presets.h"
 #include "kamite/settings_table.h"
 #include "ps2_host_gamepads.h"
 #include "ps2_host_input.h"
@@ -275,6 +276,12 @@ namespace kamite::launcher
             bool soundThisFrame = false; // a confirm / cancel / Play sound already played this frame
             int quietFrames = 0;         // no cursor tick for a frame or two after a confirm / cancel (focus moves then)
             Screen soundScreen = Screen::Home;
+            // Options > Presets (presets.h): the photos from the disc image (read once, when the tab first shows) and the
+            // preset waiting for "Replace your custom settings?".
+            Texture2D presetPhotos[presets::kCount]{};
+            bool presetPhotosRead = false;
+            int presetAsk = -1;
+            bool presetOpenPopup = false;
 #if KAMITE_LAUNCHER_STEAM
             // Add to Steam (launcher_steam.h): the lower left corner's button and its popup.
             enum class SteamPopup
@@ -2324,6 +2331,156 @@ void main()
                 ImGui::EndTable();
         }
 
+        // ---- Options > Presets (K, Nov 16; claude/presets-design.md) ------------------------------------------------
+        // The pause menu's photos, decoded from the player's disc image (never shipped).
+        void readPresetPhotos(State &state)
+        {
+            if (state.presetPhotosRead || !state.installed)
+                return;
+            state.presetPhotosRead = true;
+            std::string iso = state.ini.get("Game", "Iso");
+            const fs::path image = iso.empty() ? state.context->iso : fromUtf8(iso);
+            for (int p = 0; p < presets::kCount; ++p)
+            {
+                std::vector<uint8_t> tm2, rgba;
+                int width = 0, height = 0;
+                if (!disc_files::readFromImage(image, presets::photoPath(presets::kText[p].photo), tm2) ||
+                    !presets::decodePhoto(tm2, width, height, rgba))
+                {
+                    KM_WARN(Boot, "launcher: the " << presets::kText[p].name << " preset's photo could not be read");
+                    continue;
+                }
+                ::Image picture{rgba.data(), width, height, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
+                state.presetPhotos[p] = LoadTextureFromImage(picture);
+                if (state.presetPhotos[p].id != 0u)
+                    SetTextureFilter(state.presetPhotos[p], TEXTURE_FILTER_BILINEAR);
+            }
+        }
+
+        void usePreset(State &state, int preset)
+        {
+            presets::write(state.ini, preset);
+            state.ini.save();
+            KM_INFO(Boot, "launcher: preset " << presets::kText[preset].name);
+        }
+
+        // A row per preset (its photo, name, tagline and what it adds, Use / In use); while the settings match none a
+        // Custom banner on top, and Use asks before replacing them.
+        void drawPresets(State &state)
+        {
+            readPresetPhotos(state);
+            const int now = presets::current(state.ini);
+            categoryGap();
+            if (now == presets::kCustom)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, kHeading);
+                ImGui::SeparatorText("Custom");
+                ImGui::PopStyleColor();
+                ImGui::PushStyleColor(ImGuiCol_Text, kTextDim);
+                ImGui::TextWrapped("%s %s", presets::kCustomText.tagline, presets::kCustomText.band);
+                ImGui::PopStyleColor();
+                categoryGap();
+            }
+            const float photoH = std::round(ImGui::GetFontSize() * 5.6f), photoW = std::round(photoH * presets::kPhotoAspect);
+            const float buttonWidth = std::round(ImGui::GetFontSize() * 6.0f);
+            if (!ImGui::BeginTable("presets", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX))
+                return;
+            ImGui::TableSetupColumn("photo", ImGuiTableColumnFlags_WidthFixed, photoW);
+            ImGui::TableSetupColumn("text", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("use", ImGuiTableColumnFlags_WidthFixed, buttonWidth);
+            const float gap = std::round(ImGui::GetFontSize() * 0.45f);
+            for (int p = 0; p < presets::kCount; ++p)
+            {
+                const presets::Text &text = presets::kText[p];
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                if (p > 0)
+                {
+                    ImGui::Dummy(ImVec2(0.0f, gap));
+                    dividerLine();
+                    ImGui::Dummy(ImVec2(0.0f, gap));
+                }
+                if (state.presetPhotos[p].id != 0u)
+                    rlImGuiImageSize(&state.presetPhotos[p], static_cast<int>(photoW), static_cast<int>(photoH));
+                else
+                    ImGui::Dummy(ImVec2(photoW, photoH));
+                ImGui::TableSetColumnIndex(1);
+                if (p > 0)
+                    ImGui::Dummy(ImVec2(0.0f, 2.0f * gap + ImGui::GetStyle().ItemSpacing.y));
+                pushSize(state, 26.0f);
+                ImGui::TextUnformatted(text.name);
+                ImGui::PopFont();
+                ImGui::PushStyleColor(ImGuiCol_Text, kTextSoft);
+                ImGui::TextWrapped("%s", text.tagline);
+                ImGui::PopStyleColor();
+                ImGui::PushStyleColor(ImGuiCol_Text, kTextDim);
+                ImGui::TextWrapped("%s", text.band);
+                ImGui::PopStyleColor();
+                ImGui::TableSetColumnIndex(2);
+                if (p > 0)
+                    ImGui::Dummy(ImVec2(0.0f, 2.0f * gap + ImGui::GetStyle().ItemSpacing.y));
+                ImGui::Dummy(ImVec2(0.0f, std::round(ImGui::GetFontSize() * 0.4f)));
+                if (p == now)
+                {
+                    const char *inUse = "In use";
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 0.5f * (buttonWidth - ImGui::CalcTextSize(inUse).x));
+                    ImGui::TextColored(kHeading, "%s", inUse);
+                }
+                else
+                {
+                    ImGui::PushID(p);
+                    if (ImGui::Button("Use", ImVec2(buttonWidth, 0.0f)))
+                    {
+                        if (now == presets::kCustom)
+                        {
+                            state.presetAsk = p;
+                            state.presetOpenPopup = true;
+                        }
+                        else
+                            usePreset(state, p);
+                    }
+                    ImGui::PopID();
+                }
+            }
+            ImGui::EndTable();
+
+            // "Replace your custom settings?"
+            if (state.presetOpenPopup)
+            {
+                state.presetOpenPopup = false;
+                ImGui::OpenPopup("##presetreplace");
+            }
+            if (!ImGui::BeginPopupModal("##presetreplace", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar))
+                return;
+            const bool back = ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+            const float popupButton = std::round(ImGui::GetFontSize() * 7.5f);
+            ImGui::TextUnformatted("Replace your custom settings?");
+            if (state.presetAsk >= 0 && state.presetAsk < presets::kCount)
+                ImGui::TextColored(kTextDim, "%s sets them to its own.", presets::kText[state.presetAsk].name);
+            ImGui::Dummy(ImVec2(0.0f, fontSize(state, 10.0f)));
+            const bool keep = ImGui::Button("Keep mine", ImVec2(popupButton, 0.0f)); // first: the safe one
+            ownSoundItem();
+            if (ImGui::IsWindowAppearing())
+                ImGui::SetItemDefaultFocus();
+            ImGui::SameLine();
+            const bool replace = ImGui::Button("Replace", ImVec2(popupButton, 0.0f));
+            ownSoundItem();
+            if (replace && state.presetAsk >= 0 && state.presetAsk < presets::kCount)
+            {
+                menuSound(state, kConfirm);
+                usePreset(state, state.presetAsk);
+                state.presetAsk = -1;
+                ImGui::CloseCurrentPopup();
+            }
+            else if (keep || back)
+            {
+                menuSound(state, kCancel);
+                state.presetAsk = -1;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+
         void drawOptions(State &state)
         {
             g_captureFrame = false;
@@ -2340,6 +2497,12 @@ void main()
             g_categories = 0;
             if (ImGui::BeginTabBar("tabs"))
             {
+                // Presets first (K, Nov 16).
+                if (ImGui::BeginTabItem("Presets"))
+                {
+                    drawPresets(state);
+                    ImGui::EndTabItem();
+                }
                 // The launcher's own order (K, Nov 13: Controls after Sound; the game keeps Controls first).
                 constexpr settings::Tab kLauncherTabs[] = {settings::Tab::Display,  settings::Tab::Graphics,
                                                            settings::Tab::Interface, settings::Tab::Gameplay,
@@ -2615,6 +2778,9 @@ void main()
                 UnloadTexture(*texture);
         if (state.burst.id != 0u)
             UnloadTexture(state.burst);
+        for (Texture2D &photo : state.presetPhotos)
+            if (photo.id != 0u)
+                UnloadTexture(photo);
         if (state.background.id != 0u)
             UnloadTexture(state.background);
         if (state.backgroundShader.id != 0u && state.backgroundShader.id != rlGetShaderIdDefault())

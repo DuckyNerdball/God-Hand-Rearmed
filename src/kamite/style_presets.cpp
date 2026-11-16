@@ -1599,8 +1599,9 @@ namespace kamite::style_presets
         if (const char *character = std::getenv("KAMITE_CHARACTER"); character && std::tolower(static_cast<unsigned char>(*character)) == 'x')
             std::memcpy(g_letters, "LIFE", kStyles + 1);
         // [Game] StyleSignal ("Signal Style Switch", under Moveset Presets): a voice line and the arm flash per switch.
-        if (const char *signal = std::getenv("KAMITE_STYLE_SIGNAL"); signal && *signal && *signal != '0')
-            g_signalOn = true;
+        // On unless set to 0 (K, Nov 16: an opt-out).
+        const char *signal = std::getenv("KAMITE_STYLE_SIGNAL");
+        g_signalOn = !(signal && *signal == '0');
         KM_INFO(Game, "style switching: " << (g_enabled ? "on" : "off") << (g_signalOn ? ", signal style switch" : ""));
         ps2x::pnach::addFrameHook(&onVblank);
         FunctionHooks::instance().observeEntry(0x14FB48u, "cObjBase_SetSeqEffect (styles: chain window, signal)", &onGeneUpdate);

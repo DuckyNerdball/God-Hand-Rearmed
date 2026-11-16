@@ -131,30 +131,39 @@ namespace kamite::options_overlay
         const char *confirmWord = "", *cancelWord = "";
     };
 
-    // OPTIONS > PRESETS (K, Nov 16): a carousel. "< NAME >" over the preset's photo (the pause menu's Olivia pictures,
-    // decoded from the disc), "IN USE" under the name when it is the one in effect, and under the photo what the preset
-    // turns on, under a header line. Left / right turn it; the help band holds the preset's description.
+    // OPTIONS > PRESETS (K, Nov 16; claude/presets-design.md): a carousel. "< NAME >" over the preset's photo (the
+    // pause menu's Olivia pictures, decoded from the disc) at the pause menu's own size, "IN USE" under the name when it
+    // is the one in effect, the tagline on one line under the photo and the preset's text in the help band. Left / right
+    // turn it: the name and photo slide out streaked and the next ones slide in.
     struct PresetsView
     {
         const char *name = "";
-        const char *art = "";            // the photo (PNG path)
+        const char *art = "";            // the photo (PNG path; "" = none)
         float artAspect = 295.0f / 203.0f;
         bool inUse = false;
         const char *inUseWord = "IN USE";
-        const char *listHeader = "";     // "EVERYTHING IN REMASTERED, PLUS" ("" = none)
-        const char *const *items = nullptr;
-        int itemCount = 0;
-        const char *help = "";           // the help band (two lines at most)
-        // K's alternative (Nov 16): the photo at the pause menu's own size, `tagline` as one line under it and the
-        // list in the help band (the caller puts it in `help`); listHeader / items unused.
-        bool fullArt = false;
         const char *tagline = "";
-        // Text sizes in lines (0 = the help text's): the caller shrinks the band's list until it wraps to two lines
-        // and the tagline until it fits the page's width on one (K, Nov 16), measuring with the help font.
+        const char *help = "";           // the help band (two lines at most: fitPresetText wraps it)
+        // Text sizes in lines (0 = the help text's): fitPresetText's.
         float helpCap = 0.0f, taglineCap = 0.0f;
-        bool asking = false;             // "Replace your custom settings?": YES / NO in place of the list
+        bool asking = false;             // "Replace your custom settings?": YES / NO in place of the tagline
         bool yes = false;
         const char *question = "";
+        // A turn under way: the preset turned away from (its name and photo), dir +1 = turned right (the new one comes
+        // in from the right), t 0..1 through kPresetTurnSeconds. dir 0 = still.
+        const char *fromName = "", *fromArt = "";
+        int turnDir = 0;
+        float turnT = 1.0f;
+    };
+    inline constexpr float kPresetTurnSeconds = 0.24f;
+
+    // K's fit rule (Nov 16): the band's text shrinks from the help size until it wraps to two lines at the help's
+    // width (wrapped: its lines joined by '\n'), the tagline until it fits on one line across the carousel. Measured
+    // with the help font's own widths.
+    struct PresetFit
+    {
+        std::string band;
+        float bandCap = 0.0f, taglineCap = 0.0f;
     };
 
     // A button hint in the strip under the help band ("[A] Confirm"): the button's images (PNG paths: one, or two for
@@ -222,6 +231,9 @@ namespace kamite::options_overlay
 
 #if defined(KAMITE_HAS_SCREEN_OVERLAY)
     void build(const View &view, std::vector<Pcsx2GsScreenItem> &items, std::string &strings);
+    PresetFit fitPresetText(const char *tagline, const char *band, float aspect);
+    // A line of the help font's text at this cap height (lines), in layout units (calibrated against the renderer).
+    float helpTextWidth(const char *text, size_t length, float cap);
     // Black over the whole picture at this strength (0..1): the fade behind an OPTIONS change.
     void appendBlackout(float alpha, std::vector<Pcsx2GsScreenItem> &items);
 #endif
