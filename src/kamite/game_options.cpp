@@ -923,6 +923,7 @@ namespace kamite
         bool inGuest(uint32_t address) { return address >= 0x100000u && address < 0x1FF0000u; }
 
         constexpr float kSwayLagStep = 0.08f;         // the magenta's shrink after a stun, of the width a draw
+        constexpr uint32_t kLastBossTint = 0x00086080u; // r 0x80, g 0x60, b 0x08 (0x80 = x1): B3's orange-yellow on his strip
         std::unordered_map<uint32_t, float> g_swayLag; // game thread: enemy -> the magenta's width (0..1)
         uint32_t g_gaugeOnly = 0u; // the mid-boss whose enemy health bar is being drawn for its gauge alone
         std::unordered_set<uint32_t> g_midStun; // mid-bosses that have built stun (their gauge shows)
@@ -1177,47 +1178,48 @@ namespace kamite
             const uint32_t root = ram32(rdram, fillEnt + 0x20u);
             if (vertical)
             {
-                // The last boss (vertical): the same copy at half width to the right of the bar, filling from the bottom
-                // up (kind 3: drawX / drawY = the bottom-left corner; the fills scale in y from base +0x44). Pieces
-                // reaching well past the fill's span (the skull ornaments) stay out of the copy.
+                // The last boss (vertical; K's log, Nov 16): his fills are kind 1 (drawX / drawY = the top-left corner,
+                // 18x264 at 19,58), have no parent (the lag is the fill's child) and sample his own sheet (the strip at
+                // u 0-0.26, v 0.7-0.9; the skulls beside it), so B3's palette uv would read empty texels. The copy: the
+                // fill and its lag only, at half width to the right of the bar, growing from the bar's bottom; the fill
+                // keeps its own uv, tinted to B3's orange-yellow (the game tints the same strip 0x3B3B61 for his HP).
                 const float fillW = ramF(rdram, fillEnt + 0x68u) * fs.sclX;
                 const float fyBase = ramF(rdram, fillEnt + 0x44u), lyBase = ramF(rdram, lagEnt + 0x44u);
                 const float fullH = ramF(rdram, fillEnt + 0x6Cu) * (fyBase > 0.001f ? fs.sclY / fyBase : fs.sclY);
-                const float x0 = fs.x + 0.5f * fillW, bottom = fs.y, top = fs.y - fullH;
-                const auto inSpan = [&](uint32_t e, const Saved &k) {
-                    const float h = ramF(rdram, e + 0x6Cu) * k.sclY;
-                    return k.y - h >= top - fillW - 0.5f && k.y <= bottom + fillW + 0.5f; // (kind 3 bottom; others centred:
-                    // either way within a bar's width of the fill's span)
-                };
-                float widest = fillW;
-                for (uint32_t i = 0; i < count; ++i)
-                {
-                    const uint32_t e = ent + i * 0xACu;
-                    if (ram32(rdram, e + 0x20u) == root && e != root && (saved[i].flags & kEntNoDraw) == 0u && inSpan(e, saved[i]))
-                        widest = std::max(widest, ramF(rdram, e + 0x68u) * saved[i].sclX);
-                }
-                const float shift = 0.75f * widest + 2.0f; // its centre: half the bar + 2 + half the copy right of the bar's
+                const float x0 = fs.x + 0.5f * fillW, bottom = fs.y + fullH;
+                const float shift = 0.75f * fillW + 2.0f; // its centre: half the bar + 2 + half the copy right of the bar's
                 for (uint32_t i = 0; i < count; ++i)
                 {
                     const uint32_t e = ent + i * 0xACu;
                     const Saved &k = saved[i];
-                    if (ram32(rdram, e + 0x20u) != root || e == root || e == hideA || e == hideB || (k.flags & kEntNoDraw) != 0u ||
-                        !inSpan(e, k))
+                    if ((e != fillEnt && e != lagEnt) || (k.flags & kEntNoDraw) != 0u)
                     {
                         put32(rdram, e + 0x2Cu, k.flags | kEntNoDraw);
                         continue;
                     }
+                    const float base = e == fillEnt ? fyBase : lyBase, amount = e == fillEnt ? stun : lag;
                     putF(rdram, e + 0x50u, x0 + shift + (k.x - x0) * 0.5f);
+                    putF(rdram, e + 0x54u, bottom - fullH * amount);
                     putF(rdram, e + 0x58u, k.sclX * 0.5f);
+                    putF(rdram, e + 0x5Cu, (base > 0.001f ? k.sclY / base : 1.0f) * amount);
                     if (e == fillEnt)
-                        putF(rdram, e + 0x5Cu, (fyBase > 0.001f ? k.sclY / fyBase : 1.0f) * stun);
-                    else if (e == lagEnt)
-                    {
-                        putF(rdram, e + 0x5Cu, (lyBase > 0.001f ? k.sclY / lyBase : 1.0f) * lag);
-                        if (lag <= 0.0f)
-                            put32(rdram, e + 0x2Cu, k.flags | kEntNoDraw);
-                    }
+                        put32(rdram, e + 0x64u, (k.colour & 0xFF000000u) | kLastBossTint);
+                    else if (lag <= 0.0f)
+                        put32(rdram, e + 0x2Cu, k.flags | kEntNoDraw);
                 }
+                callGuest(rdram, ctx, runtime, kIdBaseTrans, {bar});
+                for (uint32_t i = 0; i < count; ++i)
+                {
+                    const uint32_t e = ent + i * 0xACu;
+                    const Saved &k = saved[i];
+                    put32(rdram, e + 0x2Cu, k.flags);
+                    put32(rdram, e + 0x64u, k.colour);
+                    putF(rdram, e + 0x50u, k.x);
+                    putF(rdram, e + 0x54u, k.y);
+                    putF(rdram, e + 0x58u, k.sclX);
+                    putF(rdram, e + 0x5Cu, k.sclY);
+                }
+                return;
             }
             const float fillBase = ramF(rdram, fillEnt + 0x40u), lagBase = ramF(rdram, lagEnt + 0x40u);
             const float fillH = ramF(rdram, fillEnt + 0x6Cu) * fs.sclY;
@@ -1230,7 +1232,7 @@ namespace kamite
                     tallest = std::max(tallest, ramF(rdram, e + 0x6Cu) * saved[i].sclY);
             }
             const float drop = 0.75f * tallest + 2.0f; // its centre: half the bar + 2 + half the copy below the bar's centre
-            for (uint32_t i = 0; !vertical && i < count; ++i)
+            for (uint32_t i = 0; i < count; ++i)
             {
                 const uint32_t e = ent + i * 0xACu;
                 const Saved &k = saved[i];

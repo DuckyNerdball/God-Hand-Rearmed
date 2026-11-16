@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 16, 2026
 
+- Sway Bar: fixed the last boss's stun gauge not showing.
 - Money and Cash above 100%: each breast and the seat jiggle on their own, with a side-to-side swing.
 - Cash is listed above Money, both with a recommended value (115%).
 - 60 FPS: the tension bar's glow pulses at the original pace.
