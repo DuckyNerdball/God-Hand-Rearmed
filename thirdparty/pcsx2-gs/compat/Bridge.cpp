@@ -732,6 +732,7 @@ namespace pcsx2gs
         float cx, cy, rx, ry, start, ramp, strength, soft;
         float eye[3], mid;
         float inverse[16]; // row-major
+        float wall;        // the rest of a wall the oval opens: dissolved this much (0..1; K, Nov 16)
     };
     // texture_add (any thread) -> added on the GS thread at the next vsync.
     std::mutex g_textureAddMutex;
@@ -763,12 +764,13 @@ extern "C" __declspec(dllexport) void pcsx2gs_set_option(const char *key, const 
     if (std::strcmp(key, "see_through") == 0)
     {
         pcsx2gs::SeeThroughParams p{};
-        float *f[28] = {&p.cx, &p.cy, &p.rx, &p.ry, &p.start, &p.ramp, &p.strength, &p.soft, &p.eye[0], &p.eye[1], &p.eye[2], &p.mid};
+        float *f[29] = {&p.cx, &p.cy, &p.rx, &p.ry, &p.start, &p.ramp, &p.strength, &p.soft, &p.eye[0], &p.eye[1], &p.eye[2], &p.mid};
         for (int i = 0; i < 16; i++)
             f[12 + i] = &p.inverse[i];
+        f[28] = &p.wall; // optional (an older game sends 28)
         int read = 0;
         const char *at = value;
-        for (; read < 28; read++)
+        for (; read < 29; read++)
         {
             char *end = nullptr;
             const float v = std::strtof(at, &end);
@@ -777,7 +779,8 @@ extern "C" __declspec(dllexport) void pcsx2gs_set_option(const char *key, const 
             *f[read] = v;
             at = end;
         }
-        const bool on = read == 28 && p.rx > 0.5f && p.ry > 0.5f && p.strength > 0.0f && p.ramp > 0.0f;
+        const bool on = read >= 28 && p.rx > 0.5f && p.ry > 0.5f && p.strength > 0.0f && p.ramp > 0.0f;
+        p.wall = read == 29 ? std::fmin(std::fmax(p.wall, 0.0f), 1.0f) : 0.0f;
         if (on)
         {
             std::lock_guard<std::mutex> lock(pcsx2gs::g_seeThroughMutex);

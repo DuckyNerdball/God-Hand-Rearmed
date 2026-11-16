@@ -653,7 +653,7 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	vec4 SeeThroughM2;
 	vec4 SeeThroughM3;
 	vec4 SeeThroughEye; // pcsx2gs: the eye (xyz), the player's middle height (w)
-	vec4 SeeThroughMap; // pcsx2gs: 1 / render scale, XYOFFSET x, y, 2^32
+	vec4 SeeThroughMap; // pcsx2gs: 1 / render scale, XYOFFSET x, y, this draw's see-through outside the oval
 };
 
 layout(location = 0) in VSOutput
@@ -685,7 +685,7 @@ layout(location = 0) in VSOutput
 // dither; the ground (a surface facing up or down, below the player's middle) stays.
 vec3 SeeThroughWorld(vec4 p)
 {
-	vec4 s = vec4(p.xy * SeeThroughMap.x + SeeThroughMap.yz, p.z * SeeThroughMap.w, 1.0f);
+	vec4 s = vec4(p.xy * SeeThroughMap.x + SeeThroughMap.yz, p.z * 4294967296.0f, 1.0f); // depth -> the GS's integer depth
 	vec4 h = vec4(dot(SeeThroughM0, s), dot(SeeThroughM1, s), dot(SeeThroughM2, s), dot(SeeThroughM3, s));
 	return h.xyz / h.w;
 }
@@ -701,7 +701,8 @@ bool SeeThroughHides(vec4 p, vec3 world, vec3 dx, vec3 dy)
 	float len = length(n);
 	bool ground = len > 0.0f && abs(n.y) > 0.6f * len && world.y < SeeThroughEye.w;
 	uvec2 cell = uvec2(p.xy) & 3u;
-	return !ground && radial * nearer * SeeThroughB.z > (bayer[cell.y * 4u + cell.x] + 0.5f) / 16.0f;
+	// Outside the oval a wall it opens is see-through by SeeThroughMap.w (K, Nov 16), nearer than the player too.
+	return !ground && max(radial, SeeThroughMap.w) * nearer * SeeThroughB.z > (bayer[cell.y * 4u + cell.x] + 0.5f) / 16.0f;
 }
 #endif
 

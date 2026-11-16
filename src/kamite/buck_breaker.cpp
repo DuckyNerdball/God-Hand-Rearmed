@@ -9,6 +9,7 @@
 #include "kamite/log.h"
 #include "kamite/punish_fit.h"
 #include "kamite/style_presets.h"
+#include "ps2_host_input.h"
 #include "runtime/ee_scheduler.h"
 #include "runtime/ps2_pnach.h"
 #include "runtime/ps2_save_state.h"
@@ -512,6 +513,10 @@ namespace kamite::buck_breaker
         // The slots' buttons come from the text icon sheet's top row (0x41FFA0: square 0.5, triangle 0.25, cross 0.75);
         // its first cell is circle, which the prompt sets draw as the button bound to circle (B on Xbox pads).
         constexpr float kCircleUv[4] = {0.0f, 0.0f, 0.25f, 0.25f};
+        // With the keyboard the menus' circle cell shows its menu key (Esc), so the punish (play's circle: E) is drawn
+        // from the select cell, which the keyboard's menu art fills with play's circle key (button_prompts labelsFor;
+        // K, Nov 16).
+        constexpr float kSelectUv[4] = {0.0f, 0.75f, 0.25f, 1.0f};
         constexpr uint8_t kBright = 2u, kDim = 3u; // the screen's name colour sets (lit / not)
         constexpr uint16_t kSlotMessage = 0x3044u;  // a "<7d>" placeholder of the core bank (style_presets uses others)
         constexpr uint32_t kSlotText = 0x000FFC00u; // guest scratch below the ELF (tutorial_text.cpp keeps the map)
@@ -855,8 +860,9 @@ namespace kamite::buck_breaker
             }
             wr16(name + ent::kMsg, kSlotMessage);
             byteAt(name + ent::kColourSet) = g_onSlot ? kBright : kDim;
+            const bool keys = ps2_host_input::prompts::lastDevice() == ps2_host_input::prompts::Device::Keys;
             for (int i = 0; i < 4; ++i)
-                wrFloat(button + kEntUv + 4u * static_cast<uint32_t>(i), kCircleUv[i]);
+                wrFloat(button + kEntUv + 4u * static_cast<uint32_t>(i), keys ? kSelectUv[i] : kCircleUv[i]);
 
             callGuest(rdram, ctx, runtime, kTrans, {waza});
 

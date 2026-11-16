@@ -47,6 +47,10 @@ namespace ps2_host_input
     // applied at the next sample). escStart: Esc also presses Start (no sub-screen up: cutscenes, the title, dialogs).
     void setMenuKeys(uint16_t okButtons, uint16_t cancelButtons);
     void setMenuEscStart(bool on);
+    // Gene's roulette is open (K, Nov 16): in the menu layer the left click is the OK button(s), the right click the
+    // cancel button (Esc cancels too), W / S step it (the d-pad), A / D cycle the target (Target Select's d-pad); the
+    // mouse wheel steps it whatever device is in use (a d-pad up / down tap per notch). Any thread.
+    void setMenuRoulette(bool open);
     // A digit key 0-4 pressed while the menu layer was in use (the Techniques screen's direct style picks): 0..4, or
     // -1 for none since the last call. Any thread.
     [[nodiscard]] int takeMenuDigit();

@@ -298,7 +298,7 @@ cbuffer cb1
 	float4 SeeThroughM2;
 	float4 SeeThroughM3;
 	float4 SeeThroughEye; // pcsx2gs: the eye (xyz), the player's middle height (w)
-	float4 SeeThroughMap; // pcsx2gs: 1 / render scale, XYOFFSET x, y, 2^32
+	float4 SeeThroughMap; // pcsx2gs: 1 / render scale, XYOFFSET x, y, this draw's see-through outside the oval
 };
 
 #if PS_SEE_THROUGH
@@ -310,7 +310,7 @@ cbuffer cb1
 // him, and dissolving it opened holes at his feet that striped as the floor's distance changed down the screen.
 float3 SeeThroughWorld(float4 p)
 {
-	float4 s = float4(p.xy * SeeThroughMap.x + SeeThroughMap.yz, p.z * SeeThroughMap.w, 1.0f);
+	float4 s = float4(p.xy * SeeThroughMap.x + SeeThroughMap.yz, p.z * 4294967296.0f, 1.0f); // depth -> the GS's integer depth
 	float4 h = float4(dot(SeeThroughM0, s), dot(SeeThroughM1, s), dot(SeeThroughM2, s), dot(SeeThroughM3, s));
 	return h.xyz / h.w;
 }
@@ -326,7 +326,8 @@ bool SeeThroughHides(float4 p, float3 world, float3 dx, float3 dy)
 	float len = length(n);
 	bool ground = len > 0.0f && abs(n.y) > 0.6f * len && world.y < SeeThroughEye.w;
 	uint2 cell = uint2(p.xy) & 3u;
-	return !ground && radial * nearer * SeeThroughB.z > (bayer[cell.y * 4u + cell.x] + 0.5f) / 16.0f;
+	// Outside the oval a wall it opens is see-through by SeeThroughMap.w (K, Nov 16), nearer than the player too.
+	return !ground && max(radial, SeeThroughMap.w) * nearer * SeeThroughB.z > (bayer[cell.y * 4u + cell.x] + 0.5f) / 16.0f;
 }
 #endif
 

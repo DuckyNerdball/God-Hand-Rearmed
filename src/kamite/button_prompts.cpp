@@ -399,10 +399,12 @@ namespace kamite::button_prompts
             }
         }
 
-        // menu: the keyboard's menu-layer keys (menu_buttons::menuPrompts(): Enter, Esc, the arrows, Q / E there).
-        sheets::PromptLabels labelsFor(const bindings::Snapshot &snapshot, bindings::Device device, bool menu)
+        // mode: the keyboard's keys in menus and the roulette (menu_buttons::promptMode(): Enter, Esc, the arrows, Q / E
+        // there; in the roulette the mouse's OK and cancel). A controller's labels never change with it.
+        sheets::PromptLabels labelsFor(const bindings::Snapshot &snapshot, bindings::Device device, menu_buttons::PromptMode mode)
         {
             const bool pad = device == bindings::Device::Controller;
+            const bool menu = !pad && mode != menu_buttons::PromptMode::Play;
             const auto &set = pad ? snapshot.controller : menu ? snapshot.menuKeys : snapshot.keys;
             sheets::PromptLabels labels;
             const auto put = [&](sheets::Icon icon, bindings::Input input) { labels.icon[icon] = labelOf(set[input]); };
@@ -422,10 +424,36 @@ namespace kamite::button_prompts
             put(sheets::Select, bindings::Select);
             // The keyboard's menus: the trigger cells carry the 0 and 4 keys, for the Techniques screen's "[0]-[4] Style"
             // (style_presets hintText; no menu uses the triggers, K Nov 7, and the art there is ours).
-            if (!pad && menu)
+            if (menu && mode == menu_buttons::PromptMode::Menu)
             {
                 labels.icon[sheets::L2] = "0";
                 labels.icon[sheets::R2] = "4";
+                // The Techniques screen's Buck Breaker slot names play's circle (the punish): drawn from the select cell
+                // with the keyboard (buck_breaker kSelectUv), which carries play's circle key in menus.
+                labels.icon[sheets::Select] = labelOf(snapshot.keys[bindings::Circle]);
+            }
+            if (menu && mode == menu_buttons::PromptMode::Roulette)
+            {
+                // The roulette's OK on the left click, its cancel on the right (ps2_host_input setMenuRoulette; Esc
+                // cancels too, unshown). Classic's OK is either of cross and circle, its cancel the triangle.
+                const menu_buttons::Style style = menu_buttons::style();
+                const std::string ok = art::mouseLabel(0).compact, cancel = art::mouseLabel(1).compact; // left, right
+                if (style == menu_buttons::Style::Japanese)
+                {
+                    labels.icon[sheets::Circle] = ok;
+                    labels.icon[sheets::Cross] = cancel;
+                }
+                else if (style == menu_buttons::Style::Western)
+                {
+                    labels.icon[sheets::Cross] = ok;
+                    labels.icon[sheets::Circle] = cancel;
+                }
+                else
+                {
+                    labels.icon[sheets::Cross] = ok;
+                    labels.icon[sheets::Circle] = ok;
+                    labels.icon[sheets::Triangle] = cancel;
+                }
             }
             // Sticks: on keys an inverted T of the four direction keys (Up Right Down Left); a controller's stick keeps
             // the original stick art (all four empty).
@@ -677,7 +705,7 @@ namespace kamite::button_prompts
             bindings::Device lastDevice = bindings::Device::Keys;
             bindings::PadStyle lastStyle = bindings::PadStyle::Unknown;
             bool lastModern = false;
-            bool lastMenu = false;
+            menu_buttons::PromptMode lastMode = menu_buttons::PromptMode::Play;
             bool built = false;
             uint64_t version = 0u;
             for (;;)
@@ -701,12 +729,13 @@ namespace kamite::button_prompts
                 const bool setNew = g_promptsRebuild.exchange(false, std::memory_order_acq_rel);
                 const bool modern = modern::enabled();
                 // The keyboard's art follows the menu layer (its fixed keys); a controller's never changes with it.
-                const bool menu = device == bindings::Device::Keys && menu_buttons::menuPrompts();
+                const menu_buttons::PromptMode mode =
+                    device == bindings::Device::Keys ? menu_buttons::promptMode() : menu_buttons::PromptMode::Play;
                 if (built && !crateNew && !setNew && generation == lastGeneration && device == lastDevice && style == lastStyle &&
-                    modern == lastModern && menu == lastMenu)
+                    modern == lastModern && mode == lastMode)
                     continue;
                 lastModern = modern;
-                lastMenu = menu;
+                lastMode = mode;
                 built = true;
                 lastGeneration = generation;
                 lastDevice = device;
@@ -735,7 +764,7 @@ namespace kamite::button_prompts
                     }
                 }
                 const bool playStation = set == prompt_hd::Set::PlayStation;
-                const sheets::PromptLabels labels = labelsFor(bindings::snapshot(), device, menu);
+                const sheets::PromptLabels labels = labelsFor(bindings::snapshot(), device, mode);
                 {
                     std::lock_guard<std::mutex> lock(g_menuArtMutex);
                     // The menus' buttons by their place on the pad (menu_buttons.h "Pinned menus"): cross = the south

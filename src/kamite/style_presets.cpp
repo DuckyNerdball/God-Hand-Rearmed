@@ -268,8 +268,10 @@ namespace kamite::style_presets
         // Pad filter / F2 -> EE thread: 1..5 pick None, S..Y (F2); 11..14 in play, the d-pad's style; 21 / 22 the
         // Techniques screen's R2 / L2 (next / previous, wrapping).
         std::atomic<int> g_request{0};
-        // The keyboard is the device in use: each style shows its key after the letter (S1 E2 X3 Y4; K, Nov 16). Set
-        // each vblank, so the text and the glyph placement of a frame agree.
+        // The keyboard is the device in use (set each vblank, so a frame's text and glyph placement agree): the HUD's
+        // letters are the line "S E X Y" above the level meter as before Nov 10 (K, Nov 16: round the minimap with the
+        // keys beside them looked bad), round the minimap with a controller; the Techniques screen's Style row carries
+        // each style's key (S1 E2 X3 Y4).
         std::atomic<bool> g_numbered{false};
         std::atomic<bool> g_cycleSound{false}; // a cycle on the Techniques screen: it plays its cursor sound
         // The HUD's blink after a swap in play: which style and when. Host milliseconds, not frame-hook
@@ -905,27 +907,26 @@ namespace kamite::style_presets
         constexpr int kOutlineCopies = 8;
         std::vector<uint16_t> hudText(const Store &store, bool colours)
         {
-            const bool numbered = g_numbered.load(std::memory_order_relaxed);
+            const bool line = g_numbered.load(std::memory_order_relaxed); // the keyboard: "S E X Y" over the level meter
             const int64_t now = steadyMs();
             const bool blinkOn = (now / kBlinkMs) % 2 == 0;
             const bool flash = now - g_lastActionMs.load(std::memory_order_relaxed) < kFlashMs;
             // K, Nov 10: the letters sit round the minimap (hud_layout moves each glyph there: S top, E right, X bottom,
             // Y left). The text is the four letters; the shadow carries each letter kOutlineCopies times, spread round it
             // by hud_layout, as a full outline (readable on both the PS2 and the texture pack's minimap).
+            // The line (the keyboard): the letters spaced, the shadow the same letters one unit down and right.
             std::vector<uint16_t> out;
-            if (!colours)
+            if (!colours && !line)
             {
                 for (int slot = 0; slot < kStyles; ++slot)
-                {
                     out.insert(out.end(), kOutlineCopies, glyph(g_letters[slot]));
-                    if (numbered)
-                        out.insert(out.end(), kOutlineCopies, glyph(static_cast<char>('1' + slot)));
-                }
                 out.push_back(kEnd);
                 return out;
             }
             for (int slot = 0; slot < kStyles; ++slot)
             {
+                if (line && slot > 0)
+                    out.push_back(kSpace);
                 const bool used = (store.used & (1u << slot)) != 0u;
                 uint32_t colour = kBeige;
                 if (used && store.active == slot)
@@ -935,8 +936,6 @@ namespace kamite::style_presets
                 if (colours)
                     out.insert(out.end(), {kColour, static_cast<uint16_t>(colour >> 16), static_cast<uint16_t>(colour & 0xFFFFu)});
                 out.push_back(glyph(g_letters[slot]));
-                if (numbered)
-                    out.push_back(glyph(static_cast<char>('1' + slot)));
             }
             out.push_back(kEnd);
             return out;
@@ -1418,7 +1417,7 @@ namespace kamite::style_presets
         void hudTextSlot(uint32_t entry, uint32_t state)
         {
             int list, pos;
-            if (!g_hudShown || (entry != g_hudText && entry != g_hudShadow) || !hud::radarSlot(list, pos))
+            if (!g_hudShown || (entry != g_hudText && entry != g_hudShadow) || !lettersOnRadar() || !hud::radarSlot(list, pos))
                 return;
             wr32(state + 0x58u, static_cast<uint32_t>(list));
             wr32(state + 0x5Cu, static_cast<uint32_t>(std::max(0, pos - 1)));
@@ -1537,7 +1536,11 @@ namespace kamite::style_presets
         return store.active < kStyles && (store.used & (1u << store.active)) ? store.active + 1 : 0;
     }
 
-    bool lettersOnRadar() { return g_ram != nullptr && g_enabled.load(std::memory_order_relaxed); }
+    // The keyboard's line over the level meter is not on the radar (K, Nov 16): the minimap stays where it was.
+    bool lettersOnRadar()
+    {
+        return g_ram != nullptr && g_enabled.load(std::memory_order_relaxed) && !g_numbered.load(std::memory_order_relaxed);
+    }
 
     bool enabled() { return g_enabled.load(std::memory_order_relaxed); }
 
@@ -1557,33 +1560,20 @@ namespace kamite::style_presets
         setEnvValue("KAMITE_STYLE_SIGNAL", on ? "1" : "0");
     }
 
-    int hudGlyph(uint32_t entry, int index, float &dx, float &dy, float &pair)
+    int hudGlyph(uint32_t entry, int index, float &dx, float &dy)
     {
         entry &= 0x1FFFFFFu;
-        dx = dy = pair = 0.0f;
-        if (!g_ram || !g_hudShown || (entry != g_hudText && entry != g_hudShadow) || index < 0)
+        dx = dy = 0.0f;
+        if (!lettersOnRadar() || !g_hudShown || (entry != g_hudText && entry != g_hudShadow) || index < 0)
+            return -1; // the keyboard's line: the glyphs where the text puts them
+        if (entry == g_hudText)
+            return index < kStyles ? index : -1;
+        if (index >= kStyles * kOutlineCopies)
             return -1;
-        const int per = g_numbered.load(std::memory_order_relaxed) ? 2 : 1; // glyphs per style
-        int glyphAt = index;
-        if (entry == g_hudShadow)
-        {
-            if (index >= kStyles * per * kOutlineCopies)
-                return -1;
-            static constexpr float kDir[kOutlineCopies][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
-            dx = kDir[index % kOutlineCopies][0];
-            dy = kDir[index % kOutlineCopies][1];
-            glyphAt = index / kOutlineCopies;
-        }
-        if (glyphAt >= kStyles * per)
-            return -1;
-        if (per == 2)
-            pair = glyphAt % 2 == 0 ? -0.5f : 0.5f;
-        return glyphAt / per;
-    }
-
-    bool numberedStyles()
-    {
-        return g_numbered.load(std::memory_order_relaxed);
+        static constexpr float kDir[kOutlineCopies][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+        dx = kDir[index % kOutlineCopies][0];
+        dy = kDir[index % kOutlineCopies][1];
+        return index / kOutlineCopies;
     }
 
     bool onHudEntry(uint32_t entry)
@@ -1591,8 +1581,10 @@ namespace kamite::style_presets
         entry &= 0x1FFFFFFu;
         if (!g_ram || !g_hudShown || (entry != g_hudText && entry != g_hudShadow))
             return false;
-        // Placed here, after the layout's move put the entry where its data says (the top left corner).
-        const float d = 0.0f; // the outline is spread per glyph (hudGlyph): the shadow sits under the text
+        // Placed here, after the layout's move put the entry where its data says (the top left corner). Round the minimap
+        // the outline is spread per glyph (hudGlyph): the shadow sits under the text; the keyboard's line has the plain
+        // shadow one unit down and right, as before Nov 10.
+        const float d = !lettersOnRadar() && entry == g_hudShadow ? 1.0f : 0.0f;
         wrFloat(entry + ent::kDrawX, kHudX + d);
         wrFloat(entry + ent::kDrawY, kHudY + d);
         return true;

@@ -36,12 +36,8 @@ namespace kamite::style_presets
     // style it shows (0..3 = S E X Y: top, right, bottom, left of the minimap), else -1; for the outline's copies the
     // direction of its offset (-1..1 each).
     bool lettersOnRadar();
-    // pair: with the keyboard in use each style is its letter and its key (S1 E2 X3 Y4; K, Nov 16): -0.5 for the
-    // letter, +0.5 for the digit (in glyph advances from the style's place), 0 for a lone letter.
-    int hudGlyph(uint32_t entry, int index, float &dx, float &dy, float &pair);
-    // The styles carry their keys (S1 E2 X3 Y4): the keyboard is the device in use (round the minimap and on the
-    // Techniques screen's Style row).
-    bool numberedStyles();
+    // With the keyboard as the device in use the letters are a line over the level meter instead (K, Nov 16): -1.
+    int hudGlyph(uint32_t entry, int index, float &dx, float &dy);
 
     // ps2_host_input's pad filter, player 1 (window thread): called by modern_controls' filter before its own work.
     void padFilter(uint32_t player, ps2x::iop::PadInputState &state);

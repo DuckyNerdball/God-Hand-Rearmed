@@ -29,6 +29,7 @@ namespace pcsx2gs
 		float cx, cy, rx, ry, start, ramp, strength, soft;
 		float eye[3], mid;
 		float inverse[16]; // row-major
+		float wall;        // the rest of a wall the oval opens: dissolved this much (0..1)
 	};
 	bool GetSeeThrough(SeeThroughParams& out); // compat/Bridge.cpp: pcsx2gs_set_option("see_through")
 	void SetSceneOffset(float ox, float oy);   // compat/HostStubs.cpp: the overlay's GS -> frame mapping
@@ -6239,8 +6240,15 @@ void GSRendererHW::ApplySeeThrough(float rtscale)
 	m_conf.cb_ps.SeeThroughM2 = GSVector4(s.inverse[8], s.inverse[9], s.inverse[10], s.inverse[11]);
 	m_conf.cb_ps.SeeThroughM3 = GSVector4(s.inverse[12], s.inverse[13], s.inverse[14], s.inverse[15]);
 	m_conf.cb_ps.SeeThroughEye = GSVector4(s.eye[0], s.eye[1], s.eye[2], s.mid);
-	// Render-target pixel -> GS primitive coordinates; shader depth -> integer depth (VS: Z * 2^-32).
-	m_conf.cb_ps.SeeThroughMap = GSVector4(1.0f / scale, ox, oy, 4294967296.0f);
+	// The rest of a wall the oval opens (K, Nov 16): a draw whose screen box reaches into the oval's is see-through
+	// by s.wall outside it too (where it is nearer than the player: the shader's own test), so the opened wall reads as
+	// one; scenery elsewhere stays whole.
+	const float cx = s.cx - ox, cy = s.cy - oy;
+	const bool touches = m_vt.m_max.p.x >= cx - s.rx && m_vt.m_min.p.x <= cx + s.rx && m_vt.m_max.p.y >= cy - s.ry &&
+		m_vt.m_min.p.y <= cy + s.ry;
+	// Render-target pixel -> GS primitive coordinates (the shader's depth scale is a constant there); w: this draw's
+	// translucency outside the oval.
+	m_conf.cb_ps.SeeThroughMap = GSVector4(1.0f / scale, ox, oy, touches ? std::clamp(s.wall, 0.0f, 1.0f) : 0.0f);
 }
 
 void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)

@@ -160,9 +160,6 @@ namespace kamite::hud
         constexpr float kLetterHalfH = 7.5f, kLetterHalfW = 5.5f;  // a letter's visible half size (y units)
         constexpr float kLetterGap = 1.5f;                         // from the active disc's edge
         constexpr float kOutlineStep = 1.0f;                       // the outline copies' offset (y units)
-        // With the keyboard each style is a letter and its key (S1 E2 X3 Y4; K, Nov 16): the two glyphs this far apart
-        // (y units, centre to centre), the pair a touch further from the disc.
-        constexpr float kPairAdvance = 9.0f, kPairGap = 1.0f;
         constexpr float kGlyphBiasY = 0.0f;                        // the glyph's visible centre below its quad's
         struct Box
         {
@@ -501,8 +498,8 @@ namespace kamite::hud
         {
             if (!g_inIdTrans)
                 return;
-            float ox, oy, pair;
-            const int slot = style_presets::hudGlyph(g_entry, g_glyphIndex++, ox, oy, pair);
+            float ox, oy;
+            const int slot = style_presets::hudGlyph(g_entry, g_glyphIndex++, ox, oy);
             if (slot < 0)
                 return;
             auto get = [&](uint32_t a) { return static_cast<float>(static_cast<int32_t>(read32(rdram, a))) / 16.0f; };
@@ -518,17 +515,13 @@ namespace kamite::hud
             const float rx = 0.5f * (g_radarBox.x1 - g_radarBox.x0), ry = 0.5f * (g_radarBox.y1 - g_radarBox.y0);
             const float sx = rx / ry; // x units per y unit (the HUD's stretch)
             float tx = cx, ty = cy;
-            const bool numbered = style_presets::numberedStyles();
-            const float gap = kLetterGap + (numbered ? kPairGap : 0.0f);
-            const float halfW = kLetterHalfW + (numbered ? 0.5f * kPairAdvance : 0.0f); // the pair's half width
             switch (slot)
             {
-            case 0: ty = cy - ry * kActiveShare - gap - kLetterHalfH; break;
-            case 1: tx = cx + rx * kActiveShare + (gap + halfW) * sx; break;
-            case 2: ty = cy + ry * kActiveShare + gap + kLetterHalfH; break;
-            default: tx = cx - rx * kActiveShare - (gap + halfW) * sx; break;
+            case 0: ty = cy - ry * kActiveShare - kLetterGap - kLetterHalfH; break;
+            case 1: tx = cx + rx * kActiveShare + (kLetterGap + kLetterHalfW) * sx; break;
+            case 2: ty = cy + ry * kActiveShare + kLetterGap + kLetterHalfH; break;
+            default: tx = cx - rx * kActiveShare - (kLetterGap + kLetterHalfW) * sx; break;
             }
-            tx += pair * kPairAdvance * sx;
             tx += ox * kOutlineStep * sx;
             ty += oy * kOutlineStep;
             const float dx = tx - 0.5f * (gx0 + gx1), dy = ty - (0.5f * (gy0 + gy1) + kGlyphBiasY);
@@ -688,20 +681,26 @@ namespace kamite::hud
             // The game's action prompt ("A :Throw") rides in the same two text entries (+0x9C / +0xA0, message 0x3010)
             // and sits at the top left of the 4:3 screen (x 16, y 14; K's F6, Nov 1): with the money it followed the
             // minimap's anchor and landed mid-screen at 16:9. It goes with the left edge, like the indicator.
-            // The style indicator (Nov 10) goes round the minimap: the minimap's anchor, its own group.
+            // The style indicator (Nov 10) goes round the minimap: the minimap's anchor, its own group. With the keyboard
+            // it is the line over the level meter (K, Nov 16): the left edge's anchor, as before.
+            bool leftEdge = false;
             if (style_presets::onHudEntry(g_entry))
             {
-                if (!menuNow())
+                if (!style_presets::lettersOnRadar())
+                    leftEdge = true;
+                else
                 {
-                    const float width = screenWidth(rdram);
-                    g_savedCtx = g_ctx;
-                    g_ctx = Context{true, kRadarLetters, anchorFor(kRadar, width - 0.5f * width * (1.0f - g_edgeShare), width)};
-                    g_entryOverride = true;
+                    if (!menuNow())
+                    {
+                        const float width = screenWidth(rdram);
+                        g_savedCtx = g_ctx;
+                        g_ctx = Context{true, kRadarLetters, anchorFor(kRadar, width - 0.5f * width * (1.0f - g_edgeShare), width)};
+                        g_entryOverride = true;
+                    }
+                    return;
                 }
-                return;
             }
-            bool leftEdge = false;
-            if (g_moneyLayout != 0u && g_curLayout == g_moneyLayout &&
+            if (!leftEdge && g_moneyLayout != 0u && g_curLayout == g_moneyLayout &&
                 (g_entry == (read32(rdram, g_moneyLayout + kMoneyText) & 0x01FFFFFFu) ||
                  g_entry == (read32(rdram, g_moneyLayout + kMoneyShadow) & 0x01FFFFFFu)))
                 leftEdge = true;

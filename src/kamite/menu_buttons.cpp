@@ -585,7 +585,7 @@ namespace kamite::menu_buttons
             const uint32_t game = rd32(0x3BD6E8u);
             return ramPointer(game, 0x2000u) && g_ram[game + 0x1AD8u] != 0u;
         }
-        std::atomic<bool> g_menuPrompts{true}; // the keyboard's button art shows the menu layer's keys (menuPrompts())
+        std::atomic<PromptMode> g_promptMode{PromptMode::Menu}; // promptMode()
 
         // Play comes back at once; the menus take the pad after 4 vblanks of not playing, so a moment's freeze in a fight
         // never moves the buttons under the player's fingers.
@@ -609,9 +609,12 @@ namespace kamite::menu_buttons
                                         style == Style::Western    ? PadButton::Circle
                                         : style == Style::Japanese ? PadButton::Cross
                                                                    : PadButton::Triangle);
-            const bool popUp = tutorialPopUp();
-            ps2_host_input::setMenuEscStart(menu && eventOrTitle() && !subScreenUp() && !rouletteOpen() && !popUp);
-            g_menuPrompts.store(menu && !popUp, std::memory_order_relaxed);
+            const bool popUp = tutorialPopUp(), roulette = menu && rouletteOpen();
+            ps2_host_input::setMenuEscStart(menu && eventOrTitle() && !subScreenUp() && !roulette && !popUp);
+            // The roulette with the keyboard and mouse (K, Nov 16): left click OK, right click cancel, the wheel steps it.
+            ps2_host_input::setMenuRoulette(roulette);
+            g_promptMode.store(!menu || popUp ? PromptMode::Play : roulette ? PromptMode::Roulette : PromptMode::Menu,
+                               std::memory_order_relaxed);
         }
 
         void onVblank()
@@ -805,9 +808,9 @@ namespace kamite::menu_buttons
             std::thread(scanLoop).detach();
     }
 
-    bool menuPrompts()
+    PromptMode promptMode()
     {
-        return g_menuPrompts.load(std::memory_order_relaxed);
+        return g_promptMode.load(std::memory_order_relaxed);
     }
 
     Style style()

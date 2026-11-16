@@ -1426,6 +1426,32 @@ namespace kamite::options_screen
             }
         }
 
+        // BUTTON MAPPING follows the device in use (K, Nov 16): a key or a controller button pressed on one page shows
+        // the other at once (not while a key is awaited or the drum is open).
+        bool mappingDeviceChanged(const Screen &s)
+        {
+            const bool keys = ps2_host_input::prompts::lastDevice() == ps2_host_input::prompts::Device::Keys;
+            return keys != s.inKeys && s.keysMode != keys_page::Mode::Capture && !s.mapEdit.drum;
+        }
+        void swapMappingPage(Screen &s)
+        {
+            if (!s.inKeys)
+            {
+                s.inKeys = true;
+                s.keysCursor = 0;
+                s.keysMode = keys_page::Mode::Browse;
+                (void)ps2_host_input::takeMenuDelete();
+                buildKeys(s);
+            }
+            else
+            {
+                s.inKeys = false;
+                s.mapEdit = mapping_page::Edit{};
+                buildMapping(s);
+                s.mapCursor = mapping_page::firstLine(g_mapping);
+            }
+        }
+
         // The pad on the page (K, Nov 13-14): d-pad / stick between the lines (the columns' and the paddles'); A opens
         // the drum (up / down turn it, A swaps or, on an extra button, assigns; B closes); the left face button Reset
         // (twice); B back to the BUTTON MAPPING row. Any other press disarms a waiting second press.
@@ -1911,6 +1937,8 @@ namespace kamite::options_screen
             }
             else if (s.confirmRow >= 0)
                 confirm(N, s, pressed, repeat, rdram, ctx, runtime);
+            else if (s.inPage && s.inMapping && mappingDeviceChanged(s))
+                swapMappingPage(s); // the device in use picks the page (K, Nov 16): swapped at once, that press dropped
             else if (s.inPage && s.inMapping && s.inKeys)
                 keysInput(s, pressed, repeat, rdram, ctx, runtime);
             else if (s.inPage && s.inMapping)

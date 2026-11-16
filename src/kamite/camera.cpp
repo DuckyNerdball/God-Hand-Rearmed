@@ -283,6 +283,7 @@ namespace kamite
         std::atomic<float> g_seeMargin{0.7f};    // metres in front of Gene
         std::atomic<float> g_seeStrength{100.0f}; // percent
         std::atomic<float> g_seeSoftness{33.0f};  // percent of the radius
+        std::atomic<float> g_seeWall{35.0f};      // percent: the rest of a wall the oval opens, see-through (K, Nov 16)
         bool g_seeSent = false;                   // game thread: an oval went to the renderer last frame
         std::atomic<float> g_seeReadout[4] = {};  // centre x, y, radii x, y (GS pixels), for the menu
 
@@ -743,12 +744,16 @@ namespace kamite
             // The ground that stays (up / down-facing surfaces, the shader's last value): below Gene's feet + 0.3 m
             // (K, Nov 6; was his middle, which kept window sills and ledges sticking out of the walls whole).
             const float groundBelow = feet + 0.3f;
-            char text[640];
+            char text[680];
             int length = std::snprintf(text, sizeof(text), "%.2f %.2f %.2f %.2f %.4f %.4f %.3f %.3f %.5f %.5f %.5f %.5f", ox, oy, orx, ory,
                                        start, ramp, g_seeStrength.load(std::memory_order_relaxed) / 100.0f * g_seeLevel,
                                        g_seeSoftness.load(std::memory_order_relaxed) / 100.0f, eye[0], eye[1], eye[2], groundBelow);
             for (int i = 0; i < 16 && length > 0 && length < static_cast<int>(sizeof(text)); ++i)
                 length += std::snprintf(text + length, sizeof(text) - static_cast<size_t>(length), " %.9g", inverse[i]);
+            // The rest of a wall the oval opens (the renderer: draws reaching into the oval), see-through this much.
+            if (length > 0 && length < static_cast<int>(sizeof(text)))
+                std::snprintf(text + length, sizeof(text) - static_cast<size_t>(length), " %.3f",
+                              g_seeWall.load(std::memory_order_relaxed) / 100.0f);
             if (!g_seeSent)
                 KM_TRACE(Game, "see-through on: " << text);
             g_seeSent = GSPcsx2Backend::SetOption("see_through", text);
@@ -1052,6 +1057,7 @@ namespace kamite
             g_seeMargin = iniValue(ini, "Video", "SeeThroughMargin", 0.7f, 0.1f, 5.0f);
             g_seeStrength = iniValue(ini, "Video", "SeeThroughStrength", 100.0f, 0.0f, 100.0f);
             g_seeSoftness = iniValue(ini, "Video", "SeeThroughSoftness", 33.0f, 2.0f, 100.0f);
+            g_seeWall = iniValue(ini, "Video", "SeeThroughWall", 35.0f, 0.0f, 100.0f);
         }
 
         void saveToIni()
@@ -1078,6 +1084,7 @@ namespace kamite
             ini.set("Video", "SeeThroughMargin", number(g_seeMargin.load()));
             ini.set("Video", "SeeThroughStrength", number(g_seeStrength.load()));
             ini.set("Video", "SeeThroughSoftness", number(g_seeSoftness.load()));
+            ini.set("Video", "SeeThroughWall", number(g_seeWall.load()));
             if (!ini.save())
             {
                 setStatus("Could not write GHR.ini.");
@@ -1182,6 +1189,8 @@ namespace kamite
             slider(ui, "Starts this far in front of Gene##seem", g_seeMargin, 0.1f, 3.0f, "%.2f m");
             slider(ui, "Strength##sees", g_seeStrength, 0.0f, 100.0f, "%.0f%%");
             slider(ui, "Soft edge##seesoft", g_seeSoftness, 2.0f, 100.0f, "%.0f%%");
+            // Temporary (K, Nov 16): he sets the default here, then the slider goes.
+            slider(ui, "Rest of the wall (see-through)##seewall", g_seeWall, 0.0f, 100.0f, "%.0f%%");
             ui->end_disabled();
             ui->text_disabled("Sizes are in metres round Gene's middle. Strength 100% = gone in the middle; the soft "
                               "edge is the part of the oval over which it fades out.");

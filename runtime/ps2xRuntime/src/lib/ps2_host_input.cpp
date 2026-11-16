@@ -527,6 +527,13 @@ namespace ps2_host_input
         // layout's (on the controller player 1's bindings name first); keyboard and mouse bindings as bound.
         PadConfig g_menuConfig;
         PadConfig g_menuConfigEsc;                 // the same with Esc also on Start (setMenuEscStart)
+        PadConfig g_menuConfigRoulette;            // the same with the mouse's OK / cancel (setMenuRoulette)
+        std::atomic<bool> g_menuRoulette{false};
+        // The wheel in the roulette: notches waiting (+ up, - down), each a d-pad tap of kWheelTap, kWheelTap apart.
+        int g_wheelPending = 0;                    // window thread
+        int g_wheelTap = 0;                        // the tap now: +1 up, -1 down, 0 none
+        std::chrono::steady_clock::time_point g_wheelNext{};
+        constexpr auto kWheelTap = std::chrono::milliseconds(50);
         // The keyboard's fixed menu keys (setMenuKeys): the buttons Enter / Space and Esc / Backspace press there, by
         // Menu Controls (Western until the game layer says otherwise).
         std::atomic<uint16_t> g_menuOk{PadButton::Cross};
@@ -875,8 +882,8 @@ namespace ps2_host_input
         }
 
         // The keyboard's fixed menu keys (setMenuKeys) on a menu-layer config: the chords holding one of those keys and
-        // every key chord on the d-pad go (WASD stay on the sticks), then the fixed keys are added. escStart: Esc also
-        // presses Start.
+        // every key chord on the d-pad go, then the fixed keys are added. WASD are the d-pad only there (K, Nov 16: on
+        // the left stick too, menus that read both moved twice or late on quick taps). escStart: Esc also presses Start.
         bool fixedMenuKey(int code)
         {
             switch (code)
@@ -891,18 +898,17 @@ namespace ps2_host_input
 
         void addMenuKeys(PadConfig &config, uint16_t ok, uint16_t cancel, bool escStart)
         {
-            const auto holdsFixed = [](const Chord &chord, bool wasdKept)
+            const auto holdsFixed = [](const Chord &chord)
             {
-                return std::any_of(chord.begin(), chord.end(), [&](const Element &e)
-                                   { return e.source == Source::Keyboard && fixedMenuKey(e.code) &&
-                                            !(wasdKept && (e.code == KEY_W || e.code == KEY_A || e.code == KEY_S || e.code == KEY_D)); });
+                return std::any_of(chord.begin(), chord.end(), [](const Element &e)
+                                   { return e.source == Source::Keyboard && fixedMenuKey(e.code); });
             };
             constexpr uint16_t kDpad = PadButton::Up | PadButton::Right | PadButton::Down | PadButton::Left;
             for (size_t i = 0; i < kPadButtonKeys.size(); ++i)
             {
                 Bindings kept;
                 for (Chord &chord : config.buttons[i])
-                    if (!holdsFixed(chord, false) && !((kPadButtonKeys[i].second & kDpad) != 0u && !controllerChord(chord)))
+                    if (!holdsFixed(chord) && !((kPadButtonKeys[i].second & kDpad) != 0u && !controllerChord(chord)))
                         kept.push_back(std::move(chord));
                 config.buttons[i] = std::move(kept);
             }
@@ -910,7 +916,7 @@ namespace ps2_host_input
             {
                 Bindings kept;
                 for (Chord &chord : list)
-                    if (!holdsFixed(chord, true))
+                    if (!holdsFixed(chord))
                         kept.push_back(std::move(chord));
                 list = std::move(kept);
             }
@@ -938,6 +944,28 @@ namespace ps2_host_input
                 add(PadButton::Start, {KEY_ESCAPE});
         }
 
+        // The roulette's mouse (K, Nov 16): the left click the OK button(s), the right click the cancel button, nothing
+        // else (their play actions, square and triangle, are not the roulette's).
+        void addRouletteMouse(PadConfig &config, uint16_t ok, uint16_t cancel)
+        {
+            const auto clicks = [](const Chord &chord)
+            {
+                return std::any_of(chord.begin(), chord.end(), [](const Element &e)
+                                   { return e.source == Source::Pointer && (e.code == MOUSE_BUTTON_LEFT || e.code == MOUSE_BUTTON_RIGHT); });
+            };
+            for (Bindings &list : config.buttons)
+                list.erase(std::remove_if(list.begin(), list.end(), clicks), list.end());
+            for (size_t i = 0; i < kPadButtonKeys.size(); ++i)
+                for (const auto &[mask, button] : {std::pair{ok, MOUSE_BUTTON_LEFT}, std::pair{cancel, MOUSE_BUTTON_RIGHT}})
+                    if ((kPadButtonKeys[i].second & mask) != 0u)
+                    {
+                        Element element;
+                        element.source = Source::Pointer;
+                        element.code = button;
+                        config.buttons[i].push_back(Chord{element});
+                    }
+        }
+
         // Precedence per pad: PS2X_PAD<n> in the environment, then the file's [PadN], then the defaults.
         void rebuildConfigs()
         {
@@ -955,6 +983,8 @@ namespace ps2_host_input
             const uint16_t ok = g_menuOk.load(std::memory_order_relaxed), cancel = g_menuCancel.load(std::memory_order_relaxed);
             addMenuKeys(g_menuConfig, ok, cancel, false);
             addMenuKeys(g_menuConfigEsc, ok, cancel, true);
+            g_menuConfigRoulette = g_menuConfig;
+            addRouletteMouse(g_menuConfigRoulette, ok, cancel);
             g_configsValid = true;
             publishPrompts(g_configs[0], g_menuConfig); // every rebuild: file load, the 1-s file poll, the page's edits, reset
             publishExtra(g_configs[0]);
@@ -1939,7 +1969,8 @@ namespace ps2_host_input
                 *rawStick = 0.0f;
             const bool menuLayer = player == 0u && g_menuLayerWanted.load(std::memory_order_relaxed);
             const PadConfig &mapped = padConfigs()[player];
-            const PadConfig &menu = g_menuEscStart.load(std::memory_order_relaxed) ? g_menuConfigEsc : g_menuConfig;
+            const bool roulette = player == 0u && g_menuRoulette.load(std::memory_order_relaxed);
+            const PadConfig &menu = roulette ? g_menuConfigRoulette : g_menuEscStart.load(std::memory_order_relaxed) ? g_menuConfigEsc : g_menuConfig;
             const PadConfig &config = menuLayer ? menu : mapped;
             // PS2X_FAKE_PADS=<n> (tests): players 1..n count as connected, idle, without a controller behind them.
             static const uint32_t fakePads = []
@@ -1989,6 +2020,9 @@ namespace ps2_host_input
                 }
                 g_latched = static_cast<uint16_t>(g_latched & state.buttons);
                 state.buttons = static_cast<uint16_t>(state.buttons & ~g_latched);
+                // The wheel's taps in the roulette (after the latch: never held over a flip).
+                if (menuLayer && roulette && g_wheelTap != 0)
+                    state.buttons = static_cast<uint16_t>(state.buttons | (g_wheelTap > 0 ? PadButton::Up : PadButton::Down));
                 if (g_hideStart)
                     state.buttons = static_cast<uint16_t>(state.buttons & ~PadButton::Start); // a SaveLoad chord's
             }
@@ -2253,6 +2287,34 @@ namespace ps2_host_input
         std::array<PadInputState, kMaxPlayers> state{};
         const bool capturing = controls::updateKeyCapture();
         const bool blocked = g_blocked.load(std::memory_order_relaxed) || capturing;
+        // The mouse wheel in the roulette: each notch a d-pad tap (kWheelTap down, kWheelTap up), up to three queued.
+        {
+            const auto now = std::chrono::steady_clock::now();
+            if (g_menuRoulette.load(std::memory_order_relaxed) && IsWindowFocused() && !blocked)
+            {
+                const float wheel = GetMouseWheelMove();
+                if (wheel > 0.0f) // a turn the other way drops what the last way had queued
+                    g_wheelPending = std::min(std::max(g_wheelPending, 0) + 1, 3);
+                else if (wheel < 0.0f)
+                    g_wheelPending = std::max(std::min(g_wheelPending, 0) - 1, -3);
+            }
+            else
+                g_wheelPending = 0;
+            if (now >= g_wheelNext)
+            {
+                if (g_wheelTap != 0)
+                {
+                    g_wheelTap = 0; // the gap after a tap
+                    g_wheelNext = now + kWheelTap;
+                }
+                else if (g_wheelPending != 0)
+                {
+                    g_wheelTap = g_wheelPending > 0 ? 1 : -1;
+                    g_wheelPending -= g_wheelTap;
+                    g_wheelNext = now + kWheelTap;
+                }
+            }
+        }
         if (!blocked && g_menuLayerUsed.load(std::memory_order_relaxed) && IsWindowFocused())
         {
             for (int digit = 0; digit <= 4; ++digit)
@@ -2335,6 +2397,11 @@ namespace ps2_host_input
         const bool cancelChanged = g_menuCancel.exchange(cancelButtons, std::memory_order_relaxed) != cancelButtons;
         if (okChanged || cancelChanged)
             g_menuKeysChanged.store(true, std::memory_order_release);
+    }
+
+    void setMenuRoulette(bool open)
+    {
+        g_menuRoulette.store(open, std::memory_order_relaxed);
     }
 
     void setMenuEscStart(bool on)
