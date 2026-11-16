@@ -282,9 +282,207 @@ address = "0x0013D6B8"
 value = "0x3C013C29"
 flag = "fps60"
 
-# The health bars (Nov 9, decomp cIDLifeBar.h): Gene's (func_0013F5D0), the boss bar (cCockBossBar, func_0013C950), the
-# last boss's two-segment bar (cIDLifeBar, func_0013E970) and the enemies' (func_0028F108 / func_0028F5B0, the lag
-# +0x630) ease the drawn value 0.07 of the gap a frame (lui / ori at 0x3D8F5C29): 1 - 0.93^0.5 = 0.0356 at 60
+# The HUD's own animations (Nov 16; framerate-sheet.md family 3 "HUD"): the cockpit's update (func_00140E58, every
+# main loop) runs each HUD object's move, which steps its own slides, scales and fades outside cIDBase_move's gate.
+# Tutorial pop-up (cCockTutorial, func_001471F0): its panel's scale +0x40 / +0x44 grows / shrinks 0.1 a frame -> 0.05.
+[[patches.conditional]]
+address = "0x0014725C"
+value = "0x3C013D4C"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x001473C4"
+value = "0x3C013D4C"
+flag = "fps60"
+# New-technique scroll (cCockScroll, func_00146A18): drops in y +10 a frame, its text grows / shrinks 0.3 a frame,
+# holds 90 frames (+0x102), slides out x -10 a frame -> 5.0 / 0.15, the hold every other frame.
+[[patches.conditional]]
+address = "0x00146B28"
+value = "0x3C0140A0"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x00146BC8"
+value = "0x3C013E19"
+flag = "fps60"
+[[patches.hooks]] # lhu v1,0x102(s1); addiu v1,v1,-1
+address = "0x00146C5C"
+hook = "km_fps60_countdown_v1"
+flag = "fps60"
+replace = true
+[[patches.conditional]]
+address = "0x00146C94"
+value = "0x3C013E19"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x00146CE4"
+value = "0x3C0140A0"
+flag = "fps60"
+# Roulette wheel (cCockRoulette, func_00145238's states): opening, the plates grow by a third of their size a frame
+# (/3.0 -> /6.0) and the pop eases x0.3 a frame; the cursor slide x0.7 a frame; the pick's ease x0.7 and its two fades
+# (alpha -0x20 / -0x10 a frame in the top byte, to exactly 0); closing, x0.3 and the plates /3.0. Factors -> square
+# roots, divisors x2, the alpha steps halved (both start at 0x80: still exactly 0).
+[[patches.conditional]]
+address = "0x001454C4"
+value = "0x3C0140C0"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x001456F0"
+value = "0x3C013F0C"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x001456F4"
+value = "0x3421378C"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x00145814"
+value = "0x3C013F56"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x00145818"
+value = "0x34212F5A"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x00145FCC"
+value = "0x3C013F56"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x00145FD0"
+value = "0x34212F5A"
+flag = "fps60"
+[[patches.conditional]] # lui a0,0xE000 (+0x364's alpha)
+address = "0x00146030"
+value = "0x3C04F000"
+flag = "fps60"
+[[patches.conditional]] # lui a0,0xF000 (+0x368's alpha)
+address = "0x001460FC"
+value = "0x3C04F800"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x001461EC"
+value = "0x3C013F0C"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x001461F0"
+value = "0x3421378C"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x00146274"
+value = "0x3C0140C0"
+flag = "fps60"
+# Mid-boss bars (cCockMiddleBoss, func_0013F5D0): each bar's row +0x274 eases 0.5 of the gap a frame (1 - 0.5^0.5:
+# 0x3E96, lui only), the panel slides in / out 10 a frame -> 5.0, and the 10-frame lock on switching the lit bar
+# (+0x384, set by func_00140718) counts every other frame.
+[[patches.conditional]]
+address = "0x00140320"
+value = "0x3C013E96"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x0014049C"
+value = "0x3C0140A0"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x00140524"
+value = "0x3C0140A0"
+flag = "fps60"
+[[patches.hooks]] # lbu v0,0x384(s1); addiu v0,v0,-1
+address = "0x001405E0"
+hook = "km_fps60_countdown_self"
+flag = "fps60"
+replace = true
+# Boss bar (cCockBossBar, func_0013C950): slides in 10 a frame -> 5.0.
+[[patches.conditional]]
+address = "0x0013CD9C"
+value = "0x3C0140A0"
+flag = "fps60"
+# Now Loading (cCockLoading, func_0013EE58, the loading task's sleep(1) loop): its sweep +0x90 / +0x94 += 0.03 -> 0.015.
+[[patches.conditional]]
+address = "0x0013EEA4"
+value = "0x3C013C75"
+flag = "fps60"
+# Point pop-ups (cCockGetPoint, func_0013E0B0): each rises along a keyed path by its frame +0x33C[i] (counted every
+# move, gone at 36 in the trans func_0013E260). At 60 the byte counts vblanks: the path lookups read it halved, the
+# rise per frame is added in halves and it is gone at 71 (the PS2's 35 drawn frames = 70 vblanks, from any half).
+[[patches.hooks]] # lb v0,0(a0): the frame for the key lookup
+address = "0x0013E148"
+hook = "km_fps60_point_frame"
+flag = "fps60"
+replace = true
+[[patches.hooks]] # lb v0,0(a0): the frame for the key lookup
+address = "0x0013E180"
+hook = "km_fps60_point_frame"
+flag = "fps60"
+replace = true
+[[patches.hooks]] # add.s f1,f1,f0
+address = "0x0013E204"
+hook = "km_fps60_add_half_f1f1f0"
+flag = "fps60"
+replace = true
+[[patches.conditional]] # slti v0,v0,0x24 -> 0x47
+address = "0x0013E2B4"
+value = "0x28420047"
+flag = "fps60"
+# Money (cCockPrintData, func_00143670): the shown number +0x84 rolls toward the gold by 1000 / 100 / 10 / 1 a frame
+# (held on second halves); each "+gold" line holds 20 frames (+0x180[i]), then its offset +0x100[i] x0.5 and alpha
+# +0x1A0[i] x0.8 a frame -> square roots (0.5: 0x3F35, lui only).
+[[patches.hooks]] # lw v1,0x84(a2)
+address = "0x001436BC"
+hook = "km_fps60_money_roll"
+flag = "fps60"
+replace = true
+[[patches.conditional]]
+address = "0x00143810"
+value = "0x3C013F35"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x0014382C"
+value = "0x3C013F64"
+flag = "fps60"
+[[patches.conditional]]
+address = "0x00143830"
+value = "0x3421F92E"
+flag = "fps60"
+[[patches.hooks]] # lhu v0,0(v1); addiu v0,v0,-1
+address = "0x00143870"
+hook = "km_fps60_countdown_self"
+flag = "fps60"
+replace = true
+# Level meter (cCockPlBar's move func_00142060): after a level change, the follow-up animation waits until 0x3BD6F0
+# counts to 15 (its ++ in a delay slot): the load reads one less on second halves, so it counts every other frame.
+[[patches.hooks]] # lbu v0,-0x2910(fp)
+address = "0x00142CCC"
+hook = "km_fps60_level_flash_wait"
+flag = "fps60"
+replace = true
+# Game over (the cockpit's func_001410A8, from Trans): the waits +0x23BE (150 frames from the death to the continue
+# screen; 30 before an arena / extra game ends) count every other frame, the guards with the 1 -> 0 step.
+[[patches.hooks]] # state 1: lh v0,0x23BE(s1)
+address = "0x001411D8"
+hook = "km_fps60_cd_guard_s1_23be"
+flag = "fps60"
+replace = true
+[[patches.hooks]] # addiu v0,v1,-1
+address = "0x001411E4"
+hook = "km_fps60_countdown"
+flag = "fps60"
+replace = true
+[[patches.hooks]] # state 10: lh v0,0x23BE(s1)
+address = "0x001413B8"
+hook = "km_fps60_cd_guard_s1_23be"
+flag = "fps60"
+replace = true
+[[patches.hooks]] # state 20: lh v0,0x23BE(s1)
+address = "0x00141468"
+hook = "km_fps60_cd_guard_s1_23be"
+flag = "fps60"
+replace = true
+[[patches.hooks]] # addiu v0,v1,-1
+address = "0x00141474"
+hook = "km_fps60_countdown"
+flag = "fps60"
+replace = true
+
+# The health bars (Nov 9, decomp cIDLifeBar.h): the mid-boss bars (cCockMiddleBoss, func_0013F5D0), the boss bar
+# (cCockBossBar, func_0013C950), the last boss's two-segment bar (cIDLifeBar, func_0013E970) and the enemies'
+# (func_0028F108 / func_0028F5B0, the lag +0x630) ease the drawn value 0.07 of the gap a frame (lui / ori at 0x3D8F5C29): 1 - 0.93^0.5 = 0.0356 at 60
 # (0x3D11F5ED). The first three hold the old value 40 frames first (+0xB4 / +0xBE / the entry's u16): every other frame.
 [[patches.conditional]]
 address = "0x0013CD68"
@@ -336,7 +534,7 @@ address = "0x0013EAA4"
 hook = "km_fps60_countdown_self"
 flag = "fps60"
 replace = true
-[[patches.hooks]] # Gene's bar, the entry's hold (the bnez's delay slot)
+[[patches.hooks]] # the mid-boss bars, the entry's hold (the bnez's delay slot)
 address = "0x001402B4"
 hook = "km_fps60_countdown_self"
 flag = "fps60"

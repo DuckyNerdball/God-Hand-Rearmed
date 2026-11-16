@@ -2338,6 +2338,41 @@ namespace kamite
             constexpr int32_t half = Step / 2;
             SET_GPR_S32(ctx, Reg, GPR_S32(ctx, Reg) + (skipFrame(rdram) ? half : Step - half));
         }
+        // The money counter (cCockPrintData's move func_00143670): the shown number +0x84 (of the object at a2) rolls
+        // toward the gold by 1000 / 100 / 10 / 1 a frame. Replaces lw v1,0x84(a2) at 0x1436BC: on second halves v1 =
+        // value - 1 and the target a0 = 0, so every step test fails and the +1 fallback stores the value back (the
+        // roll steps once a 30 FPS frame; a0 is reloaded right after). For k: hold on the k-1 frames after the tick.
+        void moneyRoll(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            uint32_t value = 0;
+            std::memcpy(&value, rdram + ((GPR_U32(ctx, 6) + 0x84u) & 0x01FFFFFFu), 4);
+            if (skipFrame(rdram))
+            {
+                SET_GPR_U32(ctx, 3, value - 1u);
+                SET_GPR_U32(ctx, 4, 0u);
+            }
+            else
+                SET_GPR_U32(ctx, 3, value);
+        }
+        // The point pop-ups (cCockGetPoint's move func_0013E0B0): each slot's frame +0x33C[i] counts vblanks at 60
+        // (its end test is 71, conditional 0x13E2B4), and its key lookups read it halved, so each 30 FPS frame's rise
+        // is spread over the two vblanks after the pop-up appeared, whichever half that was. Replaces lb v0,0(a0) at
+        // 0x13E148 / 0x13E180. For k: the frame / k, the end 36k - 1.
+        void pointFrame(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            const int8_t frame = static_cast<int8_t>(ram8(rdram, GPR_U32(ctx, 4)));
+            SET_GPR_S32(ctx, 2, frame / 2);
+        }
+        // `l[w|hu|bu] Dst,Offset(Base)` of a count-up whose ++ sits in a branch delay slot: `if (n) { n++; if (n == N)
+        // act }`. On second halves a non-zero n reads one less, so the ++ stores it back unchanged and the test can't
+        // fire (the level meter's follow-up wait 0x3BD6F0, cCockPlBar's move 0x142CCC).
+        template <int Base, uint32_t Offset, int Dst, int Bytes>
+        void countupLoad(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            uint32_t value = 0;
+            std::memcpy(&value, rdram + ((GPR_U32(ctx, Base) + Offset) & 0x01FFFFFFu), Bytes);
+            SET_GPR_U32(ctx, Dst, skipFrame(rdram) && value != 0u ? value - 1u : value);
+        }
         // `lw v0,X(base)` before a countdown whose `addiu v0,v0,-1` sits in a branch delay slot (no hook there): on the
         // skipped frames the loaded value is raised by one and the decrement stores it back unchanged (the zero test
         // is not affected: a non-zero value stays non-zero). Gene's +0x5F8 (0x108D08), cEmManage +0x510/+0x514/+0x530, the
@@ -2770,6 +2805,10 @@ namespace kamite
         ps2xRegisterHostHook("km_fps60_pause_cover_out", &immSplit<2, -32>);
         ps2xRegisterHostHook("km_fps60_shop_fade_in", &immSplit<2, 16>);
         ps2xRegisterHostHook("km_fps60_shop_fade_out", &immSplit<2, -16>);
+        ps2xRegisterHostHook("km_fps60_money_roll", &moneyRoll);
+        ps2xRegisterHostHook("km_fps60_point_frame", &pointFrame);
+        ps2xRegisterHostHook("km_fps60_level_flash_wait", &countupLoad<30, static_cast<uint32_t>(-0x2910), 2, 1>);
+        ps2xRegisterHostHook("km_fps60_cd_guard_s1_23be", &countdownGuard<17, 0x23BEu, 2, 2, 1>);
         ps2xRegisterHostHook("km_fps60_countup_self", &countupSelf);
         // The 1 -> 0 step's guards (countdownGuard): the signed test loads in front of hooked decrements.
         ps2xRegisterHostHook("km_fps60_cd_guard_s1_568", &countdownGuard<17, 0x568u, 2, 2, 1>);
