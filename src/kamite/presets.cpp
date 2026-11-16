@@ -14,16 +14,16 @@ namespace kamite::presets
 {
     // K's text (Nov 16 night; claude/presets-design.md). The same strings in game, in the launcher and on the posters.
     const Text kText[kCount] = {
-        {"CLASSIC", "Classic", "Clover's Vanilla Thrilla", "4:3, Cinetastic 30FPS, Classic Camera & Controls, as handed by God.",
+        {"CLASSIC", "Classic", "Clover's Vanilla Thrilla", "Cinetastic 30FPS, 4:3, Classic Camera & Controls, as handed by God.",
          13},
         {"REMASTERED", "Remastered", "Spitshine Edition",
-         "Adds: Fills your screen, Smooth Sexy Silky 60FPS, Modern Controls, etc.", 17},
+         "Smooth Sexy Silky 60FPS, Fills your screen - edge to edge, Modern Controls, etc.", 17},
         {"REARMED", "Rearmed", "That's the Spice!",
-         "Adds: New Camera, Click-Stick Dash, Dry Spinning, Target Select, Sway Bar, Moveset Presets, Buck Breaker, "
-         "Busta-Chan Jive, and Misqu\xC3\xA9 & Risqu\xC3\xA9.",
+         "Adds: New Cam Angle, Roulette Refinements, Moveset Presets, Buck Breaker, Busta-Chan Jive, and "
+         "Misqu\xC3\xA9 & Risqu\xC3\xA9.",
          18},
         {"SLEAZY MODE", "Sleazy Mode", "...is Now Selectable! For the girl who just wants to have fun.",
-         "Adds: Tension is Placable, Off the Cuff, Cunt Punter, and Wild Curry Funk.", 15},
+         "Adds: Cunt Punter, Tension - Off the Cuff, and Wild Curry Funk.", 15},
     };
     const Text kCustomText = {"CUSTOM", "Custom", "Your own mix.", "Pick a preset to replace it.", 1};
 
@@ -52,7 +52,7 @@ namespace kamite::presets
             {"SkipIntro", {"0", "1", "1", "1"}},
             {"UnlockHard", {"0", "1", "1", "1"}},
             {"RouletteRatchet", {"0", "1", "1", "1"}},
-            {"L3Dash", {"0", "0", "1", "1"}},
+            {"L3Dash", {"0", "1", "1", "1"}}, // Remastered since Nov 16 (K)
             {"RouletteTargetCycle", {"0", "0", "1", "1"}},
             {"RouletteNoOrbs", {"0", "0", "1", "1"}},
             {"SwayBar", {"0", "0", "1", "1"}},

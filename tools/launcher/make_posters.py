@@ -115,7 +115,7 @@ class BMFont:
 
     def width(self, text, px):
         s = px / self.size
-        return sum(self.chars.get(ord(c), self.chars[63])['xadvance'] for c in text) * s
+        return sum(self.chars.get(ord(c), self.chars[63])['xadvance'] for c in text.replace('\u00a0', ' ')) * s
 
     def draw(self, mask, x, y, text, px):
         """Into an L mask at (x, top y), cap ~ px."""
@@ -130,15 +130,40 @@ class BMFont:
             x += g['xadvance'] * s
 
     def wrap(self, text, px, width):
-        out, line = [], ''
-        for wd in text.split(' '):
+        """As few lines as a greedy wrap needs, the words shared out so the lines are as even as possible (K, Nov 16:
+        no word left alone on a line). '&' and ' - ' stay with the words either side ("Misqu\u00e9 & Risqu\u00e9")."""
+        words = text.replace(' & ', '\u00a0&\u00a0').replace(' - ', '\u00a0-\u00a0').split(' ')
+        count, line = 1, ''
+        for wd in words:
             t = (line + ' ' + wd).strip()
             if self.width(t, px) > width and line:
-                out.append(line); line = wd
+                count += 1; line = wd
             else:
                 line = t
-        out.append(line)
-        return out
+        n = len(words)
+        span = lambda i, j: self.width(' '.join(words[i:j]), px)
+        best = {(n, 0): (0.0, [])}  # (from word, lines left) -> (the widest line, the cut points)
+
+        def solve(i, left):
+            if (i, left) in best:
+                return best[(i, left)]
+            out = (float('inf'), [])
+            if left > 0:
+                for j in range(i + 1, n - left + 2):
+                    w = span(i, j)
+                    if w > width and j > i + 1:
+                        break
+                    rest = solve(j, left - 1)
+                    if max(w, rest[0]) < out[0]:
+                        out = (max(w, rest[0]), [j] + rest[1])
+            best[(i, left)] = out
+            return out
+
+        cuts = solve(0, count)[1]
+        lines, i = [], 0
+        for j in cuts:
+            lines.append(' '.join(words[i:j]).replace('\u00a0', ' ')); i = j
+        return lines
 
 
 

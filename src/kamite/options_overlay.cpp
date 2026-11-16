@@ -1400,7 +1400,8 @@ namespace kamite::options_overlay
             return units / kHelpUnitsPerEm;
         }
 
-        // Greedy word wrap at `width` units: the lines.
+        // Greedy word wrap at `width` units: the lines. An '&' or ' - ' stays on the line of both its neighbours (K,
+        // Nov 16: "Misqu\xC3\xA9 & Risqu\xC3\xA9" never breaks).
         std::vector<std::string> wrapAt(const char *text, float cap, float width)
         {
             std::vector<std::string> lines(1);
@@ -1410,7 +1411,8 @@ namespace kamite::options_overlay
                 while (*c == ' ')
                     ++c;
                 const char *end = c;
-                while (*end && *end != ' ')
+                while (*end && (*end != ' ' || ((end[1] == '&' || end[1] == '-') && end[2] == ' ') ||
+                                 (end > c && (end[-1] == '&' || end[-1] == '-') && end[-2] == ' ')))
                     ++end;
                 if (end == c)
                     break;
@@ -1421,6 +1423,54 @@ namespace kamite::options_overlay
                 else
                     line = candidate;
                 c = end;
+            }
+            return lines;
+        }
+    }
+
+    namespace
+    {
+        // The words of a greedy wrap shared out again over as many lines, the widest as narrow as it can be (K, Nov 16:
+        // no word left alone on a line). A line's words stay its words: '&' / ' - ' groups are not split.
+        std::vector<std::string> balance(const std::vector<std::string> &greedy, float cap)
+        {
+            std::vector<std::string> words;
+            for (const std::string &line : greedy)
+            {
+                // the greedy lines' groups: split at the spaces wrapAt splits at
+                const std::vector<std::string> parts = wrapAt(line.c_str(), cap, 0.0f);
+                words.insert(words.end(), parts.begin(), parts.end());
+            }
+            const size_t n = words.size(), count = greedy.size();
+            if (count < 2 || n <= count)
+                return greedy;
+            const auto span = [&](size_t i, size_t j) {
+                std::string text = words[i];
+                for (size_t k = i + 1; k < j; ++k)
+                    text += " " + words[k];
+                return helpTextWidth(text.data(), text.size(), cap);
+            };
+            // widest[i][l]: the narrowest widest line for words i.. on l lines; cut[i][l] the first line's end
+            std::vector<std::vector<float>> widest(n + 1, std::vector<float>(count + 1, 1e30f));
+            std::vector<std::vector<size_t>> cut(n + 1, std::vector<size_t>(count + 1, n));
+            widest[n][0] = 0.0f;
+            for (size_t l = 1; l <= count; ++l)
+                for (size_t i = n; i-- > 0;)
+                    for (size_t j = i + 1; j + (l - 1) <= n; ++j)
+                    {
+                        const float w = std::max(span(i, j), widest[j][l - 1]);
+                        if (w < widest[i][l])
+                            widest[i][l] = w, cut[i][l] = j;
+                    }
+            std::vector<std::string> lines;
+            for (size_t i = 0, l = count; l > 0; --l)
+            {
+                const size_t j = cut[i][l];
+                std::string text = words[i];
+                for (size_t k = i + 1; k < j; ++k)
+                    text += " " + words[k];
+                lines.push_back(text);
+                i = j;
             }
             return lines;
         }
@@ -1445,6 +1495,7 @@ namespace kamite::options_overlay
             lines = wrapAt(band, cap, bandWidth);
         }
         fit.bandCap = cap;
+        lines = balance(lines, cap);
         for (size_t i = 0; i < lines.size(); ++i)
             fit.band += (i ? "\n" : "") + lines[i];
         // The tagline: across the carousel (beside the list on 16:10 and wider, else the whole width), one line.

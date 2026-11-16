@@ -7,6 +7,7 @@ Newest first, one line per change; the code comments say how.
 - Options > Presets, first in the title and pause Options: Classic, Remastered, Rearmed or Sleazy Mode in one go; changing an option a preset sets shows Custom.
 - Launcher Options: a Presets tab with the same four presets.
 - New installs: the launcher first asks how you want to play, with a wanted poster per preset.
+- Presets: new descriptions; Remastered also turns on Click-Stick Dash.
 - Signal Style Switch is on by default.
 - New keyboard & mouse layout for new installs: WASD move, Shift + WASD dodge, Space / E / left click / right click for the face buttons, Q turn, R roulette, F taunt, G God Hand, middle click brawl / freecam, 1-4 styles, Esc pause.
 - Dodge Modifier (Shift by default, rebindable): hold it to dodge with the move keys, in brawl mode and freecam.
