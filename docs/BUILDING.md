@@ -113,3 +113,24 @@ options were on (60 FPS, aspect ratio, character).
   `KAMITE_CALL_PROFILE`, `KAMITE_FIND_COUNTERS`, `KAMITE_TRACE`; F8 in game dumps RAM and the VU1 trace; Shift+F8 writes a hang dump (guest threads, PCs, waits) to the log; F6 writes one
   frame's 2D primitives and every drawn layout's entry table to the log.
 - **Watching upstream:** changes in LasVola's recomp and in the decomp are reviewed weekly and ported when they help.
+- **The README:** the options list, the controls tables, the presets table and the preset tags on the feature lines are
+  generated from the code (`src/kamite/settings_table.cpp`, `presets.cpp`, the default bindings in
+  `runtime/ps2xRuntime/src/lib/ps2_host_input.cpp`): `python -I tools/readme/gen_readme.py` after changing any of them
+  (`--check` tells you if it's stale). It needs a C++ compiler on PATH (c++, g++, clang++ or cl).
+
+### Releases
+
+- **Version:** `src/kamite/version.h` (`KAMITE_VERSION`, the tag without its "v"); raised in the commit a release is
+  built from. The launcher compares it with the GitHub releases and offers newer ones (`src/kamite/launcher_update.cpp`:
+  it downloads the release zip, swaps the program files in and restarts; settings, saves, states, cases, logs, mods and
+  texture packs are never touched).
+- **Release builds:** configure with `-DKAMITE_RELEASE=ON`. It compiles out the developer dump keys and profilers (F2,
+  test cases and crash logs stay), gives the built-in default `GHR.ini` the players' values (a visible window, no time
+  limit) and turns on the update check. It applies to GHR.exe's own code and the runtime only, so switching it doesn't
+  rebuild the generated game code. Dev builds check for updates only with `[Launcher] UpdateTest=1`, and then treat any
+  release as newer (to test the updater on a copy of a play folder).
+- **The zip:** a `God Hand Rearmed` folder holding GHR.exe, its DLLs, `resources/`, a fresh `GHR.ini` (the players'
+  values, no disc image set), `README.txt`, `LICENSE` and `docs/licenses/`; never saves, logs, caches, `mods/`, tools,
+  symbols or dumps. Characters are built from the player's disc, so none ship. The maintainer's builder packs it and
+  publishes it as a GitHub pre-release named after the tag, with the CHANGELOG lines since the last release as its
+  notes and the zip as its one asset (the updater installs the newest release's `.zip`).

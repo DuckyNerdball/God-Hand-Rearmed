@@ -8,6 +8,8 @@ Newest first, one line per change; the code comments say how.
 - Fullscreen: no empty window shows at the switch from the launcher to the game.
 - Launcher: the version shows above the volume; when a new one is out, What's new and Update (downloads and installs it, restarts; your settings, saves and mods stay).
 - Launcher: the Character option shows only when there is a character besides Gene.
+- Options: new help texts for VSync and the Graphics options.
+- README: rewritten for players; bug reports have a template.
 
 ## November 16, 2026
 

@@ -1,0 +1,57 @@
+name: Bug report
+description: Something broke, crashed or plays wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the hit for everyone. The more of this you fill in, the faster it gets fixed.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Bottom right of the launcher, e.g. "v0.6.9 Beta".
+      placeholder: v0.6.9 Beta
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what you got instead. Stage and room help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Drag `logs\kamite.log` (next to GHR.exe) in here. Grab it right after the problem, before starting the game again.
+  - type: dropdown
+    id: fps
+    attributes:
+      label: Does it look like a 60 FPS problem?
+      description: Something too fast, too slow, an animation or enemy acting weird only with 60 FPS on.
+      options:
+        - "No / not sure"
+        - "Yes: I attached a test case (see below)"
+        - "Yes, but I couldn't record a case"
+  - type: markdown
+    attributes:
+      value: |
+        ### Recording a test case (60 FPS problems)
+        A case is one file that lets us replay exactly what you saw, at 30 and at 60, and see where they part ways.
+        1. Give **Record a test case** a key: launcher **Options > Controls > Hotkeys** (or **F2 > Controls** in game). F1 is free.
+        2. In game, get right next to the problem. Press the key, do the one thing that goes wrong, press it again.
+        3. The case lands in the `cases` folder next to GHR.exe as `<date>_<time>.case`. Zip **that one file**.
+        4. Attach the zip here. Over GitHub's 25 MB limit? Upload it anywhere (Google Drive, Mega...) and paste the link.
+  - type: textarea
+    id: case
+    attributes:
+      label: Test case
+      description: The zipped .case file, or a link to it.
+  - type: input
+    id: pc
+    attributes:
+      label: PC
+      description: Windows version, graphics card, controller (if it's about input).
+      placeholder: Windows 11, RTX 3070, Xbox Series pad

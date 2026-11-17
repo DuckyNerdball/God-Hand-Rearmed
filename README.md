@@ -2,86 +2,410 @@
 
 # God Hand: Rearmed
 
-**God Hand: Rearmed** (Project Kamite) is an unofficial, fan-made native PC port of **God Hand** (PlayStation 2, 2006), built by static
-recompilation: the game's own code is rebuilt as a Windows program, with PCSX2's hardware renderer for the graphics.
+**God Hand for PS2. Recompiled, Refined, Rearmed.**
+
+An unofficial, fan-made native PC port of Clover Studio's **God Hand** (PlayStation 2, 2006). The game's own code is
+recompiled into a Windows program: no emulator running the show. It plays start to credits at a smooth 60, on any
+screen, with as much or as little of our own nonsense as you want.
 
 > [!WARNING]
-> **Under construction.** The game plays from start to credits, but the port is still under development.
+> **Beta.** It plays from the first punch to the credits, but expect the odd bug. Found one? [Tell us](#found-a-bug).
 
-> **No game files are included.** Play your own damn copy! (USA, serial SLUS-21503; see
-> [DISC_HASHES.md](DISC_HASHES.md))
+> **No game files included.** Bring your own God Hand disc (USA, SLUS-21503; see [DISC_HASHES.md](DISC_HASHES.md)).
 
-## Features
+<!-- MEDIA: assets/readme/hero.gif — the hero shot: a fight at 60 FPS, widescreen -->
 
-- **Gone Native:** the PS2 program recompiled to C++ for Windows, more platforms coming soon™!
-- **Smooth Sexy Silky 60 FPS:** thousands of fixes to ensure timers are kept at the PS2's speed.
-- **Any aspect ratio** (16:9, 21:9, 32:9...), the HUD at the screen edges or where the PS2 had it, menus in the PS2's
-  proportions or stretched.
-- **Camera options:** field of view, distance and tilt (live in the F2 menu, with presets), fights framed as on the
-  PS2, and enemies whose sense of "in front of Gene" widens with the picture.
-- **HD texture packs** in PCSX2's format, their alpha kept to the game's own levels so nothing turns see-through.
-- **A launcher:** install (pick and check your disc image), play, every option in one place, and Add to Steam (a
-  non-Steam library entry with art).
-- **Quality of life:** Click-Stick Dash, d-pad scrolling in the God Reel, a double-time roulette timer, Hard unlocked from the
-  start, music mute, the blur effects at full resolution.
-- **Controls:** keyboard, mouse and controllers, rebindable in game (F1). Button prompts show the keys and buttons you
-  use at full resolution (Xbox 360, Steam Deck, Switch or keyboard art, picked from your controller or set in the
-  launcher; PlayStation pads keep the game's own). Menu controls Western (south confirms, east cancels; the roulette too) by default, or Japanese or
-  Classic in the launcher; the moves keep their buttons.
-- **Playable characters:** a character system that swaps the player model at the disc level, with an example mod built in.
-- **Diagnostics for developers:** crash and hang logs with function names, PC sampler, call profiler, frame, RAM and
-  GS dumps.
+## Get It Running
 
-## Being worked on
+1. Grab the latest `GHR-v….zip` from [Releases](https://github.com/God-Hand-Rearmed/God-Hand-Rearmed/releases).
+2. Unzip it somewhere you can write to: your Games folder, your Desktop, wherever. **Not Program Files**: the
+   launcher updates the game in place and Windows won't let it write there.
+3. Run **GHR.exe**. Windows SmartScreen may complain about an unknown publisher: **More info > Run anyway**.
+4. Point the launcher at your disc image (.iso) once, and it checks it for you.
+5. Pick a preset, hit **Play**, punch everyone.
 
-- **Modern controls:** a free camera on the right stick or the mouse, camera-relative movement, the radar following
-  the view; pressing the right stick switches to brawl mode (classic controls) and back.
-- **See Through** (experimental): walls between the camera and Gene dissolve round him; walls next to the camera
-  no longer vanish.
-- **Playing the whole game through** on the port: stages 4 to 8, the ending, the Coliseum and the extras.
-- **Characters:** Xavier in cutscenes, hair physics, fewer clipping animations; more characters the same way.
-- **Movesets:** moveset swaps and profiles, move-property tweaks (from the game's motion and event data).
-- **Later:** Vulkan, Linux and Android.
+The very first start compiles the shaders for your graphics card, so the screen may sit on black a little longer than
+you'd like. Patience, Gene.
 
-See [CHANGELOG.md](CHANGELOG.md) for what changed and when.
+When a new version is out, the launcher says so: **What's new** shows the changes, **Update** installs them and
+restarts. Your settings, saves and mods stay where they are.
+
+## What's In It
+
+<!-- MEDIA: assets/readme/launcher.png — the launcher -->
+
+### Gone Native!
+
+Recompiled as a Windows program under Vulkan or DX11; PCSX2 as the renderer until later.
+
+### You've Been Hit by, You've Been Struck by, My Smooth Visuals!
+
+True 60FPS (fists punching swiftly) game logic, that by a thousand fixes was achieved. <!-- tag:Fps60 --> `Remastered+`
+
+<!-- MEDIA: assets/readme/60fps.gif — 30 vs 60 side by side -->
+
+### Wider Than Yo Momma!
+
+I'll kick up your goddamn Aspect Ratio, boy! Up to 32:9. With enemy behavior adjusted, so everyone on screen is
+invited to kick your ass, too! <!-- tag:AspectRatio --> `Remastered+`
+
+No UI stretching in gameplay; menus at 4:3 unless you like 'em on the thicker side!
+
+<!-- MEDIA: assets/readme/ultrawide.jpg — a fight at 21:9 or 32:9 -->
+
+### Modern Controls, Tank Me Later!
+
+Switch between classic tank controls and modern third-person freecam on the fly. <!-- tag:ControlStyle --> `Remastered+`
+
+Includes a toggle to automatically enter Brawl Mode (tank controls) in combat.
+
+### Smokin' S | E | X | Y Style Switching!
+
+Set up Moveset Presets in the Techniques screen, switch with the d-pad in gameplay. <!-- tag:StyleSwitching --> `Rearmed+`
+
+For the Buck Breakers out there, you can also pick your pummel per style. <!-- tag:BuckBreaker --> `Rearmed+`
+
+<!-- MEDIA: assets/readme/styles.gif — switching styles mid-fight -->
+
+### I'm Into BDSM: Bindings & Device Scheme Mappings!
+
+Customizable controls with button prompts for Xbox, PlayStation, Nintendo, Steam, and keyboard and mouse (for the
+freaks who want to play God Hand at their desks).
+
+<!-- MEDIA: assets/readme/controls-collage.png — the controls screens as a collage -->
+
+### Just Liek... Play Game!
+
+Too many choices? How about just one? Pick a preset and get to playing right away.
+
+<!-- MEDIA: assets/readme/presets.png — the first-run wanted posters -->
+
+> **NOTE:** Everything that changes Clover's original gameplay is opt-in, so no bitchin!
+
+### The Presets
+
+<!-- BEGIN GENERATED: presets (tools/readme/gen_readme.py) -->
+| Preset | Tagline | What you get |
+| --- | --- | --- |
+| **Classic** | Clover's Vanilla Thrilla | Cinetastic 30FPS, 4:3, Classic Camera & Controls, as handed by God. |
+| **Remastered** | Spitshine Edition | Smooth Sexy Silky 60FPS, Fills your screen - edge to edge, Modern Controls, etc. |
+| **Rearmed** | That's the Spice! | Adds: New Cam Angle, Roulette Refinements, Moveset Presets, Buck Breaker, Busta-Chan Jive, and Misqué & Risqué. |
+| **Sleazy Mode** | ...is Now Selectable! For the girl who just wants to have fun. | Adds: Cunt Punter, Tension - Off the Cuff, and Wild Curry Funk. |
+<!-- END GENERATED: presets -->
+
+Each one includes everything before it. Change any option a preset sets and you're on **Custom**. The tags below say
+which preset first switches a feature on; `Toggle` means none does, it's yours to flip.
+
+### Everything Else
+
+**Controls**
+- Camera & FOV presets (As on the PS2, Wider, Widest, Action) or your own field of view, distance and tilt; fights still
+  framed the way Clover framed them. <!-- tag:CameraPreset --> `Remastered+`
+- See Through: walls between you and the action go see-through instead of vanishing. <!-- tag:SeeThrough --> `Rearmed+`
+- Menu controls Western, Japanese or Classic: confirm on the button you're used to.
+- Every button rebindable, with a full keyboard & mouse layout and save states (F5 / F9; on a controller, bind them
+  to Select or the back paddles).
+
+**Display & Graphics**
+- Fullscreen (borderless), maximized or windowed; any aspect ratio from 4:3 to 32:9.
+- Internal resolution up to 8x, Vulkan by default with Direct3D 11 as the fallback.
+- Texture filtering from the PS2's own smoothing to Dangerously Crunchy, plus trilinear, anisotropic, FXAA,
+  brightness and depth of field.
+- HD texture packs in PCSX2's format, with the game's own transparency kept intact.
+
+**Interface**
+- The HUD out at the screen edges or where the PS2 had it. <!-- tag:HudLayout --> `Remastered+`
+- Sway Bar: a stun gauge for enemies and bosses. <!-- tag:SwayBar --> `Rearmed+`
+- Button prompts that follow your controller (Xelu's prompt art; PlayStation pads keep the game's own).
+
+**Gameplay**
+- Click-Stick Dash: press and hold the stick to dash. <!-- tag:L3Dash --> `Remastered+`
+- Intro Skipper: straight to the main menu. <!-- tag:SkipIntro --> `Remastered+`
+- Hard-On: Hard difficulty from the start, no clear needed. <!-- tag:UnlockHard --> `Remastered+`
+- Target Select: switch roulette targets with the right stick or the d-pad. <!-- tag:RouletteTargetCycle --> `Rearmed+`
+- Dry Spinning: open the roulette with no balls to your name. <!-- tag:RouletteNoOrbs --> `Rearmed+`
+- Busta-Chan Jive: sprint attacks slide under and vault over railings and through windows. <!-- tag:SprintTraversal --> `Rearmed+`
+- Misqué & Risqué: better shop and casino poses, and the Money and Cash sliders. <!-- tag:Money --> `Rearmed+`
+- Cunt Punter: Ball Buster works on women. <!-- tag:BallBusterWomen --> `Sleazy Mode`
+- Tension is Placable: leash the God Hand early and keep what's left; Off the Cuff unleashes it with any Tension.
+  <!-- tag:TensionPlacable --> `Sleazy Mode`
+- Wild Curry Funk: pick up, carry and throw chairs. Mostly chairs. <!-- tag:LiftChairs --> `Sleazy Mode`
+- Roulette Timer: double time to pick your move. <!-- tag:RouletteTimer --> `Toggle`
+
+**Sound**
+- Separate Music, Sound Effects and Voices volumes; Roulette Ratchet clicks as you flick. <!-- tag:RouletteRatchet --> `Remastered+`
+
+**The Launcher**
+- Install and check your disc, every option in one place, presets, Add to Steam (a library entry with art), and
+  updates in place.
+
+## Controls
+
+Defaults for new installs. Everything is rebindable in **Options > Controls** in game and in the launcher.
+
+<!-- BEGIN GENERATED: controls (tools/readme/gen_readme.py) -->
+| Action | Controller | Keyboard & mouse |
+| --- | --- | --- |
+| Move | Left stick | W A S D |
+| Dodge | Right stick | Shift + W A S D |
+| Combo | X / □ | Left click |
+| Assigned move | Y / △ | Right click |
+| Assigned move | A / ✕ | Space |
+| Action (talk, pick up, open) | B / ○ | E |
+| 180° turn | LB / L1 | Q |
+| Roulette | RB / R1 | R |
+| Taunt | LT / L2 | F |
+| Unleash the God Hand | RT / R2 | G |
+| Brawl mode / freecam *(Modern Control Style)* | Right stick click | Middle click |
+| Dash *(Click-Stick Dash on the controller)* | Left stick click | Double-tap a direction |
+| Styles S / E / X / Y *(Moveset Presets)* | D-pad up / right / down / left | 1 2 3 4 |
+| Pause | Start / Options | Esc |
+<!-- END GENERATED: controls -->
+
+In menus the keyboard works as you'd expect: arrows or WASD to move, Enter / Space to confirm, Esc / Backspace to go
+back, Q / E to switch tabs. **F2** opens the developer menu (live camera, poses, debug switches); **F3** the FPS counter;
+**F11** fullscreen.
+
+## Options
+
+Every option, with the same help text you'll see in the launcher and in game.
+
+<!-- BEGIN GENERATED: options (tools/readme/gen_readme.py) -->
+<details>
+<summary><b>Controls</b></summary>
+
+**Camera**
+
+- **Camera & FOV:** How far you see to the side. Works with Aspect Ratio; enemies adapt. *As on the PS2 / Wider / Widest / Action / Custom* (F2 while playing tunes it live) `Remastered+`
+  - **Field of View:** How much the camera shows, both ways, outside fights. *100%: as on the PS2 / 110% / 120% / 130% / 140% / 150%*
+  - **Field of View in Fights:** The same while the game's battle camera is on (Gene has an enemy targeted). 100% frames fights as on the PS2. *100%: as on the PS2 / 110% / 120% / 130% / 140% / 150%*
+  - **Camera Distance:** At a wider field of view, how far back the camera stays. 0% keeps Gene the size he is at 100%; 100% shows more round him. *0%: Gene keeps his size / 50%: halfway out / 100%: wider view looks zoomed out*
+  - **Camera Tilt:** At a wider field of view, the camera also rises and looks down at Gene by this much: more of the floor ahead, less sky. *None / 5 degrees / 10 degrees / 15 degrees*
+- **Steady Idle Cam:** Whether the camera bobs with Gene. (F2 > Camera switches it while playing)
+- **See Through:** Instead of removing walls, the camera sees through them around Gene and enemies. (F2 > Camera sizes it while playing) `Rearmed+`
+
+**Controller**
+
+- **Vibration:** Controller rumble. Girls know what it's for.
+- **Menu Controls:** Western: bottom button confirms; right cancels. Japanese: right button confirms; bottom cancels. *Western / Japanese / Classic*
+
+</details>
+<details>
+<summary><b>Display</b></summary>
+
+**Game Window**
+
+- **Display Mode:** Window, max window, or borderless fullscreen. You can also use F11, if you're into that. *Fullscreen (Borderless) / Maximized Window / Window*
+  - **Window Size:** The window's size when it opens (not maximized or fullscreen). *Automatic (follows internal resolution) / PS2 size*
+- **Aspect Ratio:** Screen width from 4:3 to wider than yo momma! *4:3 (the PS2's) / 16:9 / 16:10 / 21:9 / 32:9 / Match the screen* `Remastered+`
+- **VSync:** On: no screen tearing. Off: for G-Sync / FreeSync. Everyone else gets torn up. *On / Off*
+
+</details>
+<details>
+<summary><b>Graphics</b></summary>
+
+**Renderer**
+
+- **Graphics API:** Default: Vulkan | Fallback: DX11 *Vulkan / Direct3D 11*
+- **Internal Resolution:** 1x: 448p | 2x: 896p | 3x: 1344p | 4x: 1792p *1x native (512x448) / 2x 1024x896 / 3x 1536x1344 / 4x 2048x1792 / 5x 2560x2240 / 6x 3072x2688 / 8x 4096x3584*
+
+**Textures**
+
+- **Texture Filtering:** PS2: the game's own smoothing. Crunchy: unfiltered 3D. Dangerously Crunchy: the UI too. Pixel freaks only. *PS2 (Bilinear) / Crunchy (Unfiltered 3D) / Dangerously Crunchy (3D+UI)*
+- **Trilinear Filtering:** PS2: as Clover drew it. Forced: blends into the distance, so far-off textures stop shimmering. *PS2 / Forced*
+- **Anisotropic Filtering:** Keeps floors and walls sharp at a slant. Costs next to nothing. Max it out. *Off / 2x / 4x / 8x / 16x*
+
+**Effects**
+
+- **Anti-Aliasing:** FXAA smooths jagged edges. Softens the picture a little. Gene stays rough. *FXAA / Off*
+- **Brightness:** 100% is the game as it was. Turn it up if you can't see who's kicking you. *50% to 150%*
+- **Post Effects:** The blur effects (depth of field, heat haze) are drawn from small copies of the frame. PS2 resolution keeps them aligned but grainy at high internal resolutions; Upscaled draws them sharp. *PS2 resolution (PCSX2's fix) / Upscaled / No fix*
+- **Depth of Field:** Blur in the distance. It can't hurt you. (F2 switches it while playing)
+
+</details>
+<details>
+<summary><b>Interface</b></summary>
+
+**HUD**
+
+- **HUD Layout:** Where the health bar, radar, and the rest of the in-game HUD go on a wide screen. Wider than 16:9 keeps them at the edges of a 16:9 area. *16:9: HUD at the screen edges / 4:3: HUD where the PS2 had it* (F7 switches it while playing) `Remastered+`
+- **Enemy Life Gauge:** Select whether to display an enemy's life gauge.
+- **Sway Bar:** Stun gauge for enemies and bosses. Fills up till they're stunned, then drains. `Rearmed+`
+
+**Menus & Prompts**
+
+- **Menu Width:** Menus and screens (pause, options, roulette setup) are drawn for 4:3: shown 4:3 with side bars, or stretched to the screen. *4:3: as on the PS2, with side bars / Stretched to the screen*
+- **Button Prompts:** Controller button hint style. This choice reflects your value as a person. *Automatic (follows your controller) / Xbox / PlayStation (the game's own) / Nintendo Switch / Steam*
+
+**Overlays**
+
+- **FPS Counter:** Framerate and game speed statistics.
+
+</details>
+<details>
+<summary><b>Gameplay</b></summary>
+
+**Speed & Feed**
+
+- **60 FPS:** Play at a smooth sexy silky 60FPS. Leave OFF if you want the OG experience. `Remastered+`
+
+**Move & Groove**
+
+- **Control Style: Pad:** Classic: PS2's OG fixed facing brawling. Modern: Toggle third-person freecam. *Classic / Modern* (F2 > Controls changes it while playing) `Remastered+`
+  - **Modern: Auto:** Brawling starts when dealing or taking damage. Press the stick (rebindable) to go back to freecam. `Remastered+`
+- **Control Style: KBM:** Keyboard & mouse. Classic: PS2's OG brawling. Modern: mouse freecam. *Classic / Modern* `Remastered+`
+  - **Modern: Auto:** Brawling starts when dealing or taking damage. Middle-click (rebindable) to go back to freecam.
+  - **Modern: Mouse Look:** Freak... (F2 > Controls sets the sensitivity)
+- **Click-Stick Dash:** Press and hold the stick to dash. Rebindable in Controls. `Remastered+`
+- **Busta-Chan Jive:** Sprint attacks go through 99% of obstacles. Slide right through, swooce right over. (F2 > Debug > Stage collision marks them) `Rearmed+`
+
+**Style Shuffle**
+
+- **Moveset Presets:** Configure up to 4 styles; switch with the d-pad. Letters around the radar show your sweet sexy styles. `Rearmed+`
+  - **Signal Style Switch:** Gene calls out each style as you switch to it, and his God Hand flashes. `Rearmed+`
+- **Buck Breaker:** Pick how to punish stunned enemies. Works with Moveset Presets. Some restrictions apply. `Rearmed+`
+
+**Fightin' Excitement**
+
+- **Cunt Punter:** Ball Buster works on women. Name changes on target. This also works IRL, though your mileage may vary. `Sleazy Mode`
+- **Tension is Placable:** After unleashing the God Hand, pull the trigger again to leash it early and keep your remaining Tension. `Sleazy Mode`
+  - **Off the Cuff:** Unleash the God Hand with any Tension, not just full. Gene is invulnerable only when unleashing at full Tension. `Sleazy Mode`
+- **Wild Curry Funk:** Carry and throw more types of objects. Mostly chairs. If it's not obvious, this makes the game easier. `Sleazy Mode`
+
+**Roulette Charrette**
+
+- **Roulette Timer:** Time limit to select a move after opening the Roulette. Techniques fire off automatically at the end of the timer. *Normal / Double time*
+- **Target Select:** Switch Roulette targets with the right stick and the d-pad. HINT: You can also use the d-pad to cycle Roulette moves. `Rearmed+`
+- **Dry Spinning:** You can open the Roulette even when you don't have balls. HINT: You can use the Roulette camera for targeting. `Rearmed+`
+
+**Skip Poker**
+
+- **Intro Skipper:** Start at the main menu: no Capcom and Clover logos and no "Press Start" screen. `Remastered+`
+- **Hard-On:** Hard can be picked from the start instead of after a clear. Your save is not changed. `Remastered+`
+
+**Misqué & Risqué**
+
+- **Better Shop & Casino Poses:** Give the shop and casino people better poses. Not sure what else you were expecting... (F2 > NPCs sets the poses) `Rearmed+`
+- **Cash:** Recommended: 115% *100% to 130%* `Rearmed+`
+- **Money:** Recommended: 115% *85% to 130%* `Rearmed+`
+
+</details>
+<details>
+<summary><b>Sound</b></summary>
+
+**Sound**
+
+- **Mode:** Select between monaural, stereo, or surround sound. *Mono / Stereo / Dolby Pro Logic II*
+- **Roulette Ratchet:** When you flick, it clicks. `Remastered+`
+
+**Volume**
+
+- **Music:** Set stage, boss, menu, and minigame music volume. *0% to 100%*
+- **Sound Effects:** Set the volume of ingame sound effects. *0% to 100%*
+- **Voices:** Set the volume of ingame voice lines. Cutscene music and voices are one track. *0% to 100%*
+
+</details>
+<details>
+<summary><b>Mods</b></summary>
+
+**Texture Packs**
+
+- **Replacement Textures:** HD texture packs in PCSX2's format.
+
+</details>
+<!-- END GENERATED: options -->
+
+## FAQ
+
+**Is this legal?**
+The port ships code, not the game: no Capcom assets, art, music or disc files. It only runs with a disc image you
+dumped from your own copy.
+
+**Which disc?**
+The USA release (SLUS-21503). Others may work; that's the one it's tested with. [DISC_HASHES.md](DISC_HASHES.md) has
+the checksums.
+
+**Why is the screen black for a while on the first start?**
+The shaders are being compiled for your graphics card. Once. After that it's quick.
+
+**Windows SmartScreen is yelling at me.**
+The exe isn't signed (certificates cost money; this is free). **More info > Run anyway**.
+
+**Steam Deck? Linux?**
+Coming. For now it's Windows; Proton may well run it, but nobody's promising anything yet.
+
+**Will my PCSX2 texture pack work?**
+Yes: packs in PCSX2's format (a `replacements` folder). Put it in `textures/SLUS-21503` next to GHR.exe, or point the
+launcher's **Mods > Texture Packs** at it.
+
+**Can I bring my PCSX2 saves?**
+Not yet. The port keeps its own memory card in `memcards\mc0`.
+
+**Where are my saves?**
+`memcards\mc0` (the game's saves) and `states` (save states), next to GHR.exe. Updates never touch them.
+
+**How do I update?**
+Start the launcher. If a new version is out, press **Update**. That's it.
+
+**I want it at 30 FPS.**
+Switch off **60 FPS** in Options > Gameplay, or pick the **Classic** preset.
+
+## Found a Bug?
+
+Open an [issue](https://github.com/God-Hand-Rearmed/God-Hand-Rearmed/issues/new/choose) with your version (bottom
+right of the launcher), what happened and `logs\kamite.log`. If something feels off at 60 FPS (too fast, too slow,
+an enemy acting weird), the template explains how to record a **test case** of it: one file that shows us exactly what
+you saw.
+
+## Coming Soon
+
+- **Linux / Steam Deck, Android and Mac.**
+- **Photo mode** with a free camera.
+- **Subtitles** for the cutscenes.
+- **More playable characters.**
+
+Building it yourself, or curious how it works? See [docs/BUILDING.md](docs/BUILDING.md). What changed and when:
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Credits
 
-- [LasVola/godhand-recomp](https://github.com/LasVola/godhand-recomp): the recompilation God Hand: Rearmed started from (the
-  running game, the SNR2 overlay loader, the button prompts, the first fixes), built on
-  [PS2Recomp](https://github.com/ran-j/PS2Recomp) by ran-j and contributors, the
-  [sotc-port runtime fork](https://github.com/LightVelox/PS2Recomp) by LightVelox, and the
-  [Urban Reign port](https://github.com/thiagordsfx/urban-reign-recomp) by thiagordsfx (runtime, VU1 compiler, sound,
-  PCSX2 graphics bridge).
+God Hand: Rearmed is directed, play-tested and written by K, built with AI assistance (Claude by Anthropic), with ideas
+and testing from the boys.
+
+**Built on**
+- [LasVola/godhand-recomp](https://github.com/LasVola/godhand-recomp): the recompilation God Hand: Rearmed started from
+  (the running game, the SNR2 overlay loader, the first fixes), built on [PS2Recomp](https://github.com/ran-j/PS2Recomp)
+  by ran-j and contributors, the [sotc-port runtime fork](https://github.com/LightVelox/PS2Recomp) by LightVelox, and
+  the [Urban Reign port](https://github.com/thiagordsfx/urban-reign-recomp) by thiagordsfx (runtime, VU1 compiler,
+  sound, PCSX2 graphics bridge).
+- [PCSX2](https://github.com/PCSX2/pcsx2): the hardware renderer and the game's GameIndex fixes.
+- [Ace Combat 5 static recompilation](https://github.com/sal063/Ace-Combat-5-Static-recompilation): the movie decoder
+  (Apache-2.0).
+
+**Thanks to the researchers**
 - [LucasPicoli/god-hand-decomp](https://github.com/LucasPicoli/god-hand-decomp) and its contributors: function names,
   boundaries and structures.
-- [PCSX2](https://github.com/PCSX2/pcsx2): the hardware renderer in `thirdparty/` and the game's GameIndex fixes.
-- The "60 Fps" and "Widescreen 16:9" PCSX2 patches for SLUS-21503 (Puggsy and others): the basis of the 60 FPS mode
-  and the aspect-ratio support.
-- [anasrar/chihuahua](https://github.com/anasrar/chihuahua) (MIT): file-format knowledge and the motion reader
-  `tools/models/mot.py` is ported from.
+- The "60 Fps" and "Widescreen 16:9" PCSX2 patches for SLUS-21503 (Puggsy and others): where the 60 FPS mode and the
+  aspect-ratio support started.
+- [anasrar/chihuahua](https://github.com/anasrar/chihuahua) (MIT): file-format knowledge and the motion reader.
 - [akitotheanimator/God-Hand-Tools](https://github.com/akitotheanimator/God-Hand-Tools) (with CarLoiD, Kerilk and Roni
-  Evil): model, motion and motion-event format knowledge.
+  Evil): model, motion and motion-event formats.
+
+**Borrowed with love**
 - Nicolae "Xelu" Berbece (Those Awesome Guys): [Xelu's free controller and keyboard prompts](https://opengameart.org/content/free-keyboard-and-controllers-prompts-pack)
-  (CC0), the button prompt art in `resources/prompts/xelu` (but the Nintendo L / R shoulders, the port's own).
-- [Quaternius](https://quaternius.com): the Universal Animation Library 1 and 2 (CC0), the NPC poses' rail lean, dance and
+  (CC0), the button prompts (the Nintendo L / R shoulders are our own).
+- [Quaternius](https://quaternius.com): the Universal Animation Library 1 and 2 (CC0), the NPCs' rail lean, dance and
   folded-arms idle.
-- [Denys Almaral](https://denysalmaral.com): the Free Animation Pack for City People, two of the NPC poses' idles.
-- masterlynx: the cover art of the Steam library entry (`resources/images/steam_cover.jpg`, used with the artist's
-  permission).
+- [Denys Almaral](https://denysalmaral.com): the Free Animation Pack for City People, two of the NPCs' idles.
+- masterlynx: the Steam library cover art, used with the artist's permission.
 - Harold Lohner ([haroldsfonts.com](http://www.haroldsfonts.com)): the Dominican font of the launcher's splash text.
-- Dennis Ludlow / Sharkshock ([sharkshock.net](http://www.sharkshock.net)): the Wendyville font of the first-run
-  posters' titles (baked into `resources/presets`; its readme in `docs/licenses`).
+- Dennis Ludlow / Sharkshock ([sharkshock.net](http://www.sharkshock.net)): the Wendyville font of the wanted posters.
 - The Holtwood One SC Project Authors: [Holtwood One SC](https://fonts.google.com/specimen/Holtwood+One+SC) (OFL-1.1),
   the posters' SELECTED stamp.
 - The Archivo Narrow Project Authors: [Archivo Narrow](https://github.com/Omnibus-Type/ArchivoNarrow) (OFL-1.1), the
-  OPTIONS screen's labels (a SemiBold instance in `resources/fonts`).
+  OPTIONS screen's labels.
 - Bitstream and the DejaVu fonts team: [DejaVu Sans](https://dejavu-fonts.github.io) (Bitstream Vera licence), the
   OPTIONS screen's help text.
-- [Ace Combat 5 static recompilation](https://github.com/sal063/Ace-Combat-5-Static-recompilation): the movie decoder
-  (Apache-2.0).
-- God Hand: Rearmed is directed, play-tested, and written by K, built with AI assistance (Claude by Anthropic), with ideas and
-  testing from the boys.
 
 ## Legal
 
