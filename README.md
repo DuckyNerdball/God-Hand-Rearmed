@@ -150,6 +150,12 @@ which preset first switches a feature on; `Toggle` means none does, it's yours t
 - Install and check your disc, every option in one place, presets, Add to Steam (a library entry with art), and
   updates in place.
 
+**Muscleanious Improvements**
+> The following are default features of GHR you'll have to deal with cause I ain't cluttering the options any more than they already are:
+- Spin Me Right Round: You can rotate Gene on the Techniques screen with the Right Stick.
+- Roulette Finesse: You can scroll the Roulette with the d-pad, up and down too.
+- Don't Not Fix What's Not Broken't: A bunch of base game bugs and minor issues were fixed.
+
 ## Controls
 
 Defaults for new installs. Everything is rebindable in **Options > Controls** in game and in the launcher.
