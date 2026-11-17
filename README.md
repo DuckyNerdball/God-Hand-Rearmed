@@ -9,55 +9,64 @@ recompiled into a Windows program: no emulator running the show. It plays start 
 screen, with as much or as little of our own nonsense as you want.
 
 > [!WARNING]
-> **Beta.** It plays from the first punch to the credits, but expect the odd bug. Found one? [Tell us](#found-a-bug).
+> **Beta!** Plays from the first punch to the credits, but expect the odd bug. Found one? [Tell us](#found-a-bug).
 
-> **No game files included.** Bring your own God Hand disc (USA, SLUS-21503; see [DISC_HASHES.md](DISC_HASHES.md)).
+> **No game files included!** Play your own damn copy! (USA, SLUS-21503); see [DISC_HASHES.md](DISC_HASHES.md)).
 
 <!-- MEDIA: assets/readme/hero.gif — the hero shot: a fight at 60 FPS, widescreen -->
 
 ## Get It Running
 
 1. Grab the latest `GHR-v….zip` from [Releases](https://github.com/God-Hand-Rearmed/God-Hand-Rearmed/releases).
-2. Unzip it somewhere you can write to: your Games folder, your Desktop, wherever. **Not Program Files**: the
-   launcher updates the game in place and Windows won't let it write there.
-3. Run **GHR.exe**. Windows SmartScreen may complain about an unknown publisher: **More info > Run anyway**.
+2. Unzip it somewhere you can write to, **Not Program Files**!
+    * The launcher updates the game in place and Windows won't let it write there.
+3. Run **GHR.exe**. 
+    * Windows SmartScreen may complain about an unknown publisher: **More info > Run anyway**.
 4. Point the launcher at your disc image (.iso) once, and it checks it for you.
-5. Pick a preset, hit **Play**, punch everyone.
+5. Pick a preset and hit "**Play**"! 
+    * Beat thugs™, demons™, women™!
 
-The very first start compiles the shaders for your graphics card, so the screen may sit on black a little longer than
-you'd like. Patience, Gene.
+The first start compiles shaders for your GPU, so the screen may stay black before coming back. Patience, young ass-whooper.
 
 When a new version is out, the launcher says so: **What's new** shows the changes, **Update** installs them and
-restarts. Your settings, saves and mods stay where they are.
+restarts. Your settings, saves, and mods stay where they are.
 
 ## What's In It
 
 <!-- MEDIA: assets/readme/launcher.png — the launcher -->
 
-### Gone Native!
+### God Hand - Gone Native!
 
 Recompiled as a Windows program under Vulkan or DX11; PCSX2 as the renderer until later.
+
+---
 
 ### You've Been Hit by, You've Been Struck by, My Smooth Visuals!
 
 True 60FPS (fists punching swiftly) game logic, that by a thousand fixes was achieved. <!-- tag:Fps60 --> `Remastered+`
 
 <!-- MEDIA: assets/readme/60fps.gif — 30 vs 60 side by side -->
+---
 
 ### Wider Than Yo Momma!
 
-I'll kick up your goddamn Aspect Ratio, boy! Up to 32:9. With enemy behavior adjusted, so everyone on screen is
+I'll kick up your goddamn Aspect Ratio, boy! 
+
+Up to 32:9. With enemy behavior adjusted, so everyone on screen is
 invited to kick your ass, too! <!-- tag:AspectRatio --> `Remastered+`
 
 No UI stretching in gameplay; menus at 4:3 unless you like 'em on the thicker side!
 
 <!-- MEDIA: assets/readme/ultrawide.jpg — a fight at 21:9 or 32:9 -->
+---
 
 ### Modern Controls, Tank Me Later!
 
 Switch between classic tank controls and modern third-person freecam on the fly. <!-- tag:ControlStyle --> `Remastered+`
 
 Includes a toggle to automatically enter Brawl Mode (tank controls) in combat.
+
+---
 
 ### Smokin' S | E | X | Y Style Switching!
 
@@ -67,12 +76,16 @@ For the Buck Breakers out there, you can also pick your pummel per style. <!-- t
 
 <!-- MEDIA: assets/readme/styles.gif — switching styles mid-fight -->
 
+---
+
 ### I'm Into BDSM: Bindings & Device Scheme Mappings!
 
 Customizable controls with button prompts for Xbox, PlayStation, Nintendo, Steam, and keyboard and mouse (for the
 freaks who want to play God Hand at their desks).
 
 <!-- MEDIA: assets/readme/controls-collage.png — the controls screens as a collage -->
+
+---
 
 ### Just Liek... Play Game!
 
@@ -99,12 +112,10 @@ which preset first switches a feature on; `Toggle` means none does, it's yours t
 ### Everything Else
 
 **Controls**
-- Camera & FOV presets (As on the PS2, Wider, Widest, Action) or your own field of view, distance and tilt; fights still
-  framed the way Clover framed them. <!-- tag:CameraPreset --> `Remastered+`
+- Camera & FOV presets (As on the PS2, Wider, Widest, Action) or your own field of view, distance and tilt; enemies conduct themselves accordingly at any setting. <!-- tag:CameraPreset --> `Remastered+`
 - See Through: walls between you and the action go see-through instead of vanishing. <!-- tag:SeeThrough --> `Rearmed+`
-- Menu controls Western, Japanese or Classic: confirm on the button you're used to.
-- Every button rebindable, with a full keyboard & mouse layout and save states (F5 / F9; on a controller, bind them
-  to Select or the back paddles).
+- Menu controls - Western, Japanese or Classic: confirm on the button you're used to.
+- (Nearly) every button rebindable, with a full keyboard & mouse layout and save states (F5 / F9; Select / Select + Start).
 
 **Display & Graphics**
 - Fullscreen (borderless), maximized or windowed; any aspect ratio from 4:3 to 32:9.
@@ -119,17 +130,17 @@ which preset first switches a feature on; `Toggle` means none does, it's yours t
 - Button prompts that follow your controller (Xelu's prompt art; PlayStation pads keep the game's own).
 
 **Gameplay**
-- Click-Stick Dash: press and hold the stick to dash. <!-- tag:L3Dash --> `Remastered+`
-- Intro Skipper: straight to the main menu. <!-- tag:SkipIntro --> `Remastered+`
+- Click-Stick Dash: press and hold the stick (or bind) to dash. <!-- tag:L3Dash --> `Remastered+`
+- Intro Skipper: skip developer intros straight to the title screen. <!-- tag:SkipIntro --> `Remastered+`
 - Hard-On: Hard difficulty from the start, no clear needed. <!-- tag:UnlockHard --> `Remastered+`
-- Target Select: switch roulette targets with the right stick or the d-pad. <!-- tag:RouletteTargetCycle --> `Rearmed+`
-- Dry Spinning: open the roulette with no balls to your name. <!-- tag:RouletteNoOrbs --> `Rearmed+`
+- Target Select: switch Roulette targets with the right stick or the d-pad. <!-- tag:RouletteTargetCycle --> `Rearmed+`
+- Dry Spinning: open the Roulette with no balls to your name. <!-- tag:RouletteNoOrbs --> `Rearmed+`
 - Busta-Chan Jive: sprint attacks slide under and vault over railings and through windows. <!-- tag:SprintTraversal --> `Rearmed+`
-- Misqué & Risqué: better shop and casino poses, and the Money and Cash sliders. <!-- tag:Money --> `Rearmed+`
+- Misqué & Risqué: better shop and casino poses, and more. <!-- tag:Money --> `Rearmed+`
 - Cunt Punter: Ball Buster works on women. <!-- tag:BallBusterWomen --> `Sleazy Mode`
 - Tension is Placable: leash the God Hand early and keep what's left; Off the Cuff unleashes it with any Tension.
   <!-- tag:TensionPlacable --> `Sleazy Mode`
-- Wild Curry Funk: pick up, carry and throw chairs. Mostly chairs. <!-- tag:LiftChairs --> `Sleazy Mode`
+- Wild Curry Funk: pick up, carry and throw more objects. Mostly chairs. <!-- tag:LiftChairs --> `Sleazy Mode`
 - Roulette Timer: double time to pick your move. <!-- tag:RouletteTimer --> `Toggle`
 
 **Sound**
@@ -318,36 +329,35 @@ Every option, with the same help text you'll see in the launcher and in game.
 ## FAQ
 
 **Is this legal?**
-The port ships code, not the game: no Capcom assets, art, music or disc files. It only runs with a disc image you
-dumped from your own copy.
+GHR ships no games assets or disc files. It only runs with a disc image you dumped from your own damn copy.
 
 **Which disc?**
 The USA release (SLUS-21503). Others may work; that's the one it's tested with. [DISC_HASHES.md](DISC_HASHES.md) has
 the checksums.
 
 **Why is the screen black for a while on the first start?**
-The shaders are being compiled for your graphics card. Once. After that it's quick.
+The shaders are being compiled for your GPU. Once. After that it's quick.
 
 **Windows SmartScreen is yelling at me.**
 The exe isn't signed (certificates cost money; this is free). **More info > Run anyway**.
 
 **Steam Deck? Linux?**
-Coming. For now it's Windows; Proton may well run it, but nobody's promising anything yet.
+Coming. For now it's Windows; Proton may run it, but no promises for now.
 
 **Will my PCSX2 texture pack work?**
 Yes: packs in PCSX2's format (a `replacements` folder). Put it in `textures/SLUS-21503` next to GHR.exe, or point the
 launcher's **Mods > Texture Packs** at it.
 
 **Can I bring my PCSX2 saves?**
-Not yet. The port keeps its own memory card in `memcards\mc0`.
+The port keeps its own memory card in `memcards\mc0`.
 
 **Where are my saves?**
 `memcards\mc0` (the game's saves) and `states` (save states), next to GHR.exe. Updates never touch them.
 
 **How do I update?**
-Start the launcher. If a new version is out, press **Update**. That's it.
+Start the launcher. If a new version is out, press **Update**. That's it!
 
-**I want it at 30 FPS.**
+**I want it at 30 FPS!**
 Switch off **60 FPS** in Options > Gameplay, or pick the **Classic** preset.
 
 ## Found a Bug?
