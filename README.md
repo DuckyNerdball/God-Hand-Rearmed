@@ -159,7 +159,7 @@ Defaults for new installs. Everything is rebindable in **Options > Controls** in
 | --- | --- | --- |
 | Move | Left stick | W A S D |
 | Dodge | Right stick | Shift + W A S D |
-| Combo | X / ◻ | Left click |
+| Combo | X / ▢ | Left click |
 | Assigned move | Y / △ | Right click |
 | Assigned move | A / ✕ | Space |
 | Action (talk, pick up, open) | B / ○ | E |
