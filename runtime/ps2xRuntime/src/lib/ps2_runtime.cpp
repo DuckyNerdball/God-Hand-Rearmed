@@ -753,6 +753,11 @@ namespace
 }
 
 void ps2xHostVsyncSetWindow(void *window) noexcept; // Kernel/host_vsync.cpp
+#if defined(_WIN32)
+bool ps2xHostReplacesLauncherWindow() noexcept; // Kernel/host_window_win32.cpp
+void ps2xHostHandoffCoverShow(void *window) noexcept;
+void ps2xHostHandoffCoverHide() noexcept;
+#endif
 void ps2xEeFlushDeferredCycles() noexcept; // Kernel/EeScheduler.cpp
 
 static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint32_t &outHeight,
@@ -1164,13 +1169,35 @@ static void shapeWindowToAspect()
 
 
 // The game window (raylib): made once, by the port's launcher or by PS2Runtime::initialize; a second call keeps the
-// window and applies the size and fullscreen settings again if they changed.
+// window (except a launcher's borderless one on Windows, below) and applies the size and fullscreen settings again if
+// they changed.
 void ps2_host_display::openHostWindow(const char *title)
 {
 #if defined(PLATFORM_VITA)
     if (!IsWindowReady())
         InitWindow(HOST_WINDOW_WIDTH, HOST_WINDOW_HEIGHT, title);
 #else
+    // A launcher's borderless window is replaced on Windows (Kernel/host_window_win32.cpp says why): closed unseen
+    // behind a black cover, made again hidden, shaped, then shown. Wine keeps it.
+    bool showWhenShaped = false;
+    static std::string s_appliedSize; // the window size last applied (below)
+#if defined(_WIN32)
+    if (IsWindowReady() && IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE) && ps2xHostReplacesLauncherWindow())
+    {
+        ps2xHostHandoffCoverShow(GetWindowHandle());
+        const Vector2 origin = GetMonitorPosition(GetCurrentMonitor());
+        SetWindowState(FLAG_WINDOW_HIDDEN);
+        ToggleBorderlessWindowed(); // raylib keeps its flags across CloseWindow: leave them as a plain window's
+        CloseWindow();
+        SetConfigFlags(FLAG_WINDOW_HIDDEN | FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_ALWAYS_RUN |
+                       (ps2_host_display::vsyncEnabled() ? FLAG_VSYNC_HINT : 0u));
+        InitWindow(HOST_WINDOW_WIDTH, HOST_WINDOW_HEIGHT, title);
+        SetWindowPosition(static_cast<int>(origin.x) + 32, static_cast<int>(origin.y) + 32); // the launcher's monitor
+        showWhenShaped = true;
+        s_appliedSize.clear(); // a new window: its size is applied again
+        std::cerr << "[window] the launcher's borderless window replaced by a new one" << std::endl;
+    }
+#endif
     // Real vsync (PS2X_VSYNC=0 goes back to the software 60 FPS limiter): the limiter was not aligned with the
     // monitor's refresh, so presents landed at a drifting phase and frames were shown for 1 or 3 refreshes.
     if (!IsWindowReady())
@@ -1178,11 +1205,10 @@ void ps2_host_display::openHostWindow(const char *title)
         SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_ALWAYS_RUN | (ps2_host_display::vsyncEnabled() ? FLAG_VSYNC_HINT : 0u));
         InitWindow(HOST_WINDOW_WIDTH, HOST_WINDOW_HEIGHT, title);
     }
-    else
+    else if (!showWhenShaped)
         SetWindowTitle(title);
     // Window size (PS2X_WINDOW_SIZE): "auto" (default) = the internal resolution's height (448 x PS2X_GS_SCALE, at most
     // 9/10 of the monitor's) in the display's shape, centered; "<w>x<h>" = that client size, centered; "native" = HOST_WINDOW_WIDTH x HOST_WINDOW_HEIGHT as before.
-    static std::string s_appliedSize;
     const char *sizeValue = std::getenv("PS2X_WINDOW_SIZE");
     const std::string sizeKey = std::string(sizeValue ? sizeValue : "") + "@" + std::to_string(ps2_host_display::aspect());
     if (!ps2_host_display::startMaximized && !ps2_host_display::startFullscreen && !IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE) &&
@@ -1227,6 +1253,14 @@ void ps2_host_display::openHostWindow(const char *title)
     keepBorderlessBehind();
     if (ps2_host_display::startMaximized && !IsWindowState(FLAG_WINDOW_MAXIMIZED))
         MaximizeWindow();
+#if defined(_WIN32)
+    if (showWhenShaped)
+    {
+        ClearWindowState(FLAG_WINDOW_HIDDEN); // shown without activation
+        SetWindowFocused();
+        ps2xHostHandoffCoverHide();
+    }
+#endif
     SetExitKey(KEY_NULL);
 #endif
 }

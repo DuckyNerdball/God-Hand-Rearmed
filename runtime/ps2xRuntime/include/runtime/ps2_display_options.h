@@ -21,7 +21,8 @@ namespace ps2_host_display
     void setModeListener(void (*listener)(int mode));
     // Makes the game window (raylib) if it does not exist yet, sized by PS2X_WINDOW_SIZE, the aspect and the start
     // flags above; called again (by PS2Runtime::initialize after a launcher made the window), it keeps the window and
-    // applies what changed. Main thread.
+    // applies what changed. On Windows a launcher's borderless window is replaced by a new one instead (its OpenGL
+    // frames would hide the GS child window). Main thread.
     void openHostWindow(const char *title);
     // Real vsync for the window (PS2X_VSYNC, default on); off = the software 60 FPS limiter.
     bool vsyncEnabled();

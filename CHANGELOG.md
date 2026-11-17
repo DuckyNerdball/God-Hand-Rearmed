@@ -2,6 +2,10 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 17, 2026
+
+- Fullscreen: the game shows right after Play (the screen stayed black until the Start menu or F11).
+
 ## November 16, 2026
 
 - Options > Presets, first in the title and pause Options: Classic, Remastered, Rearmed or Sleazy Mode in one go; changing an option a preset sets shows Custom.
