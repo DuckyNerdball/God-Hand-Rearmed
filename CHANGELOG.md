@@ -5,6 +5,9 @@ Newest first, one line per change; the code comments say how.
 ## November 17, 2026
 
 - Fullscreen: the game shows right after Play (the screen stayed black until the Start menu or F11).
+- Fullscreen: no empty window shows at the switch from the launcher to the game.
+- Launcher: the version shows above the volume; when a new one is out, What's new and Update (downloads and installs it, restarts; your settings, saves and mods stay).
+- Launcher: the Character option shows only when there is a character besides Gene.
 
 ## November 16, 2026
 

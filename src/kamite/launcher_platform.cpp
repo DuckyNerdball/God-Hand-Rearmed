@@ -11,8 +11,10 @@
 #include <shellapi.h>
 #include <objbase.h>
 #include <shobjidl.h>
+#include <winhttp.h>
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "winhttp.lib")
 #endif
 
 namespace kamite::launcher::platform
@@ -76,6 +78,130 @@ namespace kamite::launcher::platform
 #if defined(_WIN32)
         return (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
 #else
+        return false;
+#endif
+    }
+
+#if defined(_WIN32)
+    namespace
+    {
+        std::wstring wide(const std::string &text)
+        {
+            const int n = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+            std::wstring out(static_cast<size_t>(n), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), n);
+            return out;
+        }
+    }
+#endif
+
+    bool httpGet(const std::string &url, std::vector<uint8_t> &out, size_t maxBytes, const char *accept,
+                 std::atomic<uint64_t> *received)
+    {
+        out.clear();
+#if defined(_WIN32)
+        const std::wstring address = wide(url);
+        wchar_t host[256] = {}, path[2048] = {};
+        URL_COMPONENTS parts{};
+        parts.dwStructSize = sizeof(parts);
+        parts.lpszHostName = host;
+        parts.dwHostNameLength = 256;
+        parts.lpszUrlPath = path;
+        parts.dwUrlPathLength = 2048;
+        if (!WinHttpCrackUrl(address.c_str(), 0, 0, &parts))
+            return false;
+        // The agent name is the User-Agent GitHub's API asks for.
+        HINTERNET session = WinHttpOpen(L"GHR", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (session == nullptr) // before Windows 8.1
+            session = WinHttpOpen(L"GHR", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (session == nullptr)
+            return false;
+        WinHttpSetTimeouts(session, 10000, 10000, 15000, 30000);
+        const std::wstring headers = accept ? L"Accept: " + wide(accept) + L"\r\n" : std::wstring();
+        bool ok = false;
+        if (HINTERNET connection = WinHttpConnect(session, host, parts.nPort, 0))
+        {
+            if (HINTERNET request = WinHttpOpenRequest(connection, L"GET", path, nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                                       parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0))
+            {
+                DWORD status = 0, size = sizeof(status);
+                if (WinHttpSendRequest(request, headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
+                                       headers.empty() ? 0 : static_cast<DWORD>(-1L), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+                    WinHttpReceiveResponse(request, nullptr) &&
+                    WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status,
+                                        &size, WINHTTP_NO_HEADER_INDEX) &&
+                    status == 200)
+                {
+                    ok = true;
+                    for (;;)
+                    {
+                        DWORD available = 0, read = 0;
+                        if (!WinHttpQueryDataAvailable(request, &available))
+                        {
+                            ok = false;
+                            break;
+                        }
+                        if (available == 0)
+                            break;
+                        const size_t at = out.size();
+                        if (at + available > maxBytes)
+                        {
+                            ok = false;
+                            break;
+                        }
+                        out.resize(at + available);
+                        if (!WinHttpReadData(request, out.data() + at, available, &read))
+                        {
+                            ok = false;
+                            break;
+                        }
+                        out.resize(at + read);
+                        if (received)
+                            received->store(out.size(), std::memory_order_relaxed);
+                    }
+                }
+                WinHttpCloseHandle(request);
+            }
+            WinHttpCloseHandle(connection);
+        }
+        WinHttpCloseHandle(session);
+        return ok;
+#else
+        (void)url;
+        (void)maxBytes;
+        (void)accept;
+        (void)received;
+        return false;
+#endif
+    }
+
+    std::filesystem::path thisExe()
+    {
+#if defined(_WIN32)
+        std::wstring path(32768, L'\0');
+        const DWORD n = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+        path.resize(n);
+        return std::filesystem::path(path);
+#else
+        return {};
+#endif
+    }
+
+    bool relaunch(const std::filesystem::path &exe)
+    {
+#if defined(_WIN32)
+        std::wstring command = L"\"" + exe.wstring() + L"\"";
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr, exe.parent_path().c_str(),
+                            &startup, &process))
+            return false;
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        return true;
+#else
+        (void)exe;
         return false;
 #endif
     }

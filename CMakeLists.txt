@@ -19,11 +19,10 @@ set(URBAN_BUILD_TOOLS ${KAMITE_BUILD_TOOLS})
 
 # A player release (Make Release.cmd; claude/release.md): no developer dump keys (F4 / F6 / F8 / F10 / Shift+F10), no
 # F12 debugger key, no profilers or tracers (KAMITE_PC_SAMPLE, KAMITE_CALL_PROFILE, KAMITE_CALL_TRACE,
-# KAMITE_FIND_COUNTERS). F2, test cases and the crash logs stay.
+# KAMITE_FIND_COUNTERS). F2, test cases and the crash logs stay. Defined for GHR.exe's own code and the runtime only
+# (src/CMakeLists.txt), so switching it does not recompile the generated game code; the built-in default GHR.ini gets
+# the players' values (a window, no time limit).
 option(KAMITE_RELEASE "Build a player release" OFF)
-if(KAMITE_RELEASE)
-    add_compile_definitions(KAMITE_RELEASE=1)
-endif()
 
 # In-game ImGui "Runtime Debugger" (threads, kernel, IOP/SIF, RPC history, GS, DMA, memory); F1 toggles it.
 option(KAMITE_DEBUG_UI "Build the ImGui runtime debugger into GHR.exe" ON)

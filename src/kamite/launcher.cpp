@@ -6,6 +6,7 @@
 #include "kamite/game_disc.h"
 #include "kamite/ini_file.h"
 #include "kamite/launcher_platform.h"
+#include "kamite/launcher_update.h"
 #if defined(KAMITE_STEAM_SHORTCUT) && KAMITE_STEAM_SHORTCUT
 #include "kamite/launcher_steam.h"
 #define KAMITE_LAUNCHER_STEAM 1
@@ -53,6 +54,10 @@ namespace kamite::launcher
         void tickItem() { g_tickItems.push_back(ImGui::GetItemID()); }
         void silentItem() { g_silentItems.push_back(ImGui::GetItemID()); } // sliders make no sound (K)
         void ownSoundItem() { g_ownSoundItems.push_back(ImGui::GetItemID()); }
+
+        // The updater's threads outlive the launcher's state (a slow check is left running when Play is pressed).
+        update::Checker g_updateCheck;
+        update::Installer g_updater;
 
         // ---- choices ------------------------------------------------------------------------------------------------
         struct Choice
@@ -166,7 +171,7 @@ namespace kamite::launcher
         void feedGamepads(ImGuiIO &io)
         {
             using namespace ps2_host_gamepads;
-            update();
+            ps2_host_gamepads::update();
             bool held[16] = {};
             float lx = 0.0f, ly = 0.0f;
             for (int device = 0; device < kMaxDevices; ++device)
@@ -292,6 +297,17 @@ namespace kamite::launcher
             float posterW = 0.0f, posterH = 0.0f, posterPad = 0.0f;
             float photoBox[presets::kCount][4]{}, stampAt[presets::kCount][2]{};
             float pickShown = 0.0f; // the raised poster, eased toward firstRunPick
+            // Updates (launcher_update.h): above the volume; What's new and the progress in a popup.
+            enum class UpdatePopup
+            {
+                None,
+                Notes,   // What's new
+                Working, // g_updater downloading / installing
+                Failed,  // g_updater.error
+            };
+            UpdatePopup updatePopup = UpdatePopup::None;
+            bool updateOpenPopup = false;
+            fs::path exePath; // read at start: the update renames the running file aside
 #if KAMITE_LAUNCHER_STEAM
             // Add to Steam (launcher_steam.h): the lower left corner's button and its popup.
             enum class SteamPopup
@@ -955,6 +971,210 @@ void main()
                 state.ini.set("Launcher", "Volume", text);
                 state.ini.save();
             }
+        }
+
+        // What's new: the release notes (CHANGELOG lines), "# v0.7.0" per release, "## <date>" headings.
+        void drawNotes(const State &state, const std::string &notes)
+        {
+            size_t at = 0;
+            while (at <= notes.size())
+            {
+                size_t end = notes.find('\n', at);
+                if (end == std::string::npos)
+                    end = notes.size();
+                std::string line = notes.substr(at, end - at);
+                at = end + 1;
+                line.erase(std::remove(line.begin(), line.end(), '`'), line.end());
+                for (size_t bold; (bold = line.find("**")) != std::string::npos;)
+                    line.erase(bold, 2);
+                if (line.rfind("# ", 0) == 0)
+                {
+                    pushSize(state, 26.0f);
+                    ImGui::TextColored(kHeading, "%s", line.c_str() + 2);
+                    ImGui::PopFont();
+                }
+                else if (line.rfind("## ", 0) == 0)
+                    ImGui::TextColored(kTextDim, "%s", line.c_str() + 3);
+                else if (!line.empty())
+                    ImGui::TextWrapped("%s", line.c_str());
+            }
+        }
+
+        void startUpdate(State &state)
+        {
+            // The launcher's music streams from resources/music: closed so the file can be replaced.
+            if (state.hasMusic)
+            {
+                StopMusicStream(state.music);
+                UnloadMusicStream(state.music);
+                state.hasMusic = false;
+            }
+            update::startInstall(g_updater, g_updateCheck.release, state.context->exeDir);
+            state.updatePopup = State::UpdatePopup::Working;
+        }
+
+        // Home's lower right corner, over the volume (claude/release.md; K restyles it later): the version, and when a
+        // newer release is out, What's new and Update.
+        void drawUpdate(State &state)
+        {
+            using Popup = State::UpdatePopup;
+            const float size = fontSize(state, 34.0f), margin = fontSize(state, 22.0f), gap = fontSize(state, 12.0f);
+            const bool available = g_updateCheck.state.load() == static_cast<int>(update::CheckState::Available);
+            const float right = ImGui::GetWindowWidth() - margin;
+            float y = ImGui::GetWindowHeight() - margin - size - gap;
+            const update::Release &release = g_updateCheck.release;
+            if (available)
+            {
+                pushSize(state, 20.0f);
+                const ImVec2 pad = ImGui::GetStyle().FramePadding;
+                const float updateWidth = ImGui::CalcTextSize("Update").x + pad.x * 2.0f;
+                const float notesWidth = ImGui::CalcTextSize("What's new").x + pad.x * 2.0f;
+                y -= size;
+                ImGui::SetCursorPos(ImVec2(right - updateWidth - gap - notesWidth, y));
+                if (ImGui::Button("What's new", ImVec2(notesWidth, size)))
+                {
+                    state.updatePopup = Popup::Notes;
+                    state.updateOpenPopup = true;
+                }
+                ImGui::SameLine(0.0f, gap);
+                ImGui::PushStyleColor(ImGuiCol_Button, kAccent);
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.08f, 0.05f, 0.04f, 1.0f));
+                if (ImGui::Button("Update", ImVec2(updateWidth, size)))
+                {
+                    startUpdate(state);
+                    state.updateOpenPopup = true;
+                }
+                ImGui::PopStyleColor(2);
+                ImGui::PopFont();
+                y -= gap * 0.6f;
+            }
+            pushSize(state, 18.0f);
+            const std::string label = update::versionLabel() + (available ? "  \xC2\xB7  " + release.tag + " is out" : std::string());
+            const ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
+            ImGui::SetCursorPos(ImVec2(right - textSize.x, y - textSize.y));
+            ImGui::TextColored(kTextSoft, "%s", label.c_str());
+            ImGui::PopFont();
+
+            if (state.updateOpenPopup)
+            {
+                state.updateOpenPopup = false;
+                ImGui::OpenPopup("##update");
+            }
+            ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+            if (!ImGui::BeginPopupModal("##update", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar))
+                return;
+            pushSize(state, 22.0f);
+            const float width = fontSize(state, 640.0f), buttonWidth = fontSize(state, 200.0f);
+            ImGui::Dummy(ImVec2(width, fontSize(state, 4.0f)));
+            const bool back = ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+            bool close = false;
+            if (state.updatePopup == Popup::Working)
+            {
+                const auto stage = static_cast<update::Stage>(g_updater.stage.load());
+                if (stage == update::Stage::Failed)
+                {
+                    if (g_updater.worker.joinable())
+                        g_updater.worker.join();
+                    state.updatePopup = Popup::Failed;
+                }
+                else if (stage == update::Stage::Done)
+                {
+                    if (g_updater.worker.joinable())
+                        g_updater.worker.join();
+                    KM_INFO(Boot, "launcher: restarting after the update");
+                    platform::relaunch(state.exePath);
+                    state.result = Result::Quit;
+                    state.done = true;
+                }
+            }
+            switch (state.updatePopup)
+            {
+            case Popup::Notes:
+            {
+                pushSize(state, 26.0f);
+                ImGui::TextColored(kHeading, "What's new");
+                ImGui::PopFont();
+                ImGui::BeginChild("##notes", ImVec2(width, fontSize(state, 380.0f)));
+                // Text only (nothing to put the cursor on): the arrows, the d-pad and either stick scroll it.
+                {
+                    float scroll = 0.0f;
+                    for (const ImGuiKey key : {ImGuiKey_UpArrow, ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp, ImGuiKey_GamepadRStickUp})
+                        scroll -= ImGui::GetKeyData(key)->AnalogValue > 0.0f ? ImGui::GetKeyData(key)->AnalogValue : (ImGui::IsKeyDown(key) ? 1.0f : 0.0f);
+                    for (const ImGuiKey key : {ImGuiKey_DownArrow, ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown, ImGuiKey_GamepadRStickDown})
+                        scroll += ImGui::GetKeyData(key)->AnalogValue > 0.0f ? ImGui::GetKeyData(key)->AnalogValue : (ImGui::IsKeyDown(key) ? 1.0f : 0.0f);
+                    if (scroll != 0.0f)
+                        ImGui::SetScrollY(ImGui::GetScrollY() + scroll * fontSize(state, 900.0f) * ImGui::GetIO().DeltaTime);
+                }
+                pushSize(state, 19.0f);
+                drawNotes(state, release.notes);
+                ImGui::PopFont();
+                ImGui::EndChild();
+                ImGui::Dummy(ImVec2(0.0f, fontSize(state, 6.0f)));
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+                ImGui::PushStyleColor(ImGuiCol_Button, kAccent);
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.08f, 0.05f, 0.04f, 1.0f));
+                const bool go = ImGui::Button("Update", ImVec2(buttonWidth, 0.0f));
+                ImGui::PopStyleColor(2);
+                ImGui::SameLine();
+                const bool shut = ImGui::Button("Close", ImVec2(buttonWidth, 0.0f));
+                ownSoundItem();
+                if (go)
+                    startUpdate(state);
+                else if (shut || back)
+                {
+                    menuSound(state, kCancel);
+                    close = true;
+                }
+                break;
+            }
+            case Popup::Working:
+            {
+                const uint64_t got = g_updater.received.load(), total = g_updater.total;
+                if (static_cast<update::Stage>(g_updater.stage.load()) == update::Stage::Downloading)
+                {
+                    if (total > 0)
+                        ImGui::Text("Downloading %s...  %llu of %llu MB", release.tag.c_str(),
+                                    static_cast<unsigned long long>(got >> 20), static_cast<unsigned long long>((total + (1u << 20) - 1) >> 20));
+                    else
+                        ImGui::Text("Downloading %s...  %llu MB", release.tag.c_str(), static_cast<unsigned long long>(got >> 20));
+                }
+                else
+                    ImGui::Text("Installing %s...", release.tag.c_str());
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, kAccent);
+                ImGui::ProgressBar(total > 0 ? std::min(1.0f, static_cast<float>(got) / static_cast<float>(total)) : 0.0f,
+                                   ImVec2(width, fontSize(state, 24.0f)), "");
+                ImGui::PopStyleColor();
+                pushSize(state, 17.0f);
+                ImGui::TextColored(kTextDim, "The game restarts by itself when it's done. Your settings and saves stay.");
+                ImGui::PopFont();
+                break;
+            }
+            case Popup::Failed:
+            {
+                ImGui::TextUnformatted("The update didn't go through. Nothing was changed.");
+                ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+                ImGui::TextColored(kTextDim, "%s", g_updater.error.c_str());
+                ImGui::PopTextWrapPos();
+                ImGui::Dummy(ImVec2(0.0f, fontSize(state, 10.0f)));
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+                const bool ok = ImGui::Button("OK", ImVec2(buttonWidth, 0.0f));
+                if (ok || back)
+                    close = true;
+                break;
+            }
+            case Popup::None:
+                close = true;
+                break;
+            }
+            if (close)
+            {
+                state.updatePopup = Popup::None;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::PopFont();
+            ImGui::EndPopup();
         }
 
 #if KAMITE_LAUNCHER_STEAM
@@ -2311,6 +2531,12 @@ void main()
             }
         }
 
+        bool otherCharacters(const State &state)
+        {
+            static const bool any = characters::list(state.context->exeDir).size() > 1;
+            return any;
+        }
+
         // One tab: its settings in the table's order, a heading per category. Sub-options show while their parent
         // allows them (Window Size greyed instead; Camera & FOV's values only with Custom).
         void drawTab(State &state, settings::Tab tab)
@@ -2325,6 +2551,9 @@ void main()
                     continue;
                 const bool allowed = settings::parentAllows(state.ini, s);
                 if (!allowed && !s.greyed)
+                    continue;
+                // Character only with a character besides Gene (built from the disc; none in a release yet).
+                if (std::strcmp(s.id, "Character") == 0 && !otherCharacters(state))
                     continue;
                 if (!category || std::strcmp(category, s.category) != 0)
                 {
@@ -2854,6 +3083,11 @@ void main()
             }
         }
         state.volume = std::clamp(static_cast<float>(std::atof(state.ini.get("Launcher", "Volume", "0.8").c_str())), 0.0f, 1.0f);
+        state.exePath = platform::thisExe();
+        update::cleanup(context.exeDir);
+        if (g_updateCheck.state.load() == static_cast<int>(update::CheckState::Off))
+            update::startCheck(g_updateCheck, state.ini.getBool("Launcher", "UpdateTest", false)); // a dev build's test switch
+        KM_INFO(Boot, "launcher: " << update::versionLabel());
 #if KAMITE_LAUNCHER_STEAM
         state.steam = steam::probe();
         KM_INFO(Boot, "launcher: steam " << (state.steam.available ? (state.steam.added ? "found, entry there" : "found") : "not found"));
@@ -2941,6 +3175,8 @@ void main()
                 }
                 if (state.screen != Screen::Options)
                     drawVolume(state);
+                if (state.screen == Screen::Home)
+                    drawUpdate(state);
 #if KAMITE_LAUNCHER_STEAM
                 if (state.screen == Screen::Home)
                     drawSteam(state);
@@ -3001,6 +3237,11 @@ void main()
 #endif
         if (state.hasMusic)
             UnloadMusicStream(state.music);
+        // A check still running is left to finish on its own (the game's start does not wait for GitHub).
+        if (g_updateCheck.worker.joinable())
+            g_updateCheck.worker.detach();
+        if (g_updater.worker.joinable())
+            g_updater.worker.detach();
         if (state.result == Result::Play && state.audio)
         {
             // The game takes the audio device over (the runtime opens it only when it is not open yet), so Play's

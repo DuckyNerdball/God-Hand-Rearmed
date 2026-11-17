@@ -1,4 +1,5 @@
 #include "kamite/launcher_steam.h"
+#include "kamite/launcher_platform.h"
 #include "kamite/log.h"
 
 #include <algorithm>
@@ -22,8 +23,6 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
-#include <winhttp.h>
-#pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "advapi32.lib")
 #endif
@@ -121,68 +120,7 @@ namespace kamite::launcher::steam
 
         bool download(const char *url, std::vector<uint8_t> &out)
         {
-            out.clear();
-            const std::wstring address = wide(url);
-            wchar_t host[256] = {}, path[2048] = {};
-            URL_COMPONENTS parts{};
-            parts.dwStructSize = sizeof(parts);
-            parts.lpszHostName = host;
-            parts.dwHostNameLength = 256;
-            parts.lpszUrlPath = path;
-            parts.dwUrlPathLength = 2048;
-            if (!WinHttpCrackUrl(address.c_str(), 0, 0, &parts))
-                return false;
-            HINTERNET session = WinHttpOpen(L"GHR", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-            if (session == nullptr) // before Windows 8.1
-                session = WinHttpOpen(L"GHR", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-            if (session == nullptr)
-                return false;
-            WinHttpSetTimeouts(session, 10000, 10000, 15000, 30000);
-            bool ok = false;
-            if (HINTERNET connection = WinHttpConnect(session, host, parts.nPort, 0))
-            {
-                if (HINTERNET request = WinHttpOpenRequest(connection, L"GET", path, nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
-                                                           parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0))
-                {
-                    DWORD status = 0, size = sizeof(status);
-                    if (WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-                        WinHttpReceiveResponse(request, nullptr) &&
-                        WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status,
-                                            &size, WINHTTP_NO_HEADER_INDEX) &&
-                        status == 200)
-                    {
-                        ok = true;
-                        for (;;)
-                        {
-                            DWORD available = 0, read = 0;
-                            if (!WinHttpQueryDataAvailable(request, &available))
-                            {
-                                ok = false;
-                                break;
-                            }
-                            if (available == 0)
-                                break;
-                            const size_t at = out.size();
-                            if (at + available > (64u << 20)) // no library picture is that big
-                            {
-                                ok = false;
-                                break;
-                            }
-                            out.resize(at + available);
-                            if (!WinHttpReadData(request, out.data() + at, available, &read))
-                            {
-                                ok = false;
-                                break;
-                            }
-                            out.resize(at + read);
-                        }
-                    }
-                    WinHttpCloseHandle(request);
-                }
-                WinHttpCloseHandle(connection);
-            }
-            WinHttpCloseHandle(session);
-            return ok;
+            return platform::httpGet(url, out, 64u << 20); // no library picture is that big
         }
 
         bool samePath(std::string a, std::string b)

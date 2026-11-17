@@ -100,6 +100,14 @@ set(KAMITE_HOST_SOURCES
 # The header is rewritten only when the text changes, so editing GHR.ini rebuilds main.cpp alone.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/GHR.ini")
 file(READ "${CMAKE_SOURCE_DIR}/GHR.ini" KAMITE_DEFAULT_INI)
+# A release's built-in default: what a player needs (the template's defaults are the developers' hidden test runs).
+# Make Release.cmd ships the same values in the zip's GHR.ini.
+if(KAMITE_RELEASE)
+    foreach(KAMITE_INI_PAIR "Headless=0" "TimeLimitSeconds=0" "DumpOnTimeLimit=0" "Renderer=pcsx2" "LogFile=logs/kamite.log")
+        string(REGEX REPLACE "=.*" "" KAMITE_INI_KEY "${KAMITE_INI_PAIR}")
+        string(REGEX REPLACE "\n${KAMITE_INI_KEY}=[^\n]*" "\n${KAMITE_INI_PAIR}" KAMITE_DEFAULT_INI "${KAMITE_DEFAULT_INI}")
+    endforeach()
+endif()
 string(LENGTH "${KAMITE_DEFAULT_INI}" KAMITE_DEFAULT_INI_LENGTH)
 # MSVC caps one string literal at 16380 bytes and a concatenation of them at 65535: the text goes in as adjacent raw
 # literals of at most 8000 bytes, each cut after a line break.
@@ -294,6 +302,12 @@ file(WRITE "${KAMITE_MODULE_INDEX}.tmp"
 file(COPY_FILE "${KAMITE_MODULE_INDEX}.tmp" "${KAMITE_MODULE_INDEX}" ONLY_IF_DIFFERENT)
 
 add_executable(kamite ${KAMITE_HOST_SOURCES} "${KAMITE_MODULE_INDEX}")
+if(KAMITE_RELEASE) # CMakeLists.txt: GHR.exe's own code and the runtime, not the generated game code
+    target_compile_definitions(kamite PRIVATE KAMITE_RELEASE=1)
+    if(TARGET ps2_runtime)
+        target_compile_definitions(ps2_runtime PRIVATE KAMITE_RELEASE=1)
+    endif()
+endif()
 # The player-facing name: GHR.exe (the target, the code and the build folders stay "kamite"). On Windows the version
 # resource (kamite/ghr.rc) gives Explorer and Task Manager the name "God Hand: Rearmed" and the icon.
 set_target_properties(kamite PROPERTIES OUTPUT_NAME GHR)
@@ -348,15 +362,16 @@ if(KAMITE_DEBUG_UI AND TARGET rlImGui)
     target_link_libraries(kamite PRIVATE rlImGui imgui)
     target_compile_definitions(kamite PRIVATE PS2X_ENABLE_DEBUG_UI=1)
     # The launcher (src/kamite/launcher.cpp) draws with the same Dear ImGui.
-    target_sources(kamite PRIVATE kamite/launcher.cpp kamite/launcher_bark.cpp kamite/launcher_platform.cpp)
+    target_sources(kamite PRIVATE kamite/launcher.cpp kamite/launcher_bark.cpp kamite/launcher_platform.cpp
+                                  kamite/launcher_update.cpp)
     target_compile_definitions(kamite PRIVATE KAMITE_HAS_LAUNCHER=1)
+    if(WIN32)
+        target_link_libraries(kamite PRIVATE winhttp) # downloads: updates, Add to Steam's art
+    endif()
     # Add to Steam (src/kamite/launcher_steam.cpp): desktop only, left out of the Android build.
     if(KAMITE_STEAM_SHORTCUT)
         target_sources(kamite PRIVATE kamite/launcher_steam.cpp)
         target_compile_definitions(kamite PRIVATE KAMITE_STEAM_SHORTCUT=1)
-        if(WIN32)
-            target_link_libraries(kamite PRIVATE winhttp)
-        endif()
     endif()
 endif()
 

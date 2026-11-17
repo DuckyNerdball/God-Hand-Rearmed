@@ -1,7 +1,11 @@
 #pragma once
 
 // The launcher's operating-system pieces (kept out of launcher.cpp: <windows.h> and raylib clash).
+#include <atomic>
+#include <cstdint>
 #include <filesystem>
+#include <string>
+#include <vector>
 
 namespace kamite::launcher::platform
 {
@@ -11,4 +15,12 @@ namespace kamite::launcher::platform
     void open(const std::filesystem::path &path);
     // Shift held right now (the launcher shows even when hidden).
     bool shiftHeld();
+    // An HTTPS GET into `out` (redirects followed): true on status 200 with at most maxBytes. `received` (if given)
+    // counts the bytes as they come. Blocks: run it on a thread. False on platforms without it.
+    bool httpGet(const std::string &url, std::vector<uint8_t> &out, size_t maxBytes, const char *accept = nullptr,
+                 std::atomic<uint64_t> *received = nullptr);
+    // Starts the program again (the given executable, from its folder, no arguments); the caller then quits.
+    bool relaunch(const std::filesystem::path &exe);
+    // The running program's own executable.
+    std::filesystem::path thisExe();
 }
