@@ -213,9 +213,9 @@ namespace kamite::settings
                                      "Screen width from 4:3 to wider than yo momma!", "Video", "AspectRatio", "16:9",
                                      kAspects),
                               kOnLeaveNote))),
-        // Help texts: Claude's house-voice pass (Nov 17), K to approve.
+        // Help texts: K's (Nov 17).
         live(choice(Tab::Display, "Game Window", "VSync",
-                    "On: no screen tearing.\nOff: for G-Sync / FreeSync. Everyone else gets torn up.", "Video", "VSync", "2",
+                    "On: no screen tearing.\nOff: for G-Sync | FreeSync. The rest get torn up.", "Video", "VSync", "2",
                     kVsyncs)),
 
         // ---- Graphics (K, Nov 15: its own tab; claude/graphics-options.md) ---------------------------------------
@@ -226,17 +226,17 @@ namespace kamite::settings
                                      "1x: 448p | 2x: 896p | 3x: 1344p | 4x: 1792p", "Video", "InternalResolution", "3",
                                      kResolutions),
                               kOnLeaveNote))),
-        // Help texts: Claude's house-voice pass (Nov 17), K to approve.
+        // Help texts: K's (Nov 17).
         live(gameList(choice(Tab::Graphics, "Textures", "Texture Filtering",
-                             "PS2: the game's own smoothing. Crunchy: unfiltered 3D.\nDangerously Crunchy: the UI too. Pixel freaks only.",
+                             "PS2: the game's original texture smoothing.\nCrunchy: unfiltered 3D. | Dangerously Crunchy: the UI too.",
                              "Video", "TextureFiltering", "0", kTextureFilters))),
         live(choice(Tab::Graphics, "Textures", "Trilinear Filtering",
-                    "PS2: as Clover drew it. Forced: blends into the\ndistance, so far-off textures stop shimmering.", "Video",
+                    "PS2: the game's original texture smoothing.\nForced: textures blend smoothly into the distance.", "Video",
                     "TrilinearFiltering", "-1", kTrilinears)),
         live(choice(Tab::Graphics, "Textures", "Anisotropic Filtering",
                     "Keeps floors and walls sharp at a slant.\nCosts next to nothing. Max it out.",
                     "Video", "AnisotropicFiltering", "16", kAnisotropies)),
-        live(choice(Tab::Graphics, "Effects", "Anti-Aliasing", "FXAA smooths jagged edges.\nSoftens the picture a little. Gene stays rough.",
+        live(choice(Tab::Graphics, "Effects", "Anti-Aliasing", "FXAA smooths jagged edges.\nMakes the picture a little softer. Like you.",
                     "Video", "AntiAliasing", "1", kAntiAliasings)),
         live(brightness("100% is the game as it was.\nTurn it up if you can't see who's kicking you.")),
         // Launcher-only (K, Nov 13: Upscaled has caused no issues; a dev option, clutter in game).

@@ -11,7 +11,7 @@ screen, with as much or as little of our own nonsense as you want.
 > [!WARNING]
 > **Beta!** Plays from the first punch to the credits, but expect the odd bug. Found one? [Tell us](#found-a-bug).
 
-> **No game files included!** Play your own damn copy! (USA, SLUS-21503); see [DISC_HASHES.md](DISC_HASHES.md)).
+> **No game files included!** Play your own damn copy! (USA, SLUS-21503; see [DISC_HASHES.md](DISC_HASHES.md)).
 
 <!-- MEDIA: assets/readme/hero.gif — the hero shot: a fight at 60 FPS, widescreen -->
 
@@ -209,7 +209,7 @@ Every option, with the same help text you'll see in the launcher and in game.
 - **Display Mode:** Window, max window, or borderless fullscreen. You can also use F11, if you're into that. *Fullscreen (Borderless) / Maximized Window / Window*
   - **Window Size:** The window's size when it opens (not maximized or fullscreen). *Automatic (follows internal resolution) / PS2 size*
 - **Aspect Ratio:** Screen width from 4:3 to wider than yo momma! *4:3 (the PS2's) / 16:9 / 16:10 / 21:9 / 32:9 / Match the screen* `Remastered+`
-- **VSync:** On: no screen tearing. Off: for G-Sync / FreeSync. Everyone else gets torn up. *On / Off*
+- **VSync:** On: no screen tearing. Off: for G-Sync | FreeSync. The rest get torn up. *On / Off*
 
 </details>
 <details>
@@ -222,13 +222,13 @@ Every option, with the same help text you'll see in the launcher and in game.
 
 **Textures**
 
-- **Texture Filtering:** PS2: the game's own smoothing. Crunchy: unfiltered 3D. Dangerously Crunchy: the UI too. Pixel freaks only. *PS2 (Bilinear) / Crunchy (Unfiltered 3D) / Dangerously Crunchy (3D+UI)*
-- **Trilinear Filtering:** PS2: as Clover drew it. Forced: blends into the distance, so far-off textures stop shimmering. *PS2 / Forced*
+- **Texture Filtering:** PS2: the game's original texture smoothing. Crunchy: unfiltered 3D. | Dangerously Crunchy: the UI too. *PS2 (Bilinear) / Crunchy (Unfiltered 3D) / Dangerously Crunchy (3D+UI)*
+- **Trilinear Filtering:** PS2: the game's original texture smoothing. Forced: textures blend smoothly into the distance. *PS2 / Forced*
 - **Anisotropic Filtering:** Keeps floors and walls sharp at a slant. Costs next to nothing. Max it out. *Off / 2x / 4x / 8x / 16x*
 
 **Effects**
 
-- **Anti-Aliasing:** FXAA smooths jagged edges. Softens the picture a little. Gene stays rough. *FXAA / Off*
+- **Anti-Aliasing:** FXAA smooths jagged edges. Makes the picture a little softer. Like you. *FXAA / Off*
 - **Brightness:** 100% is the game as it was. Turn it up if you can't see who's kicking you. *50% to 150%*
 - **Post Effects:** The blur effects (depth of field, heat haze) are drawn from small copies of the frame. PS2 resolution keeps them aligned but grainy at high internal resolutions; Upscaled draws them sharp. *PS2 resolution (PCSX2's fix) / Upscaled / No fix*
 - **Depth of Field:** Blur in the distance. It can't hurt you. (F2 switches it while playing)
@@ -329,7 +329,7 @@ Every option, with the same help text you'll see in the launcher and in game.
 ## FAQ
 
 **Is this legal?**
-GHR ships no games assets or disc files. It only runs with a disc image you dumped from your own damn copy.
+GHR ships no game assets or disc files. It only runs with a disc image you dumped from your own damn copy.
 
 **Which disc?**
 The USA release (SLUS-21503). Others may work; that's the one it's tested with. [DISC_HASHES.md](DISC_HASHES.md) has
