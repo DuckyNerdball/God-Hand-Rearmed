@@ -20,6 +20,20 @@ namespace
 {
     HWND g_cover = nullptr;
     constexpr wchar_t kCoverClass[] = L"PS2XHandoffCover";
+    constexpr UINT_PTR kCoverTimer = 1;
+
+    // Failsafe: the cover goes by itself if the game never presents (ps2xHostHandoffCoverHide normally removes it).
+    LRESULT CALLBACK coverProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+    {
+        if (msg == WM_TIMER && wParam == kCoverTimer)
+        {
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        if (msg == WM_DESTROY && hwnd == g_cover)
+            g_cover = nullptr;
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
 }
 
 // True on Windows itself, false under Wine (ntdll exports wine_get_version there).
@@ -30,7 +44,8 @@ bool ps2xHostReplacesLauncherWindow() noexcept
 }
 
 // A plain black window (GDI, no swap chain) over the monitor the given window is on, so the screen stays black while
-// the window is closed and made again (~0.1 s) instead of showing the desktop. Never activated.
+// the window is closed and made again and until the game's first frames are on screen (the main loop hides it once
+// the GS has presented), instead of showing the desktop or the new, still empty window. Never activated.
 void ps2xHostHandoffCoverShow(void *window) noexcept
 {
     if (g_cover)
@@ -40,7 +55,7 @@ void ps2xHostHandoffCoverShow(void *window) noexcept
     if (!registered)
     {
         WNDCLASSW wc{};
-        wc.lpfnWndProc = DefWindowProcW;
+        wc.lpfnWndProc = coverProc;
         wc.hInstance = instance;
         wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
         wc.hCursor = nullptr;
@@ -59,6 +74,7 @@ void ps2xHostHandoffCoverShow(void *window) noexcept
         return;
     ShowWindow(g_cover, SW_SHOWNOACTIVATE);
     UpdateWindow(g_cover); // painted black now (the class brush), before the game window goes
+    SetTimer(g_cover, kCoverTimer, 10000, nullptr);
 }
 
 void ps2xHostHandoffCoverHide() noexcept

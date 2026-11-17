@@ -1178,7 +1178,8 @@ void ps2_host_display::openHostWindow(const char *title)
         InitWindow(HOST_WINDOW_WIDTH, HOST_WINDOW_HEIGHT, title);
 #else
     // A launcher's borderless window is replaced on Windows (Kernel/host_window_win32.cpp says why): closed unseen
-    // behind a black cover, made again hidden, shaped, then shown. Wine keeps it.
+    // behind a black cover, made again hidden, shaped, then shown; the cover goes once the game has presented. Wine
+    // keeps it.
     bool showWhenShaped = false;
     static std::string s_appliedSize; // the window size last applied (below)
 #if defined(_WIN32)
@@ -1258,7 +1259,6 @@ void ps2_host_display::openHostWindow(const char *title)
     {
         ClearWindowState(FLAG_WINDOW_HIDDEN); // shown without activation
         SetWindowFocused();
-        ps2xHostHandoffCoverHide();
     }
 #endif
     SetExitKey(KEY_NULL);
@@ -3455,6 +3455,11 @@ void PS2Runtime::run()
             EndDrawing(); // swaps, then polls the window's messages
             ps2_host_display::notePump();
         }
+#if defined(_WIN32)
+        // The launcher hand-off's black cover (openHostWindow) goes once the game's own frames are on screen.
+        if (!pcsx2Gs || GSPcsx2Backend::Presents() >= 2u)
+            ps2xHostHandoffCoverHide();
+#endif
         // The image shown: the GS thread's shared-present sequence, or (copy path) the field it was uploaded for.
         ps2_host_display::notePresent(eeScheduler().currentVSyncTick(), shared ? sharedFrame.sequence : eeScheduler().currentVSyncTick());
         fpsOverlay.present(eeScheduler().currentVSyncTick());
