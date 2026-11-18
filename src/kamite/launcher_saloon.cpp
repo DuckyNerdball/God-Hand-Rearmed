@@ -111,6 +111,7 @@ uniform sampler2D texture0;
 uniform sampler2D weightMap;
 uniform vec2 shiftRoom;  // the room's drift, in this texture's uv
 uniform vec2 shiftTable; // the table's
+uniform vec2 shiftAir;   // the air's against the room (the near ends move, the doorway's end stays)
 uniform vec2 source;     // where the doorway's rays fan out from, uv
 uniform vec2 size;       // the texture's size, pixels
 uniform float time;
@@ -120,20 +121,20 @@ void main()
 {
     vec2 uv = fragTexCoord;
     float w = texture(weightMap, uv).r;
-    uv -= mix(shiftTable, shiftRoom, w);
+    uv -= mix(shiftTable, shiftRoom, w) + shiftAir * (1.0 - w);
     vec2 d = (uv - source) * size;
     float r = length(d);
     float a = atan(d.y, d.x);
     float fan = 1.0 - smoothstep(0.15, 0.24, abs(uv.x - source.x));
-    float swing = motion * 0.010 * (0.6 * sin(time * 0.23) + 0.4 * sin(time * 0.37 + 1.3)) * smoothstep(30.0, 300.0, r) * fan;
+    float swing = motion * 0.022 * (0.6 * sin(time * 0.52) + 0.4 * sin(time * 0.83 + 1.3)) * smoothstep(30.0, 300.0, r) * fan;
     float c = cos(swing), s = sin(swing);
     vec2 turned = vec2(c * d.x - s * d.y, s * d.x + c * d.y);
     vec3 col = texture(texture0, source + turned / size).rgb;
     // waves round the circle (whole numbers: no seam), each turning at a few degrees a second, some each way
-    float b = 0.40 * sin(9.0 * a - time * 0.35) + 0.30 * sin(14.0 * a + time * 0.27 + 1.1)
-            + 0.20 * sin(23.0 * a - time * 0.52 + 2.3) + 0.25 * sin(5.0 * a + time * 0.16 + 0.7);
-    float beams = max(0.0, 1.0 + motion * 0.45 * b * smoothstep(40.0, 350.0, r) * fan);
-    float pulse = 1.0 + motion * 0.06 * sin(time * 1.1 + 1.0);
+    float b = 0.40 * sin(9.0 * a - time * 0.80) + 0.30 * sin(14.0 * a + time * 0.62 + 1.1)
+            + 0.20 * sin(23.0 * a - time * 1.15 + 2.3) + 0.25 * sin(5.0 * a + time * 0.38 + 0.7);
+    float beams = max(0.0, 1.0 + motion * 0.65 * b * smoothstep(40.0, 350.0, r) * fan);
+    float pulse = 1.0 + motion * 0.11 * (0.7 * sin(time * 1.7 + 1.0) + 0.3 * sin(time * 2.9));
     finalColor = vec4(col * beams * pulse * fragColor.a, 1.0);
 }
 )glsl";
@@ -184,16 +185,21 @@ void main()
         float curl = (fbm(vec2(h * 2.3 - time * 0.22 + fi * 7.3, fi * 1.7)) - 0.5) * (0.25 + 1.2 * h);
         float sway = 0.10 * h * sin(time * 0.47 + fi * 1.9 + h * 4.5);
         float centre = base * (1.0 - 0.35 * h) + curl + sway;
-        float width = (0.020 + 0.085 * h) * (1.0 + 0.3 * sin(fi * 4.1));
-        float d = (x - centre) / width;
-        float strand = exp(-d * d * 1.6);
+        float width = (0.034 + 0.14 * h) * (1.0 + 0.3 * sin(fi * 4.1));
+        // no clean edge: the strand's sides wander and fray as it rises
+        float fray = (fbm(vec2(x * aspect * 2.2 + fi * 5.3, h * 3.6 - time * 0.55)) - 0.5) * (0.6 + 1.4 * h);
+        float d = (x - centre) / width + fray;
+        float strand = exp(-d * d * 1.1);
         // it comes off in puffs that rise (gaps travel up the strand)
-        float puff = smoothstep(0.42, 0.70, fbm(vec2(fi * 3.1 + 0.7, h * 3.2 - time * 0.62)));
-        float grain = 0.6 + 0.4 * fbm(vec2(x * aspect * 5.0 + fi, h * 9.0 - time * 1.1));
-        a += strand * puff * grain;
+        float puff = smoothstep(0.36, 0.74, fbm(vec2(fi * 3.1 + 0.7, h * 3.2 - time * 0.62)));
+        a += strand * puff;
     }
+    // vapour, not smoke: soft billows through it (the first pass's noise) thin it out in patches
+    vec2 q = vec2(x * aspect * 1.6, h * 2.6 - time * 0.42);
+    q.x += 0.9 * (fbm(vec2(h * 2.0 - time * 0.11, x * 0.7)) - 0.5);
+    float vapour = smoothstep(0.30, 0.78, fbm(q + vec2(0.0, fbm(q * 0.6 + time * 0.05) * 1.3)));
     float shape = smoothstep(0.0, 0.08, h) * (1.0 - smoothstep(0.50, 1.0, h));
-    a = clamp(a, 0.0, 1.0) * shape * fragColor.a * 0.62;
+    a = clamp(a, 0.0, 1.0) * (0.35 + 0.65 * vapour) * shape * fragColor.a * 0.70;
     finalColor = vec4(vec3(0.97, 0.95, 0.91) * a, a);
 }
 )glsl";
@@ -205,42 +211,20 @@ void main()
 in vec2 fragTexCoord;
 in vec4 fragColor;
 uniform sampler2D texture0; // the drink's mask (alpha)
+uniform sampler2D blurMap;  // the drink blurred (premultiplied), over the smoothie's rect
+uniform vec4 blurRect;      // this quad's uv into blurMap's: offset (xy), scale (zw)
 uniform vec2 size;          // the quad's size, frame pixels
-uniform float rim;          // the glass's rim, uv
+uniform vec2 band;          // the glass's rim and the drink's bottom, uv
 uniform vec4 drop;          // the running drop: x, y (uv), size, alpha
 uniform vec4 trail[24];     // where it ran: x, y (uv), age (s), 1 = used
 out vec4 finalColor;
 %NOISE%
-// beads on a jittered grid: their cover (x), glint (y), dark rim, heavier low (z)
-vec3 beads(vec2 p, float cell, float rmin, float rmax, float keep, float seed)
-{
-    vec2 g = floor(p / cell);
-    vec3 best = vec3(0.0);
-    for (int j = -1; j <= 1; ++j)
-        for (int i = -1; i <= 1; ++i)
-        {
-            vec2 c = g + vec2(float(i), float(j)) + seed;
-            if (hash(c + 3.7) > keep)
-                continue;
-            vec2 centre = (c - seed + 0.2 + 0.6 * vec2(hash(c), hash(c + 17.31))) * cell;
-            float r = mix(rmin, rmax, hash(c + 9.1));
-            vec2 q = (p - centre) / (r * vec2(1.0, 1.12)); // a touch long: they sag
-            float d = length(q);
-            float cover = 1.0 - smoothstep(0.75, 1.0, d);
-            if (cover <= best.x)
-                continue;
-            float glint = 1.0 - smoothstep(0.0, 0.3, length(q - vec2(-0.32, -0.4)));
-            float dark = smoothstep(0.45, 0.95, d) * (0.4 + 0.6 * clamp(0.5 + 0.7 * q.y, 0.0, 1.0)) * cover;
-            best = vec3(cover, glint, dark);
-        }
-    return best;
-}
 void main()
 {
     vec2 uv = fragTexCoord;
     float mask = texture(texture0, uv).a;
     vec2 p = uv * size;
-    // the drop, and the clear track behind it (it gathered the film as it went; the film creeps back)
+    // the drop, and the clear track behind it (it gathered the mist as it went; the mist creeps back)
     vec2 dq = (p - drop.xy * size) / (vec2(3.2, 4.2) * drop.z);
     float dr = length(dq);
     float body = (1.0 - smoothstep(0.82, 1.0, dr)) * drop.w;
@@ -256,21 +240,12 @@ void main()
         float width = 2.6 * drop.z * (1.0 - 0.35 * smoothstep(0.0, 1.0, age / 10.0));
         wiped = max(wiped, (1.0 - smoothstep(width * 0.6, width, dist)) * (1.0 - smoothstep(3.0, 12.0, age)));
     }
-    float clear = mask * (1.0 - wiped) * (1.0 - body);
-    // the film: a milky haze that pales the drink, thicker lower down, uneven in soft patches
-    float low = smoothstep(rim, rim + 0.6, uv.y);
-    float film = (0.36 + 0.16 * low) * (0.8 + 0.4 * fbm(p * 0.03));
-    // beads in it, big and small: clear windows onto the drink, a glint up top, a dark rim low
-    vec3 big = beads(p, 15.0, 2.6, 5.0, 0.42, 0.0);
-    vec3 small = beads(p + 4.3, 6.5, 0.9, 1.8, 0.5, 31.0);
-    float holes = max(big.x, small.x * 0.6);
-    float fogA = clear * film * (1.0 - 0.9 * holes);
-    float hiA = clear * (big.x * big.y * 0.85 + small.x * small.y * 0.25);
-    float shadeA = clear * big.z * 0.4;
-    vec3 col = vec3(0.86, 0.91, 0.96) * fogA + vec3(1.0) * hiA;
-    float a = fogA + hiA + shadeA; // the shade: alpha with no light
-    col *= fragColor.a;
-    a = clamp(a, 0.0, 1.0) * fragColor.a;
+    // the fog: the drink seen blurred through a misted glass, from nothing at the rim to full low down, a faint pale
+    // haze over it; the drop and its track clear it (K, Nov 18: no beads, the drop is the only water to see)
+    float fog = mask * (1.0 - wiped) * (1.0 - body) * smoothstep(band.x, mix(band.x, band.y, 0.8), uv.y);
+    vec4 blurred = texture(blurMap, blurRect.xy + uv * blurRect.zw);
+    vec3 col = mix(blurred.rgb, vec3(0.92, 0.95, 0.98) * blurred.a, 0.10) * fog * fragColor.a;
+    float a = blurred.a * fog * fragColor.a;
     // the drop: clear, a dark rim heavier low, a bright speck top left, a light caustic low
     float edge = smoothstep(0.5, 0.95, dr) * body * (0.55 + 0.45 * clamp(0.5 + 0.7 * dq.y, 0.0, 1.0));
     float speck = (1.0 - smoothstep(0.0, 0.3, length(dq - vec2(-0.3, -0.42)))) * drop.w;
@@ -281,6 +256,11 @@ void main()
     finalColor = vec4(dropCol + col * (1.0 - dropA), dropA + a * (1.0 - dropA));
 }
 )glsl";
+
+        // The plate's front lip over the front cherry pair (see lipFrom): its edge, and the box redrawn below it.
+        constexpr Vector2 kPlateLip[] = {{2330.0f, 1089.0f}, {2350.0f, 1095.0f}, {2370.0f, 1099.0f}, {2390.0f, 1102.0f},
+                                         {2410.0f, 1105.0f}, {2430.0f, 1108.0f}, {2450.0f, 1111.0f}};
+        constexpr Rectangle kLipBox{2330.0f, 1084.0f, 120.0f, 40.0f};
 
         std::string withNoise(const char *source)
         {
@@ -643,7 +623,9 @@ void main()
             bool present = false;
             Rectangle rect{};
             std::vector<Texture2D> states, garnish;
-            std::vector<Pixels> hit; // Home only, per state
+            std::vector<Pixels> hit;      // Home only, per state
+            std::vector<Texture2D> blur;  // Home only, per state: the drink blurred (the frost), half size
+            std::vector<Pixels> blurPx;   // (made on a worker, uploaded with the state)
         };
         struct Snacks
         {
@@ -989,14 +971,16 @@ void main()
         constexpr Color kInk{38, 26, 18, 238};
         constexpr Color kPencil{164, 30, 22, 225};
         constexpr const char *kSkip = "Skip Launcher (hold Shift while starting to see it)";
-        // The rights notice, in fine print at the foot of the bill (K, Nov 18); a line per \n, each paragraph balanced.
-        constexpr const char *kLegal = "God\u00A0Hand\u2122 is a trademark of CAPCOM CO.,\u00A0LTD.\nAll rights to the game belong to Capcom.\n"
+        // The fine print at the foot of the bill (K, Nov 18): the tagline, then the rights notice; a line per \n, each
+        // paragraph balanced.
+        constexpr const char *kLegal = "God\u00A0Hand\u2122 for PS2 Recompiled, Refined, Rearmed.\n"
+                                       "God\u00A0Hand\u2122 is a trademark of CAPCOM CO.,\u00A0LTD.\n"
                                        "God Hand: Rearmed is an unofficial fan-made project, not affiliated with or endorsed by Capcom or "
                                        "Clover Studio. It contains no game data: play your own damn copy!";
         constexpr float kItemSize = 84.0f, kItemTop = 372.0f, kItemStep = 116.0f;
         constexpr float kSkipSize = 30.0f, kSkipY = 704.0f, kBox = 26.0f, kBoxGap = 12.0f, kPaperRoom = 610.0f;
         constexpr float kLegalSize = 24.0f, kLegalTop = 758.0f, kLegalStep = 27.0f, kLegalRoom = 590.0f;
-        constexpr Vector2 kSteamAt{86.0f, 934.0f};
+        constexpr Vector2 kSteamAt{70.0f, 76.0f}; // the upper left corner, clear of the title
         constexpr float kSteamR = 30.0f;
 
         std::vector<int> codepointsFor(const std::string &extra)
@@ -1281,7 +1265,7 @@ void main()
         bool hasBill = false, hasDoor = false;
 
         // Home
-        Texture2D back{}, fg{}, rays{}, raysWeight{}, bloom{}, bookLit{};
+        Texture2D back{}, fg{}, lip{}, rays{}, raysWeight{}, bloom{}, bookLit{};
         Pixels bookMask, raysLuma;
         Rectangle bookRect{};
         Snacks snacks;
@@ -1315,7 +1299,7 @@ void main()
         float time = 0.0f, appear = 0.0f;
         // The view turns round a point between the table and the room (K): the room leans toward the cursor, the
         // table the other way. Frame pixels.
-        Vector2 parallax{}, roomShift{}, tableShift{};
+        Vector2 parallax{}, roomShift{}, tableShift{}, airShift{}, logoShift{};
         float overlays = 1.0f, homeLife = 1.0f, bookLight = 0.0f, volume = 0.0f;
         std::vector<bool> eaten;
         std::vector<float> eatenAt;
@@ -1339,9 +1323,9 @@ void main()
 
         // drawing
         Shader shadowShader{}, raysShader{}, steamShader{}, frostShader{};
-        int raysWeightLoc = -1, raysRoomLoc = -1, raysTableLoc = -1, raysSourceLoc = -1, raysSizeLoc = -1, raysTimeLoc = -1, raysMotionLoc = -1;
+        int raysWeightLoc = -1, raysRoomLoc = -1, raysTableLoc = -1, raysAirLoc = -1, raysSourceLoc = -1, raysSizeLoc = -1, raysTimeLoc = -1, raysMotionLoc = -1;
         int steamTimeLoc = -1, steamAspectLoc = -1;
-        int frostSizeLoc = -1, frostRimLoc = -1, frostDropLoc = -1, frostTrailLoc = -1;
+        int frostSizeLoc = -1, frostBandLoc = -1, frostDropLoc = -1, frostTrailLoc = -1, frostBlurLoc = -1, frostBlurRectLoc = -1;
         Texture2D dot{}, vignette{}, paper{}, white{};
         float vignetteMade = -1.0f;
         float viewScale = 1.0f;
@@ -1453,6 +1437,90 @@ void main()
             zoomLoaded = restDone && !zoomBad;
         }
 
+        // The drink as a misted glass shows it (the frost): a smoothie state's pixels inside the drink polygon, blurred
+        // without the glass round it bleeding in (a masked blur), at half size; premultiplied RGBA. Worker side.
+        Pixels frostedDrink(const Pixels &px, Rectangle rect) const
+        {
+            Pixels out;
+            if (px.channels != 4 || px.empty() || glassDrink.size() < 3 || frameW <= 0.0f || rect.width <= 0.0f)
+                return out;
+            std::vector<Vector2> drink;
+            for (const Vector2 &p : glassDrink)
+                drink.push_back(Vector2{p.x * frameW, p.y * frameH});
+            const int w = std::max(1, px.width / 2), h = std::max(1, px.height / 2);
+            const size_t n = static_cast<size_t>(w) * h;
+            std::vector<float> channel[4], inside(n, 0.0f);
+            for (std::vector<float> &c : channel)
+                c.assign(n, 0.0f);
+            const float sx = rect.width / static_cast<float>(px.width), sy = rect.height / static_cast<float>(px.height);
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                    const size_t i = static_cast<size_t>(y) * w + x;
+                    if (!inPolygon(drink, Vector2{rect.x + (x * 2.0f + 1.0f) * sx, rect.y + (y * 2.0f + 1.0f) * sy}))
+                        continue;
+                    inside[i] = 1.0f;
+                    for (int dy = 0; dy < 2; ++dy)
+                        for (int dx = 0; dx < 2; ++dx)
+                        {
+                            const size_t at = (static_cast<size_t>(std::min(y * 2 + dy, px.height - 1)) * px.width + std::min(x * 2 + dx, px.width - 1)) * 4;
+                            for (int k = 0; k < 4; ++k)
+                                channel[k][i] += px.data[at + static_cast<size_t>(k)] * 0.25f;
+                        }
+                }
+            constexpr float kSigma = 2.4f; // half-size pixels (about 5 frame pixels)
+            for (std::vector<float> &c : channel)
+                blur(c, w, h, kSigma);
+            blur(inside, w, h, kSigma);
+            out.width = w;
+            out.height = h;
+            out.channels = 4;
+            out.data.resize(n * 4);
+            for (size_t i = 0; i < n; ++i)
+            {
+                const float k = inside[i] > 1e-3f ? 1.0f / inside[i] : 0.0f;
+                for (int c = 0; c < 4; ++c)
+                    out.data[i * 4 + static_cast<size_t>(c)] = static_cast<uint8_t>(std::clamp(channel[c][i] * k + 0.5f, 0.0f, 255.0f));
+            }
+            return out;
+        }
+
+        // The plate's front lip drawn again over the front cherry pair (K, Nov 18): the pair was rendered whole, so it
+        // showed over the lip; this is the table set's own pixels below the lip's edge (traced off fg, 5120x1440 frame
+        // pixels), identical to what lies under it once the cherries are eaten. Main thread.
+        Pixels lipFrom(const Pixels &px) const
+        {
+            Pixels out;
+            if (px.channels != 4 || px.empty() || frameW != 5120.0f || frameH != 1440.0f)
+                return out;
+            const int w = static_cast<int>(kLipBox.width), h = static_cast<int>(kLipBox.height);
+            out.width = w;
+            out.height = h;
+            out.channels = 4;
+            out.data.assign(static_cast<size_t>(w) * h * 4, 0);
+            for (int x = 0; x < w; ++x)
+            {
+                const float fx = kLipBox.x + x + 0.5f;
+                float edge = kPlateLip[0].y;
+                for (size_t i = 1; i < std::size(kPlateLip); ++i)
+                    if (fx >= kPlateLip[i - 1].x && fx <= kPlateLip[i].x)
+                        edge = kPlateLip[i - 1].y + (kPlateLip[i].y - kPlateLip[i - 1].y) * (fx - kPlateLip[i - 1].x) / (kPlateLip[i].x - kPlateLip[i - 1].x);
+                    else if (fx > kPlateLip[i].x)
+                        edge = kPlateLip[i].y;
+                for (int y = 0; y < h; ++y)
+                {
+                    const float cover = std::clamp(kLipBox.y + y + 0.5f - edge + 0.5f, 0.0f, 1.0f);
+                    const int sx = static_cast<int>(kLipBox.x + fgMargin) + x, sy = static_cast<int>(kLipBox.y + fgMargin) + y;
+                    if (cover <= 0.0f || sx < 0 || sy < 0 || sx >= px.width || sy >= px.height)
+                        continue;
+                    const size_t from = (static_cast<size_t>(sy) * px.width + sx) * 4, to = (static_cast<size_t>(y) * w + x) * 4;
+                    for (int k = 0; k < 4; ++k)
+                        out.data[to + static_cast<size_t>(k)] = static_cast<uint8_t>(px.data[from + static_cast<size_t>(k)] * cover + 0.5f);
+                }
+            }
+            return out;
+        }
+
         void loadSnacks(const fs::path &dir, const Json *js, Snacks &out, int group, bool home)
         {
             if (js == nullptr)
@@ -1485,13 +1553,25 @@ void main()
                 {
                     s.states.resize(states->items.size());
                     if (home)
+                    {
                         s.hit.resize(states->items.size());
+                        s.blur.resize(states->items.size());
+                        s.blurPx.resize(states->items.size());
+                    }
                     for (size_t i = 0; i < states->items.size(); ++i)
-                        add(dir / states->items[i].text, Kind::Rgba, group, [&s, i, home](Pixels &px) {
-                            s.states[i] = upload(px, false);
-                            if (home)
-                                s.hit[i] = alphaOf(px);
-                        });
+                        add(
+                            dir / states->items[i].text, Kind::Rgba, group,
+                            [&s, i, home](Pixels &px) {
+                                s.states[i] = upload(px, false);
+                                if (home)
+                                {
+                                    s.hit[i] = alphaOf(px);
+                                    s.blur[i] = upload(s.blurPx[i], false);
+                                    s.blurPx[i] = Pixels{};
+                                }
+                            },
+                            home ? std::function<void(Pixels &)>([this, &s, i](Pixels &px) { s.blurPx[i] = frostedDrink(px, s.rect); })
+                                 : std::function<void(Pixels &)>{});
                 }
                 if (const Json *garnish = (*sm)["garnish"]; garnish && garnish->kind == Json::Kind::Array)
                 {
@@ -1538,7 +1618,10 @@ void main()
                 return false;
             // Home first (group 0): the room, the table set, the rays, the openings' matte (its bloom), the book.
             add(homeDir / layers->items[0].text, Kind::Rgb, 0, [this](Pixels &px) { back = upload(px, true); }, {}, 2);
-            add(homeDir / layers->items[1].text, Kind::Rgba, 0, [this](Pixels &px) { fg = upload(px, true); }, {}, 2);
+            add(homeDir / layers->items[1].text, Kind::Rgba, 0, [this](Pixels &px) {
+                    lip = upload(lipFrom(px), false);
+                    fg = upload(px, true);
+                }, {}, 2);
             add(homeDir / textOf((*home)["rays"]), Kind::Rgb, 0, [this](Pixels &px) { rays = upload(px, true); },
                 [this](Pixels &px) { raysLuma = lumaOf(px, 16); }, 2);
             add(homeDir / textOf((*home)["rays_weight"]), Kind::Gray, 0, [this](Pixels &px) { raysWeight = upload(px, false); });
@@ -1644,6 +1727,7 @@ void main()
             raysWeightLoc = GetShaderLocation(raysShader, "weightMap");
             raysRoomLoc = GetShaderLocation(raysShader, "shiftRoom");
             raysTableLoc = GetShaderLocation(raysShader, "shiftTable");
+            raysAirLoc = GetShaderLocation(raysShader, "shiftAir");
             raysSourceLoc = GetShaderLocation(raysShader, "source");
             raysSizeLoc = GetShaderLocation(raysShader, "size");
             raysTimeLoc = GetShaderLocation(raysShader, "time");
@@ -1651,7 +1735,9 @@ void main()
             steamTimeLoc = GetShaderLocation(steamShader, "time");
             steamAspectLoc = GetShaderLocation(steamShader, "aspect");
             frostSizeLoc = GetShaderLocation(frostShader, "size");
-            frostRimLoc = GetShaderLocation(frostShader, "rim");
+            frostBandLoc = GetShaderLocation(frostShader, "band");
+            frostBlurLoc = GetShaderLocation(frostShader, "blurMap");
+            frostBlurRectLoc = GetShaderLocation(frostShader, "blurRect");
             frostDropLoc = GetShaderLocation(frostShader, "drop");
             frostTrailLoc = GetShaderLocation(frostShader, "trail");
             makeTextures();
@@ -1830,11 +1916,14 @@ void main()
             appear = std::min(1.0f, appear + dt / 0.35f);
             volume = in.volume;
             parallax = in.parallax;
-            const float reach = parallaxMax * frameH * tuning.drift;
+            const float reach0 = parallaxMax * frameH, reach = reach0 * tuning.drift;
             const float tableShare = std::clamp(tuning.tableShare, 0.0f, 1.0f);
             const Vector2 lean = frame == 0 ? parallax : Vector2{0.0f, 0.0f};
             roomShift = Vector2{lean.x * reach * (1.0f - tableShare), lean.y * reach * (1.0f - tableShare)};
             tableShift = Vector2{-lean.x * reach * tableShare, -lean.y * reach * tableShare};
+            // what hangs in the air (the rays' near ends, the dust) against the room; the logo out past the doorway
+            airShift = Vector2{-lean.x * reach0 * tuning.airDrift, -lean.y * reach0 * tuning.airDrift};
+            logoShift = Vector2{lean.x * reach0 * 0.6f * tuning.logoDrift, lean.y * reach0 * 0.6f * tuning.logoDrift};
 
             // the zoom: stepped frames
             if (direction != 0)
@@ -2072,11 +2161,13 @@ void main()
                 BeginShaderMode(raysShader);
                 const float room[2] = {roomShift.x / rays.width, roomShift.y / rays.height};
                 const float table[2] = {tableShift.x / rays.width, tableShift.y / rays.height};
+                const float air[2] = {airShift.x / rays.width, airShift.y / rays.height};
                 // the doorway's rays fan out from its upper glare
                 const float source[2] = {(0.5f * frameW + backMargin) / rays.width, (0.27f * frameH + backMargin) / rays.height};
                 const float size[2] = {static_cast<float>(rays.width), static_cast<float>(rays.height)};
                 SetShaderValue(raysShader, raysRoomLoc, room, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysTableLoc, table, SHADER_UNIFORM_VEC2);
+                SetShaderValue(raysShader, raysAirLoc, air, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysSourceLoc, source, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysSizeLoc, size, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysTimeLoc, &time, SHADER_UNIFORM_FLOAT);
@@ -2111,9 +2202,10 @@ void main()
             for (const Mote &m : motes)
             {
                 const float t = time;
-                // in the air between the table and the room: their drift between the two by depth
+                // in the air between the table and the room: their drift between the two by depth, and against the room
                 const float k = 0.3f + 0.6f * m.depth;
-                const Vector2 drift{tableShift.x + (roomShift.x - tableShift.x) * k, tableShift.y + (roomShift.y - tableShift.y) * k};
+                const Vector2 drift{tableShift.x + (roomShift.x - tableShift.x) * k + airShift.x * (1.0f - k),
+                                    tableShift.y + (roomShift.y - tableShift.y) * k + airShift.y * (1.0f - k)};
                 const float x = m.base.x + m.swing.x * (std::sin(t * 6.2832f / m.px + m.phase1) + 0.35f * std::sin(t * 6.2832f / m.p2 + m.phase2)) + drift.x;
                 const float y = m.base.y + m.swing.y * std::sin(t * 6.2832f / m.py + m.phase3) + 0.25f * m.swing.y * std::sin(t * 0.9f + m.phase2) +
                                 drift.y;
@@ -2180,14 +2272,25 @@ void main()
                 points[i * 4 + 2] = time - trail[i].born;
                 points[i * 4 + 3] = 1.0f;
             }
+            const Smoothie &sm = snacks.smoothie;
+            if (sm.blur.empty())
+                return;
+            const Texture2D &blurred = sm.blur[std::min(static_cast<size_t>(std::max(0, smoothieState)), sm.blur.size() - 1)];
+            if (blurred.id == 0u || sm.rect.width <= 0.0f || sm.rect.height <= 0.0f)
+                return;
             const float size[2] = {glassBox.width, glassBox.height};
-            const float rim = (rimY * frameH - glassBox.y) / glassBox.height;
+            const float band[2] = {(rimY * frameH - glassBox.y) / glassBox.height, drinkBottom / glassBox.height};
+            const float blurRect[4] = {(glassBox.x - sm.rect.x) / sm.rect.width, (glassBox.y - sm.rect.y) / sm.rect.height,
+                                       glassBox.width / sm.rect.width, glassBox.height / sm.rect.height};
+            // (blend mode, shader, then its extra texture: see drawRays)
             BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             BeginShaderMode(frostShader);
             SetShaderValue(frostShader, frostSizeLoc, size, SHADER_UNIFORM_VEC2);
-            SetShaderValue(frostShader, frostRimLoc, &rim, SHADER_UNIFORM_FLOAT);
+            SetShaderValue(frostShader, frostBandLoc, band, SHADER_UNIFORM_VEC2);
+            SetShaderValue(frostShader, frostBlurRectLoc, blurRect, SHADER_UNIFORM_VEC4);
             SetShaderValue(frostShader, frostDropLoc, drop, SHADER_UNIFORM_VEC4);
             SetShaderValueV(frostShader, frostTrailLoc, points, SHADER_UNIFORM_VEC4, 24);
+            SetShaderValueTexture(frostShader, frostBlurLoc, blurred);
             drawAt(drinkMask, Rectangle{glassBox.x + tableShift.x, glassBox.y + tableShift.y, glassBox.width, glassBox.height},
                    Color{255, 255, 255, static_cast<unsigned char>(std::clamp(strength, 0.0f, 1.0f) * 255.0f)});
             EndShaderMode();
@@ -2225,6 +2328,12 @@ void main()
                 EndBlendMode();
             }
             drawFloats(tuning.floatHeight * frameH, table);
+            if (lip.id != 0u) // over the pieces and their floats: an eaten pair rises from behind the lip
+            {
+                BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
+                drawAt(lip, Rectangle{kLipBox.x + table.x, kLipBox.y + table.y, kLipBox.width, kLipBox.height});
+                EndBlendMode();
+            }
             drawFrost();
             drawSteam();
             drawRays();
@@ -2347,7 +2456,7 @@ void main()
             homeReady = false;
             if (!IsWindowReady()) // the window (and its textures) already gone
                 return;
-            for (Texture2D *t : {&back, &fg, &rays, &raysWeight, &bloom, &bookLit, &doorTexture, &dot, &vignette, &paper, &white, &drinkMask})
+            for (Texture2D *t : {&back, &fg, &lip, &rays, &raysWeight, &bloom, &bookLit, &doorTexture, &dot, &vignette, &paper, &white, &drinkMask})
                 unload(*t);
             const auto freeSnacks = [](Snacks &s) {
                 for (Piece &p : s.pieces)
@@ -2358,6 +2467,8 @@ void main()
                 for (Texture2D &t : s.smoothie.states)
                     unload(t);
                 for (Texture2D &t : s.smoothie.garnish)
+                    unload(t);
+                for (Texture2D &t : s.smoothie.blur)
                     unload(t);
             };
             freeSnacks(snacks);
@@ -2452,7 +2563,7 @@ void main()
             if (!s.hasDoor)
                 return false;
             q = s.doorN;
-            drift = Vector2{s.roomShift.x * s.tuning.logoDrift, s.roomShift.y * s.tuning.logoDrift};
+            drift = Vector2{s.roomShift.x + s.logoShift.x, s.roomShift.y + s.logoShift.y};
         }
         else
         {
@@ -2557,6 +2668,7 @@ void main()
             {"KanaX", "Kana across", &Tuning::kanaX, -0.2f, 0.2f},
             {"KanaY", "Kana down", &Tuning::kanaY, -0.2f, 0.2f},
             {"KanaDrift", "Kana drift", &Tuning::kanaDrift, -1.0f, 2.0f},
+            {"AirDrift", "Rays & dust drift", &Tuning::airDrift, 0.0f, 2.0f},
             {"Burst", "Burst size", &Tuning::burst, 0.0f, 2.0f},
             {"RaysMotion", "Rays motion", &Tuning::raysMotion, 0.0f, 2.0f},
             {"Rays", "Rays", &Tuning::rays, 0.0f, 1.0f},

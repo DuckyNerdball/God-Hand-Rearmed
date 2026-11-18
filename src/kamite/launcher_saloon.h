@@ -91,16 +91,18 @@ namespace kamite::launcher::saloon
     // ---- the dev tuning panel's values (F4; GHR.ini [SaloonTuning]; the defaults once K is happy) -------------------
     struct Tuning
     {
-        float drift = 1.0f;        // the room against the table with the cursor (x parallax_max of the height)
+        float drift = 0.0f;        // the room against the table with the cursor (x parallax_max of the height; 0: both
+                                   // still, K Nov 18: the rays, dust, logo and kana carry the depth)
         float tableShare = 0.4f;   // the table's part of it (it goes the other way: the view turns round a point between)
         float logoU = 0.5f;        // the logo's centre in the doorway quad (0..1 across, 0..1 down)
         float logoV = 0.125f;
         float logoWidth = 1.19f;   // the logo's width (GOD HAND + plate) in doorway widths
-        float logoDrift = 1.0f;    // how much of the room's drift the logo follows
+        float logoDrift = 1.0f;    // the logo's (and burst's) drift with the cursor, out past the doorway
         float kanaX = 0.0f;        // the kana's offset in logo widths
         float kanaY = 0.0f;
         float kanaDrift = 0.4f;    // the kana's own extra drift (x the room's)
-        float burst = 0.8f;        // the speed lines behind the logo (size in logo widths)
+        float airDrift = 1.0f;     // the rays' near ends and the dust in the air, against the room
+        float burst = 1.2f;        // the speed lines behind the logo (size in logo widths)
         float raysMotion = 1.0f;   // the light rays' beams turning and the fan's swing (like the burst)
         float rays = 1.0f;         // the rays' strength
         float bloom = 0.6f;        // the doorway's (and windows') glow
@@ -109,7 +111,7 @@ namespace kamite::launcher::saloon
         float steam = 1.0f;        // the curry's steam (times the player's volume)
         float frost = 1.0f;        // the smoothie glass's frost
         float floatHeight = 0.07f; // how far an eaten snack rises (of the height)
-        float zoomFps = 24.0f;     // the Options zoom's frames a second (stepped)
+        float zoomFps = 30.0f;     // the Options zoom's frames a second (stepped)
     };
 
     class Scene

@@ -4,12 +4,12 @@ Newest first, one line per change; the code comments say how.
 
 ## November 18, 2026
 
-- Launcher: a saloon replaces the desert: the menu is written on the bill of fare, the logo shines in the doorway, the room leans with the mouse, the doors sway in the breeze and fly open on Play.
-- Launcher: light rays, dust in the light, a glowing doorway, steam off the curry (louder volume, more steam) and a frosty smoothie glass.
+- Launcher: a saloon replaces the desert: the menu is written on the bill of fare, the logo shines in the doorway, the light and the dust drift with the mouse, the doors sway in the breeze and fly open on Play.
+- Launcher: light rays, dust in the light, a glowing doorway, steam off the curry (louder volume, more steam) and a misted smoothie glass with a drop running down it.
 - Launcher: Options zooms down to the book on the table (Back zooms out); the book lights up when Options is selected and opens Options when clicked.
 - Launcher: the snacks on the table can be eaten.
 - Launcher: Add to Steam is a Steam mark on the bill; the version and the volume are on a paper slip in the corner.
-- Launcher: the legal notice is fine print on the bill; Skip Launcher (hold Shift while starting to see it) replaces "Don't show this again".
+- Launcher: the tagline and the legal notice are fine print on the bill; Skip Launcher (hold Shift while starting to see it) replaces "Don't show this again".
 
 ## November 17, 2026
 

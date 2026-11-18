@@ -906,8 +906,11 @@ namespace kamite::launcher
             const float halfW = std::max(1.0f, std::fabs(r.x - l.x) * 0.5f), halfH = std::max(1.0f, std::fabs(b.y - t.y) * 0.5f);
             const float x0 = c.x - halfW, x1 = c.x + halfW, y0 = c.y - halfH, y1 = c.y + halfH;
             ImGui::SetCursorScreenPos(ImVec2(x0, y0));
-            // EnableNav: an invisible button is no keyboard / gamepad stop unless asked
+            // EnableNav: an invisible button is no keyboard / gamepad stop unless asked; ImGui's own focus frame hidden
+            // (the pencil loop shows the focus)
+            ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
             const bool pressed = ImGui::InvisibleButton(id, ImVec2(std::max(1.0f, x1 - x0), std::max(1.0f, y1 - y0)), ImGuiButtonFlags_EnableNav);
+            ImGui::PopStyleColor();
             const ImGuiIO &io = ImGui::GetIO();
             const bool moved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
             if (hoverFocus && moved && !ImGui::IsItemFocused() && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) &&
@@ -1947,28 +1950,6 @@ namespace kamite::launcher
                 state.focusFirst = false;
         }
 
-        // The tagline at the foot of the picture, middle, where the rights notice was (K, Nov 18): the bill's serif in
-        // cream, a soft shadow under it; out through the zoom.
-        void drawTagline(const State &state, float alpha)
-        {
-            const Font &font = state.billFonts.text;
-            if (font.texture.id == 0u || alpha <= 0.01f)
-                return;
-            const char *text = "God Hand\u2122 for PS2 Recompiled, Refined, Rearmed.";
-            const Rectangle pic = state.scene.picture();
-            const float size = std::max(14.0f, pic.height * 0.026f);
-            const Vector2 extent = MeasureTextEx(font, text, size, 0.0f);
-            const Vector2 at{std::round(pic.x + (pic.width - extent.x) * 0.5f), std::round(pic.y + pic.height - size * 1.7f)};
-            const float r = std::max(1.0f, size * 0.07f);
-            const Color shade{10, 6, 4, alphaOf(0.28f * alpha)};
-            for (int i = 0; i < 12; ++i)
-            {
-                const float a = static_cast<float>(i) * 0.5236f;
-                DrawTextEx(font, text, Vector2{at.x + std::cos(a) * r, at.y + r * 0.6f + std::sin(a) * r}, size, 0.0f, shade);
-            }
-            DrawTextEx(font, text, at, size, 0.0f, Color{236, 224, 204, alphaOf(0.94f * alpha)});
-        }
-
         // The saloon's ink before ImGui (so popups cover it), from last frame's focus: the bill, the corner slip.
         void drawSaloonInk(State &state)
         {
@@ -1981,8 +1962,6 @@ namespace kamite::launcher
             if (state.screen == Screen::Options)
                 return;
             const float alpha = scene.overlays();
-            if (state.screen == Screen::Home)
-                drawTagline(state, alpha);
             const Slip right = slipAt(state, true);
             drawSlipPaper(state, right, alpha);
             drawSlipInk(state, right, true, alpha);
