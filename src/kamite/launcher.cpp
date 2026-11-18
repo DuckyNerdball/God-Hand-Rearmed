@@ -262,8 +262,9 @@ namespace kamite::launcher
             float voiceAt = -1.0f;        // a snack line waiting for the slurp to end (GetTime)
             Music ambience{};             // resources/sfx/launcher: the bar's murmur under the music (K, Nov 18)
             bool hasAmbience = false;
-            Sound pen{}, slurp{};         // the pencil loop drawn; the smoothie's last sip
-            bool hasPen = false, hasSlurp = false;
+            Sound pen{}, slurp{}, bite{}; // the pencil loop drawn; the smoothie's last sip; a fruit or a garnish eaten
+            Sound bookOpen{}, bookClose{}; // the Options zoom in to the book and back out (with the whoosh)
+            bool hasPen = false, hasSlurp = false, hasBite = false, hasBookOpen = false, hasBookClose = false;
             bool penThisFrame = false;    // the pen played: no cursor tick on top of it
             int lastSlipFocus = 0;
             int snackVoice = -1;          // the one playing (lines never overlap or queue)
@@ -475,6 +476,36 @@ namespace kamite::launcher
         {
             playEffect(state, state.pen, state.hasPen);
             state.penThisFrame = state.hasPen;
+        }
+
+        void menuSound(State &state, MenuSound which);
+
+        // Into the book and back out (K, Nov 18): the whoosh (the menu's cancel sound) with the book opening or closing,
+        // instead of the confirm. (menuSound marks the frame's sound as played.)
+        void bookSound(State &state, bool open)
+        {
+            menuSound(state, kCancel);
+            if (open)
+                playEffect(state, state.bookOpen, state.hasBookOpen);
+            else
+                playEffect(state, state.bookClose, state.hasBookClose);
+        }
+
+        // A snack eaten: its sound (the slurp for the drink, a bite for the rest; K's), then Gene's line once it's
+        // done; without the sound, the line at once.
+        float soundLength(const Sound &sound) { return sound.stream.sampleRate > 0 ? static_cast<float>(sound.frameCount) / sound.stream.sampleRate : 0.0f; }
+        void snackVoice(State &state);
+        void eatSound(State &state, bool drink)
+        {
+            Sound &sound = drink ? state.slurp : state.bite;
+            const bool loaded = drink ? state.hasSlurp : state.hasBite;
+            if (!loaded)
+            {
+                snackVoice(state);
+                return;
+            }
+            playEffect(state, sound, true, 2.0f); // (K: twice the files' level, against Gene's voice)
+            state.voiceAt = static_cast<float>(GetTime()) + soundLength(sound) + 0.05f;
         }
 
         void playMenuSound(State &state, MenuSound which, float scale = 1.0f)
@@ -1703,9 +1734,11 @@ namespace kamite::launcher
         // mark (Steam found).
         constexpr size_t kBillOptions = 1;
 
-        void openOptions(State &state)
+        void openOptions(State &state, bool sound = true)
         {
             g_hotkeysOpen = false;
+            if (sound)
+                bookSound(state, true);
             saloon::Scene &scene = state.scene;
             if (!scene.zoomBroken() && !scene.zoomReady())
             {
@@ -1740,7 +1773,7 @@ namespace kamite::launcher
                 (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
             {
                 scene.zoomOut();
-                menuSound(state, kCancel);
+                bookSound(state, false);
             }
             saloon::Bill &bill = state.bill;
             bill.items = {state.installed ? "Play" : "Install", "Options", "Quit"};
@@ -1894,17 +1927,9 @@ namespace kamite::launcher
             if (home && !popup && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsAnyItemHovered())
             {
                 if (overBook)
-                {
-                    menuSound(state, kConfirm);
                     openOptions(state);
-                }
-                else if (const saloon::Scene::Bite bite = scene.snackClick(mouse); bite == saloon::Scene::Bite::Drink && state.hasSlurp)
-                {
-                    playEffect(state, state.slurp, true);
-                    state.voiceAt = static_cast<float>(GetTime()) + 0.95f; // Gene's line once it's down
-                }
-                else if (bite != saloon::Scene::Bite::None)
-                    snackVoice(state);
+                else if (const saloon::Scene::Bite bite = scene.snackClick(mouse); bite != saloon::Scene::Bite::None)
+                    eatSound(state, bite == saloon::Scene::Bite::Drink);
             }
             // The mouse moved off everything (the bill's lines, the book, the slip's controls): nothing stays focused, so
             // no loop lingers and the book goes dark (K, Nov 18). The next key or button focuses the first item.
@@ -3423,7 +3448,10 @@ namespace kamite::launcher
             ImGui::PopFont();
             if ((back || cancel) && !state.optionsLeaving)
             {
-                menuSound(state, kCancel);
+                if (state.saloonOn)
+                    bookSound(state, false); // back out of the book
+                else
+                    menuSound(state, kCancel);
                 state.ini.save();
                 saveControls();
                 g_resetArmed = false;
@@ -3571,6 +3599,9 @@ namespace kamite::launcher
             };
             state.hasPen = effect("pen_circle.ogg", state.pen);
             state.hasSlurp = effect("smoothie_drink.ogg", state.slurp);
+            state.hasBite = effect("eat_fruit.ogg", state.bite);
+            state.hasBookOpen = effect("book_open.ogg", state.bookOpen);
+            state.hasBookClose = effect("book_close.ogg", state.bookClose);
         }
         state.volume = std::clamp(static_cast<float>(std::atof(state.ini.get("Launcher", "Volume", "0.8").c_str())), 0.0f, 1.0f);
         state.exePath = platform::thisExe();
@@ -3655,7 +3686,7 @@ namespace kamite::launcher
                 if (state.zoomPending && state.screen == Screen::Home && (state.scene.zoomReady() || state.scene.zoomBroken()))
                 {
                     state.zoomPending = false;
-                    openOptions(state);
+                    openOptions(state, false); // (its sound played at the press)
                 }
                 // The zoom landed: Options' panel fades in over its last frame. Back: it fades out, then the zoom
                 // plays backwards (the bill's loop back on Options).
@@ -3852,10 +3883,11 @@ namespace kamite::launcher
                     UnloadSound(state.menuSounds[i]);
             for (Sound &voice : state.snackVoices)
                 UnloadSound(voice);
-            if (state.hasPen)
-                UnloadSound(state.pen);
-            if (state.hasSlurp)
-                UnloadSound(state.slurp);
+            for (const auto &[loaded, sound] : {std::pair{state.hasPen, &state.pen}, std::pair{state.hasSlurp, &state.slurp},
+                                                std::pair{state.hasBite, &state.bite}, std::pair{state.hasBookOpen, &state.bookOpen},
+                                                std::pair{state.hasBookClose, &state.bookClose}})
+                if (loaded)
+                    UnloadSound(*sound);
             if (state.audio)
                 CloseAudioDevice();
         }

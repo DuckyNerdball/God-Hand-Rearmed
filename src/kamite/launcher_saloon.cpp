@@ -40,8 +40,7 @@ namespace kamite::launcher::saloon
         constexpr int kZoomFrames = 8;
         constexpr float kFloatTime = 0.6f;  // an eaten snack's rise
         constexpr float kShadowFade = 0.4f; // its shadow
-        constexpr int kMoteCount = 90;  // bright motes in the doorway's light
-        constexpr int kDustCount = 700; // fine dust all through the room's air (lit only where the light reaches)
+        constexpr int kMoteCount = 90; // bright motes in the doorway's light (the fine dust: the plumes, kDustShader)
 
         std::string utf8(const fs::path &path)
         {
@@ -119,9 +118,7 @@ uniform vec2 source;     // where the doorway's rays fan out from, uv
 uniform vec2 size;       // the texture's size, pixels
 uniform float time;
 uniform float motion;
-uniform float dust;      // the dust hanging in the light (K, Nov 18): the beams thick and thin with it
 out vec4 finalColor;
-%NOISE%
 void main()
 {
     vec2 uv = fragTexCoord;
@@ -144,15 +141,7 @@ void main()
             + 0.20 * sin(23.0 * a - time * 1.15 + 2.3) + 0.25 * sin(5.0 * a + time * 0.38 + 0.7);
     float beams = max(0.0, 1.0 + motion * 0.65 * b * smoothstep(40.0, 350.0, r) * fan);
     float pulse = 1.0 + motion * 0.11 * (0.7 * sin(time * 1.7 + 1.0) + 0.3 * sin(time * 2.9));
-    // dust: slow billowy plumes hanging in the air (drifting with it), the light thick in them and thin between
-    vec2 q = (fragTexCoord * size - shiftAir * size) / vec2(520.0, 400.0);
-    float t = time * 0.035;
-    vec2 eddy = vec2(soft(q * 0.6 + vec2(t, -0.7 * t)), soft(q * 0.6 + vec2(4.7 - 0.8 * t, 2.1 + t))) - 0.5;
-    float plume = smoothstep(0.30, 0.72, soft(q + eddy * 1.8 + vec2(0.4 * t, -0.25 * t)));
-    float fine = soft(q * 3.1 + eddy * 2.5 + vec2(-0.6 * t, 0.9 * t));
-    float thick = mix(1.0, (0.35 + 1.25 * plume) * (0.8 + 0.4 * fine), clamp(dust, 0.0, 3.0) / max(1.0, dust));
-    thick *= 1.0 + 0.35 * max(dust - 1.0, 0.0) * plume;
-    finalColor = vec4(col * beams * pulse * thick * fragColor.a, 1.0);
+    finalColor = vec4(col * beams * pulse * fragColor.a, 1.0);
 }
 )glsl";
 
@@ -190,13 +179,43 @@ in vec2 fragTexCoord;
 in vec4 fragColor;
 uniform sampler2D texture0; // the kana
 uniform sampler2D matte;    // the outside matte (1: outside)
-uniform vec4 matteMap;      // this quad's uv into the matte's: offset (xy), scale (zw)
+uniform vec2 centre;        // the kana's centre in the matte's uv
+uniform vec4 axes;          // its (turned) across and down vectors in the matte's uv: across (xy), down (zw)
 out vec4 finalColor;
 void main()
 {
     vec4 c = texture(texture0, fragTexCoord) * fragColor;
-    float m = texture(matte, matteMap.xy + fragTexCoord * matteMap.zw).r;
+    float m = texture(matte, centre + (fragTexCoord.x - 0.5) * axes.xy + (fragTexCoord.y - 0.5) * axes.zw).r;
     finalColor = vec4(c.rgb * c.a * m, c.a * m); // premultiplied
+}
+)glsl";
+
+        // Dust hanging in the room's air past the table (K, Nov 18): fine billowy plumes, faintly lit of their own against
+        // the dark (a dusty room, not film grain), much brighter where the rays reach; drawn before the table set, so
+        // the table stands in front of it. The rays layer's own rectangle (the back's).
+        const char *const kDustShader = R"glsl(
+in vec2 fragTexCoord;
+in vec4 fragColor;
+uniform sampler2D texture0; // the rays: the light in the air
+uniform vec2 size;          // its size, pixels
+uniform vec2 drift;         // the air's drift (uv)
+uniform float time;
+uniform float amount;       // the tuning's Dust plumes (past 1: dustier)
+out vec4 finalColor;
+%NOISE%
+void main()
+{
+    vec2 uv = fragTexCoord;
+    vec3 light = texture(texture0, uv).rgb;
+    vec2 p = (uv - drift) * size / vec2(340.0, 260.0);
+    float t = time * 0.03;
+    vec2 eddy = vec2(soft(p * 0.5 + vec2(t, -0.7 * t)), soft(p * 0.5 + vec2(4.7 - 0.8 * t, 2.1 + t))) - 0.5;
+    float plume = smoothstep(0.40, 0.80, soft(p + eddy * 2.2 + vec2(0.3 * t, -0.2 * t)));
+    float veil = smoothstep(0.40, 0.85, soft(p * 2.2 + eddy * 3.0 + vec2(-0.4 * t, 0.15 * t))); // finer veils in them
+    float dust = plume * (0.45 + 0.55 * veil);
+    float band = smoothstep(0.02, 0.22, uv.y) * (1.0 - smoothstep(0.82, 0.98, uv.y)); // thin at the ceiling and the floor
+    vec3 lit = vec3(0.62, 0.52, 0.40) * 0.30 + light * 1.0;
+    finalColor = vec4(lit * dust * band * amount, 1.0);
 }
 )glsl";
 
@@ -1313,9 +1332,9 @@ float soft(vec2 p)
             loops(Vector2{3.0f, 5.0f}, 9.5f, Color{60, 40, 30, 75});
             endInk();
             beginPaint();
-            loops(Vector2{0.0f, 0.0f}, 7.0f, Color{150, 16, 20, 255});  // the wire, its shaded side
-            loops(Vector2{-0.5f, -0.7f}, 5.0f, Color{206, 34, 36, 255}); // its lit face
-            loops(Vector2{-1.0f, -1.9f}, 1.8f, Color{255, 170, 160, 210}); // the glint
+            loops(Vector2{0.0f, 0.0f}, 7.0f, Color{124, 13, 17, 255});  // the wire, its shaded side
+            loops(Vector2{-0.5f, -0.7f}, 5.0f, Color{171, 28, 30, 255}); // its lit face
+            loops(Vector2{-1.0f, -1.9f}, 1.8f, Color{232, 150, 140, 200}); // the glint
             endPaint();
         }
     }
@@ -1498,7 +1517,7 @@ float soft(vec2 p)
         Pixels outsidePx;            // the outside matte, sharp (the kana's mask), until uploaded
         Texture2D outsideMask{};
         Shader kanaShader{};
-        int kanaMatteLoc = -1, kanaMapLoc = -1;
+        int kanaMatteLoc = -1, kanaCentreLoc = -1, kanaAxesLoc = -1;
         float overlays = 1.0f, homeLife = 1.0f, bookLight = 0.0f, volume = 0.0f;
         std::vector<bool> eaten;
         std::vector<float> eatenAt;
@@ -1521,9 +1540,9 @@ float soft(vec2 p)
         bool prewarmed = false;
 
         // drawing
-        Shader shadowShader{}, raysShader{}, steamShader{}, frostShader{};
-        int raysDustLoc = -1, raysWeightLoc = -1, raysRoomLoc = -1, raysTableLoc = -1, raysAirLoc = -1, raysLockLoc = -1, raysFeatherLoc = -1, raysSourceLoc = -1, raysSizeLoc = -1, raysTimeLoc = -1, raysMotionLoc = -1;
-        int steamTimeLoc = -1, steamAspectLoc = -1;
+        Shader shadowShader{}, raysShader{}, steamShader{}, frostShader{}, dustShader{};
+        int raysWeightLoc = -1, raysRoomLoc = -1, raysTableLoc = -1, raysAirLoc = -1, raysLockLoc = -1, raysFeatherLoc = -1, raysSourceLoc = -1, raysSizeLoc = -1, raysTimeLoc = -1, raysMotionLoc = -1;
+        int steamTimeLoc = -1, steamAspectLoc = -1, dustSizeLoc = -1, dustDriftLoc = -1, dustTimeLoc = -1, dustAmountLoc = -1;
         int frostSizeLoc = -1, frostBandLoc = -1, frostDropLoc = -1, frostTrailLoc = -1, frostBlurLoc = -1, frostBlurRectLoc = -1;
         Texture2D dot{}, vignette{}, paper{}, white{};
         float vignetteMade = -1.0f;
@@ -1922,7 +1941,7 @@ float soft(vec2 p)
 
             // Shaders and the small made-up textures.
             shadowShader = loadShader(kShadowShader);
-            raysShader = loadShader(withNoise(kRaysShader).c_str());
+            raysShader = loadShader(kRaysShader);
             steamShader = loadShader(withNoise(kSteamShader).c_str());
             frostShader = loadShader(withNoise(kFrostShader).c_str());
             if (!usable(shadowShader))
@@ -1935,7 +1954,6 @@ float soft(vec2 p)
             raysRoomLoc = GetShaderLocation(raysShader, "shiftRoom");
             raysTableLoc = GetShaderLocation(raysShader, "shiftTable");
             raysAirLoc = GetShaderLocation(raysShader, "shiftAir");
-            raysDustLoc = GetShaderLocation(raysShader, "dust");
             raysLockLoc = GetShaderLocation(raysShader, "lock");
             raysFeatherLoc = GetShaderLocation(raysShader, "feather");
             raysSourceLoc = GetShaderLocation(raysShader, "source");
@@ -1945,8 +1963,14 @@ float soft(vec2 p)
             steamTimeLoc = GetShaderLocation(steamShader, "time");
             steamAspectLoc = GetShaderLocation(steamShader, "aspect");
             kanaShader = loadShader(kKanaShader);
+            dustShader = loadShader(withNoise(kDustShader).c_str());
+            dustSizeLoc = GetShaderLocation(dustShader, "size");
+            dustDriftLoc = GetShaderLocation(dustShader, "drift");
+            dustTimeLoc = GetShaderLocation(dustShader, "time");
+            dustAmountLoc = GetShaderLocation(dustShader, "amount");
             kanaMatteLoc = GetShaderLocation(kanaShader, "matte");
-            kanaMapLoc = GetShaderLocation(kanaShader, "matteMap");
+            kanaCentreLoc = GetShaderLocation(kanaShader, "centre");
+            kanaAxesLoc = GetShaderLocation(kanaShader, "axes");
             frostSizeLoc = GetShaderLocation(frostShader, "size");
             frostBandLoc = GetShaderLocation(frostShader, "band");
             frostBlurLoc = GetShaderLocation(frostShader, "blurMap");
@@ -2097,23 +2121,7 @@ float soft(vec2 p)
         {
             std::mt19937 random(0x5A1007u);
             std::uniform_real_distribution<float> unit(0.0f, 1.0f);
-            motes.resize(kMoteCount + kDustCount);
-            for (size_t i = kMoteCount; i < motes.size(); ++i)
-            {
-                // the fine dust: anywhere in the air, hanging, drifting a little, small and faint
-                Mote &m = motes[i];
-                m.base = Vector2{frameW * (0.06f + 0.88f * unit(random)), frameH * (0.04f + 0.84f * unit(random))};
-                m.swing = Vector2{frameW * (0.003f + 0.010f * unit(random)), frameH * (0.008f + 0.03f * unit(random))};
-                m.px = 30.0f + 60.0f * unit(random);
-                m.py = 25.0f + 45.0f * unit(random);
-                m.p2 = 10.0f + 15.0f * unit(random);
-                m.phase1 = unit(random) * 6.28f;
-                m.phase2 = unit(random) * 6.28f;
-                m.phase3 = unit(random) * 6.28f;
-                m.depth = unit(random);
-                m.size = 1.8f + 2.6f * m.depth * m.depth;
-                m.bright = 0.35f + 0.55f * unit(random);
-            }
+            motes.resize(kMoteCount);
             for (size_t i = 0; i < static_cast<size_t>(kMoteCount); ++i)
             {
                 Mote &m = motes[i];
@@ -2407,8 +2415,6 @@ float soft(vec2 p)
                 SetShaderValue(raysShader, raysSizeLoc, size, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysTimeLoc, &time, SHADER_UNIFORM_FLOAT);
                 SetShaderValue(raysShader, raysMotionLoc, &tuning.raysMotion, SHADER_UNIFORM_FLOAT);
-                const float dust = tuning.dust * homeLife;
-                SetShaderValue(raysShader, raysDustLoc, &dust, SHADER_UNIFORM_FLOAT);
                 SetShaderValueTexture(raysShader, raysWeightLoc, raysWeight);
                 drawAt(rays, r, Color{255, 255, 255, strength});
                 EndShaderMode();
@@ -2438,15 +2444,41 @@ float soft(vec2 p)
             const float w = canvasW * tuning.kanaSize, h = canvasH * tuning.kanaSize;
             const float cx = lx + canvasW * 0.5f + tuning.kanaX * canvasW + parallax.x * reach;
             const float cy = ly + canvasH * 0.5f + tuning.kanaY * canvasW + parallax.y * reach;
-            const Rectangle at{cx - w * 0.5f + roomShift.x, cy - h * 0.5f + roomShift.y, w, h};
-            // the matte covers the back layer's rectangle (and moves with it)
+            const Vector2 middle{cx + roomShift.x, cy + roomShift.y};
+            // the matte covers the back layer's rectangle (and moves with it); the kana turned by KanaTurn (degrees,
+            // clockwise) about its middle, as raylib turns a texture
             const Rectangle matte{-backMargin + roomShift.x, -backMargin + roomShift.y, frameW + 2.0f * backMargin, frameH + 2.0f * backMargin};
-            const float map[4] = {(at.x - matte.x) / matte.width, (at.y - matte.y) / matte.height, at.width / matte.width, at.height / matte.height};
+            const float turn = tuning.kanaTurn * kPi / 180.0f, c = std::cos(turn), sn = std::sin(turn);
+            const float middleUv[2] = {(middle.x - matte.x) / matte.width, (middle.y - matte.y) / matte.height};
+            const float axes[4] = {c * w / matte.width, sn * w / matte.height, -sn * h / matte.width, c * h / matte.height};
             BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             BeginShaderMode(kanaShader);
-            SetShaderValue(kanaShader, kanaMapLoc, map, SHADER_UNIFORM_VEC4);
+            SetShaderValue(kanaShader, kanaCentreLoc, middleUv, SHADER_UNIFORM_VEC2);
+            SetShaderValue(kanaShader, kanaAxesLoc, axes, SHADER_UNIFORM_VEC4);
             SetShaderValueTexture(kanaShader, kanaMatteLoc, outsideMask);
-            drawAt(kana, at);
+            const Vector2 at = frameToScreen(middle.x, middle.y);
+            const float sw = w * viewScale, shh = h * viewScale;
+            DrawTexturePro(kana, Rectangle{0.0f, 0.0f, static_cast<float>(kana.width), static_cast<float>(kana.height)},
+                           Rectangle{at.x, at.y, sw, shh}, Vector2{sw * 0.5f, shh * 0.5f}, tuning.kanaTurn, WHITE);
+            EndShaderMode();
+            EndBlendMode();
+        }
+
+        void drawDust(Vector2 room)
+        {
+            const float strength = homeLife * tuning.dust;
+            if (strength <= 0.01f || rays.id == 0u || !usable(dustShader))
+                return;
+            const Rectangle r{-backMargin + room.x, -backMargin + room.y, static_cast<float>(rays.width), static_cast<float>(rays.height)};
+            const float size[2] = {static_cast<float>(rays.width), static_cast<float>(rays.height)};
+            const float drift[2] = {airShift.x / rays.width, airShift.y / rays.height};
+            beginScreen();
+            BeginShaderMode(dustShader);
+            SetShaderValue(dustShader, dustSizeLoc, size, SHADER_UNIFORM_VEC2);
+            SetShaderValue(dustShader, dustDriftLoc, drift, SHADER_UNIFORM_VEC2);
+            SetShaderValue(dustShader, dustTimeLoc, &time, SHADER_UNIFORM_FLOAT);
+            SetShaderValue(dustShader, dustAmountLoc, &strength, SHADER_UNIFORM_FLOAT);
+            drawAt(rays, r);
             EndShaderMode();
             EndBlendMode();
         }
@@ -2586,6 +2618,9 @@ float soft(vec2 p)
             BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             if (doorTexture.id != 0u)
                 drawAt(doorTexture, Rectangle{doorRect.x + room.x, doorRect.y + room.y, doorRect.width, doorRect.height});
+            EndBlendMode();
+            drawDust(room);
+            BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             // the table set leans the other way
             drawAt(fg, Rectangle{-fgMargin + table.x, -fgMargin + table.y, static_cast<float>(fg.width), static_cast<float>(fg.height)});
             EndBlendMode();
@@ -2754,7 +2789,7 @@ float soft(vec2 p)
                 unload(z.bloom);
                 freeSnacks(z.snacks);
             }
-            for (Shader *s : {&shadowShader, &raysShader, &steamShader, &frostShader, &kanaShader})
+            for (Shader *s : {&shadowShader, &raysShader, &steamShader, &frostShader, &kanaShader, &dustShader})
                 unload(*s);
             unload(g_inkShader);
             g_inkTried = false;
@@ -2945,13 +2980,14 @@ float soft(vec2 p)
             {"KanaY", "Kana down", &Tuning::kanaY, -0.2f, 0.2f},
             {"KanaDrift", "Kana drift", &Tuning::kanaDrift, -1.0f, 2.0f},
             {"KanaSize", "Kana size", &Tuning::kanaSize, 0.3f, 2.5f},
+            {"KanaTurn", "Kana turn (degrees)", &Tuning::kanaTurn, -45.0f, 45.0f},
             {"AirDrift", "Rays & dust drift", &Tuning::airDrift, 0.0f, 2.0f},
             {"Burst", "Burst size", &Tuning::burst, 0.0f, 2.0f},
             {"RaysMotion", "Rays motion", &Tuning::raysMotion, 0.0f, 2.0f},
             {"Rays", "Rays", &Tuning::rays, 0.0f, 1.0f},
             {"Bloom", "Bloom", &Tuning::bloom, 0.0f, 2.0f},
             {"Motes", "Motes", &Tuning::motes, 0.0f, 2.0f},
-            {"Dust", "Dust plumes", &Tuning::dust, 0.0f, 3.0f},
+            {"Dust", "Dust in the air", &Tuning::dust, 0.0f, 3.0f},
             {"Vignette", "Vignette", &Tuning::vignette, 0.0f, 0.6f},
             {"Steam", "Steam", &Tuning::steam, 0.0f, 3.0f},
             {"Frost", "Frost", &Tuning::frost, 0.0f, 2.0f},

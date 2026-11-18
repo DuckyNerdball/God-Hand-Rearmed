@@ -111,13 +111,14 @@ namespace kamite::launcher::saloon
         float kanaY = 0.0f;
         float kanaDrift = 0.4f;    // the kana's drift with the cursor, out past the doorway (the logo stays put, K)
         float kanaSize = 1.0f;     // the kana's size (x the logo canvas's)
+        float kanaTurn = 0.0f;     // the kana's twist, degrees clockwise
         float airDrift = 1.0f;     // the rays' near ends and the dust in the air, against the room
         float burst = 1.2f;        // the speed lines behind the logo (size in logo widths)
         float raysMotion = 1.0f;   // the light rays' beams turning and the fan's swing (like the burst)
         float rays = 1.0f;         // the rays' strength
         float bloom = 0.6f;        // the doorway's (and windows') glow
         float motes = 1.0f;        // the specks of dust in the light (bright motes and fine dust)
-        float dust = 1.0f;         // the plumes of dust hanging in the light
+        float dust = 1.0f;         // the dust hanging in the air past the table (faint in the dark, bright in the light)
         float vignette = 0.22f;
         float steam = 1.0f;        // the curry's steam (times the player's volume)
         float frost = 1.0f;        // the smoothie glass's frost
