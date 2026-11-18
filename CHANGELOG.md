@@ -14,6 +14,7 @@ Newest first, one line per change; the code comments say how.
 - Launcher: Options is written in the open book: tabs on bookmark slips (LB / RB, Q / E), help on the right page, Controls' pages on index tabs (LT / RT, Z / C) with the button and key pictures, a ribbon for Back.
 - Launcher: the wanted posters on the saloon wall show their photos (read from your disc).
 - Launcher: the open book's spine has no black gap; the view moves in closer on the book.
+- Add to Steam: a new wide cover for the Steam library.
 
 ## November 17, 2026
 

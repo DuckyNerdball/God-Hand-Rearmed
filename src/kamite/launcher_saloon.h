@@ -78,6 +78,7 @@ namespace kamite::launcher::saloon
         bool skip = false;
         bool steam = false;            // Steam's mark in the upper left corner (Add to Steam)
         bool steamAdded = false;       // its label when focused: "Update / on Steam", else "Add to / Steam"
+        Texture2D steamMark{};         // resources/images/steam_mark.png (the launcher's; none: the mark is drawn in lines)
         bool volume = false;           // the mute mark in the upper right corner, the volume ruler down the right edge
         float level = 0.8f;            // the volume, 0..1 (the paperclip's place on the ruler)
         bool muted = false;

@@ -1755,7 +1755,7 @@ namespace kamite::launcher
 
         // The bill's items: Play (Install when not installed), Options, Quit, then Skip Launcher (installed) and Steam's
         // mark (Steam found).
-        constexpr size_t kBillOptions = 1;
+        constexpr size_t kBillOptions = 1, kBillQuit = 2;
 
         void openOptions(State &state, bool sound = true)
         {
@@ -1852,8 +1852,8 @@ namespace kamite::launcher
                     }
                     if (focused)
                         focus = static_cast<int>(i);
-                    if ((i == 0 && state.installed) || i == kBillOptions)
-                        ownSoundItem(); // Play's own sound; Options has the whoosh and the book (K: no menu sound on top)
+                    if ((i == 0 && state.installed) || i == kBillOptions || i == kBillQuit)
+                        ownSoundItem(); // Play's own sound; Options has the whoosh and the book; Quit just goes (K: no menu sound)
                     else if (i == skipItem || i == muteItem)
                         tickItem(); // the tick box, the mute mark
                     if (pressed && home)
@@ -1874,7 +1874,7 @@ namespace kamite::launcher
                         }
                         else if (i == kBillOptions)
                             openOptions(state);
-                        else if (i == 2)
+                        else if (i == kBillQuit)
                         {
                             state.result = Result::Quit;
                             state.done = true;
@@ -3571,10 +3571,18 @@ namespace kamite::launcher
             return pressed;
         }
 
-        // The focus loop round [min, max] (drawn in over kBookLoopTime).
+        // The focus loop round [min, max] (drawn in over kBookLoopTime). It reaches out past its word, past the left
+        // page's text area too (the scrolling child clips to that): while the word itself is in view, it is drawn
+        // under the book's own edges instead (K, Nov 18: clipped loops).
         void bookLoop(State &state, const Book &b, ImDrawList *dl, ImVec2 min, ImVec2 max)
         {
+            const ImVec4 clip = dl->_CmdHeader.ClipRect;
+            const bool inView = min.x >= clip.x - 1.0f && min.y >= clip.y - 1.0f && max.x <= clip.z + 1.0f && max.y <= clip.w + 1.0f;
+            if (inView)
+                dl->PushClipRect(ImVec2(b.left, b.top), ImVec2(b.right, b.bottom), false);
             book::loop(dl, min, max, state.bookFocusAge / kBookLoopTime, state.bookFocusSeed, kBookPencil, 3.6f * b.u);
+            if (inView)
+                dl->PopClipRect();
         }
 
         void bookHelp(State &state, const char *title, const char *help, const char *note = nullptr)
@@ -4503,12 +4511,16 @@ namespace kamite::launcher
                     }
                     if (focused)
                     {
-                        if (art)
-                            bookLoop(state, b, dl, ImVec2(x, mid - 18.0f * u), ImVec2(x + artWidth, mid + 18.0f * u));
-                        else
+                        // the loop goes round the action's name (K); with two keys a row, a pencil stroke under the
+                        // one in hand
+                        const ImVec2 nameAt(p.x, mid - size * 0.56f), ns = textSize(state.bookFonts.garamond, size, name);
+                        bookLoop(state, b, dl, ImVec2(nameAt.x, nameAt.y + size * 0.12f), ImVec2(nameAt.x + ns.x, nameAt.y + size * 1.02f));
+                        if (!controller && state.bookFocusAge > 0.02f)
                         {
-                            const ImVec2 ts = textSize(state.bookFonts.ink, size, fitted.c_str());
-                            bookLoop(state, b, dl, ImVec2(at.x, at.y + size * 0.12f), ImVec2(at.x + ts.x, at.y + size * 1.02f));
+                            const float used = art ? artWidth : textSize(state.bookFonts.ink, size, fitted.c_str()).x;
+                            const float drawn = std::clamp(state.bookFocusAge / kBookLoopTime, 0.0f, 1.0f);
+                            bookRule(b, dl, x - 2.0f * u, x - 2.0f * u + (used + 4.0f * u) * drawn, mid + 21.0f * u, kBookPencil, 2.6f * u,
+                                     state.bookFocusSeed);
                         }
                         std::string title = name;
                         if (!controller)
@@ -5155,6 +5167,7 @@ namespace kamite::launcher
         loadImage(state.rearmed, "rearmed.png");
         loadImage(state.rearmedText, "rearmed_text.png");
         loadImage(state.rearmedGlow, "rearmed_glow.png");
+        loadImage(state.bill.steamMark, "steam_mark.png"); // the bill's Add to Steam mark (K's sketch, ringed)
         if (state.kana.id != 0u && state.logo.id != 0u)
             state.scene.setKana(state.kana, kLogoContent, static_cast<float>(state.logo.height) / static_cast<float>(state.logo.width));
         const fs::path burstPath = context.exeDir / "resources" / "images" / "burst.png";
@@ -5522,6 +5535,8 @@ namespace kamite::launcher
             if (art.id != 0u)
                 UnloadTexture(art);
         saloon::unloadBillFonts(state.billFonts);
+        if (state.bill.steamMark.id != 0u)
+            UnloadTexture(state.bill.steamMark);
         state.scene.close(); // its threads and textures, before the game has the window
         if (state.splashFont.texture.id != 0u)
             UnloadFont(state.splashFont);

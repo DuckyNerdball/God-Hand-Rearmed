@@ -1090,7 +1090,9 @@ float soft(vec2 p)
         constexpr float kSkipSize = 34.0f, kSkipY = 704.0f, kBox = 29.0f, kBoxGap = 12.0f, kPaperRoom = 560.0f;
         constexpr float kLegalSize = 24.0f, kLegalStep = 27.0f, kLegalRoom = 590.0f; // (below the ruler's end: a little wider)
         constexpr Vector2 kSteamAt{70.0f, 76.0f}; // the upper left corner, clear of the title
-        constexpr float kSteamR = 30.0f;
+        constexpr float kSteamR = 32.0f;
+        // steam_mark.png's ring against the picture's width (tools/launcher/steam_mark.py: the small wheel pokes out)
+        constexpr float kSteamMarkRing = 0.7329f;
         constexpr Vector2 kMuteAt{630.0f, 76.0f}; // the upper right corner, opposite (K, Nov 18)
         constexpr float kLoopTime = 0.28f; // seconds the pencil loop takes to draw (about the pen's scribble)
         constexpr float kMuteR = 30.0f;
@@ -1275,6 +1277,36 @@ float soft(vec2 p)
             inkLine(arm, 2, r * 0.17f, color, paper);
         }
 
+        // A picture inked onto the paper (its alpha is the ink), centred on `c`, `size` paper units square, in 4x4 pieces
+        // (the homography bends it; one quad would kink on its diagonal).
+        void inkPicture(const Texture2D &texture, Vector2 c, float size, Color color, const Homography &paper)
+        {
+            constexpr int kPieces = 4;
+            rlSetTexture(texture.id);
+            rlBegin(RL_QUADS);
+            rlColor4ub(color.r, color.g, color.b, color.a);
+            rlNormal3f(0.0f, 0.0f, 1.0f);
+            for (int y = 0; y < kPieces; ++y)
+                for (int x = 0; x < kPieces; ++x)
+                {
+                    const float u0 = static_cast<float>(x) / kPieces, u1 = static_cast<float>(x + 1) / kPieces;
+                    const float v0 = static_cast<float>(y) / kPieces, v1 = static_cast<float>(y + 1) / kPieces;
+                    const float x0 = c.x + size * (u0 - 0.5f), x1 = c.x + size * (u1 - 0.5f);
+                    const float y0 = c.y + size * (v0 - 0.5f), y1 = c.y + size * (v1 - 0.5f);
+                    const Vector2 tl = paper.map(x0, y0), bl = paper.map(x0, y1), br = paper.map(x1, y1), tr = paper.map(x1, y0);
+                    rlTexCoord2f(u0, v0);
+                    rlVertex2f(tl.x, tl.y);
+                    rlTexCoord2f(u0, v1);
+                    rlVertex2f(bl.x, bl.y);
+                    rlTexCoord2f(u1, v1);
+                    rlVertex2f(br.x, br.y);
+                    rlTexCoord2f(u1, v0);
+                    rlVertex2f(tr.x, tr.y);
+                }
+            rlEnd();
+            rlSetTexture(0);
+        }
+
         // The mute mark: a speaker, crossed out when muted, else one or two waves (over half).
         void inkSpeaker(Vector2 c, bool silent, float level, Color color, const Homography &paper)
         {
@@ -1394,7 +1426,8 @@ float soft(vec2 p)
         return out;
     }
 
-    Rectangle billRuler() { return Rectangle{kRulerX - 56.0f, kRulerTop - 14.0f, 712.0f + 6.0f - (kRulerX - 56.0f), kRulerBottom - kRulerTop + 28.0f}; }
+    // (the paperclip reaches from kRulerX - 70 to past the bill's edge: the box takes it with room round it, K Nov 18)
+    Rectangle billRuler() { return Rectangle{kRulerX - 92.0f, kRulerTop - 34.0f, kPaperW + 44.0f - (kRulerX - 92.0f), kRulerBottom - kRulerTop + 68.0f}; }
     float billRulerLevel(float paperY) { return std::clamp((kRulerBottom - paperY) / (kRulerBottom - kRulerTop), 0.0f, 1.0f); }
 
     void drawBill(const BillFonts &fonts, const Bill &bill, const Homography &paper)
@@ -1441,7 +1474,10 @@ float soft(vec2 p)
         // Add to Steam: Steam's mark in the upper left corner, named under it while it has the focus
         if (bill.steam)
         {
-            inkSteamMark(kSteamAt, kSteamR, kInk, paper);
+            if (bill.steamMark.id != 0u)
+                inkPicture(bill.steamMark, kSteamAt, kSteamR * 2.0f / kSteamMarkRing, kInk, paper); // K's sketch in its ring
+            else
+                inkSteamMark(kSteamAt, kSteamR, kInk, paper);
             if (static_cast<size_t>(bill.focus) == steamIndex)
             {
                 const char *lines[2] = {bill.steamAdded ? "Update" : "Add to", bill.steamAdded ? "on Steam" : "Steam"};

@@ -34,3 +34,6 @@ PNG-compressed icon frames with a black background).
 
 `steam_cover.jpg`: the Steam entry's 600x900 cover (masterlynx's art with our logo, used with the artist's permission),
 scaled from K's full-size file; Add to Steam writes it as the library cover.
+
+`steam_mark.png`: the bill's Add to Steam mark: K's sketched Steam arm in a hand-inked ring
+(`tools/launcher/steam_mark.py`), white with the ink in alpha; the bill inks it through its perspective.
