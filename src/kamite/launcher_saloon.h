@@ -55,6 +55,7 @@ namespace kamite::launcher::saloon
     void inkTickBox(Vector2 centre, float size, bool ticked, Color color, const Homography &paper);
     // Multiply blending for ink (paper shows through); End restores normal blending.
     void beginInk();
+    void beginPaint(); // the ink's solid colour drawn over (normal blending): things on the paper, not in it
     void endInk();
 
     // ---- the bill of fare: Home's menu in ink -----------------------------------------------------------------------
@@ -156,6 +157,8 @@ namespace kamite::launcher::saloon
 
         // The bill of fare's paper on screen this frame (with the table's drift); false when it is out of the frame.
         bool bill(Quad &out) const;
+        // The open book's pages on screen (TL, TR, BR, BL each), on the zoom's last frame only: the Options book.
+        bool spread(Quad &left, Quad &right) const;
         // The logo canvas (logo.png's whole canvas) in the doorway's glare; contentBox: the canvas fractions of
         // GOD HAND + plate (left, top, right, bottom). False when the doorway is out of view.
         bool logo(const float contentBox[4], float canvasAspect, Rectangle &out) const;

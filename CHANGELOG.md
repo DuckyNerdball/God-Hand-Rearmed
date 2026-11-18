@@ -11,6 +11,8 @@ Newest first, one line per change; the code comments say how.
 - Launcher: a bar's murmur under the music, a pen scribble when a choice is circled, bites and a slurp for the snacks, the book opening and closing for Options.
 - Launcher: Add to Steam (Steam's mark) and the volume (a mute mark, a ruler down the edge with a paperclip on it) are on the bill; the version is on a paper slip in the corner.
 - Launcher: the tagline and the legal notice are fine print on the bill; Skip Launcher (hold Shift while starting to see it) replaces "Don't show this again".
+- Launcher: Options is written in the open book: tabs on bookmark slips (LB / RB, Q / E), help on the right page, Controls' pages on index tabs (LT / RT, Z / C), a ribbon for Back.
+- Launcher: the open book's spine has no black gap; the view moves in closer on the book.
 
 ## November 17, 2026
 

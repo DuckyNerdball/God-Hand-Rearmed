@@ -48,13 +48,19 @@ bool button(int, Button) { return false; }
 float axis(int, Axis) { return 0.0f; }
 }
 namespace ps2x::hotkeys {
-const Info &info(Action) { static Info i{}; return i; }
-Binding binding(Action) { return Binding{}; }
-bool available(Action) { return false; }
+const Info &info(Action a) {
+  static const Info kInfo[] = {{"SaveState", "Save state", {}}, {"LoadState", "Load state", {}}, {"Fullscreen", "Fullscreen", {}},
+                               {"DevMenu", "F2 menu", {}}, {"Screenshot", "Screenshot", {}}, {"RecordCase", "Record case", {}}};
+  static const Info kOther{"Other", "Something else", {}};
+  const int i = static_cast<int>(a);
+  return i >= 0 && i < 6 ? kInfo[i] : kOther;
+}
+Binding binding(Action a) { return Binding{static_cast<int>(a) < 4 ? 290 + static_cast<int>(a) : 0, false, false}; }
+bool available(Action a) { return static_cast<int>(a) < 6; }
 void setBinding(Action, Binding) {}
 Action conflict(Action a, Binding) { return a; }
 Action plainKeyHolder(int) { return Action{}; }
-std::string text(Binding) { return {}; }
+std::string text(Binding b) { return b.key ? "F" + std::to_string(b.key - 289) : std::string(); }
 bool parse(std::string_view, Binding &) { return false; }
 int capturePressed() { return 0; }
 }

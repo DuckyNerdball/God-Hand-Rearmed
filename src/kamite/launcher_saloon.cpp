@@ -36,6 +36,7 @@ namespace kamite::launcher::saloon
 
         constexpr float kPi = 3.14159265358979f;
         constexpr int kZoomFrames = 8;
+        constexpr float kPushIn = 0.2f; // the 2D push-in on frames 5..8 (1.0 -> 1.2, K Nov 18)
         constexpr float kFloatTime = 0.6f;  // an eaten snack's rise
         constexpr float kShadowFade = 0.4f; // its shadow
         constexpr int kMoteCount = 90; // bright motes in the doorway's light (the fine dust: the plumes, kDustShader)
@@ -720,7 +721,8 @@ float soft(vec2 p)
         {
             Texture2D frame{}, bloom{};
             Quad bill{}, door{};
-            bool billInFront = true, hasBill = false, hasDoor = false;
+            Quad pageL{}, pageR{}; // the open book's pages (the last frame only): the Options book is drawn on them
+            bool billInFront = true, hasBill = false, hasDoor = false, hasPages = false;
             Snacks snacks;
         };
         struct Mote
@@ -1576,6 +1578,19 @@ float soft(vec2 p)
             const float x0 = std::max(0.0f, origin.x), y0 = std::max(0.0f, origin.y);
             const float x1 = std::min(w, origin.x + frameW * viewScale), y1 = std::min(h, origin.y + frameH * viewScale);
             pictureRect = Rectangle{x0, y0, std::max(0.0f, x1 - x0), std::max(0.0f, y1 - y0)};
+            // The zoom's last frames push in on the open book in 2D (K, Nov 18: its pages fill more of the height), about
+            // the spread's middle; the picture's box (the bars of a narrow window) stays.
+            const float push = 1.0f + kPushIn * std::clamp(static_cast<float>(frame - 4) / 4.0f, 0.0f, 1.0f);
+            if (push != 1.0f)
+            {
+                const ZoomFrame &last = zoom[kZoomFrames - 1];
+                float cy = 0.5f;
+                if (last.hasPages)
+                    cy = (last.pageL.p[0].y + last.pageL.p[3].y + last.pageR.p[1].y + last.pageR.p[2].y) * 0.25f;
+                const Vector2 c{frameW * 0.5f, frameH * cy}, at = frameToScreen(c.x, c.y);
+                viewScale *= push;
+                origin = Vector2{at.x - c.x * viewScale, at.y - c.y * viewScale};
+            }
         }
 
         // ---- loading -----------------------------------------------------------------------------------------------
@@ -1925,6 +1940,8 @@ float soft(vec2 p)
                     const fs::path zdir = dir / key;
                     zf.hasBill = quadOf((*z)["bill"], zf.bill);
                     zf.hasDoor = quadOf((*z)["door"], zf.door);
+                    if (const Json *pages = (*z)["pages"])
+                        zf.hasPages = quadOf((*pages)["left"], zf.pageL) && quadOf((*pages)["right"], zf.pageR);
                     if (const Json *front = (*z)["bill_in_front"]; front && front->kind == Json::Kind::Bool)
                         zf.billInFront = front->flag;
                     add(zdir / textOf((*z)["frame"]), Kind::Rgb, 1, [&zf](Pixels &px) { zf.frame = upload(px, true); }, {}, 2);
@@ -2847,6 +2864,22 @@ float soft(vec2 p)
     Rectangle Scene::picture() const { return m->pictureRect; }
     float Scene::scale() const { return m->viewScale; }
     Vector2 Scene::toScreen(Vector2 n) const { return m->frameToScreen(n.x * m->frameW, n.y * m->frameH); }
+
+    bool Scene::spread(Quad &left, Quad &right) const
+    {
+        const Impl &s = *m;
+        if (!s.homeReady || s.frame != kZoomFrames)
+            return false;
+        const ZoomFrame &z = s.zoom[kZoomFrames - 1];
+        if (!z.hasPages || !sane(z.pageL) || !sane(z.pageR))
+            return false;
+        for (int i = 0; i < 4; ++i)
+        {
+            left.p[i] = toScreen(z.pageL.p[i]);
+            right.p[i] = toScreen(z.pageR.p[i]);
+        }
+        return true;
+    }
 
     bool Scene::bill(Quad &out) const
     {
