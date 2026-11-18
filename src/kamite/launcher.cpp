@@ -254,7 +254,6 @@ namespace kamite::launcher
             bool focusOptions = false;    // back from Options: the loop goes back on Options
             float optionsShown = 0.0f;    // Options' panel over the zoom's last frame: fades in once it lands
             bool optionsLeaving = false;  // Back: the panel fades out, then the zoom plays backwards
-            bool tuningOpen = false;      // F4 in a dev build: the saloon's tuning sliders
             bool navCleared = false;      // the mouse left everything: the next key focuses the first item, with a tick
             bool zoomPending = false;     // Options came before the zoom's frames were read
             int slipFocus = 0;            // the corner slips' focused item (SlipItem), drawn before ImGui
@@ -491,8 +490,8 @@ namespace kamite::launcher
                 playEffect(state, state.bookClose, state.hasBookClose);
         }
 
-        // A snack eaten: its sound (the slurp for the drink, a bite for the rest; K's), then Gene's line once it's
-        // done; without the sound, the line at once.
+        // A snack eaten: its sound (the slurp for the drink, a bite for the rest; K's), Gene's line halfway through it;
+        // without the sound, the line at once.
         float soundLength(const Sound &sound) { return sound.stream.sampleRate > 0 ? static_cast<float>(sound.frameCount) / sound.stream.sampleRate : 0.0f; }
         void snackVoice(State &state);
         void eatSound(State &state, bool drink)
@@ -505,7 +504,7 @@ namespace kamite::launcher
                 return;
             }
             playEffect(state, sound, true, 2.0f); // (K: twice the files' level, against Gene's voice)
-            state.voiceAt = static_cast<float>(GetTime()) + soundLength(sound) + 0.05f;
+            state.voiceAt = static_cast<float>(GetTime()) + soundLength(sound) * 0.5f; // into its quiet roll-off (K)
         }
 
         void playMenuSound(State &state, MenuSound which, float scale = 1.0f)
@@ -715,8 +714,6 @@ namespace kamite::launcher
             {
                 if (state.popupWasOpen && !popupOpen && backKey)
                     menuSound(state, kCancel);
-                else if (g.ActiveIdWindow != nullptr && std::strncmp(g.ActiveIdWindow->Name, "Saloon tuning", 13) == 0)
-                    ; // the dev panel's sliders
                 else if (g.ActiveIdIsJustActivated && g.ActiveId != 0 && g.ActiveId != state.volumeSliderId &&
                          std::find(g_silentItems.begin(), g_silentItems.end(), g.ActiveId) == g_silentItems.end())
                 {
@@ -3552,7 +3549,6 @@ namespace kamite::launcher
         state.saloonOn = state.scene.open(context.exeDir / "resources" / "saloon");
         if (state.saloonOn)
         {
-            state.scene.loadTuning(state.ini);
             if (!saloon::loadBillFonts(state.billFonts, context.exeDir / "resources" / "fonts", state.splash))
             {
                 KM_WARN(Boot, "launcher: the bill's fonts are missing from resources/fonts, plain launcher");
@@ -3802,13 +3798,6 @@ namespace kamite::launcher
                 }
             }
             ImGui::End();
-#if !(defined(KAMITE_RELEASE) && KAMITE_RELEASE)
-            // F4 (dev builds): the saloon's tuning sliders; Save writes them to GHR.ini (K's defaults later).
-            if (state.saloonOn && ImGui::IsKeyPressed(ImGuiKey_F4, false))
-                state.tuningOpen = !state.tuningOpen;
-            if (state.tuningOpen && state.saloonOn)
-                state.tuningOpen = state.scene.drawTuning(state.ini);
-#endif
             if (state.slipFocus != state.lastSlipFocus && state.slipFocus != kSlipNone)
                 penSound(state); // the slip's loop
             state.lastSlipFocus = state.slipFocus;

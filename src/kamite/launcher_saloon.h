@@ -18,11 +18,6 @@
 #include <string>
 #include <vector>
 
-namespace kamite
-{
-    class IniFile;
-}
-
 namespace kamite::launcher::saloon
 {
     // A quad: top left, top right, bottom right, bottom left.
@@ -98,7 +93,8 @@ namespace kamite::launcher::saloon
     float billRulerLevel(float paperY);
     void drawBill(const BillFonts &fonts, const Bill &bill, const Homography &paper);
 
-    // ---- the dev tuning panel's values (F4; GHR.ini [SaloonTuning]; the defaults once K is happy) -------------------
+    // ---- the look's settings: K's values from the dev tuning panel (Nov 18). The panel (F4, GHR.ini [SaloonTuning])
+    // is gone for now; claude/saloon-launcher.md lists its sliders and ranges to bring it back.
     struct Tuning
     {
         float drift = 0.0f;        // the room against the table with the cursor (x parallax_max of the height; 0: both
@@ -106,20 +102,20 @@ namespace kamite::launcher::saloon
         float tableShare = 0.4f;   // the table's part of it (it goes the other way: the view turns round a point between)
         float logoU = 0.5f;        // the logo's centre in the doorway quad (0..1 across, 0..1 down)
         float logoV = 0.125f;
-        float logoWidth = 1.19f;   // the logo's width (GOD HAND + plate) in doorway widths
-        float kanaX = 0.0f;        // the kana's offset in logo widths
-        float kanaY = 0.0f;
+        float logoWidth = 1.151f;  // the logo's width (GOD HAND + plate) in doorway widths
+        float kanaX = 0.036f;      // the kana's offset in logo widths
+        float kanaY = 0.035f;
         float kanaDrift = 0.4f;    // the kana's drift with the cursor, out past the doorway (the logo stays put, K)
-        float kanaSize = 1.0f;     // the kana's size (x the logo canvas's)
-        float kanaTurn = 0.0f;     // the kana's twist, degrees clockwise
+        float kanaSize = 1.012f;   // the kana's size (x the logo canvas's)
+        float kanaTurn = -4.489f;  // the kana's twist, degrees clockwise
         float airDrift = 1.0f;     // the rays' near ends and the dust in the air, against the room
         float burst = 1.2f;        // the speed lines behind the logo (size in logo widths)
         float raysMotion = 1.0f;   // the light rays' beams turning and the fan's swing (like the burst)
         float rays = 1.0f;         // the rays' strength
-        float bloom = 0.6f;        // the doorway's (and windows') glow
-        float motes = 1.0f;        // the specks of dust in the light (bright motes and fine dust)
-        float dust = 1.0f;         // the dust hanging in the air past the table (faint in the dark, bright in the light)
-        float vignette = 0.22f;
+        float bloom = 1.024f;      // the doorway's (and windows') glow
+        float motes = 1.0f;        // the bright motes in the light
+        float dust = 1.323f;       // the dust hanging in the air past the table (faint in the dark, bright in the light)
+        float vignette = 0.089f;
         float steam = 1.0f;        // the curry's steam (times the player's volume)
         float frost = 1.0f;        // the smoothie glass's frost
         float floatHeight = 0.07f; // how far an eaten snack rises (of the height)
@@ -195,10 +191,6 @@ namespace kamite::launcher::saloon
 
         Tuning &tuning();
         const Tuning &tuning() const;
-        void loadTuning(const IniFile &ini);
-        void saveTuning(IniFile &ini) const;
-        // The dev panel (an ImGui window; F4 in a dev build). Returns false once closed.
-        bool drawTuning(IniFile &ini);
         // A plain paper texture (corner slips): 256x256, mipmapped, tiles.
         const Texture2D &paper() const;
 

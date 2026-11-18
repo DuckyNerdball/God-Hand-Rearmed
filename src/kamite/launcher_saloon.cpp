@@ -1,12 +1,10 @@
 // The launcher's saloon (see launcher_saloon.h; decisions in claude/saloon-launcher.md).
 #include "kamite/launcher_saloon.h"
 
-#include "kamite/ini_file.h"
 #include "kamite/json_reader.h"
 #include "kamite/log.h"
 #include "kamite/saloon_image.h"
 
-#include "imgui.h"
 #include "raylib.h"
 #include "rlgl.h"
 
@@ -706,6 +704,8 @@ float soft(vec2 p)
             bool present = false;
             Rectangle rect{};
             std::vector<Texture2D> states, garnish;
+            std::vector<bool> garnishBehind; // a garnish other things stood in front of (the back slice): it floats off
+                                             // under the state's picture, so the front slice and the cream still hide it
             std::vector<Pixels> hit;      // Home only, per state
             std::vector<Texture2D> blur;  // Home only, per state: the drink blurred (the frost), half size
             std::vector<Pixels> blurPx;   // (made on a worker, uploaded with the state)
@@ -1794,6 +1794,9 @@ float soft(vec2 p)
                 if (const Json *garnish = (*sm)["garnish"]; garnish && garnish->kind == Json::Kind::Array)
                 {
                     s.garnish.resize(garnish->items.size());
+                    s.garnishBehind.resize(garnish->items.size());
+                    for (size_t i = 0; i < garnish->items.size(); ++i)
+                        s.garnishBehind[i] = garnish->items[i].text.find("back") != std::string::npos;
                     for (size_t i = 0; i < garnish->items.size(); ++i)
                         add(dir / garnish->items[i].text, Kind::Rgba, group, [&s, i](Pixels &px) { s.garnish[i] = upload(px, false); });
                 }
@@ -2317,7 +2320,7 @@ float soft(vec2 p)
         }
 
         // A frame's snacks: shadows multiplied in, then the uneaten pieces back to front, then the smoothie.
-        void drawSnacks(const Snacks &s, Vector2 offset)
+        void drawSnacks(const Snacks &s, Vector2 offset, bool home = false)
         {
             const auto nameEaten = [&](const std::string &name, float &shade) {
                 for (size_t i = 0; i < snacks.pieces.size(); ++i)
@@ -2351,6 +2354,10 @@ float soft(vec2 p)
                 if (!nameEaten(p.name, shade))
                     drawAt(p.sprite, Rectangle{p.rect.x + offset.x, p.rect.y + offset.y, p.rect.width, p.rect.height});
             }
+            EndBlendMode();
+            if (home)
+                drawFloats(tuning.floatHeight * frameH, offset, true); // (under the smoothie: the back slice)
+            BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             if (s.smoothie.present && !s.smoothie.states.empty())
             {
                 const size_t state = std::min(static_cast<size_t>(smoothieState), s.smoothie.states.size() - 1);
@@ -2360,11 +2367,16 @@ float soft(vec2 p)
             EndBlendMode();
         }
 
-        void drawFloats(float rise, Vector2 offset)
+        // The eaten snacks floating off; behind: only the garnishes that go under the smoothie's picture, else the rest.
+        void drawFloats(float rise, Vector2 offset, bool behind)
         {
             BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             for (const Floating &f : floats)
             {
+                const bool under = f.garnish >= 0 && static_cast<size_t>(f.garnish) < snacks.smoothie.garnishBehind.size() &&
+                                   snacks.smoothie.garnishBehind[static_cast<size_t>(f.garnish)];
+                if (under != behind)
+                    continue;
                 const float u = std::clamp((time - f.start) / kFloatTime, 0.0f, 1.0f), e = 1.0f - (1.0f - u) * (1.0f - u);
                 const unsigned char a = static_cast<unsigned char>((1.0f - u) * 255.0f);
                 const Color tint{a, a, a, a};
@@ -2624,7 +2636,7 @@ float soft(vec2 p)
             // the table set leans the other way
             drawAt(fg, Rectangle{-fgMargin + table.x, -fgMargin + table.y, static_cast<float>(fg.width), static_cast<float>(fg.height)});
             EndBlendMode();
-            drawSnacks(snacks, table);
+            drawSnacks(snacks, table, true);
             if (bookLight > 0.0f && bookLit.id != 0u)
             {
                 BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
@@ -2632,7 +2644,7 @@ float soft(vec2 p)
                 drawAt(bookLit, Rectangle{bookRect.x + table.x, bookRect.y + table.y, bookRect.width, bookRect.height}, Color{a, a, a, a});
                 EndBlendMode();
             }
-            drawFloats(tuning.floatHeight * frameH, table);
+            drawFloats(tuning.floatHeight * frameH, table, false);
             if (lip.id != 0u) // over the pieces and their floats: an eaten pair rises from behind the lip
             {
                 BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
@@ -2961,87 +2973,6 @@ float soft(vec2 p)
 
     Tuning &Scene::tuning() { return m->tuning; }
     const Tuning &Scene::tuning() const { return m->tuning; }
-
-    namespace
-    {
-        struct TuningField
-        {
-            const char *key, *label;
-            float Tuning::*value;
-            float min, max;
-        };
-        constexpr TuningField kTuningFields[] = {
-            {"Drift", "Drift (room against table)", &Tuning::drift, 0.0f, 2.0f},
-            {"TableShare", "Table's share of it", &Tuning::tableShare, 0.0f, 1.0f},
-            {"LogoU", "Logo across", &Tuning::logoU, 0.2f, 0.8f},
-            {"LogoV", "Logo down", &Tuning::logoV, -0.2f, 0.6f},
-            {"LogoWidth", "Logo width", &Tuning::logoWidth, 0.5f, 2.0f},
-            {"KanaX", "Kana across", &Tuning::kanaX, -0.2f, 0.2f},
-            {"KanaY", "Kana down", &Tuning::kanaY, -0.2f, 0.2f},
-            {"KanaDrift", "Kana drift", &Tuning::kanaDrift, -1.0f, 2.0f},
-            {"KanaSize", "Kana size", &Tuning::kanaSize, 0.3f, 2.5f},
-            {"KanaTurn", "Kana turn (degrees)", &Tuning::kanaTurn, -45.0f, 45.0f},
-            {"AirDrift", "Rays & dust drift", &Tuning::airDrift, 0.0f, 2.0f},
-            {"Burst", "Burst size", &Tuning::burst, 0.0f, 2.0f},
-            {"RaysMotion", "Rays motion", &Tuning::raysMotion, 0.0f, 2.0f},
-            {"Rays", "Rays", &Tuning::rays, 0.0f, 1.0f},
-            {"Bloom", "Bloom", &Tuning::bloom, 0.0f, 2.0f},
-            {"Motes", "Motes", &Tuning::motes, 0.0f, 2.0f},
-            {"Dust", "Dust in the air", &Tuning::dust, 0.0f, 3.0f},
-            {"Vignette", "Vignette", &Tuning::vignette, 0.0f, 0.6f},
-            {"Steam", "Steam", &Tuning::steam, 0.0f, 3.0f},
-            {"Frost", "Frost", &Tuning::frost, 0.0f, 2.0f},
-            {"FloatHeight", "Snack float height", &Tuning::floatHeight, 0.0f, 0.2f},
-            {"ZoomFps", "Zoom frames a second", &Tuning::zoomFps, 6.0f, 40.0f},
-            {"Ambience", "Bar ambience", &Tuning::ambience, 0.0f, 4.0f},
-        };
-    }
-
-    void Scene::loadTuning(const IniFile &ini)
-    {
-#if !(defined(KAMITE_RELEASE) && KAMITE_RELEASE)
-        for (const TuningField &field : kTuningFields)
-        {
-            const std::string value = ini.get("SaloonTuning", field.key);
-            if (!value.empty())
-                m->tuning.*field.value = std::clamp(static_cast<float>(std::atof(value.c_str())), field.min, field.max);
-        }
-#else
-        (void)ini; // a release keeps the defaults
-#endif
-    }
-
-    void Scene::saveTuning(IniFile &ini) const
-    {
-        for (const TuningField &field : kTuningFields)
-        {
-            char text[32];
-            std::snprintf(text, sizeof(text), "%.3f", m->tuning.*field.value);
-            ini.set("SaloonTuning", field.key, text);
-        }
-        ini.save();
-    }
-
-    bool Scene::drawTuning(IniFile &ini)
-    {
-        bool open = true;
-        ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Saloon tuning (F4)", &open, ImGuiWindowFlags_NoSavedSettings))
-        {
-            ImGui::TextDisabled("Dev build only. Values go to GHR.ini [SaloonTuning].");
-            for (const TuningField &field : kTuningFields)
-                ImGui::SliderFloat(field.label, &(m->tuning.*field.value), field.min, field.max, "%.3f");
-            if (ImGui::Button("Save"))
-                saveTuning(ini);
-            ImGui::SameLine();
-            if (ImGui::Button("Defaults"))
-                m->tuning = Tuning{};
-            ImGui::Text("frame %d, parallax %.2f %.2f", m->frame, m->parallax.x, m->parallax.y);
-        }
-        ImGui::End();
-        return open;
-    }
 
     const Texture2D &Scene::paper() const { return m->paper; }
 }
