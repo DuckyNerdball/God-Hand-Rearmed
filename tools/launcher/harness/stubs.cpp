@@ -19,11 +19,29 @@ const std::string &path() { return empty; }
 bool dirty() { return false; }
 const std::string &fileError() { return empty; }
 bool envOverride(uint32_t) { return false; }
-std::vector<std::string> bindings(uint32_t, std::string_view) { return {}; }
+std::vector<std::string> bindings(uint32_t, std::string_view key) {
+  // the new-install defaults (claude/keyboard.md), so the Controls pages have something to show
+  static const std::pair<const char *, std::vector<std::string>> kDefaults[] = {
+      {"Cross", {"Keyboard/Space", "SDL-0/FaceSouth"}}, {"Circle", {"Keyboard/E", "SDL-0/FaceEast"}},
+      {"Square", {"Pointer-0/LeftButton", "SDL-0/FaceWest"}}, {"Triangle", {"Pointer-0/RightButton", "SDL-0/FaceNorth"}},
+      {"L1", {"Keyboard/Q", "SDL-0/LeftShoulder"}}, {"R1", {"Keyboard/R", "SDL-0/RightShoulder"}},
+      {"L2", {"Keyboard/F", "SDL-0/+LeftTrigger"}}, {"R2", {"Keyboard/G", "SDL-0/+RightTrigger"}},
+      {"L3", {"SDL-0/LeftStick"}}, {"R3", {"Pointer-0/MiddleButton", "SDL-0/RightStick"}},
+      {"Start", {"Keyboard/Escape", "SDL-0/Start"}}, {"Select", {"SDL-0/Back"}},
+      {"Up", {"Keyboard/1", "SDL-0/DPadUp"}}, {"Down", {"Keyboard/3", "SDL-0/DPadDown"}},
+      {"Left", {"Keyboard/4", "SDL-0/DPadLeft"}}, {"Right", {"Keyboard/2", "SDL-0/DPadRight"}},
+      {"LUp", {"Keyboard/W", "SDL-0/-LeftY"}}, {"LDown", {"Keyboard/S", "SDL-0/+LeftY"}},
+      {"LLeft", {"Keyboard/A", "SDL-0/-LeftX"}}, {"LRight", {"Keyboard/D", "SDL-0/+LeftX"}},
+      {"RUp", {"SDL-0/-RightY"}}, {"RDown", {"SDL-0/+RightY"}}, {"RLeft", {"SDL-0/-RightX"}}, {"RRight", {"SDL-0/+RightX"}},
+      {"DodgeModifier", {"Keyboard/LeftShift"}}};
+  for (const auto &[name, list] : kDefaults)
+    if (key == name) return list;
+  return {};
+}
 void setBindings(uint32_t, std::string_view, std::vector<std::string>) {}
 void resetDefaults(uint32_t) {}
 bool save(std::string &) { return true; }
-Kind kindOf(std::string_view) { return Kind::Keys; }
+Kind kindOf(std::string_view b) { return b.rfind("SDL-", 0) == 0 ? Kind::Controller : Kind::Keys; }
 bool sameBinding(std::string_view a, std::string_view b) { return a == b; }
 std::string displayName(std::string_view b) { return std::string(b); }
 std::string keyBinding(int) { return {}; }

@@ -29,7 +29,7 @@ namespace kamite::launcher::book
         struct LoopData
         {
             Kind kind = Kind::Loop;
-            float x0, y0, x1, y1, drawn, width;
+            float x0, y0, x1, y1, drawn, width, squareness;
             uint32_t seed;
             ImU32 color;
         };
@@ -267,7 +267,7 @@ namespace kamite::launcher::book
                 const Kind was = g_mode;
                 setMode(Kind::Ink);
                 const auto &d = *static_cast<const LoopData *>(data);
-                saloon::inkLoop(Rectangle{d.x0, d.y0, d.x1 - d.x0, d.y1 - d.y0}, d.drawn, d.seed, toColor(d.color), space.toScreen, d.width);
+                saloon::inkLoop(Rectangle{d.x0, d.y0, d.x1 - d.x0, d.y1 - d.y0}, d.drawn, d.seed, toColor(d.color), space.toScreen, d.width, d.squareness);
                 setMode(was);
                 break;
             }
@@ -384,11 +384,16 @@ namespace kamite::launcher::book
 
     void loop(ImDrawList *list, ImVec2 min, ImVec2 max, float drawn, uint32_t seed, ImU32 color, float width)
     {
+        // Round the box, not across it: a rounded-rectangle loop (squareness 4) whose path clears the box's corners
+        // even where the hand's spiral and wobble pull it in (~13 %): |x / rx|^4 + |y / ry|^4 ~ 0.5 at the corners.
+        const float a = (max.x - min.x) * 0.5f, b = (max.y - min.y) * 0.5f, cx = (min.x + max.x) * 0.5f, cy = (min.y + max.y) * 0.5f;
+        const float rx = a * 1.25f + width * 1.5f, ry = b * 1.75f + width;
         LoopData d;
-        d.x0 = min.x;
-        d.y0 = min.y;
-        d.x1 = max.x;
-        d.y1 = max.y;
+        d.squareness = 4.0f;
+        d.x0 = cx - rx;
+        d.y0 = cy - ry;
+        d.x1 = cx + rx;
+        d.y1 = cy + ry;
         d.drawn = drawn;
         d.width = width;
         d.seed = seed;

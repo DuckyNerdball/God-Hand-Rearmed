@@ -1007,7 +1007,7 @@ float soft(vec2 p)
         rlEnd();
     }
 
-    void inkLoop(Rectangle box, float drawn, uint32_t seed, Color color, const Homography &paper, float width)
+    void inkLoop(Rectangle box, float drawn, uint32_t seed, Color color, const Homography &paper, float width, float squareness)
     {
         drawn = std::clamp(drawn, 0.0f, 1.0f);
         if (drawn <= 0.0f)
@@ -1033,7 +1033,14 @@ float soft(vec2 p)
             const float a = start + sweep * t;
             const float shrink = 1.0f - 0.07f * t; // a spiral: the end passes inside the start
             const float wob = 1.0f + w1 * std::sin(a * 2.0f + p1) + w2 * std::sin(a * 3.0f + p2);
-            const float x = std::cos(a) * rx * shrink * wob, y = std::sin(a) * ry * shrink * wob;
+            float ca = std::cos(a), sa = std::sin(a);
+            if (squareness != 2.0f) // a superellipse: |x|^n + |y|^n = 1
+            {
+                const float e = 2.0f / squareness;
+                ca = std::copysign(std::pow(std::fabs(ca), e), ca);
+                sa = std::copysign(std::pow(std::fabs(sa), e), sa);
+            }
+            const float x = ca * rx * shrink * wob, y = sa * ry * shrink * wob;
             points.push_back(Vector2{cx + x * std::cos(tilt) - y * std::sin(tilt), cy + x * std::sin(tilt) + y * std::cos(tilt)});
         }
         // The grease pencil: waxy, a slightly uneven pressure (two passes, the second thinner and offset).
@@ -1480,6 +1487,16 @@ float soft(vec2 p)
 
         // Home
         Texture2D back{}, fg{}, lip{}, rays{}, raysWeight{}, bloom{}, bookLit{};
+        // The wanted posters on the wall (K, Nov 18): their photo boxes, filled at run time with the player's disc
+        // photos (the pause menu's Olivia, as the presets use; never shipped), lit by the box's light and under its tape.
+        struct Poster
+        {
+            Quad photo{};               // normalised to the frame (home.posters, poster_photos.py)
+            Texture2D light{}, tape{};  // the box's lighting (a multiplier), the tape over it (premultiplied)
+            bool ok = false;
+        };
+        std::array<Poster, 4> posters{};
+        std::array<Texture2D, 4> posterPhoto{}; // the launcher's (not ours)
         Pixels bookMask, raysLuma;
         Rectangle bookRect{};
         Snacks snacks;
@@ -1877,6 +1894,15 @@ float soft(vec2 p)
                 add(homeDir / textOf((*book)["lit"]), Kind::Rgba, 0, [this](Pixels &px) { bookLit = upload(px, false); });
                 add(homeDir / textOf((*book)["mask"]), Kind::Gray, 0, [this](Pixels &px) { bookMask = std::move(px); });
             }
+            if (const Json *list = (*home)["posters"]; list && list->kind == Json::Kind::Array)
+                for (size_t i = 0; i < list->items.size() && i < posters.size(); ++i)
+                {
+                    const Json &item = list->items[i];
+                    Poster &poster = posters[i];
+                    poster.ok = quadOf(item["photo"], poster.photo);
+                    add(homeDir / textOf(item["light"]), Kind::Rgb, 0, [&poster](Pixels &px) { poster.light = upload(px, false); });
+                    add(homeDir / textOf(item["tape"]), Kind::Rgba, 0, [&poster](Pixels &px) { poster.tape = upload(px, false); });
+                }
             loadSnacks(homeDir / "snacks", (*home)["snacks"], snacks, 0, true);
             eaten.assign(snacks.pieces.size(), false);
             eatenAt.assign(snacks.pieces.size(), -1.0f);
@@ -2639,11 +2665,68 @@ float soft(vec2 p)
             EndBlendMode();
         }
 
+        // A texture over a quad on screen (TL, TR, BR, BL), in 4x4 pieces.
+        void drawQuad(const Texture2D &texture, const Vector2 q[4], Color tint) const
+        {
+            constexpr int kPieces = 4;
+            const auto lerp = [](Vector2 a, Vector2 b, float t) { return Vector2{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t}; };
+            const auto at = [&](float u, float v) { return lerp(lerp(q[0], q[1], u), lerp(q[3], q[2], u), v); };
+            rlSetTexture(texture.id);
+            rlBegin(RL_QUADS);
+            rlColor4ub(tint.r, tint.g, tint.b, tint.a);
+            for (int y = 0; y < kPieces; ++y)
+                for (int x = 0; x < kPieces; ++x)
+                {
+                    const int corners[4][2] = {{x, y}, {x, y + 1}, {x + 1, y + 1}, {x + 1, y}};
+                    for (const auto &c : corners)
+                    {
+                        const float u = static_cast<float>(c[0]) / kPieces, v = static_cast<float>(c[1]) / kPieces;
+                        const Vector2 p = at(u, v);
+                        rlTexCoord2f(u, v);
+                        rlVertex2f(p.x, p.y);
+                    }
+                }
+            rlEnd();
+            rlSetTexture(0);
+            rlDrawRenderBatchActive();
+        }
+
+        // The disc photos in the wall posters' boxes (over the room, under its dust, rays and glow): the photo, the box's
+        // light multiplied in, the tape over it.
+        void drawPosters(Vector2 room)
+        {
+            rlDisableBackfaceCulling();
+            for (size_t i = 0; i < posters.size(); ++i)
+            {
+                const Poster &poster = posters[i];
+                if (!poster.ok || posterPhoto[i].id == 0u)
+                    continue;
+                Vector2 q[4];
+                for (int k = 0; k < 4; ++k)
+                    q[k] = frameToScreen(poster.photo.p[k].x * frameW + room.x, poster.photo.p[k].y * frameH + room.y);
+                drawQuad(posterPhoto[i], q, WHITE);
+                if (poster.light.id != 0u)
+                {
+                    BeginBlendMode(BLEND_MULTIPLIED);
+                    drawQuad(poster.light, q, WHITE);
+                    EndBlendMode();
+                }
+                if (poster.tape.id != 0u)
+                {
+                    BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
+                    drawQuad(poster.tape, q, WHITE);
+                    EndBlendMode();
+                }
+            }
+            rlEnableBackfaceCulling();
+        }
+
         void drawHome()
         {
             // the room (and the doors in it) drifting with the cursor
             const Vector2 room = roomShift, table = tableShift;
             drawAt(back, Rectangle{-backMargin + room.x, -backMargin + room.y, static_cast<float>(back.width), static_cast<float>(back.height)});
+            drawPosters(room);
             BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             if (doorTexture.id != 0u)
                 drawAt(doorTexture, Rectangle{doorRect.x + room.x, doorRect.y + room.y, doorRect.width, doorRect.height});
@@ -2796,6 +2879,9 @@ float soft(vec2 p)
             homeReady = false;
             if (!IsWindowReady()) // the window (and its textures) already gone
                 return;
+            for (Poster &poster : posters)
+                for (Texture2D *t : {&poster.light, &poster.tape})
+                    unload(*t);
             for (Texture2D *t : {&back, &fg, &lip, &outsideMask, &rays, &raysWeight, &bloom, &bookLit, &doorTexture, &dot, &vignette, &paper, &white, &drinkMask})
                 unload(*t);
             const auto freeSnacks = [](Snacks &s) {
@@ -2864,6 +2950,12 @@ float soft(vec2 p)
     Rectangle Scene::picture() const { return m->pictureRect; }
     float Scene::scale() const { return m->viewScale; }
     Vector2 Scene::toScreen(Vector2 n) const { return m->frameToScreen(n.x * m->frameW, n.y * m->frameH); }
+
+    void Scene::setPosterPhotos(const Texture2D *photos, int count)
+    {
+        for (int i = 0; i < static_cast<int>(m->posterPhoto.size()); ++i)
+            m->posterPhoto[static_cast<size_t>(i)] = i < count && photos ? photos[i] : Texture2D{};
+    }
 
     bool Scene::spread(Quad &left, Quad &right) const
     {

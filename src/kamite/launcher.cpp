@@ -287,6 +287,7 @@ namespace kamite::launcher
             bool hasRustle = false;
             int lastDevice = 0;   // 0 mouse, 1 keyboard, 2 controller: which prompts show
             std::string promptSet; // the loaded set's folder ("" none)
+            std::map<std::string, Texture2D> promptArt; // the Controls pages' button / key pictures, by file
             Texture2D prompt[5]{}; // tab left, tab right, sub-tab left, sub-tab right, back
             bool penThisFrame = false;    // the pen played: no cursor tick on top of it
             int lastSlipFocus = 0;
@@ -332,6 +333,7 @@ namespace kamite::launcher
             // preset waiting for "Replace your custom settings?".
             Texture2D presetPhotos[presets::kCount]{};
             bool presetPhotosRead = false;
+            bool posterPhotosSet = false; // the wall posters in the saloon have them
             int presetAsk = -1;
             bool presetOpenPopup = false;
             // The first run's wanted posters (resources/presets: tools/launcher/make_posters.py), shown once on a new
@@ -1850,8 +1852,8 @@ namespace kamite::launcher
                     }
                     if (focused)
                         focus = static_cast<int>(i);
-                    if (i == 0 && state.installed)
-                        ownSoundItem(); // Play's own sound
+                    if ((i == 0 && state.installed) || i == kBillOptions)
+                        ownSoundItem(); // Play's own sound; Options has the whoosh and the book (K: no menu sound on top)
                     else if (i == skipItem || i == muteItem)
                         tickItem(); // the tick box, the mute mark
                     if (pressed && home)
@@ -3442,6 +3444,7 @@ namespace kamite::launcher
         constexpr ImU32 kBookPencil = IM_COL32(164, 30, 22, 225), kBookPencilFaded = IM_COL32(164, 30, 22, 105);
         constexpr ImU32 kBookCream = IM_COL32(240, 222, 190, 240);
         constexpr float kBookLoopTime = 0.28f; // the bill's loop
+        constexpr float kBookTextScale = 1.25f; // the pages' writing against the book's unit (K, Nov 18: bigger, for TVs)
         // The slips' manila, a little different each (the open one lighter, in front).
         constexpr ImU32 kSlipTints[kBookTabCount] = {IM_COL32(244, 237, 219, 255), IM_COL32(240, 233, 217, 255), IM_COL32(243, 235, 222, 255),
                                                      IM_COL32(239, 234, 219, 255), IM_COL32(242, 236, 218, 255), IM_COL32(241, 233, 220, 255),
@@ -3543,7 +3546,10 @@ namespace kamite::launcher
                                                         nav ? ImGuiButtonFlags_EnableNav : ImGuiButtonFlags_None);
             ImGui::PopStyleColor();
             if (!nav)
+            {
+                ownSoundItem(); // the slips, the index tabs, the ribbon, USE THIS: their own sounds (K: no menu sound)
                 return pressed;
+            }
             const ImGuiIO &io = ImGui::GetIO();
             const bool moved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
             if (moved && ImGui::IsItemHovered() && !ImGui::IsItemFocused())
@@ -3568,8 +3574,7 @@ namespace kamite::launcher
         // The focus loop round [min, max] (drawn in over kBookLoopTime).
         void bookLoop(State &state, const Book &b, ImDrawList *dl, ImVec2 min, ImVec2 max)
         {
-            book::loop(dl, ImVec2(min.x - 7.0f * b.u, min.y - 3.0f * b.u), ImVec2(max.x + 7.0f * b.u, max.y + 3.0f * b.u),
-                       state.bookFocusAge / kBookLoopTime, state.bookFocusSeed, kBookPencil, 3.6f * b.u);
+            book::loop(dl, min, max, state.bookFocusAge / kBookLoopTime, state.bookFocusSeed, kBookPencil, 3.6f * b.u);
         }
 
         void bookHelp(State &state, const char *title, const char *help, const char *note = nullptr)
@@ -3601,7 +3606,8 @@ namespace kamite::launcher
         {
             bool pressed = false, focused = false, active = false;
             ImVec2 min, max;
-            float mid = 0.0f; // the row's middle (y)
+            float mid = 0.0f;       // the row's middle (y)
+            float nameRight = 0.0f; // where its name ends (x)
         };
 
         void bookCategory(State &state, const Book &b, const char *title, bool first)
@@ -3648,6 +3654,7 @@ namespace kamite::launcher
             }
             const ImVec2 at(x, r.mid - size * 0.56f);
             bookText(dl, state.bookFonts.garamond, size, at, ink, name);
+            r.nameRight = at.x + textSize(state.bookFonts.garamond, size, name).x;
             if (r.focused)
             {
                 const ImVec2 ts = textSize(state.bookFonts.garamond, size, name);
@@ -3662,7 +3669,9 @@ namespace kamite::launcher
         void bookValue(State &state, const Book &b, const Row &r, const char *text, bool faded)
         {
             ImDrawList *dl = ImGui::GetWindowDrawList();
-            const float u = b.u, size = 26.0f * u;
+            const float u = b.u, room = r.max.x - 20.0f * u - (r.nameRight + 22.0f * u);
+            const float full = textSize(state.bookFonts.ink, 26.0f * u, text).x;
+            const float size = 26.0f * u * (full > room && room > 0.0f ? std::max(0.6f, room / full) : 1.0f); // a long value beside a long name
             const float tw = textSize(state.bookFonts.ink, size, text).x;
             const float right = r.max.x - 20.0f * u;
             bookText(dl, state.bookFonts.ink, size, ImVec2(right - tw, r.mid - size * 0.56f), faded ? kBookPencilFaded : kBookPencil, text);
@@ -3731,8 +3740,9 @@ namespace kamite::launcher
         {
             ImDrawList *dl = ImGui::GetWindowDrawList();
             const float u = b.u;
-            x1 = r.max.x - 92.0f * u;
-            x0 = x1 - 150.0f * u;
+            const float valueW = std::max(textSize(state.bookFonts.ink, 26.0f * u, text).x, textSize(state.bookFonts.ink, 26.0f * u, "150%").x);
+            x1 = r.max.x - valueW - 16.0f * u;
+            x0 = std::min(x1 - 50.0f * u, std::max(x1 - 150.0f * u, r.nameRight + 22.0f * u));
             const float y = r.mid + 5.0f * u;
             const ImU32 ink = faded ? kBookFaded : kBookInk;
             bookRule(b, dl, x0, x1, y, ink, 1.4f * u, 3u);
@@ -4001,7 +4011,8 @@ namespace kamite::launcher
         // A paper note over the right page (the capture, the key clash, replacing the custom settings): a modal popup.
         bool bookNoteBegin(const Book &b, const char *id)
         {
-            ImGui::SetNextWindowPos(ImVec2((b.rightMin.x + b.rightMax.x) * 0.5f, b.top + 640.0f * b.u), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+            ImGui::SetNextWindowPos(ImVec2((b.rightMin.x + b.rightMax.x) * 0.5f, b.rightMin.y + (b.rightMax.y - b.rightMin.y) * 0.64f),
+                                    ImGuiCond_Always, ImVec2(0.5f, 0.5f));
             ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0, 0, 0, 0));
             ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
             ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0, 0, 0, 0));
@@ -4166,13 +4177,15 @@ namespace kamite::launcher
             {
                 const presets::Text &t = presets::kText[i];
                 const ImVec2 p = ImGui::GetCursorScreenPos();
+                const float tagH = textSize(state.bookFonts.garamond, 26.0f * u, t.tagline, w - 20.0f * u).y;
+                const float rowH = std::max(140.0f * u, 76.0f * u + tagH + 18.0f * u);
                 ImGui::PushID(i);
-                const bool pressed = bookItem(state, "##preset", p, ImVec2(p.x + w, p.y + 140.0f * u));
+                const bool pressed = bookItem(state, "##preset", p, ImVec2(p.x + w, p.y + rowH));
                 ImGui::PopID();
                 const float nameSize = 36.0f * u;
-                const ImVec2 at(p.x, p.y + 26.0f * u);
+                const ImVec2 at(p.x, p.y + 24.0f * u);
                 bookText(dl, state.bookFonts.rye, nameSize, at, kBookInk, t.name);
-                bookText(dl, state.bookFonts.garamond, 26.0f * u, ImVec2(p.x, p.y + 72.0f * u), kBookInk, t.tagline, w - 20.0f * u);
+                bookText(dl, state.bookFonts.garamond, 26.0f * u, ImVec2(p.x, p.y + 76.0f * u), kBookInk, t.tagline, w - 20.0f * u);
                 if (i == now)
                     bookStamp(state, b, nullptr, "IN USE", ImVec2(p.x + w - 74.0f * u, p.y + 44.0f * u), 22.0f * u, 7.0f);
                 if (ImGui::IsItemFocused())
@@ -4193,8 +4206,8 @@ namespace kamite::launcher
                         usePreset(state, i);
                 }
                 if (i + 1 < presets::kCount)
-                    bookRule(b, dl, p.x, p.x + w, p.y + 140.0f * u, IM_COL32(38, 26, 18, 90), 1.0f * u, static_cast<uint32_t>(i));
-                ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + 150.0f * u));
+                    bookRule(b, dl, p.x, p.x + w, p.y + rowH, IM_COL32(38, 26, 18, 90), 1.0f * u, static_cast<uint32_t>(i));
+                ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + rowH + 10.0f * u));
                 ImGui::Dummy(ImVec2(w, 0.0f));
             }
         }
@@ -4246,6 +4259,193 @@ namespace kamite::launcher
             }
         }
 
+        // A binding's pictures from the pack (K, Nov 18: the Controls pages show the prompts, not names): one file per
+        // element of the chord (resources/prompts/xelu/<set>, the sticks' side views from resources/options/mapping as
+        // in game), "" where the pack has none (that element is written out); a stick's direction (1 up, 2 down,
+        // 3 left, 4 right) is inked beside its picture.
+        std::string padFolder(const State &state); // (the prompts' art set: below)
+        struct ArtPiece
+        {
+            std::string file; // relative to the exe's folder
+            int arrow = 0;
+        };
+        std::vector<ArtPiece> bindingArt(const State &state, const std::string &binding)
+        {
+            std::vector<ArtPiece> pieces;
+            const std::string set = padFolder(state);
+            struct SetNames
+            {
+                const char *folder, *prefix, *face[4], *shoulder[2], *trigger[2], *start, *back;
+            };
+            static const SetNames kSets[] = {
+                {"xbox360", "360_", {"A", "B", "X", "Y"}, {"LB", "RB"}, {"LT", "RT"}, "Start_Alt", "Back_Alt"},
+                {"ps3", "PS3_", {"Cross", "Circle", "Square", "Triangle"}, {"L1", "R1"}, {"L2", "R2"}, "Start", "Select"},
+                {"switch", "Switch_", {"B", "A", "Y", "X"}, {"LB", "RB"}, {"LT", "RT"}, "Plus", "Minus"}, // by place
+                {"steamdeck", "SteamDeck_", {"A", "B", "X", "Y"}, {"L1", "R1"}, {"L2", "R2"}, "Menu", "Inventory"},
+            };
+            const SetNames *names = &kSets[0];
+            for (const SetNames &s : kSets)
+                if (set == s.folder)
+                    names = &s;
+            const auto padFile = [&](const std::string &name) { return std::string("resources/prompts/xelu/") + names->folder + "/" + names->prefix + name + ".png"; };
+            const auto keyFile = [](const std::string &name) { return "resources/prompts/xelu/keyboard/" + name + "_Key_Light.png"; };
+            size_t start = 0;
+            while (start <= binding.size())
+            {
+                size_t end = binding.find('&', start);
+                if (end == std::string::npos)
+                    end = binding.size();
+                std::string element = binding.substr(start, end - start);
+                element.erase(0, element.find_first_not_of(' '));
+                element.erase(element.find_last_not_of(' ') + 1);
+                start = end + 1;
+                if (element.empty())
+                    continue;
+                ArtPiece piece;
+                const size_t slash = element.find('/');
+                const std::string device = element.substr(0, slash), name = slash == std::string::npos ? std::string() : element.substr(slash + 1);
+                if (device.rfind("SDL-", 0) == 0)
+                {
+                    static const char *const kFaces[] = {"FaceSouth", "FaceEast", "FaceWest", "FaceNorth"};
+                    for (int i = 0; i < 4; ++i)
+                        if (name == kFaces[i])
+                            piece.file = padFile(names->face[i]);
+                    if (name == "LeftShoulder" || name == "RightShoulder")
+                        piece.file = padFile(names->shoulder[name[0] == 'R']);
+                    else if (name == "+LeftTrigger" || name == "+RightTrigger")
+                        piece.file = padFile(names->trigger[name[1] == 'R']);
+                    else if (name == "LeftStick" || name == "RightStick")
+                        piece.file = padFile(name == "LeftStick" ? "Left_Stick_Click" : "Right_Stick_Click");
+                    else if (name == "Start")
+                        piece.file = padFile(names->start);
+                    else if (name == "Back")
+                        piece.file = padFile(names->back);
+                    else if (name.rfind("DPad", 0) == 0)
+                        piece.file = padFile("Dpad_" + name.substr(4));
+                    else if (name.size() == 6 && (name.compare(1, 4, "Left") == 0 || name.compare(1, 4, "Righ") == 0))
+                        ; // (not a stick axis: below)
+                    if (piece.file.empty() && name.size() >= 6 && (name[0] == '+' || name[0] == '-') &&
+                        (name.compare(1, 5, "LeftX") == 0 || name.compare(1, 5, "LeftY") == 0 || name.compare(1, 6, "RightX") == 0 ||
+                         name.compare(1, 6, "RightY") == 0))
+                    {
+                        const bool left = name[1] == 'L', vertical = name.back() == 'Y', negative = name[0] == '-';
+                        piece.file = std::string("resources/options/mapping/stick_") + names->folder + (left ? "_left.png" : "_right.png");
+                        piece.arrow = vertical ? (negative ? 1 : 2) : (negative ? 3 : 4);
+                    }
+                    static const char *const kPaddles[] = {"Paddle1", "Paddle2", "Paddle3", "Paddle4"};
+                    static const char *const kPaddleFiles[] = {"paddle_r4", "paddle_l4", "paddle_r5", "paddle_l5"}; // SDL: upper right first
+                    for (int i = 0; i < 4; ++i)
+                        if (name == kPaddles[i])
+                            piece.file = std::string("resources/options/mapping/") + kPaddleFiles[i] + ".png";
+                }
+                else if (device == "Keyboard")
+                {
+                    static const std::pair<const char *, const char *> kKeys[] = {
+                        {"Space", "Space"}, {"Return", "Enter"}, {"Keypad+Enter", "Enter"}, {"Escape", "Esc"}, {"Tab", "Tab"},
+                        {"Backspace", "Backspace"}, {"LeftShift", "Shift"}, {"RightShift", "Shift"}, {"LeftControl", "Ctrl"},
+                        {"RightControl", "Ctrl"}, {"LeftAlt", "Alt"}, {"RightAlt", "Alt"}, {"Up", "Arrow_Up"}, {"Down", "Arrow_Down"},
+                        {"Left", "Arrow_Left"}, {"Right", "Arrow_Right"}, {"Insert", "Insert"}, {"Delete", "Del"}, {"Home", "Home"},
+                        {"End", "End"}, {"PageUp", "Page_Up"}, {"PageDown", "Page_Down"}, {"CapsLock", "Caps_Lock"}, {"Minus", "Minus"},
+                        {"Slash", "Slash"}, {"Semicolon", "Semicolon"}, {"BracketLeft", "Bracket_Left"}, {"BracketRight", "Bracket_Right"},
+                        {"Apostrophe", "Quote"}, {"QuoteLeft", "Tilda"}, {"NumLock", "Num_Lock"}, {"Print", "Print_Screen"}};
+                    for (const auto &[from, to] : kKeys)
+                        if (name == from)
+                            piece.file = keyFile(to);
+                    if (piece.file.empty() && name.size() == 1 && std::isalnum(static_cast<unsigned char>(name[0])))
+                        piece.file = keyFile(std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])))));
+                    else if (piece.file.empty() && name.size() >= 2 && name.size() <= 3 && name[0] == 'F' && std::isdigit(static_cast<unsigned char>(name[1])))
+                        piece.file = keyFile(name);
+                    else if (piece.file.empty() && name.size() == 7 && name.rfind("Keypad", 0) == 0 && std::isdigit(static_cast<unsigned char>(name[6])))
+                        piece.file = keyFile(name.substr(6));
+                }
+                else if (device == "Pointer-0")
+                {
+                    if (name == "LeftButton")
+                        piece.file = keyFile("Mouse_Left");
+                    else if (name == "RightButton")
+                        piece.file = keyFile("Mouse_Right");
+                    else if (name == "MiddleButton")
+                        piece.file = keyFile("Mouse_Middle");
+                }
+                pieces.push_back(piece);
+            }
+            return pieces;
+        }
+
+        const Texture2D &artTexture(State &state, const std::string &file)
+        {
+            auto it = state.promptArt.find(file);
+            if (it != state.promptArt.end())
+                return it->second;
+            Texture2D &texture = state.promptArt[file];
+            std::error_code error;
+            const fs::path path = state.context->exeDir / fromUtf8(file);
+            if (fs::is_regular_file(path, error))
+            {
+                texture = LoadTexture(utf8(path).c_str());
+                if (texture.id != 0u)
+                {
+                    GenTextureMipmaps(&texture);
+                    SetTextureFilter(texture, TEXTURE_FILTER_TRILINEAR);
+                }
+            }
+            return texture;
+        }
+
+        // A binding drawn as its pictures (+ between a chord's), from `at` (left, the row's middle); false when one of
+        // them has no picture (the caller writes the name instead). The width drawn in `width`.
+        bool bookBindingArt(State &state, const Book &b, ImDrawList *dl, const std::string &binding, ImVec2 at, float maxWidth, float &width)
+        {
+            const std::vector<ArtPiece> pieces = bindingArt(state, binding);
+            if (pieces.empty())
+                return false;
+            for (const ArtPiece &piece : pieces)
+                if (piece.file.empty() || artTexture(state, piece.file).id == 0u)
+                    return false;
+            const float u = b.u, h = 40.0f * u, plus = 18.0f * u, arrow = 16.0f * u;
+            float total = 0.0f;
+            for (size_t i = 0; i < pieces.size(); ++i)
+            {
+                const Texture2D &tex = artTexture(state, pieces[i].file);
+                total += h * static_cast<float>(tex.width) / std::max(1, tex.height) + (pieces[i].arrow ? arrow : 0.0f) + (i ? plus : 0.0f);
+            }
+            const float scale = total > maxWidth && maxWidth > 0.0f ? maxWidth / total : 1.0f;
+            float x = at.x;
+            for (size_t i = 0; i < pieces.size(); ++i)
+            {
+                if (i)
+                {
+                    const float c = x + plus * scale * 0.5f, r = 5.0f * u * scale;
+                    const ImVec2 hbar[2] = {ImVec2(c - r, at.y), ImVec2(c + r, at.y)}, vbar[2] = {ImVec2(c, at.y - r), ImVec2(c, at.y + r)};
+                    book::line(dl, hbar, 2, 2.0f * u, kBookInk);
+                    book::line(dl, vbar, 2, 2.0f * u, kBookInk);
+                    x += plus * scale;
+                }
+                const Texture2D &tex = artTexture(state, pieces[i].file);
+                const float ih = h * scale, iw = ih * static_cast<float>(tex.width) / std::max(1, tex.height);
+                book::paint(dl);
+                bookPrompt(dl, tex, ImVec2(x + iw * 0.5f, at.y), ih); // with its faint inked edge (white art on cream)
+                book::ink(dl);
+                x += iw;
+                if (pieces[i].arrow)
+                {
+                    // the stick's way, a small inked arrow
+                    const float a = arrow * scale, c = x + a * 0.5f, len = a * 0.42f, head = a * 0.22f;
+                    const int way = pieces[i].arrow;
+                    const ImVec2 dir = way == 1 ? ImVec2(0, -1) : way == 2 ? ImVec2(0, 1) : way == 3 ? ImVec2(-1, 0) : ImVec2(1, 0);
+                    const ImVec2 tip(c + dir.x * len, at.y + dir.y * len), tail(c - dir.x * len, at.y - dir.y * len);
+                    const ImVec2 shaft[2] = {tail, tip};
+                    const ImVec2 wing[3] = {ImVec2(tip.x - dir.x * head - dir.y * head, tip.y - dir.y * head + dir.x * head), tip,
+                                            ImVec2(tip.x - dir.x * head + dir.y * head, tip.y - dir.y * head - dir.x * head)};
+                    book::line(dl, shaft, 2, 2.2f * u, kBookInk);
+                    book::line(dl, wing, 3, 2.2f * u, kBookInk);
+                    x += a;
+                }
+            }
+            width = x - at.x;
+            return true;
+        }
+
         // Controller / Keys & Mouse: a row per PS2 input; its binding(s) in red pencil, A / a click to bind, X /
         // Delete / a right-click to clear.
         void bookBindings(State &state, const Book &b, bool controller)
@@ -4293,13 +4493,23 @@ namespace kamite::launcher
                     ImGui::PopID();
                     const ImVec2 at(x, mid - size * 0.56f);
                     std::string fitted = text;
-                    while (fitted.size() > 2 && textSize(state.bookFonts.ink, size, fitted.c_str()).x > cell - 14.0f * u)
-                        fitted = fitted.substr(0, fitted.size() - 2) + "\xE2\x80\xA6";
-                    bookText(dl, state.bookFonts.ink, size, at, kBookPencil, fitted.c_str());
+                    float artWidth = 0.0f;
+                    const bool art = !binding.empty() && bookBindingArt(state, b, dl, binding, ImVec2(x, mid), cell - 14.0f * u, artWidth);
+                    if (!art)
+                    {
+                        while (fitted.size() > 2 && textSize(state.bookFonts.ink, size, fitted.c_str()).x > cell - 14.0f * u)
+                            fitted = fitted.substr(0, fitted.size() - 2) + "\xE2\x80\xA6";
+                        bookText(dl, state.bookFonts.ink, size, at, kBookPencil, fitted.c_str());
+                    }
                     if (focused)
                     {
-                        const ImVec2 ts = textSize(state.bookFonts.ink, size, fitted.c_str());
-                        bookLoop(state, b, dl, ImVec2(at.x, at.y + size * 0.12f), ImVec2(at.x + ts.x, at.y + size * 1.02f));
+                        if (art)
+                            bookLoop(state, b, dl, ImVec2(x, mid - 18.0f * u), ImVec2(x + artWidth, mid + 18.0f * u));
+                        else
+                        {
+                            const ImVec2 ts = textSize(state.bookFonts.ink, size, fitted.c_str());
+                            bookLoop(state, b, dl, ImVec2(at.x, at.y + size * 0.12f), ImVec2(at.x + ts.x, at.y + size * 1.02f));
+                        }
                         std::string title = name;
                         if (!controller)
                             title += column == 0 ? " (key 1)" : " (key 2)";
@@ -4390,10 +4600,10 @@ namespace kamite::launcher
 
         // ---- the slips, Controls' index tabs, the ribbon ---------------------------------------------------------------
         // The prompts' art set for the device in use ([Game] ButtonPrompts; auto: the controller's name) and loading it.
-        std::string promptFolder(const State &state)
+        std::string padFolder(const State &state);
+        std::string promptFolder(const State &state) { return state.lastDevice == 1 ? std::string("keyboard") : padFolder(state); }
+        std::string padFolder(const State &state)
         {
-            if (state.lastDevice == 1)
-                return "keyboard";
             std::string choice = lower(state.ini.get("Game", "ButtonPrompts", "auto"));
             if (choice == "auto" && IsGamepadAvailable(0))
             {
@@ -4490,6 +4700,7 @@ namespace kamite::launcher
             state.bookNote.clear();
             playEffect(state, state.rustle, state.hasRustle);
             state.soundThisFrame = true;
+            state.quietFrames = 3; // the cursor's move to the page's first row: no tick (K)
         }
 
         void switchControlsPage(State &state, int page)
@@ -4506,6 +4717,7 @@ namespace kamite::launcher
             state.bookNote.clear();
             playEffect(state, state.rustle, state.hasRustle);
             state.soundThisFrame = true;
+            state.quietFrames = 3; // the cursor's move to the page's first row: no tick (K)
         }
 
         void bookSlips(State &state, const Book &b, bool input)
@@ -4525,7 +4737,7 @@ namespace kamite::launcher
                     const ImVec2 quad[4] = {ImVec2(a, b.top - h), ImVec2(a + w, b.top - h), ImVec2(a + w, b.top + 2.0f * u), ImVec2(a, b.top + 2.0f * u)};
                     book::paper(dl, quad, open ? kSlipOpen : kSlipTints[i], 5.0f * u);
                     book::ink(dl);
-                    const float size = 25.0f * u;
+                    const float size = 29.0f * u;
                     const ImVec2 ts = textSize(state.bookFonts.rye, size, kBookTabs[i]);
                     const float scale = ts.x > w - 10.0f * u ? (w - 10.0f * u) / ts.x : 1.0f;
                     bookText(dl, state.bookFonts.rye, size * scale, ImVec2(a + (w - ts.x * scale) * 0.5f, b.top - h * 0.5f - ts.y * scale * 0.55f),
@@ -4564,7 +4776,7 @@ namespace kamite::launcher
                                             ImVec2(b.right - 4.0f * u, a + h)};
                     book::paper(dl, quad, open ? kSlipOpen : kSlipTints[(i + 2) % kBookTabCount], 5.0f * u);
                     book::ink(dl);
-                    const float size = 23.0f * u;
+                    const float size = 27.0f * u;
                     const ImVec2 ts = textSize(state.bookFonts.rye, size, kControlsPages[i]);
                     const ImVec2 centre(b.right + out * 0.5f, a + h * 0.5f);
                     const int start = dl->VtxBuffer.Size;
@@ -4613,7 +4825,7 @@ namespace kamite::launcher
             quadColors(dl, tl, tr, ImVec2(tr.x + d.x * shade / d.y, y + shade), ImVec2(tl.x + d.x * shade / d.y, y + shade), IM_COL32(20, 6, 6, 200),
                        IM_COL32(20, 6, 6, 200), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0));
             // "Back" along it
-            const float size = 22.0f * u;
+            const float size = 26.0f * u;
             const ImVec2 ts = textSize(state.bookFonts.rye, size, "Back");
             const ImVec2 centre(cx + d.x * 74.0f * u, y + d.y * 74.0f * u);
             const int start = dl->VtxBuffer.Size;
@@ -4648,6 +4860,10 @@ namespace kamite::launcher
             b.leftMax = ImVec2(space.spine - 50.0f * u, b.bottom - 50.0f * u);
             b.rightMin = ImVec2(space.spine + 50.0f * u, b.top + 64.0f * u);
             b.rightMax = ImVec2(b.right - 56.0f * u, b.bottom - 50.0f * u);
+            // what is written on the pages in a size that reads on a TV across the room (K: scrolling is fine); the
+            // slips, tabs and ribbon keep the book's own unit
+            Book pg = b;
+            pg.u = u * kBookTextScale;
             // the whole book draws outside the window's own clip (the slips stand above the screen's top edge at times)
             const ImVec2 display = ImGui::GetIO().DisplaySize;
             ImGui::PushClipRect(ImVec2(-0.25f * display.x, -0.25f * display.y), ImVec2(1.25f * display.x, 1.25f * display.y), false);
@@ -4691,15 +4907,15 @@ namespace kamite::launcher
                 if (!input)
                     ImGui::BeginDisabled();
                 if (state.bookTab == 0)
-                    bookPresetsLeft(state, b, now, focusedPreset);
+                    bookPresetsLeft(state, pg, now, focusedPreset);
                 else if (state.bookTab == kBookControlsTab && state.bookControls == 1)
-                    bookBindings(state, b, true);
+                    bookBindings(state, pg, true);
                 else if (state.bookTab == kBookControlsTab && state.bookControls == 2)
-                    bookBindings(state, b, false);
+                    bookBindings(state, pg, false);
                 else if (state.bookTab == kBookControlsTab && state.bookControls == 3)
-                    bookHotkeys(state, b);
+                    bookHotkeys(state, pg);
                 else
-                    bookSettings(state, b, kBookSettingTabs[state.bookTab - 1]);
+                    bookSettings(state, pg, kBookSettingTabs[state.bookTab - 1]);
                 ImGui::Dummy(ImVec2(1.0f, 20.0f * u));
                 if (!input)
                     ImGui::EndDisabled();
@@ -4726,14 +4942,14 @@ namespace kamite::launcher
 
             // the right page
             if (state.bookTab == 0)
-                bookPresetsRight(state, b, now, focusedPreset >= 0 ? focusedPreset : std::max(0, now));
+                bookPresetsRight(state, pg, now, focusedPreset >= 0 ? focusedPreset : std::max(0, now));
             else
             {
-                bookHelpPage(state, b);
+                bookHelpPage(state, pg);
                 if (input && !popup && state.bookTab == kBookControlsTab && (state.bookControls == 1 || state.bookControls == 2))
                 {
-                    const ImVec2 at((b.rightMin.x + b.rightMax.x) * 0.5f, b.rightMax.y - 150.0f * u);
-                    if (bookStamp(state, b, "##reset", g_resetArmed ? "AGAIN TO RESET ALL" : "RESET ALL BINDINGS", at, 20.0f * u, -1.5f))
+                    const ImVec2 at((b.rightMin.x + b.rightMax.x) * 0.5f, b.rightMax.y - 150.0f * pg.u);
+                    if (bookStamp(state, pg, "##reset", g_resetArmed ? "AGAIN TO RESET ALL" : "RESET ALL BINDINGS", at, 20.0f * pg.u, -1.5f))
                     {
                         if (g_resetArmed)
                         {
@@ -4742,7 +4958,7 @@ namespace kamite::launcher
                         }
                         g_resetArmed = !g_resetArmed;
                     }
-                    if (bookStamp(state, b, "##ini", "OPEN CONTROLS.INI", ImVec2(at.x, at.y + 70.0f * u), 20.0f * u, 1.0f))
+                    if (bookStamp(state, pg, "##ini", "OPEN CONTROLS.INI", ImVec2(at.x, at.y + 70.0f * pg.u), 20.0f * pg.u, 1.0f))
                     {
                         std::string message;
                         pc::save(message);
@@ -4751,8 +4967,8 @@ namespace kamite::launcher
                 }
                 if (input && !popup && state.bookTab == kBookControlsTab && state.bookControls == 3)
                 {
-                    const ImVec2 at((b.rightMin.x + b.rightMax.x) * 0.5f, b.rightMax.y - 120.0f * u);
-                    if (bookStamp(state, b, "##defaults", "DEFAULT HOTKEYS", at, 20.0f * u, -1.5f))
+                    const ImVec2 at((b.rightMin.x + b.rightMax.x) * 0.5f, b.rightMax.y - 120.0f * pg.u);
+                    if (bookStamp(state, pg, "##defaults", "DEFAULT HOTKEYS", at, 20.0f * pg.u, -1.5f))
                     {
                         for (int i = 0; i < static_cast<int>(hk::Action::Count); ++i)
                             if (hk::available(static_cast<hk::Action>(i)))
@@ -4761,7 +4977,7 @@ namespace kamite::launcher
                     }
                 }
             }
-            bookNotes(state, b);
+            bookNotes(state, pg);
             ImGui::PopClipRect();
             state.bookTabChanged = false;
             if (state.bookQuiet > 0)
@@ -5109,6 +5325,13 @@ namespace kamite::launcher
                 frame.parallax = Vector2{state.parallax.x, state.parallax.y};
                 frame.volume = userVolume(state); // the curry's steam (muted: cold curry)
                 frame.bookLit = state.screen == Screen::Home && state.bill.focus == static_cast<int>(kBillOptions);
+                if (!state.posterPhotosSet && state.installed && state.scene.ready())
+                {
+                    // the wanted posters on the wall show the presets' photos from the player's disc (K, Nov 18)
+                    readPresetPhotos(state);
+                    state.scene.setPosterPhotos(state.presetPhotos, presets::kCount);
+                    state.posterPhotosSet = true;
+                }
                 state.scene.update(frame);
                 state.bill.focusAge += dt;
                 state.bookFocusAge += dt;
@@ -5295,6 +5518,9 @@ namespace kamite::launcher
         for (Texture2D &prompt : state.prompt)
             if (prompt.id != 0u)
                 UnloadTexture(prompt);
+        for (auto &[file, art] : state.promptArt)
+            if (art.id != 0u)
+                UnloadTexture(art);
         saloon::unloadBillFonts(state.billFonts);
         state.scene.close(); // its threads and textures, before the game has the window
         if (state.splashFont.texture.id != 0u)

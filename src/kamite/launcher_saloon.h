@@ -50,7 +50,8 @@ namespace kamite::launcher::saloon
     void inkLine(const Vector2 *points, int count, float width, Color color, const Homography &paper, float taper = 0.0f);
     // The focus mark: a red grease-pencil loop round a box (paper units), drawn in as `drawn` goes 0..1. seed: its
     // own wobble (a new one each time the focus moves).
-    void inkLoop(Rectangle box, float drawn, uint32_t seed, Color color, const Homography &paper, float width);
+    // squareness: the loop's shape exponent (2: an oval, as on the bill; higher: a rounder rectangle that hugs a word)
+    void inkLoop(Rectangle box, float drawn, uint32_t seed, Color color, const Homography &paper, float width, float squareness = 2.0f);
     // A tick box (inked square) and its tick, `size` paper units.
     void inkTickBox(Vector2 centre, float size, bool ticked, Color color, const Homography &paper);
     // Multiply blending for ink (paper shows through); End restores normal blending.
@@ -159,6 +160,9 @@ namespace kamite::launcher::saloon
         bool bill(Quad &out) const;
         // The open book's pages on screen (TL, TR, BR, BL each), on the zoom's last frame only: the Options book.
         bool spread(Quad &left, Quad &right) const;
+        // The wanted posters on the wall get these photos in their boxes (the presets' order; the textures stay the
+        // caller's and must outlive the scene's drawing).
+        void setPosterPhotos(const Texture2D *photos, int count);
         // The logo canvas (logo.png's whole canvas) in the doorway's glare; contentBox: the canvas fractions of
         // GOD HAND + plate (left, top, right, bottom). False when the doorway is out of view.
         bool logo(const float contentBox[4], float canvasAspect, Rectangle &out) const;
