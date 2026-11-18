@@ -1,8 +1,8 @@
 Copyright 2017 The EB Garamond Project Authors (https://github.com/octaviopardo/EBGaramond12)
 
-EBGaramond-Regular.ttf and EBGaramond-Ink.ttf (resources/fonts) are static instances of the EB Garamond variable
-font (weights 400 and 680), cut down to Latin-1 and common punctuation with fontTools: the bill of fare on the
-launcher's saloon.
+EBGaramond-Regular.ttf (resources/fonts) is a static instance of the EB Garamond variable font (weight 400), cut
+down to Latin-1 and common punctuation with fontTools: the launcher's letters the Dominican atlas lacks (curly quotes,
+dashes, # % < > and the like).
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

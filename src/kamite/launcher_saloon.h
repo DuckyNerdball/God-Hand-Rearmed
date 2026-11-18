@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -59,14 +60,31 @@ namespace kamite::launcher::saloon
     void beginPaint(); // the ink's solid colour drawn over (normal blending): things on the paper, not in it
     void endInk();
 
+    // ---- a font baked as a glyph atlas (tools/splash/bake_font.py: BMFont text .fnt + its PNG), for a font whose file
+    // can't ship (Dominican, resources/splash): the bill's (raylib) and the Options book's (ImGui) writing.
+    struct GlyphAtlas
+    {
+        struct Glyph
+        {
+            int x = 0, y = 0, w = 0, h = 0, xoff = 0, yoff = 0, advance = 0; // yoff: down from the ascender line
+        };
+        std::map<int, Glyph> glyphs;
+        int lineHeight = 1, base = 1; // ascent + descent and the ascent, in the atlas's pixels
+        int width = 0, height = 0;
+        std::vector<uint8_t> alpha; // the page's ink, width x height
+        // baked with ink, or a space (a glyph baked empty is one the font lacks)
+        bool has(int codepoint) const;
+    };
+    bool readGlyphAtlas(const std::filesystem::path &fnt, GlyphAtlas &atlas);
+
     // ---- the bill of fare: Home's menu in ink -----------------------------------------------------------------------
     struct BillFonts
     {
-        Font heading{}; // Rye (the bill's title)
-        Font item{};    // EB Garamond, heavier (the menu)
-        Font text{};    // EB Garamond (the splash line, the tagline, the small print)
+        Font heading{}; // Wendyville, in capitals (the wanted posters' title font): the bill's title
+        Font text{};    // Dominican (resources/splash's atlas; EB Garamond for what it lacks): everything else
     };
-    // resources/fonts; extra: text whose letters must be in the atlases (the splash line). False if one is missing.
+    // resources/fonts (and resources/splash for Dominican); extra: text whose letters must be in the atlases (the splash
+    // line). False if one is missing.
     bool loadBillFonts(BillFonts &fonts, const std::filesystem::path &folder, const std::string &extra);
     void unloadBillFonts(BillFonts &fonts);
 

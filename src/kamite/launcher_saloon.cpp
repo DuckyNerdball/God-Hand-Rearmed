@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -1085,10 +1086,11 @@ float soft(vec2 p)
                                        "God\u00A0Hand\u2122 is a trademark of CAPCOM CO.,\u00A0LTD.\n"
                                        "God Hand: Rearmed is an unofficial fan-made project, not affiliated with or endorsed by Capcom or "
                                        "Clover Studio. It contains no game data: play your own damn copy!";
+        constexpr float kHeadingScale = 1.3f; // Wendyville is narrow (as in the Options book)
         constexpr float kItemSize = 84.0f, kItemTop = 372.0f, kItemStep = 116.0f;
         // (the text keeps clear of the volume ruler down the right edge: as wide as it can be, centred, without reaching it)
         constexpr float kSkipSize = 34.0f, kSkipY = 704.0f, kBox = 29.0f, kBoxGap = 12.0f, kPaperRoom = 560.0f;
-        constexpr float kLegalSize = 24.0f, kLegalStep = 27.0f, kLegalRoom = 590.0f; // (below the ruler's end: a little wider)
+        constexpr float kLegalSize = 21.0f, kLegalStep = 24.0f, kLegalRoom = 590.0f; // (below the ruler's end: a little wider; Dominican runs wide)
         constexpr Vector2 kSteamAt{70.0f, 76.0f}; // the upper left corner, clear of the title
         constexpr float kSteamR = 32.0f;
         // steam_mark.png's ring against the picture's width (tools/launcher/steam_mark.py: the small wheel pokes out)
@@ -1124,9 +1126,31 @@ float soft(vec2 p)
             std::error_code error;
             if (!fs::is_regular_file(path, error))
                 return Font{};
-            Font font = LoadFontEx(utf8(path).c_str(), 96, codepoints.data(), static_cast<int>(codepoints.size()));
-            if (font.texture.id == 0u || font.texture.id == GetFontDefault().texture.id)
+            // (LoadFontEx, but packed by rectangle: its row packer assumes no glyph is taller than the size, and
+            // Wendyville's accented capitals are)
+            int size = 0;
+            unsigned char *file = LoadFileData(utf8(path).c_str(), &size);
+            if (file == nullptr)
                 return Font{};
+            Font font{};
+            font.baseSize = 96;
+            font.glyphCount = static_cast<int>(codepoints.size());
+            font.glyphPadding = 4;
+            font.glyphs = LoadFontData(file, size, font.baseSize, codepoints.data(), font.glyphCount, FONT_DEFAULT);
+            UnloadFileData(file);
+            if (font.glyphs == nullptr)
+                return Font{};
+            int tallest = font.baseSize;
+            for (int i = 0; i < font.glyphCount; ++i)
+                tallest = std::max(tallest, font.glyphs[i].image.height);
+            Image atlas = GenImageFontAtlas(font.glyphs, &font.recs, font.glyphCount, tallest, font.glyphPadding, 1);
+            font.texture = LoadTextureFromImage(atlas);
+            UnloadImage(atlas);
+            if (font.texture.id == 0u)
+            {
+                UnloadFont(font);
+                return Font{};
+            }
             GenTextureMipmaps(&font.texture);
             SetTextureFilter(font.texture, TEXTURE_FILTER_TRILINEAR);
             return font;
@@ -1380,13 +1404,154 @@ float soft(vec2 p)
         }
     }
 
+    bool GlyphAtlas::has(int codepoint) const
+    {
+        const auto it = glyphs.find(codepoint);
+        return it != glyphs.end() && ((it->second.w > 0 && it->second.h > 0) || codepoint == ' ' || codepoint == 0xA0);
+    }
+
+    bool readGlyphAtlas(const std::filesystem::path &fnt, GlyphAtlas &atlas)
+    {
+        atlas = GlyphAtlas{};
+        std::ifstream in(fnt);
+        std::string line;
+        fs::path page;
+        const auto value = [](const std::string &l, const char *key) {
+            const std::string k = std::string(" ") + key + "=";
+            const size_t at = l.find(k);
+            return at == std::string::npos ? std::string() : l.substr(at + k.size(), l.find(' ', at + k.size()) - at - k.size());
+        };
+        const auto number = [&](const std::string &l, const char *key) { return std::atoi(value(l, key).c_str()); };
+        while (std::getline(in, line))
+        {
+            if (line.rfind("common ", 0) == 0)
+            {
+                atlas.lineHeight = std::max(1, number(line, "lineHeight"));
+                atlas.base = number(line, "base");
+            }
+            else if (line.rfind("page ", 0) == 0)
+            {
+                std::string file = value(line, "file");
+                file.erase(std::remove(file.begin(), file.end(), '"'), file.end());
+                page = fnt.parent_path() / file;
+            }
+            else if (line.rfind("char ", 0) == 0)
+            {
+                GlyphAtlas::Glyph g;
+                g.x = number(line, "x");
+                g.y = number(line, "y");
+                g.w = number(line, "width");
+                g.h = number(line, "height");
+                g.xoff = number(line, "xoffset");
+                g.yoff = number(line, "yoffset");
+                g.advance = number(line, "xadvance");
+                atlas.glyphs[number(line, "id")] = g;
+            }
+        }
+        if (atlas.glyphs.empty() || page.empty())
+            return false;
+        Image image = LoadImage(utf8(page).c_str());
+        if (image.data == nullptr)
+            return false;
+        ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+        atlas.width = image.width;
+        atlas.height = image.height;
+        atlas.alpha.resize(static_cast<size_t>(image.width) * static_cast<size_t>(image.height));
+        const uint8_t *rgba = static_cast<const uint8_t *>(image.data);
+        for (size_t i = 0; i < atlas.alpha.size(); ++i)
+            atlas.alpha[i] = rgba[i * 4 + 3];
+        UnloadImage(image);
+        for (auto it = atlas.glyphs.begin(); it != atlas.glyphs.end();) // (a glyph outside the page: not drawn)
+            it = it->second.x < 0 || it->second.y < 0 || it->second.x + it->second.w > atlas.width ||
+                         it->second.y + it->second.h > atlas.height
+                     ? atlas.glyphs.erase(it)
+                     : std::next(it);
+        return true;
+    }
+
+    namespace
+    {
+        // The atlas as a raylib font at the bake's own size (ascent + descent = baseSize, as LoadFontEx sizes a .ttf), with
+        // `fallback`'s glyphs (a .ttf at that size) for the codepoints it lacks. Packed by rectangle (raylib's row packer
+        // assumes no glyph is taller than the size, which decorative fonts break).
+        Font loadAtlasFont(const fs::path &fnt, const fs::path &fallback, const std::vector<int> &codepoints)
+        {
+            GlyphAtlas atlas;
+            if (!readGlyphAtlas(fnt, atlas))
+                return Font{};
+            std::vector<GlyphInfo> glyphs;
+            std::vector<int> missing;
+            for (const int c : codepoints)
+            {
+                if (!atlas.has(c))
+                {
+                    missing.push_back(c);
+                    continue;
+                }
+                const GlyphAtlas::Glyph &g = atlas.glyphs.at(c);
+                GlyphInfo info{};
+                info.value = c;
+                info.offsetX = g.xoff;
+                info.offsetY = g.yoff;
+                info.advanceX = g.advance;
+                info.image.width = std::max(1, g.w);
+                info.image.height = std::max(1, g.h);
+                info.image.mipmaps = 1;
+                info.image.format = PIXELFORMAT_UNCOMPRESSED_GRAYSCALE;
+                auto *data = static_cast<unsigned char *>(MemAlloc(static_cast<unsigned int>(info.image.width * info.image.height)));
+                for (int y = 0; y < g.h; ++y)
+                    std::memcpy(data + static_cast<size_t>(y) * g.w, &atlas.alpha[static_cast<size_t>(g.y + y) * atlas.width + g.x],
+                                static_cast<size_t>(g.w));
+                info.image.data = data;
+                glyphs.push_back(info);
+            }
+            std::error_code error;
+            if (!missing.empty() && fs::is_regular_file(fallback, error))
+            {
+                int size = 0;
+                if (unsigned char *file = LoadFileData(utf8(fallback).c_str(), &size))
+                {
+                    if (GlyphInfo *extra = LoadFontData(file, size, atlas.lineHeight, missing.data(), static_cast<int>(missing.size()), FONT_DEFAULT))
+                    {
+                        glyphs.insert(glyphs.end(), extra, extra + missing.size());
+                        MemFree(extra); // (the images moved over)
+                    }
+                    UnloadFileData(file);
+                }
+            }
+            if (glyphs.empty())
+                return Font{};
+            int tallest = 1;
+            for (const GlyphInfo &g : glyphs)
+                tallest = std::max(tallest, g.image.height);
+            Font font{};
+            font.baseSize = atlas.lineHeight;
+            font.glyphCount = static_cast<int>(glyphs.size());
+            font.glyphPadding = 4;
+            font.glyphs = static_cast<GlyphInfo *>(MemAlloc(static_cast<unsigned int>(glyphs.size() * sizeof(GlyphInfo))));
+            std::memcpy(font.glyphs, glyphs.data(), glyphs.size() * sizeof(GlyphInfo));
+            Image image = GenImageFontAtlas(font.glyphs, &font.recs, font.glyphCount, tallest, font.glyphPadding, 1);
+            font.texture = LoadTextureFromImage(image);
+            UnloadImage(image);
+            if (font.texture.id == 0u)
+            {
+                UnloadFont(font);
+                return Font{};
+            }
+            GenTextureMipmaps(&font.texture);
+            SetTextureFilter(font.texture, TEXTURE_FILTER_TRILINEAR);
+            return font;
+        }
+    }
+
     bool loadBillFonts(BillFonts &fonts, const std::filesystem::path &folder, const std::string &extra)
     {
         std::vector<int> codepoints = codepointsFor(extra);
-        fonts.heading = loadFont(folder / "Rye-Regular.ttf", codepoints);
-        fonts.item = loadFont(folder / "EBGaramond-Ink.ttf", codepoints);
-        fonts.text = loadFont(folder / "EBGaramond-Regular.ttf", codepoints);
-        if (fonts.heading.texture.id == 0u || fonts.item.texture.id == 0u || fonts.text.texture.id == 0u)
+        fonts.heading = loadFont(folder / "Wendyville.ttf", codepoints);
+        fonts.text = loadAtlasFont(folder.parent_path() / "splash" / "splash.fnt", folder / "EBGaramond-Regular.ttf", codepoints);
+        if (fonts.text.texture.id == 0u)
+            fonts.text = loadFont(folder / "EBGaramond-Regular.ttf", codepoints);
+        if (fonts.heading.texture.id == 0u || fonts.text.texture.id == 0u)
         {
             unloadBillFonts(fonts);
             return false;
@@ -1396,7 +1561,7 @@ float soft(vec2 p)
 
     void unloadBillFonts(BillFonts &fonts)
     {
-        for (Font *font : {&fonts.heading, &fonts.item, &fonts.text})
+        for (Font *font : {&fonts.heading, &fonts.text})
             if (font->texture.id != 0u)
             {
                 UnloadFont(*font);
@@ -1409,7 +1574,7 @@ float soft(vec2 p)
         std::vector<Rectangle> out;
         for (size_t i = 0; i < bill.items.size(); ++i)
         {
-            const float w = inkWidth(fonts.item, bill.items[i].c_str(), kItemSize);
+            const float w = inkWidth(fonts.text, bill.items[i].c_str(), kItemSize);
             const float y = kItemTop + kItemStep * static_cast<float>(i);
             out.push_back(Rectangle{kPaperW * 0.5f - w * 0.5f - 34.0f, y - kItemSize * 0.52f, w + 68.0f, kItemSize * 1.04f});
         }
@@ -1434,7 +1599,7 @@ float soft(vec2 p)
     {
         beginInk();
         // the head: the title and a hand-ruled line under it
-        inkText(fonts.heading, "Bill of Fare", Vector2{kPaperW * 0.5f, 120.0f}, 80.0f, kInk, paper);
+        inkText(fonts.heading, "BILL OF FARE", Vector2{kPaperW * 0.5f, 120.0f}, 80.0f * kHeadingScale, kInk, paper); // (as on the posters)
         const Vector2 rule[4] = {{140.0f, 189.0f}, {280.0f, 187.5f}, {420.0f, 188.6f}, {560.0f, 187.0f}};
         inkLine(rule, 4, 4.0f, kInk, paper, 0.04f);
         // this start's splash line
@@ -1446,7 +1611,7 @@ float soft(vec2 p)
         }
         // the menu
         for (size_t i = 0; i < bill.items.size(); ++i)
-            inkText(fonts.item, bill.items[i].c_str(), Vector2{kPaperW * 0.5f, kItemTop + kItemStep * static_cast<float>(i)}, kItemSize, kInk, paper);
+            inkText(fonts.text, bill.items[i].c_str(), Vector2{kPaperW * 0.5f, kItemTop + kItemStep * static_cast<float>(i)}, kItemSize, kInk, paper);
         // Skip Launcher, with its tick box
         Rectangle tickBox{};
         if (bill.showSkip)

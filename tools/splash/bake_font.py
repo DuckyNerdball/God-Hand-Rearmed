@@ -1,10 +1,12 @@
-"""Bake a TrueType font into a BMFont atlas (splash.fnt + splash.png) for the launcher's splash text.
+"""Bake a TrueType font into a BMFont atlas (splash.fnt + splash.png): the launcher's Dominican (the splash text, the
+bill of fare, the Options book).
 
     python -I tools/splash/bake_font.py <font.ttf> <out dir = resources/splash> [--size 128]
 
 The font file itself is not shipped (Dominican's terms: free for any use, the raw .ttf not redistributed); the
-launcher loads the baked atlas with raylib's LoadFont. Glyphs: printable ASCII and Latin-1 (U+0020..U+007E,
-U+00A0..U+00FF). Each glyph's own ink box is packed with its real height (raylib's own atlas packer assumes glyphs
+launcher loads the baked atlas (raylib's LoadFont; saloon::readGlyphAtlas for the bill and the book). Glyphs:
+printable ASCII, Latin-1 and the common punctuation the bill asks for (curly quotes, dashes, bullet, ellipsis, euro,
+trade mark), each only if the font has it. Each glyph's own ink box is packed with its real height (raylib's own atlas packer assumes glyphs
 are no taller than the font size, which decorative fonts break: clipped, garbled splashes). Needs Pillow.
 """
 import os, sys
@@ -14,14 +16,17 @@ from PIL import Image, ImageDraw, ImageFont
 def bake(ttf, out_dir, size):
     font = ImageFont.truetype(ttf, size)
     ascent, descent = font.getmetrics()
-    codes = list(range(0x20, 0x7F)) + list(range(0xA0, 0x100))
+    codes = list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) + [0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022,
+                                                                  0x2026, 0x20AC, 0x2122]
     glyphs = []
     notdef = bytes(font.getmask('\u0378'))  # a codepoint no font has: the box drawn for missing glyphs
     for c in codes:
         ch = chr(c)
-        if c > 0x7E and bytes(font.getmask(ch)) == notdef:
-            continue  # not in the font: raylib draws '?' for it instead of a box
+        if bytes(font.getmask(ch)) == notdef:
+            continue  # not in the font (Dominican lacks # % < > { }): raylib draws '?' for it instead of a box
         l, t, r, b = font.getbbox(ch)
+        if (r <= l or b <= t) and ch not in ' \u00a0\u00ad':
+            continue  # drawn empty (Dominican's |): missing too
         w, h = max(r - l, 0), max(b - t, 0)
         adv = int(round(font.getlength(ch)))
         img = None

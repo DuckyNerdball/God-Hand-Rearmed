@@ -272,7 +272,9 @@ namespace kamite::launcher
             // page's help, the paper rustle of a slip, the prompts by the slips (for the device in use).
             struct BookFonts
             {
-                ImFont *rye = nullptr, *garamond = nullptr, *ink = nullptr, *stamp = nullptr;
+                // heading: Wendyville, in capitals (the wanted posters' title font); text: Dominican (the splash's,
+                // as on the posters); stamp: Holtwood One SC
+                ImFont *heading = nullptr, *text = nullptr, *stamp = nullptr;
             } bookFonts;
             int bookTab = 0;      // kBookTabs
             int bookControls = 0; // kControlsPages
@@ -1121,12 +1123,12 @@ namespace kamite::launcher
                     const std::string out = g_updateCheck.release.tag + " is out";
                     const float ow = saloon::inkWidth(f.text, out.c_str(), 26.0f);
                     saloon::inkText(f.text, out.c_str(), Vector2{40.0f + ow * 0.5f, 88.0f}, 26.0f, ink, slip.paper);
-                    saloon::inkText(f.item, "What's new", kNotesAt, 34.0f, ink, slip.paper);
-                    saloon::inkText(f.item, "Update", kUpdateAt, 34.0f, ink, slip.paper);
+                    saloon::inkText(f.text, "What's new", kNotesAt, 34.0f, ink, slip.paper);
+                    saloon::inkText(f.text, "Update", kUpdateAt, 34.0f, ink, slip.paper);
                     if (state.slipFocus == kSlipNotes)
-                        loop(slipTextBox(f.item, "What's new", 34.0f, kNotesAt), 21u);
+                        loop(slipTextBox(f.text, "What's new", 34.0f, kNotesAt), 21u);
                     if (state.slipFocus == kSlipUpdate)
-                        loop(slipTextBox(f.item, "Update", 34.0f, kUpdateAt), 22u);
+                        loop(slipTextBox(f.text, "Update", 34.0f, kUpdateAt), 22u);
                 }
             }
             saloon::endInk();
@@ -1253,14 +1255,14 @@ namespace kamite::launcher
                 {
                     const Slip slip = slipAt(state, true);
                     bool focused = false;
-                    if (paperButton("##notes", slipTextBox(state.billFonts.item, "What's new", 34.0f, kNotesAt), slip.paper, true, &focused))
+                    if (paperButton("##notes", slipTextBox(state.billFonts.text, "What's new", 34.0f, kNotesAt), slip.paper, true, &focused))
                     {
                         state.updatePopup = Popup::Notes;
                         state.updateOpenPopup = true;
                     }
                     if (focused)
                         state.slipFocus = kSlipNotes;
-                    if (paperButton("##update", slipTextBox(state.billFonts.item, "Update", 34.0f, kUpdateAt), slip.paper, true, &focused))
+                    if (paperButton("##update", slipTextBox(state.billFonts.text, "Update", 34.0f, kUpdateAt), slip.paper, true, &focused))
                     {
                         startUpdate(state);
                         state.updateOpenPopup = true;
@@ -1747,6 +1749,105 @@ namespace kamite::launcher
             centeredText("God Hand\u2122 for PS2 Recompiled, Refined, Rearmed.", kText);
             ImGui::PopFont();
             ImGui::Dummy(ImVec2(0.0f, fontSize(state, 40.0f)));
+        }
+
+
+        // ---- a baked glyph atlas as an ImGui font (BMFont text .fnt + its PNG; resources/splash: Dominican, whose .ttf
+        // can't ship). Each size ImGui asks for is scaled down from the atlas, its ascent + descent = the size (as
+        // ImGui sizes a .ttf).
+        saloon::GlyphAtlas g_atlasFont;
+
+        bool atlasContains(ImFontAtlas *, ImFontConfig *, ImWchar c) { return g_atlasFont.has(c); }
+
+        bool atlasBakedInit(ImFontAtlas *, ImFontConfig *src, ImFontBaked *baked, void *)
+        {
+            if (!src->MergeMode)
+            {
+                const float s = baked->Size / static_cast<float>(g_atlasFont.lineHeight);
+                baked->Ascent = std::ceil(g_atlasFont.base * s);
+                baked->Descent = std::floor(-(g_atlasFont.lineHeight - g_atlasFont.base) * s);
+            }
+            return true;
+        }
+
+        bool atlasLoadGlyph(ImFontAtlas *atlas, ImFontConfig *src, ImFontBaked *baked, void *, ImWchar c, ImFontGlyph *out, float *advanceOut)
+        {
+            if (!atlasContains(atlas, src, c))
+                return false;
+            const saloon::GlyphAtlas::Glyph &g = g_atlasFont.glyphs.find(c)->second;
+            const float s = baked->Size / static_cast<float>(g_atlasFont.lineHeight);
+            if (advanceOut)
+            {
+                *advanceOut = g.advance * s;
+                return true;
+            }
+            out->Codepoint = c;
+            out->AdvanceX = g.advance * s;
+            if (g.w <= 0 || g.h <= 0)
+                return true;
+            const float density = src->RasterizerDensity * baked->RasterizerDensity, r = s * density; // atlas px -> bitmap px
+            // the glyph's box in bitmap pixels (whole pixels, a pixel of room for the filter)
+            const float fx0 = g.xoff * r, fy0 = g.yoff * r;
+            const int x0 = static_cast<int>(std::floor(fx0)), y0 = static_cast<int>(std::floor(fy0));
+            const int w = static_cast<int>(std::ceil(fx0 + g.w * r)) - x0 + 1, h = static_cast<int>(std::ceil(fy0 + g.h * r)) - y0 + 1;
+            const ImFontAtlasRectId id = ImFontAtlasPackAddRect(atlas, w, h);
+            if (id == ImFontAtlasRectId_Invalid)
+                return false;
+            ImTextureRect *rect = ImFontAtlasPackGetRect(atlas, id);
+            std::vector<unsigned char> pixels(static_cast<size_t>(w) * h, 0);
+            // each bitmap pixel: the atlas area under it, averaged (a box filter, sampled n x n)
+            const int n = std::clamp(static_cast<int>(std::ceil(1.0f / r)) * 2, 2, 16);
+            const auto at = [&](float ax, float ay) {
+                const int ix = static_cast<int>(std::floor(ax)), iy = static_cast<int>(std::floor(ay));
+                if (ix < 0 || iy < 0 || ix >= g.w || iy >= g.h)
+                    return 0.0f;
+                return static_cast<float>(g_atlasFont.alpha[static_cast<size_t>(g.y + iy) * g_atlasFont.width + g.x + ix]);
+            };
+            for (int py = 0; py < h; ++py)
+                for (int px = 0; px < w; ++px)
+                {
+                    float sum = 0.0f;
+                    for (int sy = 0; sy < n; ++sy)
+                        for (int sx = 0; sx < n; ++sx)
+                        {
+                            const float bx = x0 + px + (sx + 0.5f) / n, by = y0 + py + (sy + 0.5f) / n; // bitmap px
+                            sum += at(bx / r - g.xoff, by / r - g.yoff);
+                        }
+                    pixels[static_cast<size_t>(py) * w + px] = static_cast<unsigned char>(std::min(255.0f, sum / (n * n) + 0.5f));
+                }
+            out->X0 = x0 / density;
+            out->Y0 = y0 / density;
+            out->X1 = (x0 + w) / density;
+            out->Y1 = (y0 + h) / density;
+            out->Visible = true;
+            out->PackId = id;
+            ImFontAtlasBakedSetFontGlyphBitmap(atlas, baked, src, out, rect, pixels.data(), ImTextureFormat_Alpha8, w);
+            return true;
+        }
+
+        // The atlas font, the glyphs it lacks (curly quotes, dashes, ellipses) from `fallback` (a .ttf).
+        ImFont *addAtlasFont(ImGuiIO &io, const fs::path &fnt, const fs::path &fallback)
+        {
+            static ImFontLoader loader;
+            loader.Name = "atlas";
+            loader.FontSrcContainsGlyph = atlasContains;
+            loader.FontBakedInit = atlasBakedInit;
+            loader.FontBakedLoadGlyph = atlasLoadGlyph;
+            if (!saloon::readGlyphAtlas(fnt, g_atlasFont))
+                return nullptr;
+            ImFontConfig config;
+            config.FontLoader = &loader;
+            config.SizePixels = 26.0f;
+            std::snprintf(config.Name, sizeof(config.Name), "%s", "atlas");
+            ImFont *font = io.Fonts->AddFont(&config);
+            std::error_code error;
+            if (font && fs::is_regular_file(fallback, error))
+            {
+                ImFontConfig merge;
+                merge.MergeMode = true;
+                io.Fonts->AddFontFromFileTTF(utf8(fallback).c_str(), 26.0f, &merge);
+            }
+            return font;
         }
 
         // ---- Home in the saloon (K, Nov 18): the menu on the bill of fare --------------------------------------------
@@ -3444,7 +3545,8 @@ namespace kamite::launcher
         constexpr ImU32 kBookPencil = IM_COL32(164, 30, 22, 225), kBookPencilFaded = IM_COL32(164, 30, 22, 105);
         constexpr ImU32 kBookCream = IM_COL32(240, 222, 190, 240);
         constexpr float kBookLoopTime = 0.28f; // the bill's loop
-        constexpr float kBookTextScale = 1.25f; // the pages' writing against the book's unit (K, Nov 18: bigger, for TVs)
+        constexpr float kBookTextScale = 1.4f; // the pages' writing against the book's unit (K, Nov 18: big enough for a TV)
+        constexpr float kHeadingScale = 1.3f;  // Wendyville is narrow: its capitals drawn bigger than asked (K's pick)
         // The slips' manila, a little different each (the open one lighter, in front).
         constexpr ImU32 kSlipTints[kBookTabCount] = {IM_COL32(244, 237, 219, 255), IM_COL32(240, 233, 217, 255), IM_COL32(243, 235, 222, 255),
                                                      IM_COL32(239, 234, 219, 255), IM_COL32(242, 236, 218, 255), IM_COL32(241, 233, 220, 255),
@@ -3462,17 +3564,30 @@ namespace kamite::launcher
             float left = 0.0f, right = 0.0f;   // the spread's outer edges (virtual x)
         };
 
+        // The headings' font (Wendyville) is set in capitals, as on the wanted posters (its lowercase m, n and y are
+        // other shapes), and bigger: textSize and bookText do both for it.
+        ImFont *g_headingFont = nullptr;
+        std::string capsFor(ImFont *font, const char *text)
+        {
+            std::string t = text ? text : "";
+            if (font == g_headingFont)
+                for (char &c : t)
+                    if (c >= 'a' && c <= 'z')
+                        c = static_cast<char>(c - 'a' + 'A');
+            return t;
+        }
+
         ImVec2 textSize(ImFont *font, float size, const char *text, float wrap = 0.0f)
         {
             if (font == nullptr || text == nullptr)
                 return ImVec2(0.0f, 0.0f);
-            return font->CalcTextSizeA(size, FLT_MAX, wrap, text);
+            return font->CalcTextSizeA(font == g_headingFont ? size * kHeadingScale : size, FLT_MAX, wrap, capsFor(font, text).c_str());
         }
 
         void bookText(ImDrawList *dl, ImFont *font, float size, ImVec2 pos, ImU32 col, const char *text, float wrap = 0.0f)
         {
             if (font != nullptr && text != nullptr && *text)
-                dl->AddText(font, size, pos, ImGui::GetColorU32(col), text, nullptr, wrap);
+                dl->AddText(font, font == g_headingFont ? size * kHeadingScale : size, pos, ImGui::GetColorU32(col), capsFor(font, text).c_str(), nullptr, wrap);
         }
 
         // Turns what was drawn since `start` (a vertex index) about `centre`.
@@ -3626,8 +3741,8 @@ namespace kamite::launcher
                 ImGui::Dummy(ImVec2(w, 10.0f * u));
             const ImVec2 p = ImGui::GetCursorScreenPos();
             const float size = 25.0f * u;
-            bookText(dl, state.bookFonts.rye, size, ImVec2(p.x, p.y + 12.0f * u), kBookInk, title);
-            const float tw = textSize(state.bookFonts.rye, size, title).x;
+            bookText(dl, state.bookFonts.heading, size, ImVec2(p.x, p.y + 12.0f * u), kBookInk, title);
+            const float tw = textSize(state.bookFonts.heading, size, title).x;
             if (p.x + tw + 12.0f * u < p.x + w)
                 bookRule(b, dl, p.x + tw + 12.0f * u, p.x + w, p.y + 12.0f * u + size * 0.62f, kBookInk, 1.3f * u,
                          static_cast<uint32_t>(std::strlen(title)));
@@ -3661,11 +3776,11 @@ namespace kamite::launcher
                 book::line(dl, elbow, 3, 1.2f * u, IM_COL32(38, 26, 18, 120));
             }
             const ImVec2 at(x, r.mid - size * 0.56f);
-            bookText(dl, state.bookFonts.garamond, size, at, ink, name);
-            r.nameRight = at.x + textSize(state.bookFonts.garamond, size, name).x;
+            bookText(dl, state.bookFonts.text, size, at, ink, name);
+            r.nameRight = at.x + textSize(state.bookFonts.text, size, name).x;
             if (r.focused)
             {
-                const ImVec2 ts = textSize(state.bookFonts.garamond, size, name);
+                const ImVec2 ts = textSize(state.bookFonts.text, size, name);
                 bookLoop(state, b, dl, ImVec2(at.x, at.y + size * 0.12f), ImVec2(at.x + ts.x, at.y + size * 1.02f));
                 bookHelp(state, name, help, note);
             }
@@ -3678,11 +3793,11 @@ namespace kamite::launcher
         {
             ImDrawList *dl = ImGui::GetWindowDrawList();
             const float u = b.u, room = r.max.x - 20.0f * u - (r.nameRight + 22.0f * u);
-            const float full = textSize(state.bookFonts.ink, 26.0f * u, text).x;
+            const float full = textSize(state.bookFonts.text, 26.0f * u, text).x;
             const float size = 26.0f * u * (full > room && room > 0.0f ? std::max(0.6f, room / full) : 1.0f); // a long value beside a long name
-            const float tw = textSize(state.bookFonts.ink, size, text).x;
+            const float tw = textSize(state.bookFonts.text, size, text).x;
             const float right = r.max.x - 20.0f * u;
-            bookText(dl, state.bookFonts.ink, size, ImVec2(right - tw, r.mid - size * 0.56f), faded ? kBookPencilFaded : kBookPencil, text);
+            bookText(dl, state.bookFonts.text, size, ImVec2(right - tw, r.mid - size * 0.56f), faded ? kBookPencilFaded : kBookPencil, text);
             const ImVec2 caret[3] = {ImVec2(right + 5.0f * u, r.mid - 3.0f * u), ImVec2(right + 10.5f * u, r.mid + 3.0f * u),
                                      ImVec2(right + 16.0f * u, r.mid - 3.0f * u)};
             book::line(dl, caret, 3, 2.0f * u, faded ? kBookPencilFaded : kBookPencil);
@@ -3695,7 +3810,7 @@ namespace kamite::launcher
             const float u = b.u, size = 26.0f * u, line = 40.0f * u, padX = 22.0f * u, padY = 12.0f * u;
             float width = 150.0f * u;
             for (const std::string &l : labels)
-                width = std::max(width, textSize(state.bookFonts.ink, size, l.c_str()).x + 2.0f * padX);
+                width = std::max(width, textSize(state.bookFonts.text, size, l.c_str()).x + 2.0f * padX);
             ImGui::SetNextWindowPos(ImVec2(r.max.x + 4.0f * u, r.max.y - 4.0f * u), ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
             ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0, 0, 0, 0));
             ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
@@ -3726,10 +3841,10 @@ namespace kamite::launcher
                     ImGui::SetNavCursorVisible(true);
                 }
                 const ImVec2 at(a.x + padX, a.y + (line - size) * 0.5f - size * 0.06f);
-                bookText(dl, state.bookFonts.ink, size, at, i == current ? kBookPencil : kBookInk, labels[static_cast<size_t>(i)].c_str());
+                bookText(dl, state.bookFonts.text, size, at, i == current ? kBookPencil : kBookInk, labels[static_cast<size_t>(i)].c_str());
                 if (ImGui::IsItemFocused())
                 {
-                    const float tw = textSize(state.bookFonts.ink, size, labels[static_cast<size_t>(i)].c_str()).x;
+                    const float tw = textSize(state.bookFonts.text, size, labels[static_cast<size_t>(i)].c_str()).x;
                     bookLoop(state, b, dl, ImVec2(at.x, at.y + size * 0.12f), ImVec2(at.x + tw, at.y + size * 1.02f));
                 }
                 ImGui::PopID();
@@ -3748,7 +3863,7 @@ namespace kamite::launcher
         {
             ImDrawList *dl = ImGui::GetWindowDrawList();
             const float u = b.u;
-            const float valueW = std::max(textSize(state.bookFonts.ink, 26.0f * u, text).x, textSize(state.bookFonts.ink, 26.0f * u, "150%").x);
+            const float valueW = std::max(textSize(state.bookFonts.text, 26.0f * u, text).x, textSize(state.bookFonts.text, 26.0f * u, "150%").x);
             x1 = r.max.x - valueW - 16.0f * u;
             x0 = std::min(x1 - 50.0f * u, std::max(x1 - 150.0f * u, r.nameRight + 22.0f * u));
             const float y = r.mid + 5.0f * u;
@@ -3766,8 +3881,8 @@ namespace kamite::launcher
             book::paint(dl);
             dl->AddPolyline(clip, 6, ImGui::GetColorU32(faded ? IM_COL32(150, 40, 40, 140) : IM_COL32(150, 26, 26, 255)), ImDrawFlags_None, 3.0f * u);
             book::ink(dl);
-            const float size = 26.0f * u, tw = textSize(state.bookFonts.ink, size, text).x;
-            bookText(dl, state.bookFonts.ink, size, ImVec2(r.max.x - tw, r.mid - size * 0.56f), faded ? kBookPencilFaded : kBookPencil, text);
+            const float size = 26.0f * u, tw = textSize(state.bookFonts.text, size, text).x;
+            bookText(dl, state.bookFonts.text, size, ImVec2(r.max.x - tw, r.mid - size * 0.56f), faded ? kBookPencilFaded : kBookPencil, text);
         }
 
         // The step a ruler's row takes from the keys / pad this frame (-1, 0, +1) while it is focused.
@@ -4002,7 +4117,7 @@ namespace kamite::launcher
         {
             ImDrawList *dl = ImGui::GetWindowDrawList();
             const float size = 30.0f * b.u;
-            const ImVec2 ts = textSize(state.bookFonts.ink, size, word);
+            const ImVec2 ts = textSize(state.bookFonts.text, size, word);
             const bool pressed = bookItem(state, id, ImVec2(at.x - 8.0f * b.u, at.y), ImVec2(at.x + ts.x + 8.0f * b.u, at.y + ts.y));
             ownSoundItem();
             if (first && ImGui::IsWindowAppearing())
@@ -4010,7 +4125,7 @@ namespace kamite::launcher
                 ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
                 ImGui::SetNavCursorVisible(true);
             }
-            bookText(dl, state.bookFonts.ink, size, at, kBookInk, word);
+            bookText(dl, state.bookFonts.text, size, at, kBookInk, word);
             if (ImGui::IsItemFocused())
                 bookLoop(state, b, dl, ImVec2(at.x, at.y + size * 0.12f), ImVec2(at.x + ts.x, at.y + size * 1.02f));
             return pressed;
@@ -4047,8 +4162,8 @@ namespace kamite::launcher
             ImDrawList *dl = ImGui::GetWindowDrawList();
             const float size = 28.0f * b.u, wrap = width * b.u;
             const ImVec2 p = ImGui::GetCursorScreenPos();
-            const ImVec2 ts = textSize(state.bookFonts.garamond, size, text, wrap);
-            bookText(dl, state.bookFonts.garamond, size, p, dim ? IM_COL32(38, 26, 18, 160) : kBookInk, text, wrap);
+            const ImVec2 ts = textSize(state.bookFonts.text, size, text, wrap);
+            bookText(dl, state.bookFonts.text, size, p, dim ? IM_COL32(38, 26, 18, 160) : kBookInk, text, wrap);
             ImGui::Dummy(ImVec2(wrap, ts.y + 6.0f * b.u));
         }
 
@@ -4174,9 +4289,9 @@ namespace kamite::launcher
             if (now == presets::kCustom)
             {
                 const ImVec2 p = ImGui::GetCursorScreenPos();
-                bookText(dl, state.bookFonts.rye, 36.0f * u, ImVec2(p.x, p.y + 12.0f * u), kBookInk, presets::kCustomText.name);
+                bookText(dl, state.bookFonts.heading, 36.0f * u, ImVec2(p.x, p.y + 12.0f * u), kBookInk, presets::kCustomText.name);
                 const std::string line = std::string(presets::kCustomText.tagline) + " " + presets::kCustomText.band;
-                bookText(dl, state.bookFonts.garamond, 26.0f * u, ImVec2(p.x, p.y + 58.0f * u), kBookInk, line.c_str(), w);
+                bookText(dl, state.bookFonts.text, 26.0f * u, ImVec2(p.x, p.y + 58.0f * u), kBookInk, line.c_str(), w);
                 bookStamp(state, b, nullptr, "IN USE", ImVec2(p.x + w - 74.0f * u, p.y + 30.0f * u), 22.0f * u, 7.0f);
                 ImGui::Dummy(ImVec2(w, 120.0f * u));
                 bookRule(b, dl, p.x, p.x + w, p.y + 112.0f * u, IM_COL32(38, 26, 18, 90), 1.0f * u, 99u);
@@ -4185,20 +4300,20 @@ namespace kamite::launcher
             {
                 const presets::Text &t = presets::kText[i];
                 const ImVec2 p = ImGui::GetCursorScreenPos();
-                const float tagH = textSize(state.bookFonts.garamond, 26.0f * u, t.tagline, w - 20.0f * u).y;
+                const float tagH = textSize(state.bookFonts.text, 26.0f * u, t.tagline, w - 20.0f * u).y;
                 const float rowH = std::max(140.0f * u, 76.0f * u + tagH + 18.0f * u);
                 ImGui::PushID(i);
                 const bool pressed = bookItem(state, "##preset", p, ImVec2(p.x + w, p.y + rowH));
                 ImGui::PopID();
                 const float nameSize = 36.0f * u;
                 const ImVec2 at(p.x, p.y + 24.0f * u);
-                bookText(dl, state.bookFonts.rye, nameSize, at, kBookInk, t.name);
-                bookText(dl, state.bookFonts.garamond, 26.0f * u, ImVec2(p.x, p.y + 76.0f * u), kBookInk, t.tagline, w - 20.0f * u);
+                bookText(dl, state.bookFonts.heading, nameSize, at, kBookInk, t.name);
+                bookText(dl, state.bookFonts.text, 26.0f * u, ImVec2(p.x, p.y + 76.0f * u), kBookInk, t.tagline, w - 20.0f * u);
                 if (i == now)
                     bookStamp(state, b, nullptr, "IN USE", ImVec2(p.x + w - 74.0f * u, p.y + 44.0f * u), 22.0f * u, 7.0f);
                 if (ImGui::IsItemFocused())
                 {
-                    const ImVec2 ts = textSize(state.bookFonts.rye, nameSize, t.name);
+                    const ImVec2 ts = textSize(state.bookFonts.heading, nameSize, t.name);
                     bookLoop(state, b, dl, ImVec2(at.x, at.y + nameSize * 0.08f), ImVec2(at.x + ts.x, at.y + nameSize * 1.0f));
                     focusedPreset = i;
                     bookHelp(state, t.name, t.band);
@@ -4245,10 +4360,10 @@ namespace kamite::launcher
                 return;
             const presets::Text &t = presets::kText[shown];
             float y = p1.y + 44.0f * u;
-            bookText(dl, state.bookFonts.rye, 34.0f * u, ImVec2(m.x, y), kBookInk, t.tagline, w);
-            y += textSize(state.bookFonts.rye, 34.0f * u, t.tagline, w).y + 8.0f * u;
+            bookText(dl, state.bookFonts.text, 34.0f * u, ImVec2(m.x, y), kBookInk, t.tagline, w); // (as on the posters)
+            y += textSize(state.bookFonts.text, 34.0f * u, t.tagline, w).y + 8.0f * u;
             bookRule(b, dl, m.x, m.x + w, y, kBookInk, 1.6f * u, 9u);
-            bookText(dl, state.bookFonts.garamond, 28.0f * u, ImVec2(m.x, y + 26.0f * u), kBookInk, t.band, w);
+            bookText(dl, state.bookFonts.text, 28.0f * u, ImVec2(m.x, y + 26.0f * u), kBookInk, t.band, w);
             const ImVec2 stampAt((b.rightMin.x + b.rightMax.x) * 0.5f, b.rightMax.y - 70.0f * u);
             if (shown == now)
                 bookStamp(state, b, nullptr, "IN USE", stampAt, 30.0f * u, -2.0f);
@@ -4461,12 +4576,12 @@ namespace kamite::launcher
             ImDrawList *dl = ImGui::GetWindowDrawList();
             const float u = b.u, w = ImGui::GetContentRegionAvail().x, size = 26.0f * u;
             const ImVec2 head = ImGui::GetCursorScreenPos();
-            bookText(dl, state.bookFonts.rye, 24.0f * u, ImVec2(head.x, head.y + 8.0f * u), kBookInk, "Action");
+            bookText(dl, state.bookFonts.heading, 24.0f * u, ImVec2(head.x, head.y + 8.0f * u), kBookInk, "Action");
             const float cell = controller ? w * 0.42f : w * 0.27f;
             const float c0 = head.x + w - (controller ? cell : 2.0f * cell);
-            bookText(dl, state.bookFonts.rye, 24.0f * u, ImVec2(c0, head.y + 8.0f * u), kBookInk, controller ? "Button" : "Key 1");
+            bookText(dl, state.bookFonts.heading, 24.0f * u, ImVec2(c0, head.y + 8.0f * u), kBookInk, controller ? "Button" : "Key 1");
             if (!controller)
-                bookText(dl, state.bookFonts.rye, 24.0f * u, ImVec2(c0 + cell, head.y + 8.0f * u), kBookInk, "Key 2");
+                bookText(dl, state.bookFonts.heading, 24.0f * u, ImVec2(c0 + cell, head.y + 8.0f * u), kBookInk, "Key 2");
             bookRule(b, dl, head.x, head.x + w, head.y + 42.0f * u, kBookInk, 1.3f * u, 5u);
             ImGui::Dummy(ImVec2(w, 56.0f * u));
             const char *help = controller ? "Press A (or click) on it, then the button, stick or trigger it should be. "
@@ -4482,7 +4597,7 @@ namespace kamite::launcher
                 const ImVec2 p = ImGui::GetCursorScreenPos();
                 const float mid = p.y + kRowH * u * 0.5f;
                 const char *name = *kControlRows[row].action ? kControlRows[row].action : kControlRows[row].button;
-                bookText(dl, state.bookFonts.garamond, size, ImVec2(p.x, mid - size * 0.56f), kBookInk, name);
+                bookText(dl, state.bookFonts.text, size, ImVec2(p.x, mid - size * 0.56f), kBookInk, name);
                 const int columns = controller ? 1 : kKeyColumns;
                 for (int column = 0; column < columns; ++column)
                 {
@@ -4505,19 +4620,19 @@ namespace kamite::launcher
                     const bool art = !binding.empty() && bookBindingArt(state, b, dl, binding, ImVec2(x, mid), cell - 14.0f * u, artWidth);
                     if (!art)
                     {
-                        while (fitted.size() > 2 && textSize(state.bookFonts.ink, size, fitted.c_str()).x > cell - 14.0f * u)
+                        while (fitted.size() > 2 && textSize(state.bookFonts.text, size, fitted.c_str()).x > cell - 14.0f * u)
                             fitted = fitted.substr(0, fitted.size() - 2) + "\xE2\x80\xA6";
-                        bookText(dl, state.bookFonts.ink, size, at, kBookPencil, fitted.c_str());
+                        bookText(dl, state.bookFonts.text, size, at, kBookPencil, fitted.c_str());
                     }
                     if (focused)
                     {
                         // the loop goes round the action's name (K); with two keys a row, a pencil stroke under the
                         // one in hand
-                        const ImVec2 nameAt(p.x, mid - size * 0.56f), ns = textSize(state.bookFonts.garamond, size, name);
+                        const ImVec2 nameAt(p.x, mid - size * 0.56f), ns = textSize(state.bookFonts.text, size, name);
                         bookLoop(state, b, dl, ImVec2(nameAt.x, nameAt.y + size * 0.12f), ImVec2(nameAt.x + ns.x, nameAt.y + size * 1.02f));
                         if (!controller && state.bookFocusAge > 0.02f)
                         {
-                            const float used = art ? artWidth : textSize(state.bookFonts.ink, size, fitted.c_str()).x;
+                            const float used = art ? artWidth : textSize(state.bookFonts.text, size, fitted.c_str()).x;
                             const float drawn = std::clamp(state.bookFocusAge / kBookLoopTime, 0.0f, 1.0f);
                             bookRule(b, dl, x - 2.0f * u, x - 2.0f * u + (used + 4.0f * u) * drawn, mid + 21.0f * u, kBookPencil, 2.6f * u,
                                      state.bookFocusSeed);
@@ -4572,12 +4687,12 @@ namespace kamite::launcher
                 }
                 ImGui::PopID();
                 const ImVec2 at(p.x, mid - size * 0.56f);
-                bookText(dl, state.bookFonts.garamond, size, at, kBookInk, info.label);
+                bookText(dl, state.bookFonts.text, size, at, kBookInk, info.label);
                 const std::string key = binding.bound() ? hk::text(binding) : std::string("\xE2\x80\x94");
-                bookText(dl, state.bookFonts.ink, size, ImVec2(c0, at.y), kBookPencil, key.c_str());
+                bookText(dl, state.bookFonts.text, size, ImVec2(c0, at.y), kBookPencil, key.c_str());
                 if (focused)
                 {
-                    const ImVec2 ts = textSize(state.bookFonts.garamond, size, info.label);
+                    const ImVec2 ts = textSize(state.bookFonts.text, size, info.label);
                     bookLoop(state, b, dl, ImVec2(at.x, at.y + size * 0.12f), ImVec2(at.x + ts.x, at.y + size * 1.02f));
                     bookHelp(state, info.label,
                              "The port's own key for it. Press A (or click), then the key (with Shift or Ctrl held if you want). "
@@ -4598,15 +4713,15 @@ namespace kamite::launcher
             if (state.bookTitle.empty())
                 return;
             const float hs = 38.0f * u;
-            bookText(dl, state.bookFonts.rye, hs, ImVec2(m.x, m.y + 6.0f * u), kBookInk, state.bookTitle.c_str(), w);
-            const float th = textSize(state.bookFonts.rye, hs, state.bookTitle.c_str(), w).y;
+            bookText(dl, state.bookFonts.heading, hs, ImVec2(m.x, m.y + 6.0f * u), kBookInk, state.bookTitle.c_str(), w);
+            const float th = textSize(state.bookFonts.heading, hs, state.bookTitle.c_str(), w).y;
             bookRule(b, dl, m.x, m.x + w, m.y + 6.0f * u + th + 6.0f * u, kBookInk, 1.8f * u, 3u);
-            bookText(dl, state.bookFonts.garamond, 28.0f * u, ImVec2(m.x, m.y + th + 50.0f * u), kBookInk, state.bookHelp.c_str(), w);
+            bookText(dl, state.bookFonts.text, 28.0f * u, ImVec2(m.x, m.y + th + 50.0f * u), kBookInk, state.bookHelp.c_str(), w);
             if (!state.bookNote.empty())
             {
                 const float ns = 25.0f * u;
-                const float nh = textSize(state.bookFonts.ink, ns, state.bookNote.c_str(), w).y;
-                bookText(dl, state.bookFonts.ink, ns, ImVec2(m.x, b.rightMax.y - nh - 14.0f * u), kBookPencil, state.bookNote.c_str(), w);
+                const float nh = textSize(state.bookFonts.text, ns, state.bookNote.c_str(), w).y;
+                bookText(dl, state.bookFonts.text, ns, ImVec2(m.x, b.rightMax.y - nh - 14.0f * u), kBookPencil, state.bookNote.c_str(), w);
             }
         }
 
@@ -4750,9 +4865,9 @@ namespace kamite::launcher
                     book::paper(dl, quad, open ? kSlipOpen : kSlipTints[i], 5.0f * u);
                     book::ink(dl);
                     const float size = 29.0f * u;
-                    const ImVec2 ts = textSize(state.bookFonts.rye, size, kBookTabs[i]);
+                    const ImVec2 ts = textSize(state.bookFonts.heading, size, kBookTabs[i]);
                     const float scale = ts.x > w - 10.0f * u ? (w - 10.0f * u) / ts.x : 1.0f;
-                    bookText(dl, state.bookFonts.rye, size * scale, ImVec2(a + (w - ts.x * scale) * 0.5f, b.top - h * 0.5f - ts.y * scale * 0.55f),
+                    bookText(dl, state.bookFonts.heading, size * scale, ImVec2(a + (w - ts.x * scale) * 0.5f, b.top - h * 0.5f - ts.y * scale * 0.55f),
                              open ? kBookInk : IM_COL32(38, 26, 18, 200), kBookTabs[i]);
                     if (input)
                     {
@@ -4789,10 +4904,10 @@ namespace kamite::launcher
                     book::paper(dl, quad, open ? kSlipOpen : kSlipTints[(i + 2) % kBookTabCount], 5.0f * u);
                     book::ink(dl);
                     const float size = 27.0f * u;
-                    const ImVec2 ts = textSize(state.bookFonts.rye, size, kControlsPages[i]);
+                    const ImVec2 ts = textSize(state.bookFonts.heading, size, kControlsPages[i]);
                     const ImVec2 centre(b.right + out * 0.5f, a + h * 0.5f);
                     const int start = dl->VtxBuffer.Size;
-                    bookText(dl, state.bookFonts.rye, size, ImVec2(centre.x - ts.x * 0.5f, centre.y - ts.y * 0.5f),
+                    bookText(dl, state.bookFonts.heading, size, ImVec2(centre.x - ts.x * 0.5f, centre.y - ts.y * 0.5f),
                              open ? kBookInk : IM_COL32(38, 26, 18, 200), kControlsPages[i]);
                     rotateSince(dl, start, centre, 1.5707963f);
                     if (input)
@@ -4838,10 +4953,10 @@ namespace kamite::launcher
                        IM_COL32(20, 6, 6, 200), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0));
             // "Back" along it
             const float size = 26.0f * u;
-            const ImVec2 ts = textSize(state.bookFonts.rye, size, "Back");
+            const ImVec2 ts = textSize(state.bookFonts.heading, size, "Back");
             const ImVec2 centre(cx + d.x * 74.0f * u, y + d.y * 74.0f * u);
             const int start = dl->VtxBuffer.Size;
-            bookText(dl, state.bookFonts.rye, size, ImVec2(centre.x - ts.x * 0.5f, centre.y - ts.y * 0.5f), kBookCream, "Back");
+            bookText(dl, state.bookFonts.heading, size, ImVec2(centre.x - ts.x * 0.5f, centre.y - ts.y * 0.5f), kBookCream, "Back");
             rotateSince(dl, start, centre, angle);
             if (state.lastDevice != 0)
                 bookPrompt(dl, state.prompt[4], ImVec2(cx - 52.0f * u, y + 54.0f * u), 44.0f * u);
@@ -5140,14 +5255,15 @@ namespace kamite::launcher
             const auto add = [&](const char *name) -> ImFont * {
                 return fs::is_regular_file(fonts / name, error) ? io.Fonts->AddFontFromFileTTF(utf8(fonts / name).c_str(), 26.0f) : nullptr;
             };
-            state.bookFonts.rye = add("Rye-Regular.ttf");
-            state.bookFonts.garamond = add("EBGaramond-Regular.ttf");
-            state.bookFonts.ink = add("EBGaramond-Ink.ttf");
+            // K, Nov 18: the posters' fonts, not the bill's old ones (Wendyville titles, Dominican for the rest)
+            state.bookFonts.heading = add("Wendyville.ttf");
+            g_headingFont = state.bookFonts.heading;
+            state.bookFonts.text = addAtlasFont(io, context.exeDir / "resources" / "splash" / "splash.fnt", fonts / "EBGaramond-Regular.ttf");
+            if (!state.bookFonts.text)
+                state.bookFonts.text = add("EBGaramond-Regular.ttf");
             state.bookFonts.stamp = add("HoltwoodOneSC-Regular.ttf");
             if (!state.bookFonts.stamp)
-                state.bookFonts.stamp = state.bookFonts.rye;
-            if (!state.bookFonts.ink)
-                state.bookFonts.ink = state.bookFonts.garamond;
+                state.bookFonts.stamp = state.bookFonts.heading;
         }
         applyStyle();
         const auto loadImage = [&](Texture2D &texture, const char *name)

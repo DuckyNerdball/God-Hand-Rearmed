@@ -414,8 +414,10 @@ and testing from the boys.
   folded-arms idle.
 - [Denys Almaral](https://denysalmaral.com): the Free Animation Pack for City People, two of the NPCs' idles.
 - masterlynx: the Steam library cover art, used with the artist's permission.
-- Harold Lohner ([haroldsfonts.com](http://www.haroldsfonts.com)): the Dominican font of the launcher's splash text.
-- Dennis Ludlow / Sharkshock ([sharkshock.net](http://www.sharkshock.net)): the Wendyville font of the wanted posters.
+- Harold Lohner ([haroldsfonts.com](http://www.haroldsfonts.com)): the Dominican font, the launcher's writing (the bill of
+  fare, the Options book, the splash text).
+- Dennis Ludlow / Sharkshock ([sharkshock.net](http://www.sharkshock.net)): the Wendyville font of the wanted posters and
+  the launcher's headings.
 - The Holtwood One SC Project Authors: [Holtwood One SC](https://fonts.google.com/specimen/Holtwood+One+SC) (OFL-1.1),
   the posters' SELECTED stamp and the Options book's stamps.
 - The Archivo Narrow Project Authors: [Archivo Narrow](https://github.com/Omnibus-Type/ArchivoNarrow) (OFL-1.1), the
@@ -425,8 +427,8 @@ and testing from the boys.
 - The launcher's saloon is rendered from Quixel Megascans' [Saloon Interior](https://www.fab.com/listings/57991a62-f98f-4c6a-9b94-a74ec12f242e)
   (via Fab) and Sketchfab models by Carissa, JoshElo, gelmi.com.br, polyplant3d, inciprocal, markus.blend, pizzaguyty,
   Zinaida.Kovrova, Kenty110 and Mei; the renders' licences and every credit are in `resources/saloon/LICENSE.txt`.
-- The EB Garamond Project Authors: [EB Garamond](https://github.com/octaviopardo/EBGaramond12) (OFL-1.1), and Sorkin
-  Type: [Rye](https://fonts.google.com/specimen/Rye) (OFL-1.1), the bill of fare.
+- The EB Garamond Project Authors: [EB Garamond](https://github.com/octaviopardo/EBGaramond12) (OFL-1.1), the
+  launcher's letters Dominican lacks.
 - [libavif](https://github.com/AOMediaCodec/libavif) and [dav1d](https://code.videolan.org/videolan/dav1d) (BSD-2-Clause),
   decoding the saloon's images.
 

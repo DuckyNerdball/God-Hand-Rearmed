@@ -7,4 +7,6 @@ from K's own list.
 
 `splash.fnt` + `splash.png`: Dominican by Harold Lohner (haroldsfonts.com) baked as a glyph atlas with
 `tools/splash/bake_font.py` (free for any use; the raw .ttf is not redistributed, so it is not in the repo). Glyphs:
-ASCII and the Latin-1 letters the font has; anything else draws as `?`.
+ASCII, Latin-1 and common punctuation, as far as the font has them. The launcher's saloon writes with it too: the bill
+of fare (raylib) and the Options book (ImGui), EB Garamond filling in what it lacks (# % < > { } |, the curly quotes
+and dashes until a re-bake has them); the splash text draws anything missing as `?`.
