@@ -119,7 +119,9 @@ uniform vec2 source;     // where the doorway's rays fan out from, uv
 uniform vec2 size;       // the texture's size, pixels
 uniform float time;
 uniform float motion;
+uniform float dust;      // the dust hanging in the light (K, Nov 18): the beams thick and thin with it
 out vec4 finalColor;
+%NOISE%
 void main()
 {
     vec2 uv = fragTexCoord;
@@ -142,7 +144,15 @@ void main()
             + 0.20 * sin(23.0 * a - time * 1.15 + 2.3) + 0.25 * sin(5.0 * a + time * 0.38 + 0.7);
     float beams = max(0.0, 1.0 + motion * 0.65 * b * smoothstep(40.0, 350.0, r) * fan);
     float pulse = 1.0 + motion * 0.11 * (0.7 * sin(time * 1.7 + 1.0) + 0.3 * sin(time * 2.9));
-    finalColor = vec4(col * beams * pulse * fragColor.a, 1.0);
+    // dust: slow billowy plumes hanging in the air (drifting with it), the light thick in them and thin between
+    vec2 q = (fragTexCoord * size - shiftAir * size) / vec2(520.0, 400.0);
+    float t = time * 0.035;
+    vec2 eddy = vec2(soft(q * 0.6 + vec2(t, -0.7 * t)), soft(q * 0.6 + vec2(4.7 - 0.8 * t, 2.1 + t))) - 0.5;
+    float plume = smoothstep(0.30, 0.72, soft(q + eddy * 1.8 + vec2(0.4 * t, -0.25 * t)));
+    float fine = soft(q * 3.1 + eddy * 2.5 + vec2(-0.6 * t, 0.9 * t));
+    float thick = mix(1.0, (0.35 + 1.25 * plume) * (0.8 + 0.4 * fine), clamp(dust, 0.0, 3.0) / max(1.0, dust));
+    thick *= 1.0 + 0.35 * max(dust - 1.0, 0.0) * plume;
+    finalColor = vec4(col * beams * pulse * thick * fragColor.a, 1.0);
 }
 )glsl";
 
@@ -173,26 +183,20 @@ float fbm(vec2 p)
 
         // The curry's steam: thin wisps rising off the bowl in puffs, curling and spreading as they go (strength in the
         // vertex alpha).
-        // Dust hanging in the air (K, Nov 18: a dusty saloon): slow billowy plumes, seen only where the rays light them
-        // (the rays layer again, screened on through the plumes' density).
-        const char *const kDustShader = R"glsl(
+        // The kana outside the doorway: its own picture, kept to the openings by the outside matte (the doors and the
+        // frame in front of it).
+        const char *const kKanaShader = R"glsl(
 in vec2 fragTexCoord;
 in vec4 fragColor;
-uniform sampler2D texture0; // the rays: the light in the air
-uniform vec2 size;          // its size, pixels
-uniform vec2 drift;         // the air's drift (uv)
-uniform float time;
+uniform sampler2D texture0; // the kana
+uniform sampler2D matte;    // the outside matte (1: outside)
+uniform vec4 matteMap;      // this quad's uv into the matte's: offset (xy), scale (zw)
 out vec4 finalColor;
-%NOISE%
 void main()
 {
-    vec2 uv = fragTexCoord;
-    vec3 light = texture(texture0, uv).rgb;
-    vec2 p = (uv - drift) * size / vec2(560.0, 430.0); // plumes a few hundred pixels across, a little flattened
-    float t = time * 0.035;
-    vec2 eddy = vec2(soft(p * 0.6 + vec2(t, -0.7 * t)), soft(p * 0.6 + vec2(4.7 - 0.8 * t, 2.1 + t))) - 0.5;
-    float plume = smoothstep(0.38, 0.74, soft(p + eddy * 1.8 + vec2(0.4 * t, -0.25 * t)));
-    finalColor = vec4(light * plume * fragColor.a, 1.0);
+    vec4 c = texture(texture0, fragTexCoord) * fragColor;
+    float m = texture(matte, matteMap.xy + fragTexCoord * matteMap.zw).r;
+    finalColor = vec4(c.rgb * c.a * m, c.a * m); // premultiplied
 }
 )glsl";
 
@@ -824,6 +828,22 @@ float soft(vec2 p)
         rlDisableBackfaceCulling(); // a homography can turn a quad's winding round
     }
 
+    // Paint: the ink's geometry drawn over (normal blending), for things that sit on the paper rather than in it.
+    void beginPaint()
+    {
+        if (!g_inkTried)
+        {
+            g_inkTried = true;
+            g_inkShader = loadShader(kInkShader);
+        }
+        if (usable(g_inkShader))
+            BeginShaderMode(g_inkShader);
+        BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
+        rlDisableBackfaceCulling();
+    }
+
+    void endPaint() { endInk(); }
+
     void endInk()
     {
         rlDrawRenderBatchActive();
@@ -1039,7 +1059,7 @@ float soft(vec2 p)
                                        "Clover Studio. It contains no game data: play your own damn copy!";
         constexpr float kItemSize = 84.0f, kItemTop = 372.0f, kItemStep = 116.0f;
         // (the text keeps clear of the volume ruler down the right edge: as wide as it can be, centred, without reaching it)
-        constexpr float kSkipSize = 30.0f, kSkipY = 704.0f, kBox = 26.0f, kBoxGap = 12.0f, kPaperRoom = 560.0f;
+        constexpr float kSkipSize = 34.0f, kSkipY = 704.0f, kBox = 29.0f, kBoxGap = 12.0f, kPaperRoom = 560.0f;
         constexpr float kLegalSize = 24.0f, kLegalStep = 27.0f, kLegalRoom = 590.0f; // (below the ruler's end: a little wider)
         constexpr Vector2 kSteamAt{70.0f, 76.0f}; // the upper left corner, clear of the title
         constexpr float kSteamR = 30.0f;
@@ -1254,9 +1274,8 @@ float soft(vec2 p)
             }
         }
 
-        // The volume ruler (ticks every 5 %, longer every 10 and 50) and the paperclip clipped over the bill's edge at
-        // the level, sliding up and down: two nested loops of steel wire lying across the edge.
-        void inkRuler(float level, Color color, const Homography &paper)
+        // The volume ruler down the right edge: ticks every 5 %, longer every 10 and 50 (the paperclip: paintClip).
+        void inkRuler(Color color, const Homography &paper)
         {
             const Vector2 line[2] = {{kRulerX, kRulerTop}, {kRulerX, kRulerBottom}};
             inkLine(line, 2, 3.0f, color, paper);
@@ -1267,20 +1286,37 @@ float soft(vec2 p)
                 const Vector2 tick[2] = {{kRulerX - tall, y}, {kRulerX, y}};
                 inkLine(tick, 2, 2.2f, color, paper);
             }
+        }
+
+        // The paperclip on the ruler (K: a red one, with some weight to it): a plastic-coated wire clip clipped over
+        // the bill's edge at the level, two nested loops lying across the edge. A soft shadow on the paper (ink),
+        // then the wire painted over it (not inked): its body, a darker underside and a light glint along the top.
+        void paintClip(float level, const Homography &paper)
+        {
             const float y = kRulerBottom + (kRulerTop - kRulerBottom) * std::clamp(level, 0.0f, 1.0f);
-            const Color steel{96, 100, 110, 242};
-            const auto clip = [&](float w, float left, float right) {
-                Vector2 wire[24];
+            const auto wire = [&](float w, float left, float right, Vector2 off, Vector2 *out) {
                 for (int i = 0; i < 12; ++i)
                 {
                     const float a = kPi * static_cast<float>(i) / 11.0f;
-                    wire[i] = Vector2{left - std::sin(a) * w + w, y - std::cos(a) * w};
-                    wire[12 + i] = Vector2{right + std::sin(a) * w - w, y + std::cos(a) * w};
+                    out[i] = Vector2{left - std::sin(a) * w + w + off.x, y - std::cos(a) * w + off.y};
+                    out[12 + i] = Vector2{right + std::sin(a) * w - w + off.x, y + std::cos(a) * w + off.y};
                 }
-                inkLine(wire, 24, 3.2f, steel, paper);
             };
-            clip(9.0f, kRulerX - 50.0f, 712.0f);
-            clip(5.5f, kRulerX - 38.0f, 704.0f);
+            const auto loops = [&](Vector2 off, float width, Color color) {
+                Vector2 points[24];
+                wire(15.0f, kRulerX - 70.0f, 716.0f, off, points);
+                inkLine(points, 24, width, color, paper);
+                wire(9.5f, kRulerX - 53.0f, 706.0f, off, points);
+                inkLine(points, 24, width, color, paper);
+            };
+            beginInk(); // the shadow, on the paper
+            loops(Vector2{3.0f, 5.0f}, 9.5f, Color{60, 40, 30, 75});
+            endInk();
+            beginPaint();
+            loops(Vector2{0.0f, 0.0f}, 7.0f, Color{150, 16, 20, 255});  // the wire, its shaded side
+            loops(Vector2{-0.5f, -0.7f}, 5.0f, Color{206, 34, 36, 255}); // its lit face
+            loops(Vector2{-1.0f, -1.9f}, 1.8f, Color{255, 170, 160, 210}); // the glint
+            endPaint();
         }
     }
 
@@ -1382,14 +1418,20 @@ float soft(vec2 p)
             {
                 const char *lines[2] = {bill.steamAdded ? "Update" : "Add to", bill.steamAdded ? "on Steam" : "Steam"};
                 for (int i = 0; i < 2; ++i)
-                    inkText(fonts.text, lines[i], Vector2{kSteamAt.x, kSteamAt.y + kSteamR + 26.0f + 24.0f * static_cast<float>(i)}, 24.0f, kInk, paper);
+                {
+                    const float size = skipSize(fonts.text); // as big as the skip line (K)
+                    inkText(fonts.text, lines[i], Vector2{kSteamAt.x, kSteamAt.y + kSteamR + size * 0.95f + size * static_cast<float>(i)}, size, kInk, paper);
+                }
             }
         }
         // the volume: the mute mark in the upper right corner, the ruler down the right edge with its paperclip
         if (bill.volume)
         {
             inkSpeaker(kMuteAt, bill.muted || bill.level <= 0.0f, bill.level, kInk, paper);
-            inkRuler(bill.muted ? 0.0f : bill.level, kInk, paper);
+            inkRuler(kInk, paper);
+            endInk();
+            paintClip(bill.muted ? 0.0f : bill.level, paper);
+            beginInk();
         }
         // the focus: a red grease-pencil loop drawn round it (the skip line's: round its tick box only, K)
         if (bill.focus >= 0 && static_cast<size_t>(bill.focus) < targets.size())
@@ -1450,7 +1492,13 @@ float soft(vec2 p)
         float time = 0.0f, appear = 0.0f;
         // The view turns round a point between the table and the room (K): the room leans toward the cursor, the
         // table the other way. Frame pixels.
-        Vector2 parallax{}, roomShift{}, tableShift{}, airShift{}, logoShift{};
+        Vector2 parallax{}, roomShift{}, tableShift{}, airShift{};
+        Texture2D kana{};            // the launcher's (not unloaded here)
+        float kanaBox[4]{}, kanaAspect = 1.0f;
+        Pixels outsidePx;            // the outside matte, sharp (the kana's mask), until uploaded
+        Texture2D outsideMask{};
+        Shader kanaShader{};
+        int kanaMatteLoc = -1, kanaMapLoc = -1;
         float overlays = 1.0f, homeLife = 1.0f, bookLight = 0.0f, volume = 0.0f;
         std::vector<bool> eaten;
         std::vector<float> eatenAt;
@@ -1473,9 +1521,9 @@ float soft(vec2 p)
         bool prewarmed = false;
 
         // drawing
-        Shader shadowShader{}, raysShader{}, steamShader{}, frostShader{}, dustShader{};
-        int raysWeightLoc = -1, raysRoomLoc = -1, raysTableLoc = -1, raysAirLoc = -1, raysLockLoc = -1, raysFeatherLoc = -1, raysSourceLoc = -1, raysSizeLoc = -1, raysTimeLoc = -1, raysMotionLoc = -1;
-        int steamTimeLoc = -1, steamAspectLoc = -1, dustSizeLoc = -1, dustDriftLoc = -1, dustTimeLoc = -1;
+        Shader shadowShader{}, raysShader{}, steamShader{}, frostShader{};
+        int raysDustLoc = -1, raysWeightLoc = -1, raysRoomLoc = -1, raysTableLoc = -1, raysAirLoc = -1, raysLockLoc = -1, raysFeatherLoc = -1, raysSourceLoc = -1, raysSizeLoc = -1, raysTimeLoc = -1, raysMotionLoc = -1;
+        int steamTimeLoc = -1, steamAspectLoc = -1;
         int frostSizeLoc = -1, frostBandLoc = -1, frostDropLoc = -1, frostTrailLoc = -1, frostBlurLoc = -1, frostBlurRectLoc = -1;
         Texture2D dot{}, vignette{}, paper{}, white{};
         float vignetteMade = -1.0f;
@@ -1776,8 +1824,16 @@ float soft(vec2 p)
             add(homeDir / textOf((*home)["rays"]), Kind::Rgb, 0, [this](Pixels &px) { rays = upload(px, true); },
                 [this](Pixels &px) { raysLuma = lumaOf(px, 16); }, 2);
             add(homeDir / textOf((*home)["rays_weight"]), Kind::Gray, 0, [this](Pixels &px) { raysWeight = upload(px, false); });
-            add(homeDir / textOf((*home)["outside"]), Kind::Gray, 0, [this](Pixels &px) { bloom = upload(px, false); },
-                [](Pixels &px) { px = bloomFrom(px); });
+            add(homeDir / textOf((*home)["outside"]), Kind::Gray, 0,
+                [this](Pixels &px) {
+                    bloom = upload(px, false);
+                    outsideMask = upload(outsidePx, false);
+                    outsidePx = Pixels{};
+                },
+                [this](Pixels &px) {
+                    outsidePx = px; // sharp, for the kana
+                    px = bloomFrom(px);
+                });
             if (const Json *book = (*home)["book"]; book && book->kind == Json::Kind::Object)
             {
                 bookRect = rectOf((*book)["rect"]);
@@ -1866,7 +1922,7 @@ float soft(vec2 p)
 
             // Shaders and the small made-up textures.
             shadowShader = loadShader(kShadowShader);
-            raysShader = loadShader(kRaysShader);
+            raysShader = loadShader(withNoise(kRaysShader).c_str());
             steamShader = loadShader(withNoise(kSteamShader).c_str());
             frostShader = loadShader(withNoise(kFrostShader).c_str());
             if (!usable(shadowShader))
@@ -1879,6 +1935,7 @@ float soft(vec2 p)
             raysRoomLoc = GetShaderLocation(raysShader, "shiftRoom");
             raysTableLoc = GetShaderLocation(raysShader, "shiftTable");
             raysAirLoc = GetShaderLocation(raysShader, "shiftAir");
+            raysDustLoc = GetShaderLocation(raysShader, "dust");
             raysLockLoc = GetShaderLocation(raysShader, "lock");
             raysFeatherLoc = GetShaderLocation(raysShader, "feather");
             raysSourceLoc = GetShaderLocation(raysShader, "source");
@@ -1887,10 +1944,9 @@ float soft(vec2 p)
             raysMotionLoc = GetShaderLocation(raysShader, "motion");
             steamTimeLoc = GetShaderLocation(steamShader, "time");
             steamAspectLoc = GetShaderLocation(steamShader, "aspect");
-            dustShader = loadShader(withNoise(kDustShader).c_str());
-            dustSizeLoc = GetShaderLocation(dustShader, "size");
-            dustDriftLoc = GetShaderLocation(dustShader, "drift");
-            dustTimeLoc = GetShaderLocation(dustShader, "time");
+            kanaShader = loadShader(kKanaShader);
+            kanaMatteLoc = GetShaderLocation(kanaShader, "matte");
+            kanaMapLoc = GetShaderLocation(kanaShader, "matteMap");
             frostSizeLoc = GetShaderLocation(frostShader, "size");
             frostBandLoc = GetShaderLocation(frostShader, "band");
             frostBlurLoc = GetShaderLocation(frostShader, "blurMap");
@@ -2097,7 +2153,6 @@ float soft(vec2 p)
             tableShift = Vector2{-lean.x * reach * tableShare, -lean.y * reach * tableShare};
             // what hangs in the air (the rays' near ends, the dust) against the room; the logo out past the doorway
             airShift = Vector2{-lean.x * reach0 * tuning.airDrift, -lean.y * reach0 * tuning.airDrift};
-            logoShift = Vector2{lean.x * reach0 * 0.6f * tuning.logoDrift, lean.y * reach0 * 0.6f * tuning.logoDrift};
 
             // the zoom: stepped frames
             if (direction != 0)
@@ -2352,6 +2407,8 @@ float soft(vec2 p)
                 SetShaderValue(raysShader, raysSizeLoc, size, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysTimeLoc, &time, SHADER_UNIFORM_FLOAT);
                 SetShaderValue(raysShader, raysMotionLoc, &tuning.raysMotion, SHADER_UNIFORM_FLOAT);
+                const float dust = tuning.dust * homeLife;
+                SetShaderValue(raysShader, raysDustLoc, &dust, SHADER_UNIFORM_FLOAT);
                 SetShaderValueTexture(raysShader, raysWeightLoc, raysWeight);
                 drawAt(rays, r, Color{255, 255, 255, strength});
                 EndShaderMode();
@@ -2361,20 +2418,35 @@ float soft(vec2 p)
             EndBlendMode();
         }
 
-        void drawDust()
+        // The kana outside, behind the doors and the frame (Home frame only): the logo canvas's place (the logo itself stays put),
+        // sized and moved by the tuning, the cursor drifting it as something far off.
+        void drawKana()
         {
-            const float strength = homeLife * tuning.dust * 0.85f;
-            if (strength <= 0.01f || rays.id == 0u || !usable(dustShader))
+            if (kana.id == 0u || outsideMask.id == 0u || !usable(kanaShader) || frame != 0 || !hasDoor)
                 return;
-            const Rectangle r{-backMargin, -backMargin, static_cast<float>(rays.width), static_cast<float>(rays.height)};
-            const float size[2] = {static_cast<float>(rays.width), static_cast<float>(rays.height)};
-            const float drift[2] = {airShift.x / rays.width, airShift.y / rays.height};
-            beginScreen();
-            BeginShaderMode(dustShader);
-            SetShaderValue(dustShader, dustSizeLoc, size, SHADER_UNIFORM_VEC2);
-            SetShaderValue(dustShader, dustDriftLoc, drift, SHADER_UNIFORM_VEC2);
-            SetShaderValue(dustShader, dustTimeLoc, &time, SHADER_UNIFORM_FLOAT);
-            drawAt(rays, r, Color{255, 255, 255, static_cast<unsigned char>(std::clamp(strength, 0.0f, 1.0f) * 255.0f)});
+            Quad frameQuad{};
+            for (int i = 0; i < 4; ++i)
+                frameQuad.p[i] = Vector2{doorN.p[i].x * frameW, doorN.p[i].y * frameH};
+            const Homography door = Homography::rectToQuad(1.0f, 1.0f, frameQuad);
+            const Vector2 centre = door.map(tuning.logoU, tuning.logoV);
+            const Vector2 left = door.map(0.0f, tuning.logoV), right = door.map(1.0f, tuning.logoV);
+            const float content = std::hypot(right.x - left.x, right.y - left.y) * tuning.logoWidth;
+            const float canvasW = content / std::max(0.05f, kanaBox[2] - kanaBox[0]), canvasH = canvasW * kanaAspect;
+            // the logo canvas, in frame pixels
+            const float lx = centre.x - canvasW * (kanaBox[0] + kanaBox[2]) * 0.5f, ly = centre.y - canvasH * (kanaBox[1] + kanaBox[3]) * 0.5f;
+            const float reach = parallaxMax * frameH * tuning.kanaDrift;
+            const float w = canvasW * tuning.kanaSize, h = canvasH * tuning.kanaSize;
+            const float cx = lx + canvasW * 0.5f + tuning.kanaX * canvasW + parallax.x * reach;
+            const float cy = ly + canvasH * 0.5f + tuning.kanaY * canvasW + parallax.y * reach;
+            const Rectangle at{cx - w * 0.5f + roomShift.x, cy - h * 0.5f + roomShift.y, w, h};
+            // the matte covers the back layer's rectangle (and moves with it)
+            const Rectangle matte{-backMargin + roomShift.x, -backMargin + roomShift.y, frameW + 2.0f * backMargin, frameH + 2.0f * backMargin};
+            const float map[4] = {(at.x - matte.x) / matte.width, (at.y - matte.y) / matte.height, at.width / matte.width, at.height / matte.height};
+            BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
+            BeginShaderMode(kanaShader);
+            SetShaderValue(kanaShader, kanaMapLoc, map, SHADER_UNIFORM_VEC4);
+            SetShaderValueTexture(kanaShader, kanaMatteLoc, outsideMask);
+            drawAt(kana, at);
             EndShaderMode();
             EndBlendMode();
         }
@@ -2409,7 +2481,7 @@ float soft(vec2 p)
                                 drift.y;
                 const float light = sample(raysLuma, (x + backMargin) / (frameW + 2.0f * backMargin), (y + backMargin) / (frameH + 2.0f * backMargin));
                 const float twinkle = 0.75f + 0.25f * std::sin(t * (1.3f + m.depth) + m.phase3 * 3.0f);
-                const float a = std::clamp((light - 0.05f) * 1.6f, 0.0f, 1.0f) * m.bright * twinkle * life;
+                const float a = std::clamp((light - 0.03f) * 3.0f, 0.0f, 1.0f) * m.bright * twinkle * life;
                 if (a < 0.01f)
                     continue;
                 const float size = m.size * (1.0f + 0.3f * std::sin(t * 0.7f + m.phase1));
@@ -2535,8 +2607,10 @@ float soft(vec2 p)
             drawFrost();
             drawSteam();
             drawRays();
-            drawDust();
             drawBloom(bloom, Rectangle{-backMargin + room.x, -backMargin + room.y, frameW + 2.0f * backMargin, frameH + 2.0f * backMargin});
+            // (over the glow, or it washes out to white; kept to the openings by the matte, which the frame and the
+            // batwings at rest cover)
+            drawKana();
             drawMotes();
         }
 
@@ -2658,7 +2732,7 @@ float soft(vec2 p)
             homeReady = false;
             if (!IsWindowReady()) // the window (and its textures) already gone
                 return;
-            for (Texture2D *t : {&back, &fg, &lip, &rays, &raysWeight, &bloom, &bookLit, &doorTexture, &dot, &vignette, &paper, &white, &drinkMask})
+            for (Texture2D *t : {&back, &fg, &lip, &outsideMask, &rays, &raysWeight, &bloom, &bookLit, &doorTexture, &dot, &vignette, &paper, &white, &drinkMask})
                 unload(*t);
             const auto freeSnacks = [](Snacks &s) {
                 for (Piece &p : s.pieces)
@@ -2680,7 +2754,7 @@ float soft(vec2 p)
                 unload(z.bloom);
                 freeSnacks(z.snacks);
             }
-            for (Shader *s : {&shadowShader, &raysShader, &steamShader, &frostShader, &dustShader})
+            for (Shader *s : {&shadowShader, &raysShader, &steamShader, &frostShader, &kanaShader})
                 unload(*s);
             unload(g_inkShader);
             g_inkTried = false;
@@ -2765,7 +2839,7 @@ float soft(vec2 p)
             if (!s.hasDoor)
                 return false;
             q = s.doorN;
-            drift = Vector2{s.roomShift.x + s.logoShift.x, s.roomShift.y + s.logoShift.y};
+            drift = s.roomShift; // (no drift of its own: the logo stays put, K)
         }
         else
         {
@@ -2789,13 +2863,14 @@ float soft(vec2 p)
         return out.y + out.height > s.pictureRect.y && out.y < s.pictureRect.y + s.pictureRect.height;
     }
 
-    Vector2 Scene::kanaShift(float logoWidth) const
+    void Scene::setKana(const Texture2D &kana, const float contentBox[4], float canvasAspect)
     {
-        const Impl &s = *m;
-        const float reach = s.parallaxMax * s.frameH * s.viewScale * s.tuning.kanaDrift;
-        const Vector2 p = s.frame == 0 ? s.parallax : Vector2{0.0f, 0.0f};
-        return Vector2{s.tuning.kanaX * logoWidth + p.x * reach, s.tuning.kanaY * logoWidth + p.y * reach};
+        m->kana = kana;
+        for (int i = 0; i < 4; ++i)
+            m->kanaBox[i] = contentBox[i];
+        m->kanaAspect = canvasAspect;
     }
+
 
     float Scene::overlays() const { return m->homeReady ? m->overlays : 0.0f; }
     bool Scene::bookHit(Vector2 screen) const { return m->bookHit(screen); }
@@ -2866,10 +2941,10 @@ float soft(vec2 p)
             {"LogoU", "Logo across", &Tuning::logoU, 0.2f, 0.8f},
             {"LogoV", "Logo down", &Tuning::logoV, -0.2f, 0.6f},
             {"LogoWidth", "Logo width", &Tuning::logoWidth, 0.5f, 2.0f},
-            {"LogoDrift", "Logo drift", &Tuning::logoDrift, 0.0f, 2.0f},
             {"KanaX", "Kana across", &Tuning::kanaX, -0.2f, 0.2f},
             {"KanaY", "Kana down", &Tuning::kanaY, -0.2f, 0.2f},
             {"KanaDrift", "Kana drift", &Tuning::kanaDrift, -1.0f, 2.0f},
+            {"KanaSize", "Kana size", &Tuning::kanaSize, 0.3f, 2.5f},
             {"AirDrift", "Rays & dust drift", &Tuning::airDrift, 0.0f, 2.0f},
             {"Burst", "Burst size", &Tuning::burst, 0.0f, 2.0f},
             {"RaysMotion", "Rays motion", &Tuning::raysMotion, 0.0f, 2.0f},

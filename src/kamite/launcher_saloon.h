@@ -107,10 +107,10 @@ namespace kamite::launcher::saloon
         float logoU = 0.5f;        // the logo's centre in the doorway quad (0..1 across, 0..1 down)
         float logoV = 0.125f;
         float logoWidth = 1.19f;   // the logo's width (GOD HAND + plate) in doorway widths
-        float logoDrift = 1.0f;    // the logo's (and burst's) drift with the cursor, out past the doorway
         float kanaX = 0.0f;        // the kana's offset in logo widths
         float kanaY = 0.0f;
-        float kanaDrift = 0.4f;    // the kana's own extra drift (x the room's)
+        float kanaDrift = 0.4f;    // the kana's drift with the cursor, out past the doorway (the logo stays put, K)
+        float kanaSize = 1.0f;     // the kana's size (x the logo canvas's)
         float airDrift = 1.0f;     // the rays' near ends and the dust in the air, against the room
         float burst = 1.2f;        // the speed lines behind the logo (size in logo widths)
         float raysMotion = 1.0f;   // the light rays' beams turning and the fan's swing (like the burst)
@@ -162,7 +162,9 @@ namespace kamite::launcher::saloon
         // The logo canvas (logo.png's whole canvas) in the doorway's glare; contentBox: the canvas fractions of
         // GOD HAND + plate (left, top, right, bottom). False when the doorway is out of view.
         bool logo(const float contentBox[4], float canvasAspect, Rectangle &out) const;
-        Vector2 kanaShift(float logoWidth) const; // the kana's extra drift, screen pixels
+        // The kana (resources/images/kana.png, over the logo's canvas): drawn by the scene outside the doorway, behind
+        // the doors and the frame (the outside matte), K Nov 18. The texture stays the launcher's.
+        void setKana(const Texture2D &kana, const float contentBox[4], float canvasAspect);
         float overlays() const;                   // corner slips, the rights notice: 1 at Home, out through the zoom
 
         bool bookHit(Vector2 screen) const;

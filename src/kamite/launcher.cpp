@@ -458,12 +458,15 @@ namespace kamite::launcher
 
         float userVolume(const State &state) { return state.muted ? 0.0f : state.volume; }
 
-        // The launcher's own sound effects (resources/sfx/launcher, K's): one shot, restarted if still playing.
+        // The launcher's own sound effects (resources/sfx/launcher, K's): one shot, restarted if still playing; a little
+        // over the files' own level (K: the effects up a bit).
+        constexpr float kEffectGain = 1.4f;
+
         void playEffect(State &state, Sound &sound, bool loaded, float level = 1.0f)
         {
             if (!loaded)
                 return;
-            SetSoundVolume(sound, level * userVolume(state));
+            SetSoundVolume(sound, kEffectGain * level * userVolume(state));
             PlayAudioStream(sound.stream); // not PlaySound (winmm's, see playMenuSound)
         }
 
@@ -626,7 +629,7 @@ namespace kamite::launcher
         // The snacks' voice lines (K, Nov 18): Gene's dry lines from se/pl00.afs (even entries; the odd ones are their
         // echo twins), read from the player's disc like the bark. Dealt from a shuffled deck; one at a time (a bite
         // while one plays is silent: no overlap, no queue).
-        constexpr int kSnackLines[] = {0, 2, 4, 6, 8, 10, 12, 14}; // Wow, Nice, I love it, Awesome, Cool, Well how, Great, Shit
+        constexpr int kSnackLines[] = {0, 2, 4, 6, 8, 10, 12}; // Wow, Nice, I love it, Awesome, Cool, Well how, Great (no Shit, K)
 
         void loadSnackVoices(State &state, const fs::path &image)
         {
@@ -653,11 +656,11 @@ namespace kamite::launcher
             if (state.snackVoice >= 0 && IsAudioStreamPlaying(state.snackVoices[static_cast<size_t>(state.snackVoice)].stream))
                 return;
             const int count = static_cast<int>(state.snackVoices.size());
-            const int pick = dealFromDeck(state, "SnackDeck", count, fnv1a("se/pl00.afs:0,2,4,6,8,10,12,14\n"));
+            const int pick = dealFromDeck(state, "SnackDeck", count, fnv1a("se/pl00.afs:0,2,4,6,8,10,12\n"));
             if (pick < 0 || pick >= count)
                 return;
             Sound &sound = state.snackVoices[static_cast<size_t>(pick)];
-            SetSoundVolume(sound, 0.9f * userVolume(state));
+            SetSoundVolume(sound, 0.65f * userVolume(state)); // under the effects (K)
             PlayAudioStream(sound.stream); // not PlaySound (winmm's, see playMenuSound)
             state.snackVoice = pick;
         }
@@ -1632,21 +1635,20 @@ namespace kamite::launcher
             }
         }
 
-        // The logo, after ImGui laid it out: the kana behind (moved a little with the cursor), GOD HAND, the plate.
+        // The logo, after ImGui laid it out: the kana behind (moved a little with the cursor; in the saloon the scene
+        // draws it outside the doorway), GOD HAND, the plate.
         // While Play's animation runs the plate is drawn later, over the fade.
         // force: draw last frame's placement (before ImGui, under an open popup).
         void drawLogo(const State &state, bool force = false)
         {
             if (!(state.logoThisFrame || (force && state.logoPlaced)))
                 return;
-            ImVec2 shift(state.parallax.x * fontSize(state, 10.0f), state.parallax.y * fontSize(state, 7.0f));
-            if (state.saloonOn)
+            if (!state.saloonOn) // (in the saloon the kana is outside the doorway, behind the doors: the scene draws it)
             {
-                const Vector2 kana = state.scene.kanaShift(state.logoMax.x - state.logoMin.x);
-                shift = ImVec2(kana.x, kana.y);
+                const ImVec2 shift(state.parallax.x * fontSize(state, 10.0f), state.parallax.y * fontSize(state, 7.0f));
+                drawLayer(state.kana, ImVec2(state.logoMin.x + shift.x, state.logoMin.y + shift.y),
+                          ImVec2(state.logoMax.x + shift.x, state.logoMax.y + shift.y), WHITE);
             }
-            drawLayer(state.kana, ImVec2(state.logoMin.x + shift.x, state.logoMin.y + shift.y),
-                      ImVec2(state.logoMax.x + shift.x, state.logoMax.y + shift.y), WHITE);
             drawLayer(state.logo, state.logoMin, state.logoMax, WHITE);
             if (state.playTime < 0.0f)
                 drawPlate(state, -1.0f);
@@ -3505,6 +3507,8 @@ namespace kamite::launcher
         loadImage(state.rearmed, "rearmed.png");
         loadImage(state.rearmedText, "rearmed_text.png");
         loadImage(state.rearmedGlow, "rearmed_glow.png");
+        if (state.kana.id != 0u && state.logo.id != 0u)
+            state.scene.setKana(state.kana, kLogoContent, static_cast<float>(state.logo.height) / static_cast<float>(state.logo.width));
         const fs::path burstPath = context.exeDir / "resources" / "images" / "burst.png";
         if (fs::is_regular_file(burstPath, error))
         {
@@ -3623,7 +3627,7 @@ namespace kamite::launcher
             if (state.hasAmbience) // out with the music on Play; silent without the saloon
             {
                 const float fade = state.playTime >= 0.0f ? std::clamp(state.playTime / (kPlayLength - 0.02f), 0.0f, 1.0f) : 0.0f;
-                SetMusicVolume(state.ambience, state.saloonOn ? state.scene.tuning().ambience * userVolume(state) * (1.0f - fade) : 0.0f);
+                SetMusicVolume(state.ambience, state.saloonOn ? kEffectGain * state.scene.tuning().ambience * userVolume(state) * (1.0f - fade) : 0.0f);
                 UpdateMusicStream(state.ambience);
             }
             if (state.voiceAt >= 0.0f && GetTime() >= state.voiceAt)
