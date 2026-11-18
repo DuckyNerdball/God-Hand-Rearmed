@@ -40,7 +40,8 @@ namespace kamite::launcher::saloon
         constexpr int kZoomFrames = 8;
         constexpr float kFloatTime = 0.6f;  // an eaten snack's rise
         constexpr float kShadowFade = 0.4f; // its shadow
-        constexpr int kMoteCount = 90;
+        constexpr int kMoteCount = 90;  // bright motes in the doorway's light
+        constexpr int kDustCount = 700; // fine dust all through the room's air (lit only where the light reaches)
 
         std::string utf8(const fs::path &path)
         {
@@ -112,6 +113,8 @@ uniform sampler2D weightMap;
 uniform vec2 shiftRoom;  // the room's drift, in this texture's uv
 uniform vec2 shiftTable; // the table's
 uniform vec2 shiftAir;   // the air's against the room (the near ends move, the doorway's end stays)
+uniform vec4 lock;       // the doors' box (uv): the air drift fades out over it (their shading stays on them)
+uniform vec2 feather;    // the box's soft edge (uv)
 uniform vec2 source;     // where the doorway's rays fan out from, uv
 uniform vec2 size;       // the texture's size, pixels
 uniform float time;
@@ -121,7 +124,11 @@ void main()
 {
     vec2 uv = fragTexCoord;
     float w = texture(weightMap, uv).r;
-    uv -= mix(shiftTable, shiftRoom, w) + shiftAir * (1.0 - w);
+    // the air's drift: in the doorway's fan only (the windows' rays stay on their windows), not over the doors
+    vec2 inLo = smoothstep(lock.xy - feather, lock.xy, uv), inHi = 1.0 - smoothstep(lock.zw, lock.zw + feather, uv);
+    float locked = inLo.x * inLo.y * inHi.x * inHi.y;
+    float airFan = 1.0 - smoothstep(0.15, 0.24, abs(uv.x - source.x));
+    uv -= mix(shiftTable, shiftRoom, w) + shiftAir * (1.0 - w) * airFan * (1.0 - locked);
     vec2 d = (uv - source) * size;
     float r = length(d);
     float a = atan(d.y, d.x);
@@ -166,6 +173,29 @@ float fbm(vec2 p)
 
         // The curry's steam: thin wisps rising off the bowl in puffs, curling and spreading as they go (strength in the
         // vertex alpha).
+        // Dust hanging in the air (K, Nov 18: a dusty saloon): slow billowy plumes, seen only where the rays light them
+        // (the rays layer again, screened on through the plumes' density).
+        const char *const kDustShader = R"glsl(
+in vec2 fragTexCoord;
+in vec4 fragColor;
+uniform sampler2D texture0; // the rays: the light in the air
+uniform vec2 size;          // its size, pixels
+uniform vec2 drift;         // the air's drift (uv)
+uniform float time;
+out vec4 finalColor;
+%NOISE%
+void main()
+{
+    vec2 uv = fragTexCoord;
+    vec3 light = texture(texture0, uv).rgb;
+    vec2 p = (uv - drift) * size / vec2(560.0, 430.0); // plumes a few hundred pixels across, a little flattened
+    float t = time * 0.035;
+    vec2 eddy = vec2(soft(p * 0.6 + vec2(t, -0.7 * t)), soft(p * 0.6 + vec2(4.7 - 0.8 * t, 2.1 + t))) - 0.5;
+    float plume = smoothstep(0.38, 0.74, soft(p + eddy * 1.8 + vec2(0.4 * t, -0.25 * t)));
+    finalColor = vec4(light * plume * fragColor.a, 1.0);
+}
+)glsl";
+
         const char *const kSteamShader = R"glsl(
 in vec2 fragTexCoord;
 in vec4 fragColor;
@@ -177,29 +207,27 @@ void main()
 {
     float x = (fragTexCoord.x - 0.5) * 2.0; // -1..1 across
     float h = 1.0 - fragTexCoord.y;         // 0 at the bowl, 1 at the top
-    float a = 0.0;
+    // where the vapour rises: four plumes' soft envelope, curling and swaying more the higher they get
+    float env = 0.0;
     for (int i = 0; i < 4; ++i)
     {
         float fi = float(i);
         float base = (fi - 1.5) * 0.26 + 0.06 * sin(time * 0.21 + fi * 2.1);
-        float curl = (fbm(vec2(h * 2.3 - time * 0.22 + fi * 7.3, fi * 1.7)) - 0.5) * (0.25 + 1.2 * h);
+        float curl = (soft(vec2(h * 1.6 - time * 0.20 + fi * 7.3, fi * 1.7)) - 0.5) * (0.3 + 1.3 * h);
         float sway = 0.10 * h * sin(time * 0.47 + fi * 1.9 + h * 4.5);
-        float centre = base * (1.0 - 0.35 * h) + curl + sway;
-        float width = (0.034 + 0.14 * h) * (1.0 + 0.3 * sin(fi * 4.1));
-        // no clean edge: the strand's sides wander and fray as it rises
-        float fray = (fbm(vec2(x * aspect * 2.2 + fi * 5.3, h * 3.6 - time * 0.55)) - 0.5) * (0.6 + 1.4 * h);
-        float d = (x - centre) / width + fray;
-        float strand = exp(-d * d * 1.1);
-        // it comes off in puffs that rise (gaps travel up the strand)
-        float puff = smoothstep(0.36, 0.74, fbm(vec2(fi * 3.1 + 0.7, h * 3.2 - time * 0.62)));
-        a += strand * puff;
+        float width = (0.05 + 0.19 * h) * (1.0 + 0.3 * sin(fi * 4.1));
+        float d = (x - (base * (1.0 - 0.35 * h) + curl + sway)) / width;
+        env += exp(-d * d * 0.9);
     }
-    // vapour, not smoke: soft billows through it (the first pass's noise) thin it out in patches
-    vec2 q = vec2(x * aspect * 1.6, h * 2.6 - time * 0.42);
-    q.x += 0.9 * (fbm(vec2(h * 2.0 - time * 0.11, x * 0.7)) - 0.5);
-    float vapour = smoothstep(0.30, 0.78, fbm(q + vec2(0.0, fbm(q * 0.6 + time * 0.05) * 1.3)));
+    env = clamp(env, 0.0, 1.0);
+    // the vapour: carried up by the warm air, folded by slow eddies (stronger higher up), drawn out upward into
+    // soft-edged veils (K: steam, not smoke; no texture of its own)
+    vec2 p = vec2(x * aspect * 1.1, h * 1.3 - time * 0.36);
+    vec2 eddy = vec2(soft(p * 0.8 + vec2(0.0, time * 0.07)), soft(p * 0.8 + vec2(5.2, 1.3 - time * 0.06))) - 0.5;
+    p += eddy * (0.5 + 1.5 * h);
+    float veil = smoothstep(0.36, 0.70, soft(vec2(p.x * 1.4, p.y * 0.6)));
     float shape = smoothstep(0.0, 0.08, h) * (1.0 - smoothstep(0.50, 1.0, h));
-    a = clamp(a, 0.0, 1.0) * (0.35 + 0.65 * vapour) * shape * fragColor.a * 0.70;
+    float a = env * (0.25 + 0.75 * veil) * shape * fragColor.a * 0.78;
     finalColor = vec4(vec3(0.97, 0.95, 0.91) * a, a);
 }
 )glsl";
@@ -240,11 +268,13 @@ void main()
         float width = 2.6 * drop.z * (1.0 - 0.35 * smoothstep(0.0, 1.0, age / 10.0));
         wiped = max(wiped, (1.0 - smoothstep(width * 0.6, width, dist)) * (1.0 - smoothstep(3.0, 12.0, age)));
     }
-    // the fog: the drink seen blurred through a misted glass, from nothing at the rim to full low down, a faint pale
-    // haze over it; the drop and its track clear it (K, Nov 18: no beads, the drop is the only water to see)
-    float fog = mask * (1.0 - wiped) * (1.0 - body) * smoothstep(band.x, mix(band.x, band.y, 0.8), uv.y);
+    // the fog: the drink seen blurred through a misted glass, from nothing at the rim to full low down, a pale haze
+    // over it; the drop and its track clear it (K, Nov 18: no beads, the drop is the only water to see)
+    float thick = smoothstep(band.x, mix(band.x, band.y, 0.8), uv.y);
+    float fog = mask * (1.0 - wiped) * (1.0 - body) * thick;
     vec4 blurred = texture(blurMap, blurRect.xy + uv * blurRect.zw);
-    vec3 col = mix(blurred.rgb, vec3(0.92, 0.95, 0.98) * blurred.a, 0.10) * fog * fragColor.a;
+    // chilled: paler where the mist is thickest, so the drop's track shows in the colour too (K)
+    vec3 col = mix(blurred.rgb, vec3(0.92, 0.95, 0.98) * blurred.a, 0.06 + 0.22 * thick) * fog * fragColor.a;
     float a = blurred.a * fog * fragColor.a;
     // the drop: clear, a dark rim heavier low, a bright speck top left, a light caustic low
     float edge = smoothstep(0.5, 0.95, dr) * body * (0.55 + 0.45 * clamp(0.5 + 0.7 * dq.y, 0.0, 1.0));
@@ -262,12 +292,42 @@ void main()
                                          {2410.0f, 1105.0f}, {2430.0f, 1108.0f}, {2450.0f, 1111.0f}};
         constexpr Rectangle kLipBox{2330.0f, 1084.0f, 120.0f, 40.0f};
 
+        // Smooth gradient noise (no value noise's grid, no fine octaves): steam and dust, things of air.
+        const char *const kSoftNoise = R"glsl(
+vec2 gradOf(vec2 i)
+{
+    float a = hash(i) * 6.2831853;
+    return vec2(cos(a), sin(a));
+}
+float gnoise(vec2 p)
+{
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    float a = dot(gradOf(i), f), b = dot(gradOf(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
+    float c = dot(gradOf(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)), d = dot(gradOf(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
+    return 0.5 + 0.75 * mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+float soft(vec2 p)
+{
+    float v = 0.0, a = 0.55, sum = 0.0;
+    mat2 turn = mat2(0.8, -0.6, 0.6, 0.8);
+    for (int i = 0; i < 3; ++i)
+    {
+        v += a * gnoise(p);
+        sum += a;
+        p = turn * p * 2.0 + vec2(3.7, 1.9);
+        a *= 0.45;
+    }
+    return v / sum;
+}
+)glsl";
+
         std::string withNoise(const char *source)
         {
             std::string text(source);
             const size_t at = text.find("%NOISE%");
             if (at != std::string::npos)
-                text.replace(at, 7, kNoise);
+                text.replace(at, 7, std::string(kNoise) + kSoftNoise);
             return text;
         }
 
@@ -978,10 +1038,16 @@ void main()
                                        "God Hand: Rearmed is an unofficial fan-made project, not affiliated with or endorsed by Capcom or "
                                        "Clover Studio. It contains no game data: play your own damn copy!";
         constexpr float kItemSize = 84.0f, kItemTop = 372.0f, kItemStep = 116.0f;
-        constexpr float kSkipSize = 30.0f, kSkipY = 704.0f, kBox = 26.0f, kBoxGap = 12.0f, kPaperRoom = 610.0f;
-        constexpr float kLegalSize = 24.0f, kLegalTop = 758.0f, kLegalStep = 27.0f, kLegalRoom = 590.0f;
+        // (the text keeps clear of the volume ruler down the right edge: as wide as it can be, centred, without reaching it)
+        constexpr float kSkipSize = 30.0f, kSkipY = 704.0f, kBox = 26.0f, kBoxGap = 12.0f, kPaperRoom = 560.0f;
+        constexpr float kLegalSize = 24.0f, kLegalStep = 27.0f, kLegalRoom = 590.0f; // (below the ruler's end: a little wider)
         constexpr Vector2 kSteamAt{70.0f, 76.0f}; // the upper left corner, clear of the title
         constexpr float kSteamR = 30.0f;
+        constexpr Vector2 kMuteAt{630.0f, 76.0f}; // the upper right corner, opposite (K, Nov 18)
+        constexpr float kLoopTime = 0.28f; // seconds the pencil loop takes to draw (about the pen's scribble)
+        constexpr float kMuteR = 30.0f;
+        // the volume ruler down the right edge, loud at the top; its ticks point in, the paperclip sits over the edge
+        constexpr float kRulerX = 684.0f, kRulerTop = 150.0f, kRulerBottom = 800.0f; // (ends above the fine print)
 
         std::vector<int> codepointsFor(const std::string &extra)
         {
@@ -1160,6 +1226,62 @@ void main()
             const Vector2 arm[2] = {{small.x + r * 0.13f, small.y - r * 0.10f}, {hub.x - r * 0.22f, hub.y + r * 0.16f}};
             inkLine(arm, 2, r * 0.17f, color, paper);
         }
+
+        // The mute mark: a speaker, crossed out when muted, else one or two waves (over half).
+        void inkSpeaker(Vector2 c, bool silent, float level, Color color, const Homography &paper)
+        {
+            const float mx = c.x - 25.0f, my = c.y;
+            const Vector2 speaker[7] = {{mx, my - 9.0f},          {mx + 10.0f, my - 9.0f}, {mx + 24.0f, my - 22.0f}, {mx + 24.0f, my + 22.0f},
+                                        {mx + 10.0f, my + 9.0f}, {mx, my + 9.0f},         {mx, my - 9.0f}};
+            inkLine(speaker, 7, 4.5f, color, paper);
+            if (silent)
+            {
+                const Vector2 a[2] = {{mx + 32.0f, my - 10.0f}, {mx + 50.0f, my + 10.0f}}, b[2] = {{mx + 32.0f, my + 10.0f}, {mx + 50.0f, my - 10.0f}};
+                inkLine(a, 2, 4.0f, color, paper);
+                inkLine(b, 2, 4.0f, color, paper);
+                return;
+            }
+            for (int wave = 0; wave < (level > 0.5f ? 2 : 1); ++wave)
+            {
+                Vector2 arc[9];
+                const float r = 14.0f + 11.0f * static_cast<float>(wave);
+                for (int i = 0; i < 9; ++i)
+                {
+                    const float a = -0.8f + 1.6f * static_cast<float>(i) / 8.0f;
+                    arc[i] = Vector2{mx + 24.0f + std::cos(a) * r, my + std::sin(a) * r};
+                }
+                inkLine(arc, 9, 3.5f, color, paper);
+            }
+        }
+
+        // The volume ruler (ticks every 5 %, longer every 10 and 50) and the paperclip clipped over the bill's edge at
+        // the level, sliding up and down: two nested loops of steel wire lying across the edge.
+        void inkRuler(float level, Color color, const Homography &paper)
+        {
+            const Vector2 line[2] = {{kRulerX, kRulerTop}, {kRulerX, kRulerBottom}};
+            inkLine(line, 2, 3.0f, color, paper);
+            for (int i = 0; i <= 20; ++i)
+            {
+                const float y = kRulerTop + (kRulerBottom - kRulerTop) * static_cast<float>(i) / 20.0f;
+                const float tall = i % 10 == 0 ? 26.0f : i % 2 == 0 ? 15.0f : 9.0f;
+                const Vector2 tick[2] = {{kRulerX - tall, y}, {kRulerX, y}};
+                inkLine(tick, 2, 2.2f, color, paper);
+            }
+            const float y = kRulerBottom + (kRulerTop - kRulerBottom) * std::clamp(level, 0.0f, 1.0f);
+            const Color steel{96, 100, 110, 242};
+            const auto clip = [&](float w, float left, float right) {
+                Vector2 wire[24];
+                for (int i = 0; i < 12; ++i)
+                {
+                    const float a = kPi * static_cast<float>(i) / 11.0f;
+                    wire[i] = Vector2{left - std::sin(a) * w + w, y - std::cos(a) * w};
+                    wire[12 + i] = Vector2{right + std::sin(a) * w - w, y + std::cos(a) * w};
+                }
+                inkLine(wire, 24, 3.2f, steel, paper);
+            };
+            clip(9.0f, kRulerX - 50.0f, 712.0f);
+            clip(5.5f, kRulerX - 38.0f, 704.0f);
+        }
     }
 
     bool loadBillFonts(BillFonts &fonts, const std::filesystem::path &folder, const std::string &extra)
@@ -1203,8 +1325,13 @@ void main()
         }
         if (bill.steam)
             out.push_back(Rectangle{kSteamAt.x - kSteamR - 8.0f, kSteamAt.y - kSteamR - 8.0f, kSteamR * 2.0f + 16.0f, kSteamR * 2.0f + 16.0f});
+        if (bill.volume)
+            out.push_back(Rectangle{kMuteAt.x - kMuteR - 8.0f, kMuteAt.y - kMuteR - 8.0f, kMuteR * 2.0f + 16.0f, kMuteR * 2.0f + 16.0f});
         return out;
     }
+
+    Rectangle billRuler() { return Rectangle{kRulerX - 56.0f, kRulerTop - 14.0f, 712.0f + 6.0f - (kRulerX - 56.0f), kRulerBottom - kRulerTop + 28.0f}; }
+    float billRulerLevel(float paperY) { return std::clamp((kRulerBottom - paperY) / (kRulerBottom - kRulerTop), 0.0f, 1.0f); }
 
     void drawBill(const BillFonts &fonts, const Bill &bill, const Homography &paper)
     {
@@ -1224,32 +1351,56 @@ void main()
         for (size_t i = 0; i < bill.items.size(); ++i)
             inkText(fonts.item, bill.items[i].c_str(), Vector2{kPaperW * 0.5f, kItemTop + kItemStep * static_cast<float>(i)}, kItemSize, kInk, paper);
         // Skip Launcher, with its tick box
+        Rectangle tickBox{};
         if (bill.showSkip)
         {
             const float size = skipSize(fonts.text);
             const float w = inkWidth(fonts.text, kSkip, size);
             const float left = kPaperW * 0.5f - (w + kBox + kBoxGap) * 0.5f;
-            inkTickBox(Vector2{left + kBox * 0.5f, kSkipY}, kBox * size / kSkipSize, bill.skip, kInk, paper);
+            const float box = kBox * size / kSkipSize;
+            inkTickBox(Vector2{left + kBox * 0.5f, kSkipY}, box, bill.skip, kInk, paper);
             inkText(fonts.text, kSkip, Vector2{left + kBox + kBoxGap + w * 0.5f, kSkipY}, size, kInk, paper);
+            tickBox = Rectangle{left + kBox * 0.5f - box * 0.5f - 6.0f, kSkipY - box * 0.5f - 6.0f, box + 12.0f, box + 12.0f};
         }
-        // the fine print
+        // the fine print at the foot, as far from the bottom as from the sides (K, Nov 18)
         const std::vector<std::string> &legal = legalLines(fonts.text);
+        float widest = 0.0f;
+        for (const std::string &line : legal)
+            widest = std::max(widest, inkWidth(fonts.text, line.c_str(), kLegalSize));
+        const float margin = (kPaperW - widest) * 0.5f;
+        const float first = kPaperH - margin - kLegalSize * 0.5f - kLegalStep * static_cast<float>(legal.empty() ? 0 : legal.size() - 1);
         for (size_t i = 0; i < legal.size(); ++i)
-            inkText(fonts.text, legal[i].c_str(), Vector2{kPaperW * 0.5f, kLegalTop + kLegalStep * static_cast<float>(i)}, kLegalSize, kInk, paper);
-        // Add to Steam: Steam's mark in the lower left corner
-        if (bill.steam)
-            inkSteamMark(kSteamAt, kSteamR, kInk, paper);
-        // the focus: a red grease-pencil loop drawn round it
+            inkText(fonts.text, legal[i].c_str(), Vector2{kPaperW * 0.5f, first + kLegalStep * static_cast<float>(i)}, kLegalSize, kInk, paper);
         const std::vector<Rectangle> targets = billTargets(fonts, bill);
+        const size_t skipIndex = bill.showSkip ? bill.items.size() : SIZE_MAX;
+        const size_t steamIndex = bill.steam ? bill.items.size() + (bill.showSkip ? 1u : 0u) : SIZE_MAX;
+        // Add to Steam: Steam's mark in the upper left corner, named under it while it has the focus
+        if (bill.steam)
+        {
+            inkSteamMark(kSteamAt, kSteamR, kInk, paper);
+            if (static_cast<size_t>(bill.focus) == steamIndex)
+            {
+                const char *lines[2] = {bill.steamAdded ? "Update" : "Add to", bill.steamAdded ? "on Steam" : "Steam"};
+                for (int i = 0; i < 2; ++i)
+                    inkText(fonts.text, lines[i], Vector2{kSteamAt.x, kSteamAt.y + kSteamR + 26.0f + 24.0f * static_cast<float>(i)}, 24.0f, kInk, paper);
+            }
+        }
+        // the volume: the mute mark in the upper right corner, the ruler down the right edge with its paperclip
+        if (bill.volume)
+        {
+            inkSpeaker(kMuteAt, bill.muted || bill.level <= 0.0f, bill.level, kInk, paper);
+            inkRuler(bill.muted ? 0.0f : bill.level, kInk, paper);
+        }
+        // the focus: a red grease-pencil loop drawn round it (the skip line's: round its tick box only, K)
         if (bill.focus >= 0 && static_cast<size_t>(bill.focus) < targets.size())
         {
-            Rectangle box = targets[static_cast<size_t>(bill.focus)];
+            Rectangle box = static_cast<size_t>(bill.focus) == skipIndex ? tickBox : targets[static_cast<size_t>(bill.focus)];
             const bool small = static_cast<size_t>(bill.focus) >= bill.items.size();
             box.x -= small ? 6.0f : 4.0f;
             box.width += small ? 12.0f : 8.0f;
             box.y -= small ? 4.0f : 0.0f;
             box.height += small ? 8.0f : 0.0f;
-            inkLoop(box, bill.focusAge / 0.16f, bill.focusSeed, kPencil, paper, small ? 4.5f : 7.0f);
+            inkLoop(box, bill.focusAge / kLoopTime, bill.focusSeed, kPencil, paper, small ? 4.5f : 7.0f);
         }
         endInk();
     }
@@ -1322,9 +1473,9 @@ void main()
         bool prewarmed = false;
 
         // drawing
-        Shader shadowShader{}, raysShader{}, steamShader{}, frostShader{};
-        int raysWeightLoc = -1, raysRoomLoc = -1, raysTableLoc = -1, raysAirLoc = -1, raysSourceLoc = -1, raysSizeLoc = -1, raysTimeLoc = -1, raysMotionLoc = -1;
-        int steamTimeLoc = -1, steamAspectLoc = -1;
+        Shader shadowShader{}, raysShader{}, steamShader{}, frostShader{}, dustShader{};
+        int raysWeightLoc = -1, raysRoomLoc = -1, raysTableLoc = -1, raysAirLoc = -1, raysLockLoc = -1, raysFeatherLoc = -1, raysSourceLoc = -1, raysSizeLoc = -1, raysTimeLoc = -1, raysMotionLoc = -1;
+        int steamTimeLoc = -1, steamAspectLoc = -1, dustSizeLoc = -1, dustDriftLoc = -1, dustTimeLoc = -1;
         int frostSizeLoc = -1, frostBandLoc = -1, frostDropLoc = -1, frostTrailLoc = -1, frostBlurLoc = -1, frostBlurRectLoc = -1;
         Texture2D dot{}, vignette{}, paper{}, white{};
         float vignetteMade = -1.0f;
@@ -1728,12 +1879,18 @@ void main()
             raysRoomLoc = GetShaderLocation(raysShader, "shiftRoom");
             raysTableLoc = GetShaderLocation(raysShader, "shiftTable");
             raysAirLoc = GetShaderLocation(raysShader, "shiftAir");
+            raysLockLoc = GetShaderLocation(raysShader, "lock");
+            raysFeatherLoc = GetShaderLocation(raysShader, "feather");
             raysSourceLoc = GetShaderLocation(raysShader, "source");
             raysSizeLoc = GetShaderLocation(raysShader, "size");
             raysTimeLoc = GetShaderLocation(raysShader, "time");
             raysMotionLoc = GetShaderLocation(raysShader, "motion");
             steamTimeLoc = GetShaderLocation(steamShader, "time");
             steamAspectLoc = GetShaderLocation(steamShader, "aspect");
+            dustShader = loadShader(withNoise(kDustShader).c_str());
+            dustSizeLoc = GetShaderLocation(dustShader, "size");
+            dustDriftLoc = GetShaderLocation(dustShader, "drift");
+            dustTimeLoc = GetShaderLocation(dustShader, "time");
             frostSizeLoc = GetShaderLocation(frostShader, "size");
             frostBandLoc = GetShaderLocation(frostShader, "band");
             frostBlurLoc = GetShaderLocation(frostShader, "blurMap");
@@ -1884,9 +2041,26 @@ void main()
         {
             std::mt19937 random(0x5A1007u);
             std::uniform_real_distribution<float> unit(0.0f, 1.0f);
-            motes.resize(kMoteCount);
-            for (Mote &m : motes)
+            motes.resize(kMoteCount + kDustCount);
+            for (size_t i = kMoteCount; i < motes.size(); ++i)
             {
+                // the fine dust: anywhere in the air, hanging, drifting a little, small and faint
+                Mote &m = motes[i];
+                m.base = Vector2{frameW * (0.06f + 0.88f * unit(random)), frameH * (0.04f + 0.84f * unit(random))};
+                m.swing = Vector2{frameW * (0.003f + 0.010f * unit(random)), frameH * (0.008f + 0.03f * unit(random))};
+                m.px = 30.0f + 60.0f * unit(random);
+                m.py = 25.0f + 45.0f * unit(random);
+                m.p2 = 10.0f + 15.0f * unit(random);
+                m.phase1 = unit(random) * 6.28f;
+                m.phase2 = unit(random) * 6.28f;
+                m.phase3 = unit(random) * 6.28f;
+                m.depth = unit(random);
+                m.size = 1.8f + 2.6f * m.depth * m.depth;
+                m.bright = 0.35f + 0.55f * unit(random);
+            }
+            for (size_t i = 0; i < static_cast<size_t>(kMoteCount); ++i)
+            {
+                Mote &m = motes[i];
                 // in the air between us and the doorway, mostly in the light's cone
                 const float u = unit(random), v = unit(random);
                 m.base = Vector2{frameW * (0.5f + (u - 0.5f) * (0.30f + 0.35f * v)), frameH * (0.08f + 0.70f * v)};
@@ -2168,6 +2342,12 @@ void main()
                 SetShaderValue(raysShader, raysRoomLoc, room, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysTableLoc, table, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysAirLoc, air, SHADER_UNIFORM_VEC2);
+                const float lockBox[4] = {(doorRect.x + backMargin) / rays.width, (doorRect.y + backMargin) / rays.height,
+                                          (doorRect.x + doorRect.width + backMargin) / rays.width,
+                                          (doorRect.y + doorRect.height + backMargin) / rays.height};
+                const float feather[2] = {160.0f / rays.width, 160.0f / rays.height};
+                SetShaderValue(raysShader, raysLockLoc, lockBox, SHADER_UNIFORM_VEC4);
+                SetShaderValue(raysShader, raysFeatherLoc, feather, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysSourceLoc, source, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysSizeLoc, size, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysTimeLoc, &time, SHADER_UNIFORM_FLOAT);
@@ -2178,6 +2358,24 @@ void main()
             }
             else // without the shader the rays drift with the room whole
                 drawAt(rays, Rectangle{r.x + roomShift.x, r.y + roomShift.y, r.width, r.height}, Color{strength, strength, strength, 255});
+            EndBlendMode();
+        }
+
+        void drawDust()
+        {
+            const float strength = homeLife * tuning.dust * 0.85f;
+            if (strength <= 0.01f || rays.id == 0u || !usable(dustShader))
+                return;
+            const Rectangle r{-backMargin, -backMargin, static_cast<float>(rays.width), static_cast<float>(rays.height)};
+            const float size[2] = {static_cast<float>(rays.width), static_cast<float>(rays.height)};
+            const float drift[2] = {airShift.x / rays.width, airShift.y / rays.height};
+            beginScreen();
+            BeginShaderMode(dustShader);
+            SetShaderValue(dustShader, dustSizeLoc, size, SHADER_UNIFORM_VEC2);
+            SetShaderValue(dustShader, dustDriftLoc, drift, SHADER_UNIFORM_VEC2);
+            SetShaderValue(dustShader, dustTimeLoc, &time, SHADER_UNIFORM_FLOAT);
+            drawAt(rays, r, Color{255, 255, 255, static_cast<unsigned char>(std::clamp(strength, 0.0f, 1.0f) * 255.0f)});
+            EndShaderMode();
             EndBlendMode();
         }
 
@@ -2337,6 +2535,7 @@ void main()
             drawFrost();
             drawSteam();
             drawRays();
+            drawDust();
             drawBloom(bloom, Rectangle{-backMargin + room.x, -backMargin + room.y, frameW + 2.0f * backMargin, frameH + 2.0f * backMargin});
             drawMotes();
         }
@@ -2413,7 +2612,10 @@ void main()
                         floats.push_back(Floating{-1, smoothieState, time});
                     ++smoothieState;
                     if (smoothieState >= 4)
+                    {
                         smoothieEmptyAt = time;
+                        return Bite::Drink;
+                    }
                     return Bite::Smoothie;
                 }
             }
@@ -2478,7 +2680,7 @@ void main()
                 unload(z.bloom);
                 freeSnacks(z.snacks);
             }
-            for (Shader *s : {&shadowShader, &raysShader, &steamShader, &frostShader})
+            for (Shader *s : {&shadowShader, &raysShader, &steamShader, &frostShader, &dustShader})
                 unload(*s);
             unload(g_inkShader);
             g_inkTried = false;
@@ -2674,11 +2876,13 @@ void main()
             {"Rays", "Rays", &Tuning::rays, 0.0f, 1.0f},
             {"Bloom", "Bloom", &Tuning::bloom, 0.0f, 2.0f},
             {"Motes", "Motes", &Tuning::motes, 0.0f, 2.0f},
+            {"Dust", "Dust plumes", &Tuning::dust, 0.0f, 3.0f},
             {"Vignette", "Vignette", &Tuning::vignette, 0.0f, 0.6f},
             {"Steam", "Steam", &Tuning::steam, 0.0f, 3.0f},
             {"Frost", "Frost", &Tuning::frost, 0.0f, 2.0f},
             {"FloatHeight", "Snack float height", &Tuning::floatHeight, 0.0f, 0.2f},
             {"ZoomFps", "Zoom frames a second", &Tuning::zoomFps, 6.0f, 40.0f},
+            {"Ambience", "Bar ambience", &Tuning::ambience, 0.0f, 4.0f},
         };
     }
 

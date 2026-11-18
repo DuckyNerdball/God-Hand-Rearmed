@@ -259,6 +259,13 @@ namespace kamite::launcher
             bool zoomPending = false;     // Options came before the zoom's frames were read
             int slipFocus = 0;            // the corner slips' focused item (SlipItem), drawn before ImGui
             std::vector<Sound> snackVoices; // Gene's dry lines from se/pl00.afs (eating a snack)
+            float voiceAt = -1.0f;        // a snack line waiting for the slurp to end (GetTime)
+            Music ambience{};             // resources/sfx/launcher: the bar's murmur under the music (K, Nov 18)
+            bool hasAmbience = false;
+            Sound pen{}, slurp{};         // the pencil loop drawn; the smoothie's last sip
+            bool hasPen = false, hasSlurp = false;
+            bool penThisFrame = false;    // the pen played: no cursor tick on top of it
+            int lastSlipFocus = 0;
             int snackVoice = -1;          // the one playing (lines never overlap or queue)
             Font splashFont{}; // resources/splash/splash.fnt, the Dominican font baked as an atlas
             std::string splash; // a random line of resources/splash/splash.txt, "" when there is none
@@ -450,6 +457,22 @@ namespace kamite::launcher
         }
 
         float userVolume(const State &state) { return state.muted ? 0.0f : state.volume; }
+
+        // The launcher's own sound effects (resources/sfx/launcher, K's): one shot, restarted if still playing.
+        void playEffect(State &state, Sound &sound, bool loaded, float level = 1.0f)
+        {
+            if (!loaded)
+                return;
+            SetSoundVolume(sound, level * userVolume(state));
+            PlayAudioStream(sound.stream); // not PlaySound (winmm's, see playMenuSound)
+        }
+
+        // The pencil loop drawn round something (the bill, the slip): its scribble instead of the cursor's tick.
+        void penSound(State &state)
+        {
+            playEffect(state, state.pen, state.hasPen);
+            state.penThisFrame = state.hasPen;
+        }
 
         void playMenuSound(State &state, MenuSound which, float scale = 1.0f)
         {
@@ -678,6 +701,7 @@ namespace kamite::launcher
                         menuSound(state, kConfirm);
                 }
                 else if (g.NavId != state.lastNavId && (state.lastNavId != 0 || state.navCleared) && g.NavId != 0 && g.NavCursorVisible &&
+                         !state.penThisFrame &&
                          state.quietFrames == 0 && state.soundScreen == state.screen)
                     playMenuSound(state, kTick);
             }
@@ -922,15 +946,13 @@ namespace kamite::launcher
         }
 
         // The corner slip (K, Nov 17): a paper slip poking up from the picture's bottom right edge, in dark ink: the
-        // version / update and the volume (Add to Steam moved onto the bill, K Nov 18). A slip's own units: x right, y down; about
+        // version / update (Add to Steam and the volume moved onto the bill, K Nov 18). A slip's own units: x right, y down; about
         // kSlipShown of its height shows above the edge.
         enum SlipItem
         {
             kSlipNone,
             kSlipNotes,
             kSlipUpdate,
-            kSlipMute,
-            kSlipVolume,
         };
         constexpr float kSlipH = 240.0f, kSlipShown = 168.0f;
         constexpr Color kSlipInk{40, 28, 20, 238};
@@ -947,7 +969,7 @@ namespace kamite::launcher
             const Rectangle pic = state.scene.picture();
             const float k = pic.height / 900.0f * 0.56f; // screen pixels a slip unit
             Slip slip;
-            slip.w = right ? 760.0f : 420.0f;
+            slip.w = 420.0f;
             const float angle = (right ? -1.4f : 1.8f) * DEG2RAD, c = std::cos(angle), sn = std::sin(angle);
             const float margin = pic.height * 0.03f;
             const float cx = right ? pic.x + pic.width - margin - slip.w * k * 0.5f : pic.x + margin + slip.w * k * 0.5f;
@@ -1009,8 +1031,6 @@ namespace kamite::launcher
         }
 
         // What sits on the slips, in slip units.
-        constexpr Rectangle kMuteBox{404.0f, 78.0f, 64.0f, 70.0f};
-        constexpr float kRulerY = 128.0f, kRulerX0 = 492.0f, kRulerX1 = 722.0f, kRulerTop = 70.0f, kRulerBottom = 152.0f;
         constexpr Vector2 kNotesAt{110.0f, 140.0f}, kUpdateAt{285.0f, 140.0f};
 
         Rectangle slipTextBox(const Font &font, const char *text, float size, Vector2 centre)
@@ -1051,58 +1071,6 @@ namespace kamite::launcher
                     if (state.slipFocus == kSlipUpdate)
                         loop(slipTextBox(f.item, "Update", 34.0f, kUpdateAt), 22u);
                 }
-                // the volume: its label, a speaker, a ruler with a paperclip at the value
-                saloon::inkText(f.text, "Volume", Vector2{607.0f, 46.0f}, 30.0f, ink, slip.paper);
-                const float mx = kMuteBox.x + 12.0f, my = kMuteBox.y + kMuteBox.height * 0.5f;
-                const Vector2 speaker[7] = {{mx, my - 9.0f},          {mx + 10.0f, my - 9.0f}, {mx + 24.0f, my - 22.0f}, {mx + 24.0f, my + 22.0f},
-                                            {mx + 10.0f, my + 9.0f}, {mx, my + 9.0f},         {mx, my - 9.0f}};
-                saloon::inkLine(speaker, 7, 4.5f, ink, slip.paper);
-                if (state.muted || state.volume <= 0.0f)
-                {
-                    const Vector2 a[2] = {{mx + 32.0f, my - 10.0f}, {mx + 50.0f, my + 10.0f}}, b[2] = {{mx + 32.0f, my + 10.0f}, {mx + 50.0f, my - 10.0f}};
-                    saloon::inkLine(a, 2, 4.0f, ink, slip.paper);
-                    saloon::inkLine(b, 2, 4.0f, ink, slip.paper);
-                }
-                else
-                    for (int wave = 0; wave < (state.volume > 0.5f ? 2 : 1); ++wave)
-                    {
-                        Vector2 arc[9];
-                        const float r = 14.0f + 11.0f * static_cast<float>(wave);
-                        for (int i = 0; i < 9; ++i)
-                        {
-                            const float a = -0.8f + 1.6f * static_cast<float>(i) / 8.0f;
-                            arc[i] = Vector2{mx + 24.0f + std::cos(a) * r, my + std::sin(a) * r};
-                        }
-                        saloon::inkLine(arc, 9, 3.5f, ink, slip.paper);
-                    }
-                if (state.slipFocus == kSlipMute)
-                    loop(kMuteBox, 31u);
-                const Vector2 ruler[2] = {{kRulerX0, kRulerY}, {kRulerX1, kRulerY}};
-                saloon::inkLine(ruler, 2, 3.0f, ink, slip.paper);
-                for (int i = 0; i <= 20; ++i)
-                {
-                    const float x = kRulerX0 + (kRulerX1 - kRulerX0) * static_cast<float>(i) / 20.0f;
-                    const float tall = i % 10 == 0 ? 26.0f : i % 2 == 0 ? 15.0f : 9.0f;
-                    const Vector2 tick[2] = {{x, kRulerY - tall}, {x, kRulerY}};
-                    saloon::inkLine(tick, 2, 2.2f, ink, slip.paper);
-                }
-                // the paperclip, standing on the ruler at the value: two nested loops of steel wire
-                const float px = kRulerX0 + (kRulerX1 - kRulerX0) * (state.muted ? 0.0f : state.volume);
-                const Color steel{96, 100, 110, alphaOf(0.95f * alpha)};
-                const auto clip = [&](float w, float top, float bottom) {
-                    Vector2 wire[24];
-                    for (int i = 0; i < 12; ++i)
-                    {
-                        const float a = kSlipPi * static_cast<float>(i) / 11.0f;
-                        wire[i] = Vector2{px - std::cos(a) * w, top - std::sin(a) * w + w};
-                        wire[12 + i] = Vector2{px + std::cos(a) * w, bottom + std::sin(a) * w - w};
-                    }
-                    saloon::inkLine(wire, 24, 3.2f, steel, slip.paper);
-                };
-                clip(9.0f, kRulerY - 52.0f, kRulerY + 14.0f);
-                clip(5.5f, kRulerY - 40.0f, kRulerY + 6.0f);
-                if (state.slipFocus == kSlipVolume)
-                    loop(Rectangle{kRulerX0 - 16.0f, kRulerY - 60.0f, kRulerX1 - kRulerX0 + 32.0f, 84.0f}, 41u);
             }
             saloon::endInk();
         }
@@ -1111,56 +1079,8 @@ namespace kamite::launcher
         // in GHR.ini.
         void drawVolume(State &state)
         {
-            if (state.saloonOn) // on the right slip: the speaker and the ruler (their ink is drawn before ImGui)
-            {
-                const Slip slip = slipAt(state, true);
-                bool focused = false;
-                if (paperButton("##mute", kMuteBox, slip.paper, true, &focused))
-                {
-                    state.muted = !state.muted;
-                    state.ini.setBool("Launcher", "Mute", state.muted);
-                    state.ini.save();
-                }
-                if (focused)
-                    state.slipFocus = kSlipMute;
-                // an ImGui slider with nothing of its own showing, over the ruler (mouse drag, arrows, d-pad)
-                const Vector2 a = slip.paper.map(kRulerX0, kRulerTop), b = slip.paper.map(kRulerX1, kRulerBottom);
-                ImGui::SetCursorScreenPos(ImVec2(a.x, a.y));
-                const ImGuiCol hidden[] = {ImGuiCol_FrameBg,    ImGuiCol_FrameBgHovered,   ImGuiCol_FrameBgActive, ImGuiCol_SliderGrab,
-                                           ImGuiCol_SliderGrabActive, ImGuiCol_Text, ImGuiCol_Border,         ImGuiCol_NavCursor};
-                for (const ImGuiCol col : hidden)
-                    ImGui::PushStyleColor(col, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-                                    ImVec2(0.0f, std::max(1.0f, (b.y - a.y) * 0.5f - ImGui::GetFontSize() * 0.5f)));
-                ImGui::SetNextItemWidth(std::max(1.0f, b.x - a.x));
-                float percent = state.volume * 100.0f;
-                if (ImGui::SliderFloat("##volume", &percent, 0.0f, 100.0f, "", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput))
-                {
-                    state.volume = percent / 100.0f;
-                    if (state.muted && state.volume > 0.0f)
-                    {
-                        state.muted = false;
-                        state.ini.setBool("Launcher", "Mute", false);
-                    }
-                }
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor(static_cast<int>(std::size(hidden)));
-                state.volumeSliderId = ImGui::GetItemID();
-                const ImGuiIO &io = ImGui::GetIO();
-                if (ImGui::IsItemHovered() && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f) && !ImGui::IsItemFocused() &&
-                    !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId))
-                    ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
-                if (ImGui::IsItemFocused())
-                    state.slipFocus = kSlipVolume;
-                if (ImGui::IsItemDeactivatedAfterEdit())
-                {
-                    char text[16];
-                    std::snprintf(text, sizeof(text), "%.2f", state.volume);
-                    state.ini.set("Launcher", "Volume", text);
-                    state.ini.save();
-                }
+            if (state.saloonOn) // on the bill (drawSaloonHome)
                 return;
-            }
 
             const float size = fontSize(state, 34.0f), margin = fontSize(state, 22.0f), slider = fontSize(state, 200.0f);
             const float gap = fontSize(state, 8.0f);
@@ -1243,12 +1163,18 @@ namespace kamite::launcher
 
         void startUpdate(State &state)
         {
-            // The launcher's music streams from resources/music: closed so the file can be replaced.
+            // The launcher's music and the bar's murmur stream from resources: closed so the files can be replaced.
             if (state.hasMusic)
             {
                 StopMusicStream(state.music);
                 UnloadMusicStream(state.music);
                 state.hasMusic = false;
+            }
+            if (state.hasAmbience)
+            {
+                StopMusicStream(state.ambience);
+                UnloadMusicStream(state.ambience);
+                state.hasAmbience = false;
             }
             update::startInstall(g_updater, g_updateCheck.release, state.context->exeDir);
             state.updatePopup = State::UpdatePopup::Working;
@@ -1821,11 +1747,16 @@ namespace kamite::launcher
             bill.skip = !state.ini.getBool("Launcher", "Show", true);
 #if KAMITE_LAUNCHER_STEAM
             bill.steam = state.steam.available;
+            bill.steamAdded = state.steam.added;
 #else
             bill.steam = false;
 #endif
+            bill.volume = true;
+            bill.level = state.volume;
+            bill.muted = state.muted;
             const size_t skipItem = bill.showSkip ? bill.items.size() : SIZE_MAX;
-            const size_t steamItem = bill.steam ? bill.items.size() + (bill.showSkip ? 1u : 0u) : SIZE_MAX;
+            [[maybe_unused]] const size_t steamItem = bill.steam ? bill.items.size() + (bill.showSkip ? 1u : 0u) : SIZE_MAX;
+            const size_t muteItem = bill.items.size() + (bill.showSkip ? 1u : 0u) + (bill.steam ? 1u : 0u);
             bool overTarget = false;
             saloon::Quad quad;
             int focus = -1;
@@ -1846,14 +1777,6 @@ namespace kamite::launcher
                     bool focused = false;
                     const bool pressed = paperButton("##bill", targets[i], paper, home, &focused);
                     overTarget = overTarget || saloon::inside(paperQuad(targets[i], paper), mouse);
-#if KAMITE_LAUNCHER_STEAM
-                    if (i == steamItem && home)
-                    {
-                        pushSize(state, 18.0f);
-                        ImGui::SetItemTooltip("%s", steamLabel(state));
-                        ImGui::PopFont();
-                    }
-#endif
                     if (home && ((state.focusFirst && i == 0) || (state.focusOptions && i == kBillOptions)))
                     {
                         // Play starts focused, its loop showing, so A / Enter plays at once (K Oct 29); back from
@@ -1873,8 +1796,8 @@ namespace kamite::launcher
                         focus = static_cast<int>(i);
                     if (i == 0 && state.installed)
                         ownSoundItem(); // Play's own sound
-                    else if (i == skipItem)
-                        tickItem(); // the tick box
+                    else if (i == skipItem || i == muteItem)
+                        tickItem(); // the tick box, the mute mark
                     if (pressed && home)
                     {
                         if (i == 0 && state.installed)
@@ -1908,8 +1831,57 @@ namespace kamite::launcher
                         else if (i == steamItem)
                             pressSteam(state);
 #endif
+                        else if (i == muteItem)
+                        {
+                            state.muted = !state.muted;
+                            state.ini.setBool("Launcher", "Mute", state.muted);
+                            state.ini.save();
+                        }
                     }
                     ImGui::PopID();
+                }
+                // the volume ruler down the bill's right edge: an ImGui slider with nothing of its own showing over it
+                // (keyboard / gamepad: activate it, then up / down); a mouse drag follows the paperclip through the
+                // bill's perspective. Its focus draws no loop (K).
+                {
+                    const Rectangle r = saloon::billRuler();
+                    const Vector2 top = paper.map(r.x + r.width * 0.5f, r.y), bottom = paper.map(r.x + r.width * 0.5f, r.y + r.height);
+                    const Vector2 left = paper.map(r.x, r.y + r.height * 0.5f), right = paper.map(r.x + r.width, r.y + r.height * 0.5f);
+                    const float x0 = std::min(left.x, right.x), x1 = std::max(left.x, right.x);
+                    ImGui::SetCursorScreenPos(ImVec2(x0, std::min(top.y, bottom.y)));
+                    const ImGuiCol hidden[] = {ImGuiCol_FrameBg,         ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive, ImGuiCol_SliderGrab,
+                                               ImGuiCol_SliderGrabActive, ImGuiCol_Text,           ImGuiCol_Border,        ImGuiCol_NavCursor};
+                    for (const ImGuiCol col : hidden)
+                        ImGui::PushStyleColor(col, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    float percent = state.volume * 100.0f;
+                    bool changed = ImGui::VSliderFloat("##volume", ImVec2(std::max(1.0f, x1 - x0), std::max(1.0f, std::fabs(bottom.y - top.y))), &percent,
+                                                       0.0f, 100.0f, "", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput);
+                    ImGui::PopStyleColor(static_cast<int>(std::size(hidden)));
+                    state.volumeSliderId = ImGui::GetItemID();
+                    if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                    {
+                        percent = saloon::billRulerLevel(paper.inverse().map(mouse).y) * 100.0f;
+                        changed = true;
+                    }
+                    if (changed && home)
+                    {
+                        state.volume = percent / 100.0f;
+                        if (state.muted && state.volume > 0.0f)
+                        {
+                            state.muted = false;
+                            state.ini.setBool("Launcher", "Mute", false);
+                        }
+                    }
+                    if (home && ImGui::IsItemHovered() && moved && !ImGui::IsItemFocused() && !popup)
+                        ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+                    if (ImGui::IsItemDeactivated())
+                    {
+                        char text[16];
+                        std::snprintf(text, sizeof(text), "%.2f", state.volume);
+                        state.ini.set("Launcher", "Volume", text);
+                        state.ini.save();
+                    }
+                    overTarget = overTarget || ImGui::IsItemHovered();
                 }
                 if (!home)
                     ImGui::EndDisabled();
@@ -1924,7 +1896,12 @@ namespace kamite::launcher
                     menuSound(state, kConfirm);
                     openOptions(state);
                 }
-                else if (scene.snackClick(mouse) != saloon::Scene::Bite::None)
+                else if (const saloon::Scene::Bite bite = scene.snackClick(mouse); bite == saloon::Scene::Bite::Drink && state.hasSlurp)
+                {
+                    playEffect(state, state.slurp, true);
+                    state.voiceAt = static_cast<float>(GetTime()) + 0.95f; // Gene's line once it's down
+                }
+                else if (bite != saloon::Scene::Bite::None)
                     snackVoice(state);
             }
             // The mouse moved off everything (the bill's lines, the book, the slip's controls): nothing stays focused, so
@@ -1942,6 +1919,8 @@ namespace kamite::launcher
             // The loop follows the focus; through the zoom it stays where it was (on Options).
             if (home && focus != bill.focus)
             {
+                if (focus >= 0)
+                    penSound(state);
                 bill.focus = focus;
                 bill.focusSeed = static_cast<uint32_t>(std::rand()) * 2654435761u + 1u;
                 bill.focusAge = 0.0f;
@@ -3564,6 +3543,31 @@ namespace kamite::launcher
                 PlayMusicStream(state.music);
             }
         }
+        // The saloon's sounds (K's, resources/sfx/launcher): the bar's murmur (a loop under the music, saloon only), the
+        // pen's scribble round a loop, the smoothie's last sip.
+        if (state.audio)
+        {
+            const fs::path sfx = context.exeDir / "resources" / "sfx" / "launcher";
+            if (fs::is_regular_file(sfx / "bar_ambience.ogg", error))
+            {
+                state.ambience = LoadMusicStream(utf8(sfx / "bar_ambience.ogg").c_str());
+                state.hasAmbience = IsMusicValid(state.ambience);
+                if (state.hasAmbience)
+                {
+                    state.ambience.looping = true;
+                    SetMusicVolume(state.ambience, 0.0f);
+                    PlayMusicStream(state.ambience);
+                }
+            }
+            const auto effect = [&](const char *name, Sound &sound) {
+                if (!fs::is_regular_file(sfx / name, error))
+                    return false;
+                sound = LoadSound(utf8(sfx / name).c_str());
+                return sound.frameCount > 0;
+            };
+            state.hasPen = effect("pen_circle.ogg", state.pen);
+            state.hasSlurp = effect("smoothie_drink.ogg", state.slurp);
+        }
         state.volume = std::clamp(static_cast<float>(std::atof(state.ini.get("Launcher", "Volume", "0.8").c_str())), 0.0f, 1.0f);
         state.exePath = platform::thisExe();
         update::cleanup(context.exeDir);
@@ -3595,6 +3599,7 @@ namespace kamite::launcher
             updateMotion(state, state.screen);
             state.logoThisFrame = false;
             state.soundThisFrame = false;
+            state.penThisFrame = false;
             g_tickItems.clear();
             g_ownSoundItems.clear();
             g_silentItems.clear();
@@ -3614,6 +3619,18 @@ namespace kamite::launcher
                 const float fade = state.playTime >= 0.0f ? std::clamp(state.playTime / (kPlayLength - 0.02f), 0.0f, 1.0f) : 0.0f;
                 SetMusicVolume(state.music, kMusicVolume * userVolume(state) * (1.0f - fade));
                 UpdateMusicStream(state.music);
+            }
+            if (state.hasAmbience) // out with the music on Play; silent without the saloon
+            {
+                const float fade = state.playTime >= 0.0f ? std::clamp(state.playTime / (kPlayLength - 0.02f), 0.0f, 1.0f) : 0.0f;
+                SetMusicVolume(state.ambience, state.saloonOn ? state.scene.tuning().ambience * userVolume(state) * (1.0f - fade) : 0.0f);
+                UpdateMusicStream(state.ambience);
+            }
+            if (state.voiceAt >= 0.0f && GetTime() >= state.voiceAt)
+            {
+                state.voiceAt = -1.0f;
+                if (state.screen == Screen::Home && state.playTime < 0.0f)
+                    snackVoice(state);
             }
             if (state.saloonOn && state.scene.failed())
             {
@@ -3757,6 +3774,9 @@ namespace kamite::launcher
             if (state.tuningOpen && state.saloonOn)
                 state.tuningOpen = state.scene.drawTuning(state.ini);
 #endif
+            if (state.slipFocus != state.lastSlipFocus && state.slipFocus != kSlipNone)
+                penSound(state); // the slip's loop
+            state.lastSlipFocus = state.slipFocus;
             frameSounds(state);
             rlImGuiEnd();
             if (!logoUnder)
@@ -3805,6 +3825,11 @@ namespace kamite::launcher
 #endif
         if (state.hasMusic)
             UnloadMusicStream(state.music);
+        if (state.hasAmbience) // (faded out by Play; stopped before the device goes to the game, or it would repeat)
+        {
+            StopMusicStream(state.ambience);
+            UnloadMusicStream(state.ambience);
+        }
         // A check still running is left to finish on its own (the game's start does not wait for GitHub).
         if (g_updateCheck.worker.joinable())
             g_updateCheck.worker.detach();
@@ -3823,6 +3848,10 @@ namespace kamite::launcher
                     UnloadSound(state.menuSounds[i]);
             for (Sound &voice : state.snackVoices)
                 UnloadSound(voice);
+            if (state.hasPen)
+                UnloadSound(state.pen);
+            if (state.hasSlurp)
+                UnloadSound(state.slurp);
             if (state.audio)
                 CloseAudioDevice();
         }

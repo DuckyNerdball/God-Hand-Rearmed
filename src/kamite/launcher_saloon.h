@@ -79,13 +79,23 @@ namespace kamite::launcher::saloon
         std::vector<std::string> items; // Play (Install), Options, Quit
         bool showSkip = false;         // "Skip Launcher (hold Shift while starting to see it)" with its tick box
         bool skip = false;
-        bool steam = false;            // the Add to Steam mark in the lower left corner
-        int focus = -1;                // an item, then the skip line, then the Steam mark (billTargets' order); -1: none
+        bool steam = false;            // Steam's mark in the upper left corner (Add to Steam)
+        bool steamAdded = false;       // its label when focused: "Update / on Steam", else "Add to / Steam"
+        bool volume = false;           // the mute mark in the upper right corner, the volume ruler down the right edge
+        float level = 0.8f;            // the volume, 0..1 (the paperclip's place on the ruler)
+        bool muted = false;
+        int focus = -1;                // billTargets' order: the items, the skip line, the Steam mark, the mute mark
+                                       // (-1: none; the ruler's slider takes focus with no loop, K)
         uint32_t focusSeed = 1;        // the loop's own wobble (a new one each move)
         float focusAge = 1.0f;         // seconds since the focus moved (the loop draws itself in)
     };
-    // What can be clicked on the bill, in paper units: the items, then the skip line, then the Steam mark (when shown).
+    // What can be clicked on the bill, in paper units: the items, then the skip line, the Steam mark and the mute mark
+    // (when shown).
     std::vector<Rectangle> billTargets(const BillFonts &fonts, const Bill &bill);
+    // The volume ruler down the bill's right edge (paper units): the box its slider covers, and the level at a paper y
+    // (1 at the top, 0 at the bottom).
+    Rectangle billRuler();
+    float billRulerLevel(float paperY);
     void drawBill(const BillFonts &fonts, const Bill &bill, const Homography &paper);
 
     // ---- the dev tuning panel's values (F4; GHR.ini [SaloonTuning]; the defaults once K is happy) -------------------
@@ -106,12 +116,14 @@ namespace kamite::launcher::saloon
         float raysMotion = 1.0f;   // the light rays' beams turning and the fan's swing (like the burst)
         float rays = 1.0f;         // the rays' strength
         float bloom = 0.6f;        // the doorway's (and windows') glow
-        float motes = 1.0f;        // the dust in the light
+        float motes = 1.0f;        // the specks of dust in the light (bright motes and fine dust)
+        float dust = 1.0f;         // the plumes of dust hanging in the light
         float vignette = 0.22f;
         float steam = 1.0f;        // the curry's steam (times the player's volume)
         float frost = 1.0f;        // the smoothie glass's frost
         float floatHeight = 0.07f; // how far an eaten snack rises (of the height)
         float zoomFps = 30.0f;     // the Options zoom's frames a second (stepped)
+        float ambience = 1.0f;     // the bar's murmur under the music (x the file's level, x the player's volume)
     };
 
     class Scene
@@ -158,7 +170,8 @@ namespace kamite::launcher::saloon
         {
             None,
             Fruit,
-            Smoothie,
+            Smoothie, // a garnish (an orange slice, the cherry and mint)
+            Drink,    // the drink itself (the last sip)
         };
         // A click at Home: a snack under it is eaten (floats up). None: nothing there, or one is still floating.
         Bite snackClick(Vector2 screen);

@@ -17,7 +17,7 @@ for (x,y),(u,v) in zip(src,q):
 h=np.linalg.solve(np.array(A),np.array(b)); Hm=np.append(h,1).reshape(3,3)
 def m(x,y):
     p=Hm@[x,y,1]; return (int(p[0]/p[2]), int(p[1]/p[2]))
-out={'play':m(350,372),'options':m(350,488),'quit':m(350,604),'skip':m(350,704),'steam':m(70,76)}
+out={'play':m(350,372),'options':m(350,488),'quit':m(350,604),'skip':m(350,704),'steam':m(70,76),'mute':m(630,76),'vol_hi':m(684,225),'vol_lo':m(684,760),'mute':m(630,76),'vol_hi':m(684,225),'vol_lo':m(684,825)}
 br=J['home']['book']['rect']; out['book']=tuple(int(v) for v in scr((br[0]+br[2])/2/FW,(br[1]+br[3])/2/FH))
 p=[x for x in J['home']['snacks']['pieces'] if x['name']=='bananas'][0]['rect']; out['bananas']=tuple(int(v) for v in scr((p[0]+p[2])/2/FW,(p[1]+p[3])/2/FH))
 sm=J['home']['snacks']['smoothie']['rect']; out['smoothie']=tuple(int(v) for v in scr((sm[0]+sm[2])/2/FW,(sm[1]*0.45+sm[3]*0.55)/FH))
