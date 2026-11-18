@@ -523,6 +523,26 @@ namespace kamite::launcher_bark
     }
 
     int count() { return static_cast<int>(sizeof(kLines) / sizeof(kLines[0])); }
+
+    bool voiceLine(const std::vector<uint8_t> &afs, int entry, Stereo &out)
+    {
+        out.lr.clear();
+        if (afs.size() < 16 || std::memcmp(afs.data(), "AFS", 3) != 0 || entry < 0 || static_cast<uint32_t>(entry) >= le32(&afs[4]))
+            return false;
+        const uint32_t offset = le32(&afs[8 + 8 * entry]);
+        if (static_cast<uint64_t>(offset) + 0x20 > afs.size())
+            return false;
+        Mono v;
+        if (!decodeAdx(afs, entry, 0, be32(&afs[offset + 12]), v) || v.empty())
+            return false;
+        const size_t edge = std::min<size_t>(v.size() / 2, static_cast<size_t>(0.003 * kRate));
+        fade(v.data(), edge, true);
+        fade(v.data() + v.size() - edge, edge, false);
+        out.lr.resize(v.size() * 2);
+        for (size_t i = 0; i < v.size(); ++i)
+            out.lr[i * 2] = out.lr[i * 2 + 1] = v[i];
+        return true;
+    }
     const char *name(int line) { return line >= 0 && line < count() ? kLines[line].name : ""; }
 
     bool render(int line, const ReadFile &read, Stereo &out)

@@ -1,5 +1,6 @@
 #include "kamite/launcher.h"
 #include "kamite/launcher_bark.h"
+#include "kamite/launcher_saloon.h"
 
 #include "kamite/character_mods.h"
 #include "kamite/disc_files.h"
@@ -242,9 +243,21 @@ namespace kamite::launcher
             Texture2D rearmedText{}; // resources/images/rearmed_text.png: its letters, white (tinted gold / hot)
             Texture2D rearmedGlow{}; // resources/images/rearmed_glow.png: the letters blurred, for the hot glow
             Texture2D burst{}; // resources/images/burst.png: the speed lines behind the logo
-            Texture2D background{};   // resources/images/background.png: the desert (the gradient without it)
-            Shader backgroundShader{}; // kBackgroundShader: heat haze, depth of field, clouds (none: the plain image)
-            int backgroundTexel = -1, backgroundTime = -1, backgroundView = -1;
+            // The saloon (launcher_saloon.h, claude/saloon-launcher.md): the room behind every screen, Home's menu in
+            // ink on its bill of fare, the logo in the doorway's glare, the Options zoom. Off (the plain gradient and
+            // the old buttons) when resources/saloon is missing or can't be decoded.
+            saloon::Scene scene;
+            bool saloonOn = false;
+            saloon::BillFonts billFonts;
+            saloon::Bill bill;            // the menu's focus (its loop) and items, drawn before ImGui from last frame's
+            bool focusOptions = false;    // back from Options: the loop goes back on Options
+            float optionsShown = 0.0f;    // Options' panel over the zoom's last frame: fades in once it lands
+            bool optionsLeaving = false;  // Back: the panel fades out, then the zoom plays backwards
+            bool tuningOpen = false;      // F3 in a dev build: the saloon's tuning sliders
+            bool zoomPending = false;     // Options came before the zoom's frames were read
+            int slipFocus = 0;            // the corner slips' focused item (SlipItem), drawn before ImGui
+            std::vector<Sound> snackVoices; // Gene's dry lines from se/pl00.afs (eating a snack)
+            int snackVoice = -1;          // the one playing (lines never overlap or queue)
             Font splashFont{}; // resources/splash/splash.fnt, the Dominican font baked as an atlas
             std::string splash; // a random line of resources/splash/splash.txt, "" when there is none
             // The title's motion: the cursor (eased) shifts the burst layers and the kana by different amounts,
@@ -585,6 +598,45 @@ namespace kamite::launcher
                                                   << " ms)");
         }
 
+        // The snacks' voice lines (K, Nov 18): Gene's dry lines from se/pl00.afs (even entries; the odd ones are their
+        // echo twins), read from the player's disc like the bark. Dealt from a shuffled deck; one at a time (a bite
+        // while one plays is silent: no overlap, no queue).
+        constexpr int kSnackLines[] = {0, 2, 4, 6, 8, 10, 12, 14}; // Wow, Nice, I love it, Awesome, Cool, Well how, Great, Shit
+
+        void loadSnackVoices(State &state, const fs::path &image)
+        {
+            if (!state.audio || !state.snackVoices.empty() || image.empty())
+                return;
+            std::vector<uint8_t> afs;
+            if (!disc_files::readFromImage(image, "se/pl00.afs", afs))
+            {
+                KM_INFO(Boot, "launcher: no snack lines (se/pl00.afs not read from the disc image)");
+                return;
+            }
+            for (const int entry : kSnackLines)
+            {
+                launcher_bark::Stereo pcm;
+                if (launcher_bark::voiceLine(afs, entry, pcm))
+                    state.snackVoices.push_back(soundFrom(pcm));
+            }
+        }
+
+        void snackVoice(State &state)
+        {
+            if (state.snackVoices.empty())
+                return;
+            if (state.snackVoice >= 0 && IsAudioStreamPlaying(state.snackVoices[static_cast<size_t>(state.snackVoice)].stream))
+                return;
+            const int count = static_cast<int>(state.snackVoices.size());
+            const int pick = dealFromDeck(state, "SnackDeck", count, fnv1a("se/pl00.afs:0,2,4,6,8,10,12,14\n"));
+            if (pick < 0 || pick >= count)
+                return;
+            Sound &sound = state.snackVoices[static_cast<size_t>(pick)];
+            SetSoundVolume(sound, 0.9f * userVolume(state));
+            PlayAudioStream(sound.stream); // not PlaySound (winmm's, see playMenuSound)
+            state.snackVoice = pick;
+        }
+
         void menuSound(State &state, MenuSound which)
         {
             playMenuSound(state, which);
@@ -604,6 +656,8 @@ namespace kamite::launcher
             {
                 if (state.popupWasOpen && !popupOpen && backKey)
                     menuSound(state, kCancel);
+                else if (g.ActiveIdWindow != nullptr && std::strncmp(g.ActiveIdWindow->Name, "Saloon tuning", 13) == 0)
+                    ; // the dev panel's sliders
                 else if (g.ActiveIdIsJustActivated && g.ActiveId != 0 && g.ActiveId != state.volumeSliderId &&
                          std::find(g_silentItems.begin(), g_silentItems.end(), g.ActiveId) == g_silentItems.end())
                 {
@@ -645,123 +699,18 @@ namespace kamite::launcher
                 target.x = std::clamp((mouse.x - width * 0.5f) / (width * 0.5f), -1.0f, 1.0f);
                 target.y = std::clamp((mouse.y - height * 0.5f) / (height * 0.5f), -1.0f, 1.0f);
             }
+            // The saloon: the room snaps to centre on the zoom's first frame and holds still through it and Options;
+            // back at Home it eases in again (K).
+            if (state.saloonOn && (state.scene.zoomFrame() > 0 || screen == Screen::Options))
+            {
+                state.parallax = ImVec2(0.0f, 0.0f);
+                target = ImVec2(0.0f, 0.0f);
+            }
             const float ease = 1.0f - std::exp(-dt * 3.0f);
             state.parallax.x += (target.x - state.parallax.x) * ease;
             state.parallax.y += (target.y - state.parallax.y) * ease;
             const float shown = screen == Screen::Options ? 0.0f : 1.0f;
             state.burstShown += (shown - state.burstShown) * (1.0f - std::exp(-dt * 5.0f));
-        }
-
-        // background.png's effects, drawn over the whole window: a rising heat haze along the horizon, a fake depth of
-        // field (the town and the walkers in focus, the near sand soft, a little softening everywhere to hide the
-        // image's low resolution) and wispy clouds drifting on a plane above the desert, behind the town. The header
-        // (#version) is added for the GL version raylib runs.
-        const char *const kBackgroundShader = R"glsl(
-in vec2 fragTexCoord;
-in vec4 fragColor;
-uniform sampler2D texture0;
-uniform vec4 colDiffuse;
-uniform vec2 texel; // 1 / the image's size
-uniform float time; // seconds
-uniform vec4 view;  // the part of the image in the window: x, y, width, height in image uv
-out vec4 finalColor;
-
-const float kHorizon = 0.625; // the horizon's height in background.png (0 top, 1 bottom)
-
-float hash(vec2 p)
-{
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-}
-float noise(vec2 p)
-{
-    vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-float fbm(vec2 p)
-{
-    float v = 0.0, a = 0.5;
-    for (int i = 0; i < 5; ++i)
-    {
-        v += a * noise(p);
-        p = p * 2.03 + vec2(17.1, 9.2);
-        a *= 0.5;
-    }
-    return v;
-}
-
-const vec2 kDisc[12] = vec2[](vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621),
-                              vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893),
-                              vec2(0.507, 0.064), vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
-
-void main()
-{
-    vec2 uv = fragTexCoord;
-    float d = uv.y - kHorizon; // < 0 sky, > 0 sand
-
-    // Heat haze: rising shimmer, strongest along the horizon, weaker over the sand, none high in the sky.
-    float haze = smoothstep(-0.07, 0.0, d) * (0.35 + 0.65 * exp(-max(d, 0.0) * 14.0));
-    float w = noise(vec2(uv.x * 60.0, uv.y * 150.0 + time * 2.4)) + 0.5 * noise(vec2(uv.x * 120.0, uv.y * 300.0 + time * 4.1)) - 0.75;
-    uv += vec2(2.6, 0.8) * w * haze * texel;
-
-    // Fake depth of field: the horizon (the town, the walkers) in focus, the near sand soft; a little softening
-    // everywhere hides the image's low resolution.
-    float radius = 1.3 + 2.8 * smoothstep(0.03, 0.37, d) + 0.5 * smoothstep(0.0, -0.4, d);
-    vec3 centre = texture(texture0, uv).rgb;
-    vec3 col = centre;
-    for (int i = 0; i < 12; ++i)
-        col += texture(texture0, uv + kDisc[i] * radius * texel).rgb;
-    col /= 13.0;
-
-    // Wispy clouds on a plane above the desert, drifting sideways (no loop seam: the noise never repeats).
-    float h = kHorizon - fragTexCoord.y;
-    if (h > 0.0)
-    {
-        float depth = 0.12 / (h + 0.03);
-        vec2 q = vec2((fragTexCoord.x - 0.5) * depth * 6.0 + time * 0.018, depth * 14.0);
-        q += 0.7 * vec2(fbm(q * 0.7 + vec2(0.0, time * 0.02)), fbm(q * 0.7 + vec2(5.2, 1.3)));
-        float c = fbm(q);
-        float a = smoothstep(0.50, 0.82, c) * smoothstep(0.0, 0.14, h) * 0.6;
-        a *= smoothstep(0.0, 0.08, centre.b - centre.r); // only over the sky, behind the town
-        col = mix(col, mix(vec3(1.0), col, 0.2), a);
-    }
-    // Toned down so the launcher's text reads over it: a little darker overall, more towards the bottom, a vignette.
-    vec2 sp = (fragTexCoord - view.xy) / view.zw; // 0..1 over the window
-    vec2 v = sp - 0.5;
-    col *= (1.0 - 0.08) * (1.0 - 0.45 * smoothstep(0.45, 1.0, sp.y)) * (1.0 - 0.3 * smoothstep(0.2, 0.75, dot(v, v) * 2.0));
-    finalColor = vec4(col, 1.0) * colDiffuse * fragColor;
-}
-)glsl";
-
-        // The desert, covering the window: fitted to the height up to the image's own width (2.76:1; wider windows crop
-        // it vertically), anchored right so the town and the walkers stay in frame when the window is narrower.
-        // False without background.png (the gradient is drawn instead).
-        bool drawDesert(const State &state)
-        {
-            const Texture2D &image = state.background;
-            if (image.id == 0u || image.width <= 0 || image.height <= 0)
-                return false;
-            const float width = static_cast<float>(GetScreenWidth()), height = static_cast<float>(GetScreenHeight());
-            const float imageWidth = static_cast<float>(image.width), imageHeight = static_cast<float>(image.height);
-            const float scale = std::max(width / imageWidth, height / imageHeight);
-            const float shownWidth = width / scale, shownHeight = height / scale;
-            const float x = imageWidth - shownWidth, y = (imageHeight - shownHeight) * 0.5f;
-            const bool shaded = state.backgroundShader.id != 0u && state.backgroundShader.id != rlGetShaderIdDefault();
-            if (shaded)
-            {
-                const float texel[2] = {1.0f / imageWidth, 1.0f / imageHeight};
-                SetShaderValue(state.backgroundShader, state.backgroundTexel, texel, SHADER_UNIFORM_VEC2);
-                SetShaderValue(state.backgroundShader, state.backgroundTime, &state.time, SHADER_UNIFORM_FLOAT);
-                const float view[4] = {x / imageWidth, y / imageHeight, shownWidth / imageWidth, shownHeight / imageHeight};
-                SetShaderValue(state.backgroundShader, state.backgroundView, view, SHADER_UNIFORM_VEC4);
-                BeginShaderMode(state.backgroundShader);
-            }
-            DrawTexturePro(image, Rectangle{x, y, shownWidth, shownHeight}, Rectangle{0.0f, 0.0f, width, height},
-                           Vector2{0.0f, 0.0f}, 0.0f, WHITE);
-            if (shaded)
-                EndShaderMode();
-            return true;
         }
 
         // One layer of the burst: the texture centred at (x, y), radius in pixels, squashed vertically, turned.
@@ -791,6 +740,15 @@ void main()
             }
             const float unit = state.unit, t = state.time, shown = state.burstShown;
             const ImVec2 p = state.parallax;
+            if (state.saloonOn) // in the doorway's glare: sized by the logo, drifting with the room
+            {
+                const float r = (state.logoMax.x - state.logoMin.x) * 0.77f * state.scene.tuning().burst;
+                drawBurstLayer(state.burst, x, y, r * (1.0f + 0.02f * std::sin(t * 1.1f + 1.0f)), t * 1.2f,
+                               static_cast<unsigned char>(45.0f * shown));
+                drawBurstLayer(state.burst, x, y, r * 0.78f * (1.0f + 0.03f * std::sin(t * 1.6f)), 40.0f - t * 2.0f,
+                               static_cast<unsigned char>(70.0f * shown));
+                return;
+            }
             // Back layer: bigger, dimmer, turns one way and shifts the most; front layer: the other way, less.
             drawBurstLayer(state.burst, x - p.x * 36.0f * unit, y - p.y * 36.0f * unit,
                            diagonal * 0.80f * (1.0f + 0.02f * std::sin(t * 1.1f + 1.0f)), t * 1.2f,
@@ -917,10 +875,290 @@ void main()
             return clicked;
         }
 
+        unsigned char alphaOf(float a) { return static_cast<unsigned char>(std::clamp(a, 0.0f, 1.0f) * 255.0f); }
+
+        // ---- the saloon's paper UI (launcher_saloon.h) ---------------------------------------------------------------
+        // An invisible button over a box on a paper (the bill, a slip): ImGui gets the box's inscribed rectangle on
+        // screen (keyboard / gamepad focus, clicks); moving the mouse over the box itself (exactly, through the paper's
+        // perspective) moves the focus there (K: hover moves the focus), without the cursor's tick.
+        bool paperButton(const char *id, Rectangle box, const saloon::Homography &paper, bool hoverFocus, bool *focused = nullptr)
+        {
+            saloon::Quad q;
+            q.p[0] = paper.map(box.x, box.y);
+            q.p[1] = paper.map(box.x + box.width, box.y);
+            q.p[2] = paper.map(box.x + box.width, box.y + box.height);
+            q.p[3] = paper.map(box.x, box.y + box.height);
+            // ImGui's box: the item's middle, as wide as its middle line and as tall as its middle column (a long line
+            // on a tilted paper would have no inner box, and its outer one would reach over its neighbours).
+            const Vector2 c = paper.map(box.x + box.width * 0.5f, box.y + box.height * 0.5f);
+            const Vector2 l = paper.map(box.x, box.y + box.height * 0.5f), r = paper.map(box.x + box.width, box.y + box.height * 0.5f);
+            const Vector2 t = paper.map(box.x + box.width * 0.5f, box.y), b = paper.map(box.x + box.width * 0.5f, box.y + box.height);
+            const float halfW = std::max(1.0f, std::fabs(r.x - l.x) * 0.5f), halfH = std::max(1.0f, std::fabs(b.y - t.y) * 0.5f);
+            const float x0 = c.x - halfW, x1 = c.x + halfW, y0 = c.y - halfH, y1 = c.y + halfH;
+            ImGui::SetCursorScreenPos(ImVec2(x0, y0));
+            // EnableNav: an invisible button is no keyboard / gamepad stop unless asked
+            const bool pressed = ImGui::InvisibleButton(id, ImVec2(std::max(1.0f, x1 - x0), std::max(1.0f, y1 - y0)), ImGuiButtonFlags_EnableNav);
+            const ImGuiIO &io = ImGui::GetIO();
+            const bool moved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
+            if (hoverFocus && moved && !ImGui::IsItemFocused() && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) &&
+                saloon::inside(q, Vector2{io.MousePos.x, io.MousePos.y}))
+                ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+            if (focused != nullptr)
+                *focused = ImGui::IsItemFocused();
+            return pressed;
+        }
+
+        // The corner slips (K, Nov 17): paper slips poking up from the picture's bottom edge, in dark ink: Add to Steam
+        // on the left, the version / update and the volume on the right. A slip's own units: x right, y down; about
+        // kSlipShown of its height shows above the edge.
+        enum SlipItem
+        {
+            kSlipNone,
+            kSlipSteam,
+            kSlipNotes,
+            kSlipUpdate,
+            kSlipMute,
+            kSlipVolume,
+        };
+        constexpr float kSlipH = 240.0f, kSlipShown = 168.0f;
+        constexpr Color kSlipInk{40, 28, 20, 238};
+        constexpr Color kSlipPencil{164, 30, 22, 220};
+        constexpr float kSlipPi = 3.14159265f;
+        struct Slip
+        {
+            saloon::Homography paper;
+            saloon::Quad quad;
+            float w = 0.0f, h = kSlipH;
+        };
+        Slip slipAt(const State &state, bool right)
+        {
+            const Rectangle pic = state.scene.picture();
+            const float k = pic.height / 900.0f * 0.56f; // screen pixels a slip unit
+            Slip slip;
+            slip.w = right ? 760.0f : 420.0f;
+            const float angle = (right ? -1.4f : 1.8f) * DEG2RAD, c = std::cos(angle), sn = std::sin(angle);
+            const float margin = pic.height * 0.03f;
+            const float cx = right ? pic.x + pic.width - margin - slip.w * k * 0.5f : pic.x + margin + slip.w * k * 0.5f;
+            const float cy = pic.y + pic.height - kSlipShown * k + slip.h * k * 0.5f;
+            const float hw = slip.w * 0.5f, hh = slip.h * 0.5f;
+            const Vector2 corners[4] = {{-hw, -hh}, {hw, -hh}, {hw, hh}, {-hw, hh}};
+            for (int i = 0; i < 4; ++i)
+                slip.quad.p[i] = Vector2{cx + (corners[i].x * c - corners[i].y * sn) * k, cy + (corners[i].x * sn + corners[i].y * c) * k};
+            slip.paper = saloon::Homography::rectToQuad(slip.w, slip.h, slip.quad);
+            return slip;
+        }
+
+        // A slip's paper: a soft shadow, then the paper (its rim a little darker), faded by `alpha`.
+        void drawSlipPaper(const State &state, const Slip &slip, float alpha)
+        {
+            const Texture2D &paper = state.scene.paper();
+            if (alpha <= 0.0f || paper.id == 0u)
+                return;
+            // the shadow: three widening quads, down and out a little
+            const Vector2 centre{(slip.quad.p[0].x + slip.quad.p[2].x) * 0.5f, (slip.quad.p[0].y + slip.quad.p[2].y) * 0.5f};
+            for (int ring = 3; ring >= 1; --ring)
+            {
+                const float grow = 3.0f * static_cast<float>(ring);
+                Vector2 q[4];
+                for (int i = 0; i < 4; ++i)
+                {
+                    const float dx = slip.quad.p[i].x - centre.x, dy = slip.quad.p[i].y - centre.y, d = std::max(1.0f, std::hypot(dx, dy));
+                    q[i] = Vector2{slip.quad.p[i].x + dx / d * grow + 2.0f, slip.quad.p[i].y + dy / d * grow + 4.0f};
+                }
+                const Color shade{0, 0, 0, alphaOf(0.10f * alpha)};
+                DrawTriangle(q[0], q[3], q[2], shade);
+                DrawTriangle(q[0], q[2], q[1], shade);
+            }
+            // the paper, 4x4 cells: the rim's vertices darker
+            constexpr int kCells = 4;
+            const float tile = 300.0f; // slip units a tile of the paper texture
+            rlDisableBackfaceCulling();
+            rlSetTexture(paper.id);
+            rlBegin(RL_QUADS);
+            for (int y = 0; y < kCells; ++y)
+                for (int x = 0; x < kCells; ++x)
+                {
+                    const int corners[4][2] = {{x, y}, {x, y + 1}, {x + 1, y + 1}, {x + 1, y}};
+                    for (const auto &corner : corners)
+                    {
+                        const float u = slip.w * static_cast<float>(corner[0]) / kCells, v = slip.h * static_cast<float>(corner[1]) / kCells;
+                        const bool rim = corner[0] == 0 || corner[0] == kCells || corner[1] == 0;
+                        const float shade = rim ? 0.80f : 1.0f;
+                        rlColor4ub(alphaOf(shade), alphaOf(shade * 0.96f), alphaOf(shade * 0.92f), alphaOf(alpha));
+                        rlTexCoord2f(u / tile, v / tile);
+                        const Vector2 at = slip.paper.map(u, v);
+                        rlVertex2f(at.x, at.y);
+                    }
+                }
+            rlEnd();
+            rlSetTexture(0);
+            rlDrawRenderBatchActive();
+            rlEnableBackfaceCulling();
+        }
+
+        // What sits on the slips, in slip units.
+        constexpr Rectangle kMuteBox{404.0f, 78.0f, 64.0f, 70.0f};
+        constexpr float kRulerY = 128.0f, kRulerX0 = 492.0f, kRulerX1 = 722.0f, kRulerTop = 70.0f, kRulerBottom = 152.0f;
+        constexpr Vector2 kSteamAt{210.0f, 78.0f}, kNotesAt{110.0f, 140.0f}, kUpdateAt{285.0f, 140.0f};
+
+        Rectangle slipTextBox(const Font &font, const char *text, float size, Vector2 centre)
+        {
+            const float w = saloon::inkWidth(font, text, size);
+            return Rectangle{centre.x - w * 0.5f - 14.0f, centre.y - size * 0.6f, w + 28.0f, size * 1.2f};
+        }
+
+        bool updateAvailable() { return g_updateCheck.state.load() == static_cast<int>(update::CheckState::Available); }
+#if KAMITE_LAUNCHER_STEAM
+        const char *steamLabel(const State &state) { return state.steam.added ? "Update Steam Entry" : "Add to Steam"; }
+        float steamSize(const State &state) { return state.steam.added ? 34.0f : 42.0f; }
+#endif
+
+        // The slips' ink (before ImGui, from last frame's focus): their words, the speaker, the ruler, the loop.
+        void drawSlipInk(const State &state, const Slip &slip, bool right, float alpha)
+        {
+            const saloon::BillFonts &f = state.billFonts;
+            Color ink = kSlipInk, pencil = kSlipPencil;
+            ink.a = alphaOf(ink.a / 255.0f * alpha);
+            pencil.a = alphaOf(pencil.a / 255.0f * alpha);
+            const auto loop = [&](Rectangle box, uint32_t seed) { saloon::inkLoop(box, 1.0f, seed, pencil, slip.paper, 4.0f); };
+            saloon::beginInk();
+            if (!right)
+            {
+#if KAMITE_LAUNCHER_STEAM
+                saloon::inkText(f.heading, steamLabel(state), kSteamAt, steamSize(state), ink, slip.paper);
+                if (state.slipFocus == kSlipSteam)
+                    loop(slipTextBox(f.heading, steamLabel(state), steamSize(state), kSteamAt), 11u);
+#endif
+            }
+            else
+            {
+                const std::string version = update::versionLabel();
+                const float vw = saloon::inkWidth(f.text, version.c_str(), 32.0f);
+                const float scale = vw > 340.0f ? 340.0f / vw : 1.0f; // a dev build's long label
+                saloon::inkText(f.text, version.c_str(), Vector2{40.0f + vw * scale * 0.5f, 48.0f}, 32.0f * scale, ink, slip.paper);
+                if (updateAvailable() && state.screen == Screen::Home)
+                {
+                    const std::string out = g_updateCheck.release.tag + " is out";
+                    const float ow = saloon::inkWidth(f.text, out.c_str(), 26.0f);
+                    saloon::inkText(f.text, out.c_str(), Vector2{40.0f + ow * 0.5f, 88.0f}, 26.0f, ink, slip.paper);
+                    saloon::inkText(f.item, "What's new", kNotesAt, 34.0f, ink, slip.paper);
+                    saloon::inkText(f.item, "Update", kUpdateAt, 34.0f, ink, slip.paper);
+                    if (state.slipFocus == kSlipNotes)
+                        loop(slipTextBox(f.item, "What's new", 34.0f, kNotesAt), 21u);
+                    if (state.slipFocus == kSlipUpdate)
+                        loop(slipTextBox(f.item, "Update", 34.0f, kUpdateAt), 22u);
+                }
+                // the volume: its label, a speaker, a ruler with a paperclip at the value
+                saloon::inkText(f.text, "Volume", Vector2{607.0f, 46.0f}, 30.0f, ink, slip.paper);
+                const float mx = kMuteBox.x + 12.0f, my = kMuteBox.y + kMuteBox.height * 0.5f;
+                const Vector2 speaker[7] = {{mx, my - 9.0f},          {mx + 10.0f, my - 9.0f}, {mx + 24.0f, my - 22.0f}, {mx + 24.0f, my + 22.0f},
+                                            {mx + 10.0f, my + 9.0f}, {mx, my + 9.0f},         {mx, my - 9.0f}};
+                saloon::inkLine(speaker, 7, 4.5f, ink, slip.paper);
+                if (state.muted || state.volume <= 0.0f)
+                {
+                    const Vector2 a[2] = {{mx + 32.0f, my - 10.0f}, {mx + 50.0f, my + 10.0f}}, b[2] = {{mx + 32.0f, my + 10.0f}, {mx + 50.0f, my - 10.0f}};
+                    saloon::inkLine(a, 2, 4.0f, ink, slip.paper);
+                    saloon::inkLine(b, 2, 4.0f, ink, slip.paper);
+                }
+                else
+                    for (int wave = 0; wave < (state.volume > 0.5f ? 2 : 1); ++wave)
+                    {
+                        Vector2 arc[9];
+                        const float r = 14.0f + 11.0f * static_cast<float>(wave);
+                        for (int i = 0; i < 9; ++i)
+                        {
+                            const float a = -0.8f + 1.6f * static_cast<float>(i) / 8.0f;
+                            arc[i] = Vector2{mx + 24.0f + std::cos(a) * r, my + std::sin(a) * r};
+                        }
+                        saloon::inkLine(arc, 9, 3.5f, ink, slip.paper);
+                    }
+                if (state.slipFocus == kSlipMute)
+                    loop(kMuteBox, 31u);
+                const Vector2 ruler[2] = {{kRulerX0, kRulerY}, {kRulerX1, kRulerY}};
+                saloon::inkLine(ruler, 2, 3.0f, ink, slip.paper);
+                for (int i = 0; i <= 20; ++i)
+                {
+                    const float x = kRulerX0 + (kRulerX1 - kRulerX0) * static_cast<float>(i) / 20.0f;
+                    const float tall = i % 10 == 0 ? 26.0f : i % 2 == 0 ? 15.0f : 9.0f;
+                    const Vector2 tick[2] = {{x, kRulerY - tall}, {x, kRulerY}};
+                    saloon::inkLine(tick, 2, 2.2f, ink, slip.paper);
+                }
+                // the paperclip, standing on the ruler at the value: two nested loops of steel wire
+                const float px = kRulerX0 + (kRulerX1 - kRulerX0) * (state.muted ? 0.0f : state.volume);
+                const Color steel{96, 100, 110, alphaOf(0.95f * alpha)};
+                const auto clip = [&](float w, float top, float bottom) {
+                    Vector2 wire[24];
+                    for (int i = 0; i < 12; ++i)
+                    {
+                        const float a = kSlipPi * static_cast<float>(i) / 11.0f;
+                        wire[i] = Vector2{px - std::cos(a) * w, top - std::sin(a) * w + w};
+                        wire[12 + i] = Vector2{px + std::cos(a) * w, bottom + std::sin(a) * w - w};
+                    }
+                    saloon::inkLine(wire, 24, 3.2f, steel, slip.paper);
+                };
+                clip(9.0f, kRulerY - 52.0f, kRulerY + 14.0f);
+                clip(5.5f, kRulerY - 40.0f, kRulerY + 6.0f);
+                if (state.slipFocus == kSlipVolume)
+                    loop(Rectangle{kRulerX0 - 16.0f, kRulerY - 60.0f, kRulerX1 - kRulerX0 + 32.0f, 84.0f}, 41u);
+            }
+            saloon::endInk();
+        }
+
         // The lower right corner's volume: a mute button (a speaker, crossed out when muted) left of a slider; both kept
         // in GHR.ini.
         void drawVolume(State &state)
         {
+            if (state.saloonOn) // on the right slip: the speaker and the ruler (their ink is drawn before ImGui)
+            {
+                const Slip slip = slipAt(state, true);
+                bool focused = false;
+                if (paperButton("##mute", kMuteBox, slip.paper, true, &focused))
+                {
+                    state.muted = !state.muted;
+                    state.ini.setBool("Launcher", "Mute", state.muted);
+                    state.ini.save();
+                }
+                if (focused)
+                    state.slipFocus = kSlipMute;
+                // an ImGui slider with nothing of its own showing, over the ruler (mouse drag, arrows, d-pad)
+                const Vector2 a = slip.paper.map(kRulerX0, kRulerTop), b = slip.paper.map(kRulerX1, kRulerBottom);
+                ImGui::SetCursorScreenPos(ImVec2(a.x, a.y));
+                const ImGuiCol hidden[] = {ImGuiCol_FrameBg,    ImGuiCol_FrameBgHovered,   ImGuiCol_FrameBgActive, ImGuiCol_SliderGrab,
+                                           ImGuiCol_SliderGrabActive, ImGuiCol_Text, ImGuiCol_Border,         ImGuiCol_NavCursor};
+                for (const ImGuiCol col : hidden)
+                    ImGui::PushStyleColor(col, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                                    ImVec2(0.0f, std::max(1.0f, (b.y - a.y) * 0.5f - ImGui::GetFontSize() * 0.5f)));
+                ImGui::SetNextItemWidth(std::max(1.0f, b.x - a.x));
+                float percent = state.volume * 100.0f;
+                if (ImGui::SliderFloat("##volume", &percent, 0.0f, 100.0f, "", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput))
+                {
+                    state.volume = percent / 100.0f;
+                    if (state.muted && state.volume > 0.0f)
+                    {
+                        state.muted = false;
+                        state.ini.setBool("Launcher", "Mute", false);
+                    }
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(static_cast<int>(std::size(hidden)));
+                state.volumeSliderId = ImGui::GetItemID();
+                const ImGuiIO &io = ImGui::GetIO();
+                if (ImGui::IsItemHovered() && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f) && !ImGui::IsItemFocused() &&
+                    !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId))
+                    ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+                if (ImGui::IsItemFocused())
+                    state.slipFocus = kSlipVolume;
+                if (ImGui::IsItemDeactivatedAfterEdit())
+                {
+                    char text[16];
+                    std::snprintf(text, sizeof(text), "%.2f", state.volume);
+                    state.ini.set("Launcher", "Volume", text);
+                    state.ini.save();
+                }
+                return;
+            }
+
             const float size = fontSize(state, 34.0f), margin = fontSize(state, 22.0f), slider = fontSize(state, 200.0f);
             const float gap = fontSize(state, 8.0f);
             ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - margin - slider - gap - size, ImGui::GetWindowHeight() - margin - size));
@@ -1023,7 +1261,29 @@ void main()
             const float right = ImGui::GetWindowWidth() - margin;
             float y = ImGui::GetWindowHeight() - margin - size - gap;
             const update::Release &release = g_updateCheck.release;
-            if (available)
+            if (state.saloonOn) // on the right slip (its ink is drawn before ImGui)
+            {
+                if (available)
+                {
+                    const Slip slip = slipAt(state, true);
+                    bool focused = false;
+                    if (paperButton("##notes", slipTextBox(state.billFonts.item, "What's new", 34.0f, kNotesAt), slip.paper, true, &focused))
+                    {
+                        state.updatePopup = Popup::Notes;
+                        state.updateOpenPopup = true;
+                    }
+                    if (focused)
+                        state.slipFocus = kSlipNotes;
+                    if (paperButton("##update", slipTextBox(state.billFonts.item, "Update", 34.0f, kUpdateAt), slip.paper, true, &focused))
+                    {
+                        startUpdate(state);
+                        state.updateOpenPopup = true;
+                    }
+                    if (focused)
+                        state.slipFocus = kSlipUpdate;
+                }
+            }
+            else if (available)
             {
                 pushSize(state, 20.0f);
                 const ImVec2 pad = ImGui::GetStyle().FramePadding;
@@ -1048,12 +1308,15 @@ void main()
                 ImGui::PopFont();
                 y -= gap * 0.6f;
             }
-            pushSize(state, 18.0f);
-            const std::string label = update::versionLabel() + (available ? "  \xC2\xB7  " + release.tag + " is out" : std::string());
-            const ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
-            ImGui::SetCursorPos(ImVec2(right - textSize.x, y - textSize.y));
-            ImGui::TextColored(kTextSoft, "%s", label.c_str());
-            ImGui::PopFont();
+            if (!state.saloonOn)
+            {
+                pushSize(state, 18.0f);
+                const std::string label = update::versionLabel() + (available ? "  \xC2\xB7  " + release.tag + " is out" : std::string());
+                const ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
+                ImGui::SetCursorPos(ImVec2(right - textSize.x, y - textSize.y));
+                ImGui::TextColored(kTextSoft, "%s", label.c_str());
+                ImGui::PopFont();
+            }
 
             if (state.updateOpenPopup)
             {
@@ -1198,8 +1461,22 @@ void main()
                 return;
             const float size = fontSize(state, 34.0f), margin = fontSize(state, 22.0f);
             pushSize(state, 20.0f);
-            ImGui::SetCursorPos(ImVec2(margin, ImGui::GetWindowHeight() - margin - size));
-            if (ImGui::Button(state.steam.added ? "Update Steam Entry" : "Add to Steam", ImVec2(0.0f, size)))
+            bool pressed = false;
+            if (state.saloonOn) // on the left slip (its ink is drawn before ImGui)
+            {
+                const Slip slip = slipAt(state, false);
+                bool focused = false;
+                pressed = paperButton("##steam", slipTextBox(state.billFonts.heading, steamLabel(state), steamSize(state), kSteamAt), slip.paper,
+                                      true, &focused);
+                if (focused)
+                    state.slipFocus = kSlipSteam;
+            }
+            else
+            {
+                ImGui::SetCursorPos(ImVec2(margin, ImGui::GetWindowHeight() - margin - size));
+                pressed = ImGui::Button(state.steam.added ? "Update Steam Entry" : "Add to Steam", ImVec2(0.0f, size));
+            }
+            if (pressed)
             {
                 if (steam::running())
                     state.steamPopup = Popup::Confirm;
@@ -1323,8 +1600,6 @@ void main()
                            Rectangle{min.x, min.y, max.x - min.x, max.y - min.y}, Vector2{0.0f, 0.0f}, 0.0f, tint);
         }
 
-        unsigned char alphaOf(float a) { return static_cast<unsigned char>(std::clamp(a, 0.0f, 1.0f) * 255.0f); }
-
         float ramp(float t, float a, float b) { return std::clamp((t - a) / (b - a), 0.0f, 1.0f); }
 
         // Smooth in and out (smoothstep), so no step lands as a pop at 60 Hz.
@@ -1442,7 +1717,12 @@ void main()
         {
             if (!(state.logoThisFrame || (force && state.logoPlaced)))
                 return;
-            const ImVec2 shift(state.parallax.x * fontSize(state, 10.0f), state.parallax.y * fontSize(state, 7.0f));
+            ImVec2 shift(state.parallax.x * fontSize(state, 10.0f), state.parallax.y * fontSize(state, 7.0f));
+            if (state.saloonOn)
+            {
+                const Vector2 kana = state.scene.kanaShift(state.logoMax.x - state.logoMin.x);
+                shift = ImVec2(kana.x, kana.y);
+            }
             drawLayer(state.kana, ImVec2(state.logoMin.x + shift.x, state.logoMin.y + shift.y),
                       ImVec2(state.logoMax.x + shift.x, state.logoMax.y + shift.y), WHITE);
             drawLayer(state.logo, state.logoMin, state.logoMax, WHITE);
@@ -1452,6 +1732,12 @@ void main()
 
         void title(State &state)
         {
+            if (state.saloonOn) // the logo is in the doorway (placed before ImGui): the screen starts under it
+            {
+                const float below = state.logoPlaced ? state.logoMax.y - ImGui::GetCursorScreenPos().y : fontSize(state, 300.0f);
+                ImGui::Dummy(ImVec2(0.0f, std::max(fontSize(state, 24.0f), below + fontSize(state, 12.0f))));
+                return;
+            }
             if (state.logo.id != 0u && state.logo.height > 0)
             {
                 ImGui::Dummy(ImVec2(0.0f, fontSize(state, 24.0f)));
@@ -1485,6 +1771,254 @@ void main()
             ImGui::Dummy(ImVec2(0.0f, fontSize(state, 40.0f)));
         }
 
+        // ---- Home in the saloon (K, Nov 18): the menu on the bill of fare --------------------------------------------
+        // The logo's GOD HAND + plate box in logo.png's canvas (tools/logo: placed in the doorway by that box).
+        constexpr float kLogoContent[4] = {0.1225f, 0.3679f, 0.8968f, 0.9002f};
+
+        // The bill's items: Play (Install when not installed), Options, Quit, then "Don't show this again".
+        constexpr size_t kBillOptions = 1;
+
+        void openOptions(State &state)
+        {
+            g_hotkeysOpen = false;
+            saloon::Scene &scene = state.scene;
+            if (!scene.zoomBroken() && !scene.zoomReady())
+            {
+                state.zoomPending = true; // its frames are still being read (the first moments): it starts when they are
+                return;
+            }
+            if (scene.zoomBroken())
+            {
+                state.screen = Screen::Options; // straight there, over Home darkened
+                state.focusFirst = true;
+                state.optionsShown = 0.0f;
+                state.optionsLeaving = false;
+                return;
+            }
+            scene.zoomIn(); // the main loop opens Options when it lands
+        }
+
+        void drawSaloonHome(State &state)
+        {
+            if (state.installed && state.firstRunPending)
+            {
+                state.screen = Screen::FirstRun; // a new install whose disc image was found without the Install screen
+                state.focusFirst = true;
+                return;
+            }
+            saloon::Scene &scene = state.scene;
+            const ImGuiIO &io = ImGui::GetIO();
+            const bool popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
+            const bool home = scene.atHome() && state.playTime < 0.0f;
+            // Through the zoom only Back counts: it reverses from the frame showing.
+            if (scene.zoomingIn() && !popup &&
+                (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
+            {
+                scene.zoomOut();
+                menuSound(state, kCancel);
+            }
+            saloon::Bill &bill = state.bill;
+            bill.items = {state.installed ? "Play" : "Install", "Options", "Quit"};
+            bill.splash = state.splash;
+            bill.showDontShow = state.installed;
+            bill.dontShow = !state.ini.getBool("Launcher", "Show", true);
+            saloon::Quad quad;
+            int focus = -1;
+            bool billShown = false;
+            const Vector2 mouse{io.MousePos.x, io.MousePos.y};
+            const bool moved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
+            const bool overBook = home && !popup && scene.bookHit(mouse);
+            if (scene.bill(quad))
+            {
+                billShown = true;
+                const saloon::Homography paper = saloon::Homography::rectToQuad(saloon::kPaperW, saloon::kPaperH, quad);
+                const std::vector<Rectangle> targets = saloon::billTargets(state.billFonts, bill);
+                if (!home)
+                    ImGui::BeginDisabled();
+                for (size_t i = 0; i < targets.size(); ++i)
+                {
+                    ImGui::PushID(static_cast<int>(i));
+                    bool focused = false;
+                    const bool pressed = paperButton("##bill", targets[i], paper, home, &focused);
+                    if (home && ((state.focusFirst && i == 0) || (state.focusOptions && i == kBillOptions)))
+                    {
+                        // Play starts focused, its loop showing, so A / Enter plays at once (K Oct 29); back from
+                        // Options the loop is on Options again. (Set on the item itself: SetKeyboardFocusHere tabs
+                        // to the next text-input item, here the volume slider, and opens it.)
+                        ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+                        ImGui::SetNavCursorVisible(true);
+                        focused = true;
+                    }
+                    // hovering the book is hovering Options (the book lights, the loop goes to Options)
+                    if (home && i == kBillOptions && overBook && moved && !focused)
+                    {
+                        ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+                        focused = true;
+                    }
+                    if (focused)
+                        focus = static_cast<int>(i);
+                    if (i == 0 && state.installed)
+                        ownSoundItem(); // Play's own sound
+                    else if (i == bill.items.size())
+                        tickItem(); // the tick box
+                    if (pressed && home)
+                    {
+                        if (i == 0 && state.installed)
+                        {
+                            if (state.playTime < 0.0f)
+                            {
+                                state.playTime = 0.0f; // the plate's animation and the fade; the main loop starts the game after
+                                state.soundThisFrame = true; // Play's own sound, next frame
+                                scene.fling();               // the doors fling open into the fade
+                            }
+                        }
+                        else if (i == 0)
+                        {
+                            state.screen = Screen::Install;
+                            state.focusFirst = true;
+                        }
+                        else if (i == kBillOptions)
+                            openOptions(state);
+                        else if (i == 2)
+                        {
+                            state.result = Result::Quit;
+                            state.done = true;
+                        }
+                        else
+                        {
+                            state.ini.setBool("Launcher", "Show", bill.dontShow);
+                            state.ini.save();
+                        }
+                    }
+                    ImGui::PopID();
+                }
+                if (!home)
+                    ImGui::EndDisabled();
+            }
+            if (home && billShown)
+                state.focusOptions = false;
+            // A click on the book opens Options; on a snack, it is eaten (an egg: no hover hint, K).
+            if (home && !popup && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsAnyItemHovered())
+            {
+                if (overBook)
+                {
+                    menuSound(state, kConfirm);
+                    openOptions(state);
+                }
+                else if (scene.snackClick(mouse) != saloon::Scene::Bite::None)
+                    snackVoice(state);
+            }
+            // The loop follows the focus; through the zoom it stays where it was (on Options).
+            if (home && focus != bill.focus)
+            {
+                bill.focus = focus;
+                bill.focusSeed = static_cast<uint32_t>(std::rand()) * 2654435761u + 1u;
+                bill.focusAge = 0.0f;
+            }
+            // The rights notice at the foot of the screen, as before (too long for fine print on the bill): in the gap
+            // between the bill and the right slip when it fits there in two lines, else across from the bill to the
+            // picture's right edge, just above the slip; out through the zoom.
+            {
+                ImGui::PushStyleVar(ImGuiStyleVar_Alpha, scene.overlays() * ImGui::GetStyle().Alpha);
+                pushSize(state, 15.0f);
+                const Rectangle pic = scene.picture();
+                const float margin = fontSize(state, 16.0f);
+                float left = pic.x + pic.width * 0.06f;
+                saloon::Quad paper;
+                if (scene.atHome() && scene.bill(paper))
+                    left = std::max(left, std::max(paper.p[1].x, paper.p[2].x) + margin);
+                const Slip slip = slipAt(state, true);
+                const float slipLeft = std::min(slip.quad.p[0].x, slip.quad.p[3].x), slipTop = std::min(slip.quad.p[0].y, slip.quad.p[1].y);
+                const char *text = "God Hand™ is a trademark of CAPCOM CO., LTD. All rights to the game belong to Capcom.\n"
+                                   "God Hand: Rearmed is an unofficial fan-made project, not affiliated with or endorsed by Capcom or Clover "
+                                   "Studio. It contains no game data: play your own damn copy!";
+                const auto wrap = [&](float room) {
+                    std::vector<std::string> lines;
+                    std::string line, word;
+                    for (const char *c = text;; ++c)
+                    {
+                        if (*c == ' ' || *c == '\n' || *c == '\0')
+                        {
+                            const std::string tried = line.empty() ? word : line + " " + word;
+                            if (!line.empty() && ImGui::CalcTextSize(tried.c_str()).x > room)
+                            {
+                                lines.push_back(line);
+                                line = word;
+                            }
+                            else
+                                line = tried;
+                            word.clear();
+                            if ((*c == '\n' || *c == '\0') && !line.empty())
+                            {
+                                lines.push_back(line);
+                                line.clear();
+                            }
+                            if (*c == '\0')
+                                break;
+                        }
+                        else
+                            word += *c;
+                    }
+                    return lines;
+                };
+                float right = slipLeft - margin, bottom = pic.y + pic.height - fontSize(state, 14.0f);
+                std::vector<std::string> lines = wrap(std::max(fontSize(state, 120.0f), right - left));
+                if (lines.size() > 2)
+                {
+                    right = pic.x + pic.width - margin;
+                    bottom = slipTop - fontSize(state, 8.0f);
+                    lines = wrap(std::max(fontSize(state, 120.0f), right - left));
+                }
+                const float lineHeight = ImGui::GetTextLineHeight();
+                ImDrawList *draw = ImGui::GetWindowDrawList();
+                float y = bottom - lineHeight * static_cast<float>(lines.size());
+                const float centre = (left + right) * 0.5f;
+                const ImU32 shade = IM_COL32(10, 6, 4, static_cast<int>(70.0f * scene.overlays()));
+                const ImU32 colour = ImGui::GetColorU32(kTextSoft);
+                const float r = std::max(1.0f, ImGui::GetFontSize() * 0.09f);
+                for (const std::string &l : lines)
+                {
+                    const float x = centre - ImGui::CalcTextSize(l.c_str()).x * 0.5f;
+                    for (int i = 0; i < 12; ++i)
+                    {
+                        const float a = static_cast<float>(i) * 0.5236f;
+                        draw->AddText(ImVec2(x + std::cos(a) * r, y + r * 0.6f + std::sin(a) * r), shade, l.c_str());
+                    }
+                    draw->AddText(ImVec2(x, y), colour, l.c_str());
+                    y += lineHeight;
+                }
+                ImGui::PopFont();
+                ImGui::PopStyleVar();
+            }
+            if (billShown)
+                state.focusFirst = false;
+        }
+
+        // The saloon's ink before ImGui (so popups cover it), from last frame's focus: the bill, the corner slips.
+        void drawSaloonInk(State &state)
+        {
+            const saloon::Scene &scene = state.scene;
+            if (!scene.ready())
+                return;
+            saloon::Quad quad;
+            if (state.screen == Screen::Home && scene.bill(quad))
+                saloon::drawBill(state.billFonts, state.bill, saloon::Homography::rectToQuad(saloon::kPaperW, saloon::kPaperH, quad));
+            if (state.screen == Screen::Options)
+                return;
+            const float alpha = scene.overlays();
+#if KAMITE_LAUNCHER_STEAM
+            if (state.screen == Screen::Home && state.steam.available)
+            {
+                const Slip left = slipAt(state, false);
+                drawSlipPaper(state, left, alpha);
+                drawSlipInk(state, left, false, alpha);
+            }
+#endif
+            const Slip right = slipAt(state, true);
+            drawSlipPaper(state, right, alpha);
+            drawSlipInk(state, right, true, alpha);
+        }
+
         bool checkImage(State &state, const fs::path &image)
         {
             if (image.empty())
@@ -1511,6 +2045,7 @@ void main()
             state.ini.save();
             state.installed = true;
             loadMenuSounds(state, image);
+            loadSnackVoices(state, image);
             startBark(state, image);
             state.installMessage.clear();
             state.installError = false;
@@ -1520,6 +2055,11 @@ void main()
 
         void drawHome(State &state)
         {
+            if (state.saloonOn)
+            {
+                drawSaloonHome(state);
+                return;
+            }
             if (state.installed && state.firstRunPending)
             {
                 state.screen = Screen::FirstRun; // a new install whose disc image was found without the Install screen
@@ -2952,12 +3492,17 @@ void main()
             const bool cancel = !g_captureFrame && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) &&
                                 (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false));
             ImGui::PopFont();
-            if (back || cancel)
+            if ((back || cancel) && !state.optionsLeaving)
             {
                 menuSound(state, kCancel);
                 state.ini.save();
                 saveControls();
                 g_resetArmed = false;
+                if (state.saloonOn) // the panel fades out, then the zoom plays backwards (the main loop)
+                {
+                    state.optionsLeaving = true;
+                    return;
+                }
                 state.screen = Screen::Home;
                 state.focusFirst = true;
                 return;
@@ -3043,30 +3588,19 @@ void main()
                 SetTextureFilter(state.burst, TEXTURE_FILTER_TRILINEAR);
             }
         }
-        const fs::path backgroundPath = context.exeDir / "resources" / "images" / "background.png";
-        if (fs::is_regular_file(backgroundPath, error))
+        loadSplash(state, context.exeDir / "resources" / "splash");
+        // The saloon (resources/saloon): its images decode on worker threads while the launcher starts.
+        state.saloonOn = state.scene.open(context.exeDir / "resources" / "saloon");
+        if (state.saloonOn)
         {
-            state.background = LoadTexture(utf8(backgroundPath).c_str());
-            if (state.background.id != 0u)
+            state.scene.loadTuning(state.ini);
+            if (!saloon::loadBillFonts(state.billFonts, context.exeDir / "resources" / "fonts", state.splash))
             {
-                GenTextureMipmaps(&state.background);
-                SetTextureFilter(state.background, TEXTURE_FILTER_TRILINEAR);
-                SetTextureWrap(state.background, TEXTURE_WRAP_CLAMP);
-                const int gl = rlGetVersion();
-                const char *header = (gl == RL_OPENGL_33 || gl == RL_OPENGL_43) ? "#version 330\n"
-                                     : gl == RL_OPENGL_ES_30                    ? "#version 300 es\nprecision highp float;\n"
-                                                                                : nullptr;
-                if (header != nullptr)
-                {
-                    const std::string source = std::string(header) + kBackgroundShader;
-                    state.backgroundShader = LoadShaderFromMemory(nullptr, source.c_str());
-                    state.backgroundTexel = GetShaderLocation(state.backgroundShader, "texel");
-                    state.backgroundTime = GetShaderLocation(state.backgroundShader, "time");
-                    state.backgroundView = GetShaderLocation(state.backgroundShader, "view");
-                }
+                KM_WARN(Boot, "launcher: the bill's fonts are missing from resources/fonts, plain launcher");
+                state.scene.close();
+                state.saloonOn = false;
             }
         }
-        loadSplash(state, context.exeDir / "resources" / "splash");
         InitAudioDevice();
         state.audio = IsAudioDeviceReady();
         const fs::path musicPath = context.exeDir / "resources" / "music" / "launcher.ogg";
@@ -3096,6 +3630,7 @@ void main()
         if (state.installed)
         {
             loadMenuSounds(state, context.iso);
+            loadSnackVoices(state, context.iso);
             startBark(state, context.iso);
         }
         KM_INFO(Boot, "launcher: shown (" << (state.installed ? "installed" : "not installed") << ")");
@@ -3132,18 +3667,84 @@ void main()
                 SetMusicVolume(state.music, kMusicVolume * userVolume(state) * (1.0f - fade));
                 UpdateMusicStream(state.music);
             }
+            if (state.saloonOn && state.scene.failed())
+            {
+                KM_WARN(Boot, "launcher: the saloon failed to load, plain launcher");
+                state.scene.close();
+                state.saloonOn = false;
+            }
+            if (state.saloonOn)
+            {
+                const float dt = std::min(GetFrameTime(), 0.1f);
+                saloon::Scene::Frame frame;
+                frame.dt = dt;
+                frame.parallax = Vector2{state.parallax.x, state.parallax.y};
+                frame.volume = userVolume(state); // the curry's steam (muted: cold curry)
+                frame.bookLit = state.screen == Screen::Home && state.bill.focus == static_cast<int>(kBillOptions);
+                state.scene.update(frame);
+                state.bill.focusAge += dt;
+                if (state.zoomPending && state.screen == Screen::Home && (state.scene.zoomReady() || state.scene.zoomBroken()))
+                {
+                    state.zoomPending = false;
+                    openOptions(state);
+                }
+                // The zoom landed: Options' panel fades in over its last frame. Back: it fades out, then the zoom
+                // plays backwards (the bill's loop back on Options).
+                if (state.screen == Screen::Home && state.scene.landed())
+                {
+                    state.screen = Screen::Options;
+                    state.focusFirst = true;
+                    state.optionsShown = 0.0f;
+                    state.optionsLeaving = false;
+                }
+                if (state.screen == Screen::Options)
+                {
+                    const float target = state.optionsLeaving ? 0.0f : 1.0f;
+                    state.optionsShown += std::clamp(target - state.optionsShown, -dt / 0.12f, dt / 0.15f);
+                    if (state.optionsLeaving && state.optionsShown <= 0.0f)
+                    {
+                        state.optionsLeaving = false;
+                        state.screen = Screen::Home;
+                        state.focusOptions = true;
+                        state.scene.zoomOut();
+                    }
+                }
+            }
             const bool playing = state.playTime >= 0.0f;
             BeginDrawing();
-            if (!drawDesert(state))
+            if (state.saloonOn)
+            {
+                // Install and the first run's posters over Home darkened about halfway (K); Options without its zoom too.
+                const float dim = state.screen == Screen::Install || state.screen == Screen::FirstRun                ? 0.5f
+                                  : state.screen == Screen::Options && state.scene.zoomFrame() == 0 ? 0.65f
+                                                                                                         : 0.0f;
+                state.scene.draw(dim);
+                // The logo in the doorway's glare (not on Options or the posters), riding the zoom's frames.
+                Rectangle at{};
+                const bool shown = state.logo.id != 0u && state.screen != Screen::Options && state.screen != Screen::FirstRun &&
+                                   state.scene.ready() &&
+                                   state.scene.logo(kLogoContent, static_cast<float>(state.logo.height) / static_cast<float>(state.logo.width), at);
+                state.logoPlaced = shown;
+                state.logoThisFrame = shown;
+                if (shown)
+                {
+                    state.logoMin = ImVec2(at.x, at.y);
+                    state.logoMax = ImVec2(at.x + at.width, at.y + at.height);
+                }
+            }
+            else
                 drawBackground();
             drawBurst(state);
+            if (state.saloonOn)
+                drawSaloonInk(state);
             // A popup (Add to Steam's) must sit over the logo: while one is open on Home the logo goes under ImGui
             // (only on Home: the other screens draw no logo).
             const bool logoUnder = state.popupWasOpen && !playing && state.screen == Screen::Home;
             if (logoUnder)
             {
                 drawLogo(state, true);
-                drawSplash(state);
+                if (!state.saloonOn)
+                    drawSplash(state);
             }
             rlImGuiBegin();
             ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
@@ -3158,6 +3759,7 @@ void main()
                     ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha, 1.0f);
                     ImGui::BeginDisabled();
                 }
+                state.slipFocus = kSlipNone;
                 switch (state.screen)
                 {
                 case Screen::Home:
@@ -3167,7 +3769,19 @@ void main()
                     drawInstall(state);
                     break;
                 case Screen::Options:
-                    drawOptions(state);
+                    if (state.saloonOn) // over the zoom's last frame, fading in once it lands and out on Back
+                    {
+                        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, std::clamp(state.optionsShown, 0.0f, 1.0f));
+                        const bool leaving = state.optionsLeaving; // Back sets it inside
+                        if (leaving)
+                            ImGui::BeginDisabled();
+                        drawOptions(state);
+                        if (leaving)
+                            ImGui::EndDisabled();
+                        ImGui::PopStyleVar();
+                    }
+                    else
+                        drawOptions(state);
                     break;
                 case Screen::FirstRun:
                     drawFirstRun(state);
@@ -3188,12 +3802,20 @@ void main()
                 }
             }
             ImGui::End();
+#if !(defined(KAMITE_RELEASE) && KAMITE_RELEASE)
+            // F3 (dev builds): the saloon's tuning sliders; Save writes them to GHR.ini (K's defaults later).
+            if (state.saloonOn && ImGui::IsKeyPressed(ImGuiKey_F3, false))
+                state.tuningOpen = !state.tuningOpen;
+            if (state.tuningOpen && state.saloonOn)
+                state.tuningOpen = state.scene.drawTuning(state.ini);
+#endif
             frameSounds(state);
             rlImGuiEnd();
             if (!logoUnder)
             {
                 drawLogo(state);
-                drawSplash(state);
+                if (!state.saloonOn)
+                    drawSplash(state);
             }
             drawPosters(state);
             if (playing)
@@ -3223,10 +3845,8 @@ void main()
                     UnloadTexture(*texture);
         if (state.stamp.id != 0u)
             UnloadTexture(state.stamp);
-        if (state.background.id != 0u)
-            UnloadTexture(state.background);
-        if (state.backgroundShader.id != 0u && state.backgroundShader.id != rlGetShaderIdDefault())
-            UnloadShader(state.backgroundShader);
+        saloon::unloadBillFonts(state.billFonts);
+        state.scene.close(); // its threads and textures, before the game has the window
         if (state.splashFont.texture.id != 0u)
             UnloadFont(state.splashFont);
         if (state.barkWorker.joinable())
@@ -3253,6 +3873,8 @@ void main()
             for (int i = 0; i < 4; ++i)
                 if (state.hasMenuSound[i])
                     UnloadSound(state.menuSounds[i]);
+            for (Sound &voice : state.snackVoices)
+                UnloadSound(voice);
             if (state.audio)
                 CloseAudioDevice();
         }

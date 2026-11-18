@@ -2,6 +2,14 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 18, 2026
+
+- Launcher: a saloon replaces the desert: the menu is written on the bill of fare, the logo shines in the doorway, the room leans with the mouse, the doors sway in the breeze and fly open on Play.
+- Launcher: light rays, dust in the light, a glowing doorway, steam off the curry (louder volume, more steam) and a frosty smoothie glass.
+- Launcher: Options zooms down to the book on the table (Back zooms out); the book lights up when Options is selected and opens Options when clicked.
+- Launcher: the snacks on the table can be eaten.
+- Launcher: Add to Steam, the version and the volume are paper slips in the corners.
+
 ## November 17, 2026
 
 - Fullscreen: the game shows right after Play (the screen stayed black until the Start menu or F11).

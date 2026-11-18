@@ -1,0 +1,1815 @@
+{
+ "size": [
+  5120,
+  1440
+ ],
+ "fg_margin": 29,
+ "parallax_max": 0.015,
+ "door": [
+  [
+   0.4397585391998291,
+   0.16658520698547363
+  ],
+  [
+   0.5602414608001709,
+   0.16658520698547363
+  ],
+  [
+   0.5585910081863403,
+   0.7915125638246536
+  ],
+  [
+   0.44140902161598206,
+   0.7915125638246536
+  ]
+ ],
+ "bill": [
+  [
+   0.333596795797348,
+   0.5447047352790833
+  ],
+  [
+   0.4258575737476349,
+   0.5355945825576782
+  ],
+  [
+   0.44158661365509033,
+   0.9415747560560703
+  ],
+  [
+   0.3207673728466034,
+   1.0042719789780676
+  ]
+ ],
+ "book": [
+  [
+   0.6404958367347717,
+   0.7309309542179108
+  ],
+  [
+   0.6850945949554443,
+   0.7628328055143356
+  ],
+  [
+   0.6506474018096924,
+   0.812614381313324
+  ],
+  [
+   0.6038203835487366,
+   0.7708086669445038
+  ]
+ ],
+ "home": {
+  "layers": [
+   "back.avif",
+   "fg.avif"
+  ],
+  "rays": "rays.avif",
+  "outside": "outside.avif",
+  "rays_weight": "rays_weight.avif",
+  "doors": {
+   "rect": [
+    2222,
+    211,
+    2898,
+    1227
+   ],
+   "sway": 72,
+   "fling": 8,
+   "fps": 24,
+   "sway_pattern": "sway_{:02d}.avif",
+   "fling_pattern": "fling_{:02d}.avif"
+  },
+  "book": {
+   "rect": [
+    2976,
+    1002,
+    3704,
+    1288
+   ],
+   "lit": "book_lit.avif",
+   "mask": "book_mask.avif"
+  },
+  "snacks": {
+   "pieces": [
+    {
+     "name": "strawberry_001",
+     "rect": [
+      2563,
+      903,
+      2661,
+      1030
+     ],
+     "sprite": "strawberry_001.avif",
+     "shadow": "strawberry_001_shadow.avif"
+    },
+    {
+     "name": "cherries_002",
+     "rect": [
+      2337,
+      875,
+      2469,
+      1036
+     ],
+     "sprite": "cherries_002.avif",
+     "shadow": "cherries_002_shadow.avif"
+    },
+    {
+     "name": "bananas",
+     "rect": [
+      2378,
+      818,
+      2772,
+      1131
+     ],
+     "sprite": "bananas.avif",
+     "shadow": "bananas_shadow.avif"
+    },
+    {
+     "name": "orange3",
+     "rect": [
+      2631,
+      925,
+      2858,
+      1105
+     ],
+     "sprite": "orange3.avif",
+     "shadow": "orange3_shadow.avif"
+    },
+    {
+     "name": "cherries",
+     "rect": [
+      2296,
+      901,
+      2416,
+      1088
+     ],
+     "sprite": "cherries.avif",
+     "shadow": "cherries_shadow.avif"
+    },
+    {
+     "name": "strawberry",
+     "rect": [
+      2679,
+      979,
+      2854,
+      1135
+     ],
+     "sprite": "strawberry.avif",
+     "shadow": "strawberry_shadow.avif"
+    },
+    {
+     "name": "orange2",
+     "rect": [
+      2534,
+      963,
+      2780,
+      1148
+     ],
+     "sprite": "orange2.avif",
+     "shadow": "orange2_shadow.avif"
+    },
+    {
+     "name": "cherries_001",
+     "rect": [
+      2345,
+      1017,
+      2548,
+      1143
+     ],
+     "sprite": "cherries_001.avif",
+     "shadow": "cherries_001_shadow.avif"
+    }
+   ],
+   "shadows_rect": [
+    2175,
+    784,
+    2944,
+    1231
+   ],
+   "smoothie": {
+    "rect": [
+     3019,
+     621,
+     3346,
+     1087
+    ],
+    "states": [
+     "smoothie_0_full.avif",
+     "smoothie_1_no_back_slice.avif",
+     "smoothie_2_no_front_slice.avif",
+     "smoothie_3_no_garnish.avif",
+     "smoothie_4_empty.avif"
+    ],
+    "garnish": [
+     "garnish_back_slice.avif",
+     "garnish_front_slice.avif",
+     "garnish_cherry_mint.avif"
+    ]
+   }
+  },
+  "curry": {
+   "centre": [
+    0.5606437921524048,
+    0.8482020497322083
+   ],
+   "source": [
+    [
+     0.53486,
+     0.848202
+    ],
+    [
+     0.535759,
+     0.836363
+    ],
+    [
+     0.540202,
+     0.826846
+    ],
+    [
+     0.547375,
+     0.820737
+    ],
+    [
+     0.55627,
+     0.818637
+    ],
+    [
+     0.565787,
+     0.820737
+    ],
+    [
+     0.574767,
+     0.826846
+    ],
+    [
+     0.582026,
+     0.836363
+    ],
+    [
+     0.586428,
+     0.848202
+    ],
+    [
+     0.587054,
+     0.860767
+    ],
+    [
+     0.583463,
+     0.872042
+    ],
+    [
+     0.575966,
+     0.879917
+    ],
+    [
+     0.565755,
+     0.882749
+    ],
+    [
+     0.554705,
+     0.879917
+    ],
+    [
+     0.544878,
+     0.872042
+    ],
+    [
+     0.537951,
+     0.860767
+    ]
+   ],
+   "up10cm": [
+    0.00036519765853881836,
+    -0.13325810432434082
+   ],
+   "hull": [
+    [
+     0.517934,
+     0.858994
+    ],
+    [
+     0.518016,
+     0.84904
+    ],
+    [
+     0.519192,
+     0.839223
+    ],
+    [
+     0.524764,
+     0.823859
+    ],
+    [
+     0.534763,
+     0.811595
+    ],
+    [
+     0.540556,
+     0.807505
+    ],
+    [
+     0.546709,
+     0.805044
+    ],
+    [
+     0.552803,
+     0.803698
+    ],
+    [
+     0.560473,
+     0.803458
+    ],
+    [
+     0.573725,
+     0.807003
+    ],
+    [
+     0.583402,
+     0.813546
+    ],
+    [
+     0.593142,
+     0.823896
+    ],
+    [
+     0.595859,
+     0.828084
+    ],
+    [
+     0.602386,
+     0.843059
+    ],
+    [
+     0.604782,
+     0.853717
+    ],
+    [
+     0.604928,
+     0.873827
+    ],
+    [
+     0.603526,
+     0.881738
+    ],
+    [
+     0.581046,
+     0.931214
+    ],
+    [
+     0.579413,
+     0.931803
+    ],
+    [
+     0.558578,
+     0.932783
+    ],
+    [
+     0.553325,
+     0.930491
+    ],
+    [
+     0.542049,
+     0.920552
+    ],
+    [
+     0.538755,
+     0.914756
+    ],
+    [
+     0.521535,
+     0.877135
+    ]
+   ]
+  },
+  "glass": {
+   "bowl": [
+    [
+     0.603747,
+     0.630107
+    ],
+    [
+     0.605408,
+     0.545368
+    ],
+    [
+     0.605634,
+     0.544456
+    ],
+    [
+     0.607147,
+     0.543302
+    ],
+    [
+     0.610197,
+     0.542567
+    ],
+    [
+     0.61437,
+     0.542358
+    ],
+    [
+     0.619063,
+     0.542687
+    ],
+    [
+     0.623635,
+     0.543526
+    ],
+    [
+     0.62745,
+     0.544757
+    ],
+    [
+     0.629889,
+     0.54622
+    ],
+    [
+     0.630634,
+     0.547219
+    ],
+    [
+     0.631473,
+     0.625319
+    ],
+    [
+     0.630261,
+     0.651173
+    ],
+    [
+     0.628461,
+     0.658544
+    ],
+    [
+     0.624414,
+     0.667448
+    ],
+    [
+     0.621792,
+     0.671693
+    ],
+    [
+     0.62054,
+     0.672387
+    ],
+    [
+     0.618768,
+     0.672585
+    ],
+    [
+     0.616771,
+     0.672272
+    ],
+    [
+     0.61486,
+     0.671484
+    ],
+    [
+     0.613327,
+     0.670357
+    ],
+    [
+     0.612417,
+     0.669065
+    ],
+    [
+     0.608208,
+     0.659543
+    ],
+    [
+     0.606101,
+     0.65268
+    ]
+   ],
+   "drink": [
+    [
+     0.604569,
+     0.629817
+    ],
+    [
+     0.60474,
+     0.620417
+    ],
+    [
+     0.60725,
+     0.557761
+    ],
+    [
+     0.611133,
+     0.556298
+    ],
+    [
+     0.626081,
+     0.558829
+    ],
+    [
+     0.628509,
+     0.561706
+    ],
+    [
+     0.630619,
+     0.624917
+    ],
+    [
+     0.630322,
+     0.642947
+    ],
+    [
+     0.629478,
+     0.650029
+    ],
+    [
+     0.628148,
+     0.655902
+    ],
+    [
+     0.627785,
+     0.657037
+    ],
+    [
+     0.623981,
+     0.665236
+    ],
+    [
+     0.621843,
+     0.668035
+    ],
+    [
+     0.621495,
+     0.66849
+    ],
+    [
+     0.619141,
+     0.669929
+    ],
+    [
+     0.616989,
+     0.669865
+    ],
+    [
+     0.61589,
+     0.669263
+    ],
+    [
+     0.615015,
+     0.668779
+    ],
+    [
+     0.613111,
+     0.666678
+    ],
+    [
+     0.612766,
+     0.666076
+    ],
+    [
+     0.610715,
+     0.662416
+    ],
+    [
+     0.607136,
+     0.652819
+    ],
+    [
+     0.60678,
+     0.65156
+    ],
+    [
+     0.60557,
+     0.645308
+    ]
+   ],
+   "rim_y": 0.5423582792282104
+  }
+ },
+ "zoom": {
+  "zoom01": {
+   "snacks": {
+    "pieces": [
+     {
+      "name": "strawberry_001",
+      "rect": [
+       2481,
+       851,
+       2605,
+       1001
+      ],
+      "sprite": "strawberry_001.avif",
+      "shadow": "strawberry_001_shadow.avif"
+     },
+     {
+      "name": "cherries_002",
+      "rect": [
+       2226,
+       826,
+       2399,
+       1012
+      ],
+      "sprite": "cherries_002.avif",
+      "shadow": "cherries_002_shadow.avif"
+     },
+     {
+      "name": "bananas",
+      "rect": [
+       2257,
+       761,
+       2716,
+       1124
+      ],
+      "sprite": "bananas.avif",
+      "shadow": "bananas_shadow.avif"
+     },
+     {
+      "name": "orange3",
+      "rect": [
+       2552,
+       882,
+       2811,
+       1092
+      ],
+      "sprite": "orange3.avif",
+      "shadow": "orange3_shadow.avif"
+     },
+     {
+      "name": "cherries",
+      "rect": [
+       2168,
+       863,
+       2337,
+       1077
+      ],
+      "sprite": "cherries.avif",
+      "shadow": "cherries_shadow.avif"
+     },
+     {
+      "name": "strawberry",
+      "rect": [
+       2598,
+       949,
+       2804,
+       1130
+      ],
+      "sprite": "strawberry.avif",
+      "shadow": "strawberry_shadow.avif"
+     },
+     {
+      "name": "orange2",
+      "rect": [
+       2428,
+       931,
+       2721,
+       1147
+      ],
+      "sprite": "orange2.avif",
+      "shadow": "orange2_shadow.avif"
+     },
+     {
+      "name": "cherries_001",
+      "rect": [
+       2217,
+       994,
+       2475,
+       1141
+      ],
+      "sprite": "cherries_001.avif",
+      "shadow": "cherries_001_shadow.avif"
+     }
+    ],
+    "shadows_rect": [
+     2026,
+     726,
+     2896,
+     1240
+    ],
+    "scale": 0.5,
+    "smoothie": {
+     "rect": [
+      2980,
+      543,
+      3341,
+      1060
+     ],
+     "states": [
+      "smoothie_0_full.avif",
+      "smoothie_1_no_back_slice.avif",
+      "smoothie_2_no_front_slice.avif",
+      "smoothie_3_no_garnish.avif",
+      "smoothie_4_empty.avif"
+     ]
+    }
+   },
+   "fruit_free": true,
+   "frame_scale": 0.5,
+   "frame": "frame.avif",
+   "outside": "outside.avif",
+   "bill": [
+    [
+     0.28874656558036804,
+     0.528500884771347
+    ],
+    [
+     0.3974573612213135,
+     0.5126339197158813
+    ],
+    [
+     0.4097452163696289,
+     0.9919468844309449
+    ],
+    [
+     0.26385048031806946,
+     1.085203841328621
+    ]
+   ],
+   "door": [
+    [
+     0.4295356869697571,
+     0.08941900730133057
+    ],
+    [
+     0.5557949542999268,
+     0.09059292078018188
+    ],
+    [
+     0.5525156259536743,
+     0.7347276508808136
+    ],
+    [
+     0.43369364738464355,
+     0.7361835539340973
+    ]
+   ],
+   "bill_in_front": true
+  },
+  "zoom02": {
+   "snacks": {
+    "pieces": [
+     {
+      "name": "strawberry_001",
+      "rect": [
+       2373,
+       776,
+       2517,
+       950
+      ],
+      "sprite": "strawberry_001.avif",
+      "shadow": "strawberry_001_shadow.avif"
+     },
+     {
+      "name": "cherries_002",
+      "rect": [
+       2077,
+       758,
+       2288,
+       971
+      ],
+      "sprite": "cherries_002.avif",
+      "shadow": "cherries_002_shadow.avif"
+     },
+     {
+      "name": "bananas",
+      "rect": [
+       2091,
+       680,
+       2625,
+       1109
+      ],
+      "sprite": "bananas.avif",
+      "shadow": "bananas_shadow.avif"
+     },
+     {
+      "name": "orange3",
+      "rect": [
+       2441,
+       820,
+       2734,
+       1067
+      ],
+      "sprite": "orange3.avif",
+      "shadow": "orange3_shadow.avif"
+     },
+     {
+      "name": "cherries",
+      "rect": [
+       1993,
+       809,
+       2209,
+       1057
+      ],
+      "sprite": "cherries.avif",
+      "shadow": "cherries_shadow.avif"
+     },
+     {
+      "name": "strawberry",
+      "rect": [
+       2491,
+       907,
+       2722,
+       1117
+      ],
+      "sprite": "strawberry.avif",
+      "shadow": "strawberry_shadow.avif"
+     },
+     {
+      "name": "cherries_001",
+      "rect": [
+       2043,
+       961,
+       2359,
+       1138
+      ],
+      "sprite": "cherries_001.avif",
+      "shadow": "cherries_001_shadow.avif"
+     },
+     {
+      "name": "orange2",
+      "rect": [
+       2283,
+       885,
+       2626,
+       1144
+      ],
+      "sprite": "orange2.avif",
+      "shadow": "orange2_shadow.avif"
+     }
+    ],
+    "shadows_rect": [
+     1823,
+     646,
+     2817,
+     1252
+    ],
+    "scale": 0.5,
+    "smoothie": {
+     "rect": [
+      2927,
+      435,
+      3331,
+      1011
+     ],
+     "states": [
+      "smoothie_0_full.avif",
+      "smoothie_1_no_back_slice.avif",
+      "smoothie_2_no_front_slice.avif",
+      "smoothie_3_no_garnish.avif",
+      "smoothie_4_empty.avif"
+     ]
+    }
+   },
+   "fruit_free": true,
+   "frame_scale": 0.5,
+   "frame": "frame.avif",
+   "outside": "outside.avif",
+   "bill": [
+    [
+     0.21575738489627838,
+     0.5091703534126282
+    ],
+    [
+     0.35305657982826233,
+     0.4802491068840027
+    ],
+    [
+     0.3600214123725891,
+     1.0759453102946281
+    ],
+    [
+     0.1700107455253601,
+     1.2305294424295425
+    ]
+   ],
+   "door": [
+    [
+     0.4140309989452362,
+     -0.02536606788635254
+    ],
+    [
+     0.549159049987793,
+     -0.0219881534576416
+    ],
+    [
+     0.5440958142280579,
+     0.6535074412822723
+    ],
+    [
+     0.4229772388935089,
+     0.6574790775775909
+    ]
+   ],
+   "bill_in_front": true
+  },
+  "zoom03": {
+   "snacks": {
+    "pieces": [
+     {
+      "name": "strawberry_001",
+      "rect": [
+       2214,
+       661,
+       2396,
+       870
+      ],
+      "sprite": "strawberry_001.avif",
+      "shadow": "strawberry_001_shadow.avif"
+     },
+     {
+      "name": "cherries_002",
+      "rect": [
+       1850,
+       654,
+       2125,
+       907
+      ],
+      "sprite": "cherries_002.avif",
+      "shadow": "cherries_002_shadow.avif"
+     },
+     {
+      "name": "bananas",
+      "rect": [
+       1828,
+       556,
+       2489,
+       1089
+      ],
+      "sprite": "bananas.avif",
+      "shadow": "bananas_shadow.avif"
+     },
+     {
+      "name": "orange3",
+      "rect": [
+       2269,
+       725,
+       2619,
+       1028
+      ],
+      "sprite": "orange3.avif",
+      "shadow": "orange3_shadow.avif"
+     },
+     {
+      "name": "cherries",
+      "rect": [
+       1720,
+       729,
+       2020,
+       1028
+      ],
+      "sprite": "cherries.avif",
+      "shadow": "cherries_shadow.avif"
+     },
+     {
+      "name": "cherries_001",
+      "rect": [
+       1777,
+       914,
+       2186,
+       1136
+      ],
+      "sprite": "cherries_001.avif",
+      "shadow": "cherries_001_shadow.avif"
+     },
+     {
+      "name": "strawberry",
+      "rect": [
+       2319,
+       841,
+       2598,
+       1098
+      ],
+      "sprite": "strawberry.avif",
+      "shadow": "strawberry_shadow.avif"
+     },
+     {
+      "name": "orange2",
+      "rect": [
+       2060,
+       816,
+       2483,
+       1142
+      ],
+      "sprite": "orange2.avif",
+      "shadow": "orange2_shadow.avif"
+     }
+    ],
+    "shadows_rect": [
+     1509,
+     522,
+     2697,
+     1279
+    ],
+    "scale": 0.5,
+    "smoothie": {
+     "rect": [
+      2853,
+      265,
+      3317,
+      930
+     ],
+     "states": [
+      "smoothie_0_full.avif",
+      "smoothie_1_no_back_slice.avif",
+      "smoothie_2_no_front_slice.avif",
+      "smoothie_3_no_garnish.avif",
+      "smoothie_4_empty.avif"
+     ]
+    }
+   },
+   "fruit_free": true,
+   "frame_scale": 0.5,
+   "frame": "frame.avif",
+   "outside": "outside.avif",
+   "bill": [
+    [
+     0.08187094330787659,
+     0.498926043510437
+    ],
+    [
+     0.2773135304450989,
+     0.4393244981765747
+    ],
+    [
+     0.277885377407074,
+     1.2356837093830109
+    ],
+    [
+     -0.0009264134569093585,
+     1.5357359647750854
+    ]
+   ],
+   "door": [
+    [
+     0.3886861503124237,
+     -0.2083832025527954
+    ],
+    [
+     0.5390748977661133,
+     -0.2004396915435791
+    ],
+    [
+     0.5325379371643066,
+     0.5344270765781403
+    ],
+    [
+     0.40768590569496155,
+     0.5427506864070892
+    ]
+   ],
+   "bill_in_front": true
+  },
+  "zoom04": {
+   "snacks": {
+    "pieces": [
+     {
+      "name": "strawberry_001",
+      "rect": [
+       1976,
+       489,
+       2222,
+       752
+      ],
+      "sprite": "strawberry_001.avif",
+      "shadow": "strawberry_001_shadow.avif"
+     },
+     {
+      "name": "cherries_002",
+      "rect": [
+       1494,
+       506,
+       1887,
+       819
+      ],
+      "sprite": "cherries_002.avif",
+      "shadow": "cherries_002_shadow.avif"
+     },
+     {
+      "name": "bananas",
+      "rect": [
+       1396,
+       370,
+       2324,
+       1070
+      ],
+      "sprite": "bananas.avif",
+      "shadow": "bananas_shadow.avif"
+     },
+     {
+      "name": "cherries",
+      "rect": [
+       1281,
+       626,
+       1742,
+       1000
+      ],
+      "sprite": "cherries.avif",
+      "shadow": "cherries_shadow.avif"
+     },
+     {
+      "name": "orange3",
+      "rect": [
+       2009,
+       584,
+       2455,
+       973
+      ],
+      "sprite": "orange3.avif",
+      "shadow": "orange3_shadow.avif"
+     },
+     {
+      "name": "cherries_001",
+      "rect": [
+       1364,
+       859,
+       1934,
+       1161
+      ],
+      "sprite": "cherries_001.avif",
+      "shadow": "cherries_001_shadow.avif"
+     },
+     {
+      "name": "strawberry",
+      "rect": [
+       2061,
+       750,
+       2423,
+       1075
+      ],
+      "sprite": "strawberry.avif",
+      "shadow": "strawberry_shadow.avif"
+     },
+     {
+      "name": "orange2",
+      "rect": [
+       1714,
+       721,
+       2297,
+       1160
+      ],
+      "sprite": "orange2.avif",
+      "shadow": "orange2_shadow.avif"
+     }
+    ],
+    "shadows_rect": [
+     1023,
+     335,
+     2526,
+     1350
+    ],
+    "scale": 0.5,
+    "smoothie": {
+     "rect": [
+      2750,
+      0,
+      3302,
+      802
+     ],
+     "states": [
+      "smoothie_0_full.avif",
+      "smoothie_1_no_back_slice.avif",
+      "smoothie_2_no_front_slice.avif",
+      "smoothie_3_no_garnish.avif",
+      "smoothie_4_empty.avif"
+     ]
+    }
+   },
+   "fruit_free": true,
+   "frame_scale": 0.5,
+   "frame": "frame.avif",
+   "outside": "outside.avif",
+   "bill": [
+    [
+     -0.20470955967903137,
+     0.5659435987472534
+    ],
+    [
+     0.13551568984985352,
+     0.41291940212249756
+    ],
+    [
+     0.1434374898672104,
+     1.559896171092987
+    ],
+    [
+     -0.33197644352912903,
+     2.257480263710022
+    ]
+   ],
+   "door": [
+    [
+     0.34239494800567627,
+     -0.5201690196990967
+    ],
+    [
+     0.5224313139915466,
+     -0.5008100271224976
+    ],
+    [
+     0.5165953040122986,
+     0.3620874285697937
+    ],
+    [
+     0.3848433494567871,
+     0.3783298134803772
+    ]
+   ],
+   "bill_in_front": true
+  },
+  "zoom05": {
+   "snacks": {
+    "pieces": [
+     {
+      "name": "strawberry_001",
+      "rect": [
+       1598,
+       254,
+       1963,
+       596
+      ],
+      "sprite": "strawberry_001.avif",
+      "shadow": "strawberry_001_shadow.avif"
+     },
+     {
+      "name": "cherries_002",
+      "rect": [
+       888,
+       330,
+       1526,
+       727
+      ],
+      "sprite": "cherries_002.avif",
+      "shadow": "cherries_002_shadow.avif"
+     },
+     {
+      "name": "cherries",
+      "rect": [
+       531,
+       544,
+       1322,
+       1046
+      ],
+      "sprite": "cherries.avif",
+      "shadow": "cherries_shadow.avif"
+     },
+     {
+      "name": "bananas",
+      "rect": [
+       627,
+       108,
+       2087,
+       1118
+      ],
+      "sprite": "bananas.avif",
+      "shadow": "bananas_shadow.avif"
+     },
+     {
+      "name": "orange3",
+      "rect": [
+       1608,
+       400,
+       2230,
+       922
+      ],
+      "sprite": "orange3.avif",
+      "shadow": "orange3_shadow.avif"
+     },
+     {
+      "name": "cherries_001",
+      "rect": [
+       727,
+       836,
+       1569,
+       1288
+      ],
+      "sprite": "cherries_001.avif",
+      "shadow": "cherries_001_shadow.avif"
+     },
+     {
+      "name": "orange2",
+      "rect": [
+       1180,
+       624,
+       2035,
+       1257
+      ],
+      "sprite": "orange2.avif",
+      "shadow": "orange2_shadow.avif"
+     },
+     {
+      "name": "strawberry",
+      "rect": [
+       1677,
+       654,
+       2187,
+       1086
+      ],
+      "sprite": "strawberry.avif",
+      "shadow": "strawberry_shadow.avif"
+     }
+    ],
+    "shadows_rect": [
+     283,
+     73,
+     2299,
+     1440
+    ],
+    "scale": 0.5,
+    "smoothie": {
+     "rect": [
+      2602,
+      0,
+      3288,
+      613
+     ],
+     "states": [
+      "smoothie_0_full.avif",
+      "smoothie_1_no_back_slice.avif",
+      "smoothie_2_no_front_slice.avif",
+      "smoothie_3_no_garnish.avif",
+      "smoothie_4_empty.avif"
+     ]
+    }
+   },
+   "fruit_free": true,
+   "frame_scale": 0.5,
+   "frame": "frame.avif",
+   "outside": "outside.avif",
+   "bill": [
+    [
+     -1.0704447031021118,
+     1.1637260615825653
+    ],
+    [
+     -0.18347236514091492,
+     0.5404595136642456
+    ],
+    [
+     -0.04803852364420891,
+     2.201764464378357
+    ],
+    [
+     -0.9346470832824707,
+     4.019225835800171
+    ]
+   ],
+   "door": [
+    [
+     0.2338026762008667,
+     -1.1496658325195312
+    ],
+    [
+     0.4865180552005768,
+     -1.088498830795288
+    ],
+    [
+     0.491874098777771,
+     0.11032712459564209
+    ],
+    [
+     0.3456297516822815,
+     0.14370745420455933
+    ]
+   ],
+   "bill_in_front": true
+  },
+  "zoom06": {
+   "snacks": {
+    "pieces": [
+     {
+      "name": "strawberry_001",
+      "rect": [
+       950,
+       22,
+       1541,
+       468
+      ],
+      "sprite": "strawberry_001.avif",
+      "shadow": "strawberry_001_shadow.avif"
+     },
+     {
+      "name": "cherries_002",
+      "rect": [
+       0,
+       258,
+       951,
+       825
+      ],
+      "sprite": "cherries_002.avif",
+      "shadow": "cherries_002_shadow.avif"
+     },
+     {
+      "name": "cherries",
+      "rect": [
+       0,
+       626,
+       695,
+       1399
+      ],
+      "sprite": "cherries.avif",
+      "shadow": "cherries_shadow.avif"
+     },
+     {
+      "name": "bananas",
+      "rect": [
+       0,
+       0,
+       1719,
+       1417
+      ],
+      "sprite": "bananas.avif",
+      "shadow": "bananas_shadow.avif"
+     },
+     {
+      "name": "cherries_001",
+      "rect": [
+       0,
+       956,
+       1074,
+       1440
+      ],
+      "sprite": "cherries_001.avif",
+      "shadow": "cherries_001_shadow.avif"
+     },
+     {
+      "name": "orange3",
+      "rect": [
+       1014,
+       253,
+       1933,
+       1015
+      ],
+      "sprite": "orange3.avif",
+      "shadow": "orange3_shadow.avif"
+     },
+     {
+      "name": "orange2",
+      "rect": [
+       475,
+       620,
+       1676,
+       1440
+      ],
+      "sprite": "orange2.avif",
+      "shadow": "orange2_shadow.avif"
+     },
+     {
+      "name": "strawberry",
+      "rect": [
+       1171,
+       640,
+       1888,
+       1253
+      ],
+      "sprite": "strawberry.avif",
+      "shadow": "strawberry_shadow.avif"
+     }
+    ],
+    "shadows_rect": [
+     0,
+     0,
+     2053,
+     1440
+    ],
+    "scale": 0.5,
+    "smoothie": {
+     "rect": [
+      2234,
+      0,
+      3248,
+      370
+     ],
+     "states": [
+      "smoothie_0_full.avif",
+      "smoothie_1_no_back_slice.avif",
+      "smoothie_2_no_front_slice.avif",
+      "smoothie_3_no_garnish.avif",
+      "smoothie_4_empty.avif"
+     ]
+    }
+   },
+   "fruit_free": true,
+   "frame_scale": 0.5,
+   "frame": "frame.avif",
+   "outside": "outside.avif",
+   "bill": [
+    [
+     -1.1171425580978394,
+     1.7896750569343567
+    ],
+    [
+     -0.15820516645908356,
+     3.089111328125
+    ],
+    [
+     -1.2725582122802734,
+     6.413746356964111
+    ],
+    [
+     -9.210421562194824,
+     11.855897903442383
+    ]
+   ],
+   "door": [
+    [
+     -0.20288439095020294,
+     -3.1201000213623047
+    ],
+    [
+     0.3509596586227417,
+     -2.7116148471832275
+    ],
+    [
+     0.4415610432624817,
+     -0.25862598419189453
+    ],
+    [
+     0.26294949650764465,
+     -0.17506825923919678
+    ]
+   ],
+   "bill_in_front": true
+  },
+  "zoom07": {
+   "snacks": {
+    "pieces": [
+     {
+      "name": "cherries_002",
+      "rect": [
+       0,
+       760,
+       164,
+       1440
+      ],
+      "sprite": "cherries_002.avif",
+      "shadow": "cherries_002_shadow.avif"
+     },
+     {
+      "name": "strawberry_001",
+      "rect": [
+       31,
+       92,
+       913,
+       761
+      ],
+      "sprite": "strawberry_001.avif",
+      "shadow": "strawberry_001_shadow.avif"
+     },
+     {
+      "name": "bananas",
+      "rect": [
+       0,
+       0,
+       1453,
+       1440
+      ],
+      "sprite": "bananas.avif",
+      "shadow": "bananas_shadow.avif"
+     },
+     {
+      "name": "orange3",
+      "rect": [
+       387,
+       363,
+       1656,
+       1440
+      ],
+      "sprite": "orange3.avif",
+      "shadow": "orange3_shadow.avif"
+     },
+     {
+      "name": "orange2",
+      "rect": [
+       112,
+       981,
+       1533,
+       1440
+      ],
+      "sprite": "orange2.avif",
+      "shadow": "orange2_shadow.avif"
+     },
+     {
+      "name": "strawberry",
+      "rect": [
+       799,
+       921,
+       1711,
+       1440
+      ],
+      "sprite": "strawberry.avif",
+      "shadow": "strawberry_shadow.avif"
+     }
+    ],
+    "shadows_rect": [
+     0,
+     0,
+     2008,
+     1440
+    ],
+    "scale": 0.5,
+    "smoothie": {
+     "rect": [
+      1079,
+      0,
+      2952,
+      173
+     ],
+     "states": [
+      "smoothie_0_full.avif",
+      "smoothie_1_no_back_slice.avif",
+      "smoothie_2_no_front_slice.avif",
+      "smoothie_3_no_garnish.avif",
+      "smoothie_4_empty.avif"
+     ]
+    }
+   },
+   "fruit_free": true,
+   "frame_scale": 0.5,
+   "frame": "frame.avif",
+   "outside": "outside.avif",
+   "bill": [
+    [
+     13.385554313659668,
+     -35.07306671142578
+    ],
+    [
+     -0.43296077847480774,
+     5.884850978851318
+    ],
+    [
+     0.06276661902666092,
+     3.4352540969848633
+    ],
+    [
+     -3.04830002784729,
+     8.841227054595947
+    ]
+   ],
+   "door": [
+    [
+     -2.6016950607299805,
+     -26.609539031982422
+    ],
+    [
+     7.960389614105225,
+     25.110986709594727
+    ],
+    [
+     0.07448017597198486,
+     -0.47185468673706055
+    ],
+    [
+     0.31417539715766907,
+     -0.7400457859039307
+    ]
+   ],
+   "bill_in_front": false
+  },
+  "zoom08": {
+   "snacks": {
+    "pieces": [
+     {
+      "name": "strawberry_001",
+      "rect": [
+       0,
+       979,
+       678,
+       1440
+      ],
+      "sprite": "strawberry_001.avif",
+      "shadow": "strawberry_001_shadow.avif"
+     },
+     {
+      "name": "bananas",
+      "rect": [
+       0,
+       931,
+       1743,
+       1440
+      ],
+      "sprite": "bananas.avif",
+      "shadow": "bananas_shadow.avif"
+     },
+     {
+      "name": "orange3",
+      "rect": [
+       321,
+       994,
+       1790,
+       1440
+      ],
+      "sprite": "orange3.avif",
+      "shadow": "orange3_shadow.avif"
+     },
+     {
+      "name": "strawberry",
+      "rect": [
+       1065,
+       1414,
+       1995,
+       1440
+      ],
+      "sprite": "strawberry.avif",
+      "shadow": "strawberry_shadow.avif"
+     }
+    ],
+    "shadows_rect": [
+     0,
+     513,
+     2356,
+     1440
+    ],
+    "smoothie": {
+     "rect": [
+      0,
+      0,
+      2373,
+      188
+     ],
+     "states": [
+      "smoothie_0_full.avif",
+      "smoothie_1_no_back_slice.avif",
+      "smoothie_2_no_front_slice.avif",
+      "smoothie_3_no_garnish.avif",
+      "smoothie_4_empty.avif"
+     ]
+    }
+   },
+   "fruit_free": true,
+   "frame": "frame.avif",
+   "outside": "outside.avif",
+   "pages": {
+    "left": [
+     [
+      0.3766900897026062,
+      0.14849966764450073
+     ],
+     [
+      0.49995511770248413,
+      0.1485053300857544
+     ],
+     [
+      0.49995070695877075,
+      0.8503246158361435
+     ],
+     [
+      0.3669716715812683,
+      0.8503216356039047
+     ]
+    ],
+    "right": [
+     [
+      0.500041663646698,
+      0.14851093292236328
+     ],
+     [
+      0.6233060359954834,
+      0.14851349592208862
+     ],
+     [
+      0.6330240964889526,
+      0.850337341427803
+     ],
+     [
+      0.500044047832489,
+      0.8503308594226837
+     ]
+    ]
+   },
+   "bill": [
+    [
+     0.42697954177856445,
+     3.0097782611846924
+    ],
+    [
+     0.32183367013931274,
+     4.2764973640441895
+    ],
+    [
+     -2.5061566829681396,
+     21.712539672851562
+    ],
+    [
+     -0.9052338600158691,
+     9.236848831176758
+    ]
+   ],
+   "door": [
+    [
+     0.05013837292790413,
+     -1.0084457397460938
+    ],
+    [
+     1.876827597618103,
+     2.341689109802246
+    ],
+    [
+     1.6940829753875732,
+     5.051691055297852
+    ],
+    [
+     -0.21075671911239624,
+     -0.22345364093780518
+    ]
+   ],
+   "bill_in_front": true
+  }
+ },
+ "back_margin": 29,
+ "format": "avif"
+}

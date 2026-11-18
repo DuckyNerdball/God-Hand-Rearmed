@@ -422,6 +422,13 @@ and testing from the boys.
   OPTIONS screen's labels.
 - Bitstream and the DejaVu fonts team: [DejaVu Sans](https://dejavu-fonts.github.io) (Bitstream Vera licence), the
   OPTIONS screen's help text.
+- The launcher's saloon is rendered from Quixel Megascans' [Saloon Interior](https://www.fab.com/listings/57991a62-f98f-4c6a-9b94-a74ec12f242e)
+  (via Fab) and Sketchfab models by Carissa, JoshElo, gelmi.com.br, polyplant3d, inciprocal, markus.blend, pizzaguyty,
+  Zinaida.Kovrova, Kenty110 and Mei; the renders' licences and every credit are in `resources/saloon/LICENSE.txt`.
+- The EB Garamond Project Authors: [EB Garamond](https://github.com/octaviopardo/EBGaramond12) (OFL-1.1), and Sorkin
+  Type: [Rye](https://fonts.google.com/specimen/Rye) (OFL-1.1), the bill of fare.
+- [libavif](https://github.com/AOMediaCodec/libavif) and [dav1d](https://code.videolan.org/videolan/dav1d) (BSD-2-Clause),
+  decoding the saloon's images.
 
 ## Legal
 

@@ -1,7 +1,6 @@
 # Launcher images
 
-The logo is five layers with the same canvas, drawn into one rectangle at the top of the Home and Install screens
-(as wide as fits, at most half the window's height, trilinear filtered), in this order:
+The logo is five layers with the same canvas, drawn into one rectangle (trilinear filtered), in this order:
 
 - `kana.png`: the flat turquoise kana behind everything, shifted a little with the mouse.
 - `logo.png`: GOD HAND and its shadow. It stays still. Without it the launcher writes the name in text.
@@ -20,12 +19,9 @@ hand-painted crack PSD; K's own effects pass is on top of that.
 nothing at the circle's edge). The launcher draws it twice, turning and pulsing, squashed to 3/4 height, centred on
 GOD HAND (`kLogoCentreX/Y`), and shifts it with the mouse.
 
-`background.png`: the desert behind everything (K's own art, widened to 2600x941 with sand and sky taken from its own
-empty left side). It fits the window's height up to 2.76:1 (wider windows crop it vertically), anchored right so the
-town and the walkers stay in frame. `kBackgroundShader` in src/kamite/launcher.cpp adds heat haze along the horizon,
-fake depth of field, procedural clouds (masked to blue sky pixels, so they pass behind the town) and a darkening
-towards the bottom with a vignette so the text reads; its `kHorizon` (0.625) is the horizon's height in this image.
-Without the file the launcher draws its brown gradient.
+The launcher's background is the saloon (`resources/saloon`, src/kamite/launcher_saloon.cpp): the logo sits in its
+doorway's glare (placed by GOD HAND + plate's box in the canvas, riding the Options zoom), the burst behind it sized by
+the logo. Without the saloon (no pack, no AVIF decoder) the launcher draws its brown gradient and the logo at the top.
 
 `tools/logo/build_logo.py` built the old KAMITE logo (wordmark + kana over it); kept for its burst.png step. The whole
 `resources/` folder is copied next to GHR.exe at build time.

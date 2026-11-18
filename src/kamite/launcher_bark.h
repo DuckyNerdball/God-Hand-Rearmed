@@ -32,6 +32,10 @@ namespace kamite::launcher_bark
     constexpr float kVoiceAt = 0.20f;
     bool render(int line, const ReadFile &read, Stereo &out);
 
+    // One of Gene's short lines from an AFS of ADX voice lines read from the disc (se/pl00.afs: the launcher's snacks),
+    // whole and dry, as 48 kHz stereo. False when the entry isn't one.
+    bool voiceLine(const std::vector<uint8_t> &afs, int entry, Stereo &out);
+
     // The music's tail lasts at most this long (every bark ends sooner).
     constexpr float kMaxTail = 3.0f;
 

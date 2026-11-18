@@ -356,6 +356,47 @@ if(MSVC)
     target_link_libraries(kamite PRIVATE dbghelp winmm)
 endif()
 
+# The launcher's saloon (resources/saloon, claude/saloon-launcher.md) is AVIF: libavif with dav1d to decode it, fetched
+# at configure time like SDL3 (the libsdl-org forks SDL_image vendors; both build with CMake). dav1d builds C only, so no
+# NASM or Meson is needed; KAMITE_DAV1D_ASM=ON adds its x86 assembly (faster, needs nasm on the PATH). Without it
+# (KAMITE_SALOON=OFF) the launcher keeps its plain look.
+option(KAMITE_SALOON "The launcher's saloon (libavif + dav1d, fetched at configure time)" ON)
+option(KAMITE_DAV1D_ASM "dav1d with its NASM assembly (needs nasm)" OFF)
+if(KAMITE_SALOON AND KAMITE_DEBUG_UI AND TARGET rlImGui)
+    include(FetchContent)
+    set(KAMITE_SHARED_LIBS_SAVED ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+    set(DAV1D_ASM ${KAMITE_DAV1D_ASM} CACHE BOOL "" FORCE)
+    set(DAV1D_BITDEPTHS "8" CACHE STRING "" FORCE)
+    set(DAV1D_LOG OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(kamite_dav1d
+        GIT_REPOSITORY https://github.com/libsdl-org/dav1d.git
+        GIT_TAG a6b395b472c2b1911a49936840e18535b071c1bd) # 1.2.1-SDL
+    FetchContent_MakeAvailable(kamite_dav1d)
+    set(AVIF_CODEC_DAV1D "SYSTEM" CACHE STRING "" FORCE) # the dav1d target above
+    set(AVIF_CODEC_AOM "OFF" CACHE STRING "" FORCE)
+    set(AVIF_CODEC_LIBGAV1 "OFF" CACHE STRING "" FORCE)
+    set(AVIF_CODEC_RAV1E "OFF" CACHE STRING "" FORCE)
+    set(AVIF_CODEC_SVT "OFF" CACHE STRING "" FORCE)
+    set(AVIF_LIBYUV "OFF" CACHE STRING "" FORCE)
+    set(AVIF_LIBSHARPYUV "OFF" CACHE STRING "" FORCE)
+    set(AVIF_JPEG "OFF" CACHE STRING "" FORCE)
+    set(AVIF_ZLIBPNG "OFF" CACHE STRING "" FORCE)
+    set(AVIF_BUILD_APPS OFF CACHE BOOL "" FORCE)
+    set(AVIF_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(kamite_libavif
+        GIT_REPOSITORY https://github.com/libsdl-org/libavif.git
+        GIT_TAG ee829431ceaed31a34b7e1420f7f18180e7eae23) # v1.1.1-SDL
+    FetchContent_MakeAvailable(kamite_libavif)
+    set(BUILD_SHARED_LIBS ${KAMITE_SHARED_LIBS_SAVED})
+    target_sources(kamite PRIVATE kamite/launcher_saloon.cpp kamite/saloon_image.cpp)
+    target_link_libraries(kamite PRIVATE avif)
+    target_compile_definitions(kamite PRIVATE KAMITE_HAS_AVIF=1)
+elseif(KAMITE_DEBUG_UI AND TARGET rlImGui)
+    # without the decoder the saloon reports itself unavailable (saloon_image.cpp) and the launcher stays plain
+    target_sources(kamite PRIVATE kamite/launcher_saloon.cpp kamite/saloon_image.cpp)
+endif()
+
 if(KAMITE_DEBUG_UI AND TARGET rlImGui)
     target_sources(kamite PRIVATE "${CMAKE_SOURCE_DIR}/runtime/ps2xRuntime/src/lib/ps2_debug_panel.cpp")
     target_include_directories(kamite PRIVATE "${CMAKE_SOURCE_DIR}/runtime/ps2xRuntime/src/lib")

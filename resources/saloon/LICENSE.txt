@@ -1,0 +1,52 @@
+The saloon images in this folder
+================================
+
+These images (the launcher's saloon: its layers, door frames, Options zoom frames, the book and the snack sprites
+and shadows) were rendered for God Hand: Rearmed from the 3D assets credited below. They are separate from the
+God Hand: Rearmed code, which has its own licence (LICENSE at the top of the repository). They contain no game data.
+
+Each file carries the licence its sources require:
+
+- Files named cherries*  (the plate's cherries, their shadows)
+    CC BY-SA 4.0  https://creativecommons.org/licenses/by-sa/4.0/
+    Based on "Cherries" (https://sketchfab.com/3d-models/cherries-4d406299153c455f94564b49b56bd6a9)
+    by Carissa (https://sketchfab.com/cclarke468), licensed under CC BY-SA 4.0.
+
+- Files named bananas*  (the banana bunch, its shadow)
+    CC BY-NC-SA 4.0  https://creativecommons.org/licenses/by-nc-sa/4.0/
+    Based on "A Bunch of Bananas" (https://sketchfab.com/3d-models/a-bunch-of-bananas-df544cb8528e43a09510327643286161)
+    by JoshElo (https://sketchfab.com/JoshElo), licensed under CC BY-NC-SA 4.0.
+
+- Every other file
+    CC BY-NC-SA 4.0  https://creativecommons.org/licenses/by-nc-sa/4.0/
+    (c) God Hand: Rearmed. Some of these show part of the bananas (CC BY-NC-SA 4.0, the same licence); none of
+    them contains the cherries: the Options zoom frames ship with the plate's fruit removed, and the launcher draws
+    each piece from its own file.
+
+Credit "God Hand: Rearmed" and the authors below when you share these images or anything made from them. The
+licences above cover these rendered images only; they grant no rights to the 3D assets themselves, which stay
+under their own licences.
+
+Also based on
+-------------
+- "Strawberry" (https://sketchfab.com/3d-models/strawberry-dd6a424807614544835c8cc4529d6f0d) by gelmi.com.br
+  (https://sketchfab.com/rodrigogelmi), CC BY 4.0.
+- "orange fruit" (https://sketchfab.com/3d-models/orange-fruit-cbdf758f21924c168c1c3da1afed9754) by polyplant3d
+  (https://sketchfab.com/polyplant3d), CC BY 4.0.
+- "Cara Cara Orange" (https://sketchfab.com/3d-models/cara-cara-orange-ad325912dc614f1596d2dad2d64524eb) by
+  inciprocal (https://sketchfab.com/inciprocal.com), Sketchfab Standard licence.
+- "Banana Smoothie" (https://sketchfab.com/3d-models/banana-smoothie-6b25cd71cbd74eeca3e04696c0f6b6b3) by markus.blend
+  (https://sketchfab.com/markus.blend), CC BY 4.0. Recoloured as a blue smoothie.
+- "Cherry (Free Download)" (https://sketchfab.com/3d-models/cherry-free-download-8e076ba031bb4969930dc8e49d35668d) by
+  pizzaguyty (https://sketchfab.com/pizzaguyty), CC BY 4.0. The smoothie's cherry.
+- "Mint Leaves" (https://sketchfab.com/3d-models/mint-leaves-25837c82537c46e3ade674e0b8e99864) by Zinaida.Kovrova
+  (https://sketchfab.com/Zinaida.Kovrova), CC BY 4.0.
+- "Curry Msize" (https://sketchfab.com/3d-models/curry-msize-aee5acd194744d6d8d31a0494181552f) by Kenty110
+  (https://sketchfab.com/Kenty110), CC BY 4.0.
+- "Spoon" (https://sketchfab.com/3d-models/spoon-9e21771ced474b19a1420484c23ec0a5) by Mei
+  (https://sketchfab.com/410972008), CC BY 4.0.
+- "Saloon Interior" (https://www.fab.com/listings/57991a62-f98f-4c6a-9b94-a74ec12f242e) and other Quixel Megascans
+  assets (the brown book, the red leather), via Fab, under the Fab Standard License.
+
+Changes: the models were placed in one scene, re-lit and re-shaded (the smoothie recoloured, the book split so it
+opens), rendered, colour-graded and cut into layers.
