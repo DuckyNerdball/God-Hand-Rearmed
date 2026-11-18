@@ -20,7 +20,7 @@ xdotool mousemove 800 50; sleep 0.3
 key Down; sleep 0.3; key Down; sleep 0.4; shot 06_keys
 click $OPTIONSX $OPTIONSY; sleep 0.1; shot 07_zooming; sleep 2.0; shot 08_options
 key Escape; sleep 0.25; shot 09_leaving; sleep 2.5; shot 10_back_home
-key F3; sleep 0.8; shot 11_tuning; key F3; sleep 0.3
+key F4; sleep 0.8; shot 11_tuning; key F4; sleep 0.3
 xdotool mousemove $PLAYX $PLAYY; sleep 0.4; xdotool mousedown 1; sleep 0.25; xdotool mouseup 1; sleep 0.05; shot 12_play
 sleep 2
 kill $LP 2>/dev/null; kill $XP 2>/dev/null

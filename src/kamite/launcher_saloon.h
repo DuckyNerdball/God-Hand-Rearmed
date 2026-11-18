@@ -77,20 +77,22 @@ namespace kamite::launcher::saloon
     {
         std::string splash;            // this start's line ("" for none)
         std::vector<std::string> items; // Play (Install), Options, Quit
-        bool showDontShow = false;     // the last line: "Don't show this again..." with its tick box
-        bool dontShow = false;
-        int focus = -1;                // an item, or items.size() for the last line; -1: none
+        bool showSkip = false;         // "Skip Launcher (hold Shift while starting to see it)" with its tick box
+        bool skip = false;
+        bool steam = false;            // the Add to Steam mark in the lower left corner
+        int focus = -1;                // an item, then the skip line, then the Steam mark (billTargets' order); -1: none
         uint32_t focusSeed = 1;        // the loop's own wobble (a new one each move)
         float focusAge = 1.0f;         // seconds since the focus moved (the loop draws itself in)
     };
-    // What can be clicked on the bill, in paper units: the items, then the last line (when shown).
+    // What can be clicked on the bill, in paper units: the items, then the skip line, then the Steam mark (when shown).
     std::vector<Rectangle> billTargets(const BillFonts &fonts, const Bill &bill);
     void drawBill(const BillFonts &fonts, const Bill &bill, const Homography &paper);
 
-    // ---- the dev tuning panel's values (F3; GHR.ini [SaloonTuning]; the defaults once K is happy) -------------------
+    // ---- the dev tuning panel's values (F4; GHR.ini [SaloonTuning]; the defaults once K is happy) -------------------
     struct Tuning
     {
-        float drift = 1.0f;        // the room's drift with the cursor (x parallax_max of the height)
+        float drift = 1.0f;        // the room against the table with the cursor (x parallax_max of the height)
+        float tableShare = 0.4f;   // the table's part of it (it goes the other way: the view turns round a point between)
         float logoU = 0.5f;        // the logo's centre in the doorway quad (0..1 across, 0..1 down)
         float logoV = 0.125f;
         float logoWidth = 1.19f;   // the logo's width (GOD HAND + plate) in doorway widths
@@ -99,7 +101,7 @@ namespace kamite::launcher::saloon
         float kanaY = 0.0f;
         float kanaDrift = 0.4f;    // the kana's own extra drift (x the room's)
         float burst = 0.8f;        // the speed lines behind the logo (size in logo widths)
-        float raysWarp = 0.5f;     // the light rays' slow sway and shimmer
+        float raysMotion = 1.0f;   // the light rays' beams turning and the fan's swing (like the burst)
         float rays = 1.0f;         // the rays' strength
         float bloom = 0.6f;        // the doorway's (and windows') glow
         float motes = 1.0f;        // the dust in the light
@@ -107,6 +109,7 @@ namespace kamite::launcher::saloon
         float steam = 1.0f;        // the curry's steam (times the player's volume)
         float frost = 1.0f;        // the smoothie glass's frost
         float floatHeight = 0.07f; // how far an eaten snack rises (of the height)
+        float zoomFps = 24.0f;     // the Options zoom's frames a second (stepped)
     };
 
     class Scene
@@ -140,7 +143,7 @@ namespace kamite::launcher::saloon
         float scale() const; // screen pixels per frame pixel
         Vector2 toScreen(Vector2 normalised) const;
 
-        // The bill of fare's paper on screen this frame; false when it is out of the frame (deep in the zoom).
+        // The bill of fare's paper on screen this frame (with the table's drift); false when it is out of the frame.
         bool bill(Quad &out) const;
         // The logo canvas (logo.png's whole canvas) in the doorway's glare; contentBox: the canvas fractions of
         // GOD HAND + plate (left, top, right, bottom). False when the doorway is out of view.
@@ -176,7 +179,7 @@ namespace kamite::launcher::saloon
         const Tuning &tuning() const;
         void loadTuning(const IniFile &ini);
         void saveTuning(IniFile &ini) const;
-        // The dev panel (an ImGui window; F3 in a dev build). Returns false once closed.
+        // The dev panel (an ImGui window; F4 in a dev build). Returns false once closed.
         bool drawTuning(IniFile &ini);
         // A plain paper texture (corner slips): 256x256, mipmapped, tiles.
         const Texture2D &paper() const;

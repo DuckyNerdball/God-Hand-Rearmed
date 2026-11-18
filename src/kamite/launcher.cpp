@@ -26,6 +26,7 @@
 #include "rlImGui.h"
 #include "rlgl.h"
 
+#include <cstdint>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -253,7 +254,8 @@ namespace kamite::launcher
             bool focusOptions = false;    // back from Options: the loop goes back on Options
             float optionsShown = 0.0f;    // Options' panel over the zoom's last frame: fades in once it lands
             bool optionsLeaving = false;  // Back: the panel fades out, then the zoom plays backwards
-            bool tuningOpen = false;      // F3 in a dev build: the saloon's tuning sliders
+            bool tuningOpen = false;      // F4 in a dev build: the saloon's tuning sliders
+            bool navCleared = false;      // the mouse left everything: the next key focuses the first item, with a tick
             bool zoomPending = false;     // Options came before the zoom's frames were read
             int slipFocus = 0;            // the corner slips' focused item (SlipItem), drawn before ImGui
             std::vector<Sound> snackVoices; // Gene's dry lines from se/pl00.afs (eating a snack)
@@ -675,12 +677,14 @@ namespace kamite::launcher
                     else
                         menuSound(state, kConfirm);
                 }
-                else if (g.NavId != state.lastNavId && state.lastNavId != 0 && g.NavId != 0 && g.NavCursorVisible &&
+                else if (g.NavId != state.lastNavId && (state.lastNavId != 0 || state.navCleared) && g.NavId != 0 && g.NavCursorVisible &&
                          state.quietFrames == 0 && state.soundScreen == state.screen)
                     playMenuSound(state, kTick);
             }
             if (state.quietFrames > 0 && !state.soundThisFrame)
                 --state.quietFrames;
+            if (g.NavId != 0)
+                state.navCleared = false;
             state.lastNavId = g.NavId;
             state.popupWasOpen = popupOpen;
             state.soundScreen = state.screen;
@@ -881,13 +885,19 @@ namespace kamite::launcher
         // An invisible button over a box on a paper (the bill, a slip): ImGui gets the box's inscribed rectangle on
         // screen (keyboard / gamepad focus, clicks); moving the mouse over the box itself (exactly, through the paper's
         // perspective) moves the focus there (K: hover moves the focus), without the cursor's tick.
-        bool paperButton(const char *id, Rectangle box, const saloon::Homography &paper, bool hoverFocus, bool *focused = nullptr)
+        saloon::Quad paperQuad(Rectangle box, const saloon::Homography &paper)
         {
             saloon::Quad q;
             q.p[0] = paper.map(box.x, box.y);
             q.p[1] = paper.map(box.x + box.width, box.y);
             q.p[2] = paper.map(box.x + box.width, box.y + box.height);
             q.p[3] = paper.map(box.x, box.y + box.height);
+            return q;
+        }
+
+        bool paperButton(const char *id, Rectangle box, const saloon::Homography &paper, bool hoverFocus, bool *focused = nullptr)
+        {
+            const saloon::Quad q = paperQuad(box, paper);
             // ImGui's box: the item's middle, as wide as its middle line and as tall as its middle column (a long line
             // on a tilted paper would have no inner box, and its outer one would reach over its neighbours).
             const Vector2 c = paper.map(box.x + box.width * 0.5f, box.y + box.height * 0.5f);
@@ -908,13 +918,12 @@ namespace kamite::launcher
             return pressed;
         }
 
-        // The corner slips (K, Nov 17): paper slips poking up from the picture's bottom edge, in dark ink: Add to Steam
-        // on the left, the version / update and the volume on the right. A slip's own units: x right, y down; about
+        // The corner slip (K, Nov 17): a paper slip poking up from the picture's bottom right edge, in dark ink: the
+        // version / update and the volume (Add to Steam moved onto the bill, K Nov 18). A slip's own units: x right, y down; about
         // kSlipShown of its height shows above the edge.
         enum SlipItem
         {
             kSlipNone,
-            kSlipSteam,
             kSlipNotes,
             kSlipUpdate,
             kSlipMute,
@@ -999,7 +1008,7 @@ namespace kamite::launcher
         // What sits on the slips, in slip units.
         constexpr Rectangle kMuteBox{404.0f, 78.0f, 64.0f, 70.0f};
         constexpr float kRulerY = 128.0f, kRulerX0 = 492.0f, kRulerX1 = 722.0f, kRulerTop = 70.0f, kRulerBottom = 152.0f;
-        constexpr Vector2 kSteamAt{210.0f, 78.0f}, kNotesAt{110.0f, 140.0f}, kUpdateAt{285.0f, 140.0f};
+        constexpr Vector2 kNotesAt{110.0f, 140.0f}, kUpdateAt{285.0f, 140.0f};
 
         Rectangle slipTextBox(const Font &font, const char *text, float size, Vector2 centre)
         {
@@ -1010,7 +1019,6 @@ namespace kamite::launcher
         bool updateAvailable() { return g_updateCheck.state.load() == static_cast<int>(update::CheckState::Available); }
 #if KAMITE_LAUNCHER_STEAM
         const char *steamLabel(const State &state) { return state.steam.added ? "Update Steam Entry" : "Add to Steam"; }
-        float steamSize(const State &state) { return state.steam.added ? 34.0f : 42.0f; }
 #endif
 
         // The slips' ink (before ImGui, from last frame's focus): their words, the speaker, the ruler, the loop.
@@ -1022,15 +1030,7 @@ namespace kamite::launcher
             pencil.a = alphaOf(pencil.a / 255.0f * alpha);
             const auto loop = [&](Rectangle box, uint32_t seed) { saloon::inkLoop(box, 1.0f, seed, pencil, slip.paper, 4.0f); };
             saloon::beginInk();
-            if (!right)
-            {
-#if KAMITE_LAUNCHER_STEAM
-                saloon::inkText(f.heading, steamLabel(state), kSteamAt, steamSize(state), ink, slip.paper);
-                if (state.slipFocus == kSlipSteam)
-                    loop(slipTextBox(f.heading, steamLabel(state), steamSize(state), kSteamAt), 11u);
-#endif
-            }
-            else
+            if (right)
             {
                 const std::string version = update::versionLabel();
                 const float vw = saloon::inkWidth(f.text, version.c_str(), 32.0f);
@@ -1451,40 +1451,33 @@ namespace kamite::launcher
             state.steamWorker = std::thread([&state, resources] { state.steamResult = steam::addOrUpdate(resources, state.steamStage); });
         }
 
-        // The lower left corner (K Nov 10; placement to be revisited with the launcher's next visual pass): Add to
-        // Steam, or Update Steam Entry once it is there; hidden without Steam. Steam reads its shortcut list only when
-        // it starts, so a running Steam is restarted, after asking.
+        // Add to Steam, or Update Steam Entry once it is there. Steam reads its shortcut list only when it starts, so a
+        // running Steam is restarted, after asking.
+        void pressSteam(State &state)
+        {
+            if (steam::running())
+                state.steamPopup = State::SteamPopup::Confirm;
+            else
+                startSteamJob(state);
+            state.steamOpenPopup = true;
+        }
+
+        // Add to Steam: Steam's mark in the bill's lower left corner in the saloon (K, Nov 18; pressed there), else a
+        // button in the lower left corner; hidden without Steam. Then its popup.
         void drawSteam(State &state)
         {
             using Popup = State::SteamPopup;
             if (!state.steam.available)
                 return;
-            const float size = fontSize(state, 34.0f), margin = fontSize(state, 22.0f);
-            pushSize(state, 20.0f);
-            bool pressed = false;
-            if (state.saloonOn) // on the left slip (its ink is drawn before ImGui)
+            if (!state.saloonOn)
             {
-                const Slip slip = slipAt(state, false);
-                bool focused = false;
-                pressed = paperButton("##steam", slipTextBox(state.billFonts.heading, steamLabel(state), steamSize(state), kSteamAt), slip.paper,
-                                      true, &focused);
-                if (focused)
-                    state.slipFocus = kSlipSteam;
-            }
-            else
-            {
+                const float size = fontSize(state, 34.0f), margin = fontSize(state, 22.0f);
+                pushSize(state, 20.0f);
                 ImGui::SetCursorPos(ImVec2(margin, ImGui::GetWindowHeight() - margin - size));
-                pressed = ImGui::Button(state.steam.added ? "Update Steam Entry" : "Add to Steam", ImVec2(0.0f, size));
+                if (ImGui::Button(steamLabel(state), ImVec2(0.0f, size)))
+                    pressSteam(state);
+                ImGui::PopFont();
             }
-            if (pressed)
-            {
-                if (steam::running())
-                    state.steamPopup = Popup::Confirm;
-                else
-                    startSteamJob(state);
-                state.steamOpenPopup = true;
-            }
-            ImGui::PopFont();
             if (state.steamOpenPopup)
             {
                 state.steamOpenPopup = false;
@@ -1775,7 +1768,8 @@ namespace kamite::launcher
         // The logo's GOD HAND + plate box in logo.png's canvas (tools/logo: placed in the doorway by that box).
         constexpr float kLogoContent[4] = {0.1225f, 0.3679f, 0.8968f, 0.9002f};
 
-        // The bill's items: Play (Install when not installed), Options, Quit, then "Don't show this again".
+        // The bill's items: Play (Install when not installed), Options, Quit, then Skip Launcher (installed) and Steam's
+        // mark (Steam found).
         constexpr size_t kBillOptions = 1;
 
         void openOptions(State &state)
@@ -1820,8 +1814,16 @@ namespace kamite::launcher
             saloon::Bill &bill = state.bill;
             bill.items = {state.installed ? "Play" : "Install", "Options", "Quit"};
             bill.splash = state.splash;
-            bill.showDontShow = state.installed;
-            bill.dontShow = !state.ini.getBool("Launcher", "Show", true);
+            bill.showSkip = state.installed;
+            bill.skip = !state.ini.getBool("Launcher", "Show", true);
+#if KAMITE_LAUNCHER_STEAM
+            bill.steam = state.steam.available;
+#else
+            bill.steam = false;
+#endif
+            const size_t skipItem = bill.showSkip ? bill.items.size() : SIZE_MAX;
+            const size_t steamItem = bill.steam ? bill.items.size() + (bill.showSkip ? 1u : 0u) : SIZE_MAX;
+            bool overTarget = false;
             saloon::Quad quad;
             int focus = -1;
             bool billShown = false;
@@ -1840,6 +1842,15 @@ namespace kamite::launcher
                     ImGui::PushID(static_cast<int>(i));
                     bool focused = false;
                     const bool pressed = paperButton("##bill", targets[i], paper, home, &focused);
+                    overTarget = overTarget || saloon::inside(paperQuad(targets[i], paper), mouse);
+#if KAMITE_LAUNCHER_STEAM
+                    if (i == steamItem && home)
+                    {
+                        pushSize(state, 18.0f);
+                        ImGui::SetItemTooltip("%s", steamLabel(state));
+                        ImGui::PopFont();
+                    }
+#endif
                     if (home && ((state.focusFirst && i == 0) || (state.focusOptions && i == kBillOptions)))
                     {
                         // Play starts focused, its loop showing, so A / Enter plays at once (K Oct 29); back from
@@ -1859,7 +1870,7 @@ namespace kamite::launcher
                         focus = static_cast<int>(i);
                     if (i == 0 && state.installed)
                         ownSoundItem(); // Play's own sound
-                    else if (i == bill.items.size())
+                    else if (i == skipItem)
                         tickItem(); // the tick box
                     if (pressed && home)
                     {
@@ -1884,11 +1895,16 @@ namespace kamite::launcher
                             state.result = Result::Quit;
                             state.done = true;
                         }
-                        else
+                        else if (i == skipItem)
                         {
-                            state.ini.setBool("Launcher", "Show", bill.dontShow);
+                            bill.skip = !bill.skip;
+                            state.ini.setBool("Launcher", "Show", !bill.skip);
                             state.ini.save();
                         }
+#if KAMITE_LAUNCHER_STEAM
+                        else if (i == steamItem)
+                            pressSteam(state);
+#endif
                     }
                     ImGui::PopID();
                 }
@@ -1908,6 +1924,18 @@ namespace kamite::launcher
                 else if (scene.snackClick(mouse) != saloon::Scene::Bite::None)
                     snackVoice(state);
             }
+            // The mouse moved off everything (the bill's lines, the book, the slip's controls): nothing stays focused, so
+            // no loop lingers and the book goes dark (K, Nov 18). The next key or button focuses the first item.
+            if (home && billShown && !popup && moved && !overTarget && !overBook && !ImGui::IsAnyItemHovered())
+            {
+                ImGuiContext &g = *GImGui;
+                if (g.NavId != 0 && g.NavWindow == ImGui::GetCurrentWindow())
+                {
+                    ImGui::SetNavID(0, ImGuiNavLayer_Main, 0, ImRect());
+                    state.navCleared = true;
+                    focus = -1;
+                }
+            }
             // The loop follows the focus; through the zoom it stays where it was (on Options).
             if (home && focus != bill.focus)
             {
@@ -1915,86 +1943,33 @@ namespace kamite::launcher
                 bill.focusSeed = static_cast<uint32_t>(std::rand()) * 2654435761u + 1u;
                 bill.focusAge = 0.0f;
             }
-            // The rights notice at the foot of the screen, as before (too long for fine print on the bill): in the gap
-            // between the bill and the right slip when it fits there in two lines, else across from the bill to the
-            // picture's right edge, just above the slip; out through the zoom.
-            {
-                ImGui::PushStyleVar(ImGuiStyleVar_Alpha, scene.overlays() * ImGui::GetStyle().Alpha);
-                pushSize(state, 15.0f);
-                const Rectangle pic = scene.picture();
-                const float margin = fontSize(state, 16.0f);
-                float left = pic.x + pic.width * 0.06f;
-                saloon::Quad paper;
-                if (scene.atHome() && scene.bill(paper))
-                    left = std::max(left, std::max(paper.p[1].x, paper.p[2].x) + margin);
-                const Slip slip = slipAt(state, true);
-                const float slipLeft = std::min(slip.quad.p[0].x, slip.quad.p[3].x), slipTop = std::min(slip.quad.p[0].y, slip.quad.p[1].y);
-                const char *text = "God Hand™ is a trademark of CAPCOM CO., LTD. All rights to the game belong to Capcom.\n"
-                                   "God Hand: Rearmed is an unofficial fan-made project, not affiliated with or endorsed by Capcom or Clover "
-                                   "Studio. It contains no game data: play your own damn copy!";
-                const auto wrap = [&](float room) {
-                    std::vector<std::string> lines;
-                    std::string line, word;
-                    for (const char *c = text;; ++c)
-                    {
-                        if (*c == ' ' || *c == '\n' || *c == '\0')
-                        {
-                            const std::string tried = line.empty() ? word : line + " " + word;
-                            if (!line.empty() && ImGui::CalcTextSize(tried.c_str()).x > room)
-                            {
-                                lines.push_back(line);
-                                line = word;
-                            }
-                            else
-                                line = tried;
-                            word.clear();
-                            if ((*c == '\n' || *c == '\0') && !line.empty())
-                            {
-                                lines.push_back(line);
-                                line.clear();
-                            }
-                            if (*c == '\0')
-                                break;
-                        }
-                        else
-                            word += *c;
-                    }
-                    return lines;
-                };
-                float right = slipLeft - margin, bottom = pic.y + pic.height - fontSize(state, 14.0f);
-                std::vector<std::string> lines = wrap(std::max(fontSize(state, 120.0f), right - left));
-                if (lines.size() > 2)
-                {
-                    right = pic.x + pic.width - margin;
-                    bottom = slipTop - fontSize(state, 8.0f);
-                    lines = wrap(std::max(fontSize(state, 120.0f), right - left));
-                }
-                const float lineHeight = ImGui::GetTextLineHeight();
-                ImDrawList *draw = ImGui::GetWindowDrawList();
-                float y = bottom - lineHeight * static_cast<float>(lines.size());
-                const float centre = (left + right) * 0.5f;
-                const ImU32 shade = IM_COL32(10, 6, 4, static_cast<int>(70.0f * scene.overlays()));
-                const ImU32 colour = ImGui::GetColorU32(kTextSoft);
-                const float r = std::max(1.0f, ImGui::GetFontSize() * 0.09f);
-                for (const std::string &l : lines)
-                {
-                    const float x = centre - ImGui::CalcTextSize(l.c_str()).x * 0.5f;
-                    for (int i = 0; i < 12; ++i)
-                    {
-                        const float a = static_cast<float>(i) * 0.5236f;
-                        draw->AddText(ImVec2(x + std::cos(a) * r, y + r * 0.6f + std::sin(a) * r), shade, l.c_str());
-                    }
-                    draw->AddText(ImVec2(x, y), colour, l.c_str());
-                    y += lineHeight;
-                }
-                ImGui::PopFont();
-                ImGui::PopStyleVar();
-            }
             if (billShown)
                 state.focusFirst = false;
         }
 
-        // The saloon's ink before ImGui (so popups cover it), from last frame's focus: the bill, the corner slips.
+        // The tagline at the foot of the picture, middle, where the rights notice was (K, Nov 18): the bill's serif in
+        // cream, a soft shadow under it; out through the zoom.
+        void drawTagline(const State &state, float alpha)
+        {
+            const Font &font = state.billFonts.text;
+            if (font.texture.id == 0u || alpha <= 0.01f)
+                return;
+            const char *text = "God Hand\u2122 for PS2 Recompiled, Refined, Rearmed.";
+            const Rectangle pic = state.scene.picture();
+            const float size = std::max(14.0f, pic.height * 0.026f);
+            const Vector2 extent = MeasureTextEx(font, text, size, 0.0f);
+            const Vector2 at{std::round(pic.x + (pic.width - extent.x) * 0.5f), std::round(pic.y + pic.height - size * 1.7f)};
+            const float r = std::max(1.0f, size * 0.07f);
+            const Color shade{10, 6, 4, alphaOf(0.28f * alpha)};
+            for (int i = 0; i < 12; ++i)
+            {
+                const float a = static_cast<float>(i) * 0.5236f;
+                DrawTextEx(font, text, Vector2{at.x + std::cos(a) * r, at.y + r * 0.6f + std::sin(a) * r}, size, 0.0f, shade);
+            }
+            DrawTextEx(font, text, at, size, 0.0f, Color{236, 224, 204, alphaOf(0.94f * alpha)});
+        }
+
+        // The saloon's ink before ImGui (so popups cover it), from last frame's focus: the bill, the corner slip.
         void drawSaloonInk(State &state)
         {
             const saloon::Scene &scene = state.scene;
@@ -2006,14 +1981,8 @@ namespace kamite::launcher
             if (state.screen == Screen::Options)
                 return;
             const float alpha = scene.overlays();
-#if KAMITE_LAUNCHER_STEAM
-            if (state.screen == Screen::Home && state.steam.available)
-            {
-                const Slip left = slipAt(state, false);
-                drawSlipPaper(state, left, alpha);
-                drawSlipInk(state, left, false, alpha);
-            }
-#endif
+            if (state.screen == Screen::Home)
+                drawTagline(state, alpha);
             const Slip right = slipAt(state, true);
             drawSlipPaper(state, right, alpha);
             drawSlipInk(state, right, true, alpha);
@@ -3803,8 +3772,8 @@ namespace kamite::launcher
             }
             ImGui::End();
 #if !(defined(KAMITE_RELEASE) && KAMITE_RELEASE)
-            // F3 (dev builds): the saloon's tuning sliders; Save writes them to GHR.ini (K's defaults later).
-            if (state.saloonOn && ImGui::IsKeyPressed(ImGuiKey_F3, false))
+            // F4 (dev builds): the saloon's tuning sliders; Save writes them to GHR.ini (K's defaults later).
+            if (state.saloonOn && ImGui::IsKeyPressed(ImGuiKey_F4, false))
                 state.tuningOpen = !state.tuningOpen;
             if (state.tuningOpen && state.saloonOn)
                 state.tuningOpen = state.scene.drawTuning(state.ini);

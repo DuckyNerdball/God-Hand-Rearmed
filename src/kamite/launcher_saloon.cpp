@@ -37,7 +37,6 @@ namespace kamite::launcher::saloon
         using saloon_image::Pixels;
 
         constexpr float kPi = 3.14159265358979f;
-        constexpr float kZoomFps = 12.0f; // the zoom's frames, stepped (a 2000s menu's keyframes)
         constexpr int kZoomFrames = 8;
         constexpr float kFloatTime = 0.6f;  // an eaten snack's rise
         constexpr float kShadowFade = 0.4f; // its shadow
@@ -102,35 +101,40 @@ void main()
 }
 )glsl";
 
-        // The light rays (a screen layer): they follow the room's drift by the pack's weight map (less toward the
-        // camera), sway slowly round the doorway and shimmer.
+        // The light rays (a screen layer): near ones follow the table, far ones the room (the pack's weight map: ~1 at
+        // the doorway, ~0.3 at the near floor); the doorway's fan swings a little and beams sweep round it both ways,
+        // like the burst's turning layers (the windows' rays keep still).
         const char *const kRaysShader = R"glsl(
 in vec2 fragTexCoord;
 in vec4 fragColor;
 uniform sampler2D texture0;
 uniform sampler2D weightMap;
-uniform vec2 shift;   // the room's drift, in this texture's uv
-uniform vec2 source;  // where the rays fan out from, uv
-uniform vec2 size;    // the texture's size, pixels
+uniform vec2 shiftRoom;  // the room's drift, in this texture's uv
+uniform vec2 shiftTable; // the table's
+uniform vec2 source;     // where the doorway's rays fan out from, uv
+uniform vec2 size;       // the texture's size, pixels
 uniform float time;
-uniform float warp;
+uniform float motion;
 out vec4 finalColor;
 void main()
 {
     vec2 uv = fragTexCoord;
     float w = texture(weightMap, uv).r;
-    uv -= shift * w;
+    uv -= mix(shiftTable, shiftRoom, w);
     vec2 d = (uv - source) * size;
     float r = length(d);
     float a = atan(d.y, d.x);
-    float sway = warp * 0.010 * (0.6 * sin(a * 7.0 + time * 0.37) + 0.4 * sin(a * 13.0 - time * 0.23 + 1.7))
-               * smoothstep(40.0, 400.0, r);
-    float c = cos(sway), s = sin(sway);
+    float fan = 1.0 - smoothstep(0.15, 0.24, abs(uv.x - source.x));
+    float swing = motion * 0.010 * (0.6 * sin(time * 0.23) + 0.4 * sin(time * 0.37 + 1.3)) * smoothstep(30.0, 300.0, r) * fan;
+    float c = cos(swing), s = sin(swing);
     vec2 turned = vec2(c * d.x - s * d.y, s * d.x + c * d.y);
     vec3 col = texture(texture0, source + turned / size).rgb;
-    float shimmer = 1.0 + warp * 0.22 * (0.5 * sin(a * 23.0 + time * 0.9) + 0.5 * sin(a * 37.0 - time * 0.61 + 0.4))
-                  * smoothstep(60.0, 500.0, r);
-    finalColor = vec4(col * shimmer * fragColor.a, 1.0);
+    // waves round the circle (whole numbers: no seam), each turning at a few degrees a second, some each way
+    float b = 0.40 * sin(9.0 * a - time * 0.35) + 0.30 * sin(14.0 * a + time * 0.27 + 1.1)
+            + 0.20 * sin(23.0 * a - time * 0.52 + 2.3) + 0.25 * sin(5.0 * a + time * 0.16 + 0.7);
+    float beams = max(0.0, 1.0 + motion * 0.45 * b * smoothstep(40.0, 350.0, r) * fan);
+    float pulse = 1.0 + motion * 0.06 * sin(time * 1.1 + 1.0);
+    finalColor = vec4(col * beams * pulse * fragColor.a, 1.0);
 }
 )glsl";
 
@@ -159,7 +163,8 @@ float fbm(vec2 p)
 }
 )glsl";
 
-        // The curry's steam: faint wisps rising off the bowl and curling away (strength in the vertex alpha).
+        // The curry's steam: thin wisps rising off the bowl in puffs, curling and spreading as they go (strength in the
+        // vertex alpha).
         const char *const kSteamShader = R"glsl(
 in vec2 fragTexCoord;
 in vec4 fragColor;
@@ -169,53 +174,111 @@ out vec4 finalColor;
 %NOISE%
 void main()
 {
-    float x = (fragTexCoord.x - 0.5) * 2.0;           // -1..1 across
-    float h = (1.0 - fragTexCoord.y);                 // 0 at the bowl, 1 at the top
-    float sway = 0.18 * h * sin(time * 0.31 + h * 3.0) + 0.10 * h * h * sin(time * 0.53 + 1.3);
-    float spread = 0.42 + 0.55 * h;
-    float across = abs(x - sway) / spread;
-    vec2 q = vec2(x * aspect * 1.6, h * 2.6 - time * 0.42);
-    q.x += 0.9 * (fbm(vec2(h * 2.0 - time * 0.11, x * 0.7)) - 0.5);
-    float n = fbm(q + vec2(0.0, fbm(q * 0.6 + time * 0.05) * 1.3));
-    float wisps = smoothstep(0.50, 0.86, n);
-    float shape = (1.0 - smoothstep(0.55, 1.0, across)) * smoothstep(0.02, 0.16, h) * (1.0 - smoothstep(0.45, 1.0, h));
-    float a = wisps * shape * fragColor.a * 0.30;
-    finalColor = vec4(vec3(0.97, 0.94, 0.89) * a, a);
+    float x = (fragTexCoord.x - 0.5) * 2.0; // -1..1 across
+    float h = 1.0 - fragTexCoord.y;         // 0 at the bowl, 1 at the top
+    float a = 0.0;
+    for (int i = 0; i < 4; ++i)
+    {
+        float fi = float(i);
+        float base = (fi - 1.5) * 0.26 + 0.06 * sin(time * 0.21 + fi * 2.1);
+        float curl = (fbm(vec2(h * 2.3 - time * 0.22 + fi * 7.3, fi * 1.7)) - 0.5) * (0.25 + 1.2 * h);
+        float sway = 0.10 * h * sin(time * 0.47 + fi * 1.9 + h * 4.5);
+        float centre = base * (1.0 - 0.35 * h) + curl + sway;
+        float width = (0.020 + 0.085 * h) * (1.0 + 0.3 * sin(fi * 4.1));
+        float d = (x - centre) / width;
+        float strand = exp(-d * d * 1.6);
+        // it comes off in puffs that rise (gaps travel up the strand)
+        float puff = smoothstep(0.42, 0.70, fbm(vec2(fi * 3.1 + 0.7, h * 3.2 - time * 0.62)));
+        float grain = 0.6 + 0.4 * fbm(vec2(x * aspect * 5.0 + fi, h * 9.0 - time * 1.1));
+        a += strand * puff * grain;
+    }
+    float shape = smoothstep(0.0, 0.08, h) * (1.0 - smoothstep(0.50, 1.0, h));
+    a = clamp(a, 0.0, 1.0) * shape * fragColor.a * 0.62;
+    finalColor = vec4(vec3(0.97, 0.95, 0.91) * a, a);
 }
 )glsl";
 
-        // The smoothie glass's frost where the cold drink is (mask), and a droplet running down through it.
+        // The smoothie glass in the warm saloon: a milky film of condensation where the cold drink is, thicker lower
+        // down, with beads of water in it; a drop now and then runs down the glass's curve, wiping a clear trail that
+        // fogs over again.
         const char *const kFrostShader = R"glsl(
 in vec2 fragTexCoord;
 in vec4 fragColor;
-uniform sampler2D texture0; // the drink's mask
+uniform sampler2D texture0; // the drink's mask (alpha)
 uniform vec2 size;          // the quad's size, frame pixels
-uniform vec4 drop;          // x, the y it started at, the y it is at (uv), 1 while running
-uniform float trail;        // its trail's age (s), fading the clear line back
+uniform float rim;          // the glass's rim, uv
+uniform vec4 drop;          // the running drop: x, y (uv), size, alpha
+uniform vec4 trail[24];     // where it ran: x, y (uv), age (s), 1 = used
 out vec4 finalColor;
 %NOISE%
+// beads on a jittered grid: their cover (x), glint (y), dark rim, heavier low (z)
+vec3 beads(vec2 p, float cell, float rmin, float rmax, float keep, float seed)
+{
+    vec2 g = floor(p / cell);
+    vec3 best = vec3(0.0);
+    for (int j = -1; j <= 1; ++j)
+        for (int i = -1; i <= 1; ++i)
+        {
+            vec2 c = g + vec2(float(i), float(j)) + seed;
+            if (hash(c + 3.7) > keep)
+                continue;
+            vec2 centre = (c - seed + 0.2 + 0.6 * vec2(hash(c), hash(c + 17.31))) * cell;
+            float r = mix(rmin, rmax, hash(c + 9.1));
+            vec2 q = (p - centre) / (r * vec2(1.0, 1.12)); // a touch long: they sag
+            float d = length(q);
+            float cover = 1.0 - smoothstep(0.75, 1.0, d);
+            if (cover <= best.x)
+                continue;
+            float glint = 1.0 - smoothstep(0.0, 0.3, length(q - vec2(-0.32, -0.4)));
+            float dark = smoothstep(0.45, 0.95, d) * (0.4 + 0.6 * clamp(0.5 + 0.7 * q.y, 0.0, 1.0)) * cover;
+            best = vec3(cover, glint, dark);
+        }
+    return best;
+}
 void main()
 {
     vec2 uv = fragTexCoord;
     float mask = texture(texture0, uv).a;
     vec2 p = uv * size;
-    float haze = 0.55 + 0.45 * fbm(p * 0.045);
-    float speck = smoothstep(0.78, 0.98, hash(floor(p * 0.9))) * 0.9;
-    float frost = mask * (0.16 * haze + 0.22 * speck);
-    // the trail: frost wiped off along the droplet's path, slowly coming back
-    float dx = abs(p.x - drop.x * size.x);
-    float onPath = (1.0 - smoothstep(1.2, 2.6, dx)) * step(drop.y, uv.y) * step(uv.y, max(drop.z, drop.y));
-    float wiped = onPath * (1.0 - smoothstep(2.0, 6.0, trail));
-    frost *= 1.0 - 0.85 * wiped;
-    // the droplet: a small bright bead with a darker rim
-    vec2 bead = (p - vec2(drop.x * size.x, drop.z * size.y)) / vec2(2.2, 2.8);
-    float r = length(bead);
-    float beadA = drop.w * (1.0 - smoothstep(0.75, 1.0, r));
-    float hi = drop.w * (1.0 - smoothstep(0.0, 0.45, length(bead - vec2(-0.3, -0.35))));
-    vec3 col = mix(vec3(0.92, 0.96, 1.0), vec3(0.55, 0.62, 0.70), smoothstep(0.4, 1.0, r) * beadA);
-    float a = max(frost * fragColor.a, beadA * 0.55 * mask);
-    a = max(a, hi * 0.9 * mask);
-    finalColor = vec4(col * a, a);
+    // the drop, and the clear track behind it (it gathered the film as it went; the film creeps back)
+    vec2 dq = (p - drop.xy * size) / (vec2(3.2, 4.2) * drop.z);
+    float dr = length(dq);
+    float body = (1.0 - smoothstep(0.82, 1.0, dr)) * drop.w;
+    float wiped = 0.0;
+    for (int i = 0; i < 23; ++i)
+    {
+        if (trail[i + 1].w < 0.5)
+            break;
+        vec2 a = trail[i].xy * size, b = trail[i + 1].xy * size, ab = b - a;
+        float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
+        float dist = length(p - a - ab * t);
+        float age = mix(trail[i].z, trail[i + 1].z, t);
+        float width = 2.6 * drop.z * (1.0 - 0.35 * smoothstep(0.0, 1.0, age / 10.0));
+        wiped = max(wiped, (1.0 - smoothstep(width * 0.6, width, dist)) * (1.0 - smoothstep(3.0, 12.0, age)));
+    }
+    float clear = mask * (1.0 - wiped) * (1.0 - body);
+    // the film: a milky haze that pales the drink, thicker lower down, uneven in soft patches
+    float low = smoothstep(rim, rim + 0.6, uv.y);
+    float film = (0.36 + 0.16 * low) * (0.8 + 0.4 * fbm(p * 0.03));
+    // beads in it, big and small: clear windows onto the drink, a glint up top, a dark rim low
+    vec3 big = beads(p, 15.0, 2.6, 5.0, 0.42, 0.0);
+    vec3 small = beads(p + 4.3, 6.5, 0.9, 1.8, 0.5, 31.0);
+    float holes = max(big.x, small.x * 0.6);
+    float fogA = clear * film * (1.0 - 0.9 * holes);
+    float hiA = clear * (big.x * big.y * 0.85 + small.x * small.y * 0.25);
+    float shadeA = clear * big.z * 0.4;
+    vec3 col = vec3(0.86, 0.91, 0.96) * fogA + vec3(1.0) * hiA;
+    float a = fogA + hiA + shadeA; // the shade: alpha with no light
+    col *= fragColor.a;
+    a = clamp(a, 0.0, 1.0) * fragColor.a;
+    // the drop: clear, a dark rim heavier low, a bright speck top left, a light caustic low
+    float edge = smoothstep(0.5, 0.95, dr) * body * (0.55 + 0.45 * clamp(0.5 + 0.7 * dq.y, 0.0, 1.0));
+    float speck = (1.0 - smoothstep(0.0, 0.3, length(dq - vec2(-0.3, -0.42)))) * drop.w;
+    float caustic = (1.0 - smoothstep(0.0, 0.34, length(dq - vec2(0.06, 0.55)))) * drop.w;
+    float dropA = max(edge * 0.7, max(speck, caustic * 0.5));
+    vec3 dropCol = vec3(0.06, 0.12, 0.22) * edge * 0.7 + vec3(0.8, 0.92, 1.0) * caustic * 0.5 + vec3(1.0) * speck;
+    dropCol = min(dropCol, vec3(dropA));
+    finalColor = vec4(dropCol + col * (1.0 - dropA), dropA + a * (1.0 - dropA));
 }
 )glsl";
 
@@ -925,10 +988,16 @@ void main()
     {
         constexpr Color kInk{38, 26, 18, 238};
         constexpr Color kPencil{164, 30, 22, 225};
-        constexpr const char *kTagline[2] = {"God Hand\u2122 for PS2", "Recompiled, Refined, Rearmed."};
-        constexpr const char *kDontShow = "Don't show this again (hold Shift while starting to see it)";
-        constexpr float kItemSize = 84.0f, kItemTop = 385.0f, kItemStep = 128.0f;
-        constexpr float kSmallSize = 24.0f, kSmallY = 908.0f, kBox = 22.0f, kBoxGap = 12.0f, kPaperRoom = 600.0f;
+        constexpr const char *kSkip = "Skip Launcher (hold Shift while starting to see it)";
+        // The rights notice, in fine print at the foot of the bill (K, Nov 18); a line per \n, each paragraph balanced.
+        constexpr const char *kLegal = "God\u00A0Hand\u2122 is a trademark of CAPCOM CO.,\u00A0LTD.\nAll rights to the game belong to Capcom.\n"
+                                       "God Hand: Rearmed is an unofficial fan-made project, not affiliated with or endorsed by Capcom or "
+                                       "Clover Studio. It contains no game data: play your own damn copy!";
+        constexpr float kItemSize = 84.0f, kItemTop = 372.0f, kItemStep = 116.0f;
+        constexpr float kSkipSize = 30.0f, kSkipY = 704.0f, kBox = 26.0f, kBoxGap = 12.0f, kPaperRoom = 610.0f;
+        constexpr float kLegalSize = 24.0f, kLegalTop = 758.0f, kLegalStep = 27.0f, kLegalRoom = 590.0f;
+        constexpr Vector2 kSteamAt{86.0f, 934.0f};
+        constexpr float kSteamR = 30.0f;
 
         std::vector<int> codepointsFor(const std::string &extra)
         {
@@ -1011,10 +1080,101 @@ void main()
             return fit;
         }
 
-        float smallSize(const Font &font)
+        float skipSize(const Font &font)
         {
-            const float wide = inkWidth(font, kDontShow, kSmallSize) + kBox + kBoxGap;
-            return wide > kPaperRoom ? kSmallSize * kPaperRoom / wide : kSmallSize;
+            const float wide = inkWidth(font, kSkip, kSkipSize) + kBox + kBoxGap;
+            return wide > kPaperRoom ? kSkipSize * kPaperRoom / wide : kSkipSize;
+        }
+
+        // Words broken greedily into lines no wider than room.
+        std::vector<std::string> wrapWords(const Font &font, const std::vector<std::string> &words, float size, float room)
+        {
+            std::vector<std::string> lines;
+            std::string line;
+            for (const std::string &word : words)
+            {
+                const std::string tried = line.empty() ? word : line + " " + word;
+                if (!line.empty() && inkWidth(font, tried.c_str(), size) > room)
+                {
+                    lines.push_back(line);
+                    line = word;
+                }
+                else
+                    line = tried;
+            }
+            if (!line.empty())
+                lines.push_back(line);
+            return lines;
+        }
+
+        // The rights notice broken into lines that fit the bill, each paragraph balanced (as narrow as it can go
+        // without taking another line, so no word is left hanging on its own).
+        const std::vector<std::string> &legalLines(const Font &font)
+        {
+            static std::vector<std::string> lines;
+            static unsigned int madeFor = 0u;
+            if (madeFor == font.texture.id && !lines.empty())
+                return lines;
+            madeFor = font.texture.id;
+            lines.clear();
+            std::vector<std::string> words;
+            std::string word;
+            auto paragraph = [&]() {
+                if (words.empty())
+                    return;
+                const size_t count = wrapWords(font, words, kLegalSize, kLegalRoom).size();
+                float lo = kLegalRoom * 0.4f, hi = kLegalRoom;
+                for (int i = 0; i < 14; ++i)
+                {
+                    const float mid = (lo + hi) * 0.5f;
+                    (wrapWords(font, words, kLegalSize, mid).size() <= count ? hi : lo) = mid;
+                }
+                for (std::string &line : wrapWords(font, words, kLegalSize, hi))
+                {
+                    // the no-break spaces kept words together; the font has no glyph of its own for them
+                    for (size_t at; (at = line.find("\xC2\xA0")) != std::string::npos;)
+                        line.replace(at, 2, " ");
+                    lines.push_back(std::move(line));
+                }
+                words.clear();
+            };
+            for (const char *c = kLegal;; ++c)
+            {
+                if (*c == ' ' || *c == '\n' || *c == '\0')
+                {
+                    if (!word.empty())
+                        words.push_back(word);
+                    word.clear();
+                    if (*c != ' ')
+                        paragraph();
+                    if (*c == '\0')
+                        break;
+                }
+                else
+                    word += *c;
+            }
+            return lines;
+        }
+
+        // Steam's mark in ink (a piston: the big wheel's hub, the arm, the small wheel), for Add to Steam.
+        void inkSteamMark(Vector2 c, float r, Color color, const Homography &paper)
+        {
+            const auto circle = [&](Vector2 at, float radius, float width) {
+                Vector2 points[33];
+                for (int i = 0; i <= 32; ++i)
+                {
+                    const float a = kPi * 2.0f * static_cast<float>(i) / 32.0f;
+                    points[i] = Vector2{at.x + std::cos(a) * radius, at.y + std::sin(a) * radius};
+                }
+                inkLine(points, 33, width, color, paper);
+            };
+            circle(c, r, r * 0.13f);
+            const Vector2 hub{c.x + r * 0.30f, c.y - r * 0.24f}, small{c.x - r * 0.38f, c.y + r * 0.34f};
+            circle(hub, r * 0.27f, r * 0.12f);
+            circle(hub, r * 0.10f, r * 0.10f);
+            circle(small, r * 0.17f, r * 0.11f);
+            const Vector2 arm[2] = {{small.x + r * 0.13f, small.y - r * 0.10f}, {hub.x - r * 0.22f, hub.y + r * 0.16f}};
+            inkLine(arm, 2, r * 0.17f, color, paper);
         }
     }
 
@@ -1051,12 +1211,14 @@ void main()
             const float y = kItemTop + kItemStep * static_cast<float>(i);
             out.push_back(Rectangle{kPaperW * 0.5f - w * 0.5f - 34.0f, y - kItemSize * 0.52f, w + 68.0f, kItemSize * 1.04f});
         }
-        if (bill.showDontShow)
+        if (bill.showSkip)
         {
-            const float size = smallSize(fonts.text);
-            const float w = inkWidth(fonts.text, kDontShow, size) + kBox + kBoxGap;
-            out.push_back(Rectangle{kPaperW * 0.5f - w * 0.5f - 10.0f, kSmallY - 24.0f, w + 20.0f, 48.0f});
+            const float size = skipSize(fonts.text);
+            const float w = inkWidth(fonts.text, kSkip, size) + kBox + kBoxGap;
+            out.push_back(Rectangle{kPaperW * 0.5f - w * 0.5f - 10.0f, kSkipY - 26.0f, w + 20.0f, 52.0f});
         }
+        if (bill.steam)
+            out.push_back(Rectangle{kSteamAt.x - kSteamR - 8.0f, kSteamAt.y - kSteamR - 8.0f, kSteamR * 2.0f + 16.0f, kSteamR * 2.0f + 16.0f});
         return out;
     }
 
@@ -1077,18 +1239,22 @@ void main()
         // the menu
         for (size_t i = 0; i < bill.items.size(); ++i)
             inkText(fonts.item, bill.items[i].c_str(), Vector2{kPaperW * 0.5f, kItemTop + kItemStep * static_cast<float>(i)}, kItemSize, kInk, paper);
-        // the tagline
-        inkText(fonts.text, kTagline[0], Vector2{kPaperW * 0.5f, 792.0f}, 30.0f, kInk, paper);
-        inkText(fonts.text, kTagline[1], Vector2{kPaperW * 0.5f, 828.0f}, 30.0f, kInk, paper);
-        // the small print, last: the tick box and its line
-        if (bill.showDontShow)
+        // Skip Launcher, with its tick box
+        if (bill.showSkip)
         {
-            const float size = smallSize(fonts.text);
-            const float w = inkWidth(fonts.text, kDontShow, size);
+            const float size = skipSize(fonts.text);
+            const float w = inkWidth(fonts.text, kSkip, size);
             const float left = kPaperW * 0.5f - (w + kBox + kBoxGap) * 0.5f;
-            inkTickBox(Vector2{left + kBox * 0.5f, kSmallY}, kBox * size / kSmallSize, bill.dontShow, kInk, paper);
-            inkText(fonts.text, kDontShow, Vector2{left + kBox + kBoxGap + w * 0.5f, kSmallY}, size, kInk, paper);
+            inkTickBox(Vector2{left + kBox * 0.5f, kSkipY}, kBox * size / kSkipSize, bill.skip, kInk, paper);
+            inkText(fonts.text, kSkip, Vector2{left + kBox + kBoxGap + w * 0.5f, kSkipY}, size, kInk, paper);
         }
+        // the fine print
+        const std::vector<std::string> &legal = legalLines(fonts.text);
+        for (size_t i = 0; i < legal.size(); ++i)
+            inkText(fonts.text, legal[i].c_str(), Vector2{kPaperW * 0.5f, kLegalTop + kLegalStep * static_cast<float>(i)}, kLegalSize, kInk, paper);
+        // Add to Steam: Steam's mark in the lower left corner
+        if (bill.steam)
+            inkSteamMark(kSteamAt, kSteamR, kInk, paper);
         // the focus: a red grease-pencil loop drawn round it
         const std::vector<Rectangle> targets = billTargets(fonts, bill);
         if (bill.focus >= 0 && static_cast<size_t>(bill.focus) < targets.size())
@@ -1097,9 +1263,9 @@ void main()
             const bool small = static_cast<size_t>(bill.focus) >= bill.items.size();
             box.x -= small ? 6.0f : 4.0f;
             box.width += small ? 12.0f : 8.0f;
-            box.y -= small ? 6.0f : 0.0f;
-            box.height += small ? 12.0f : 0.0f;
-            inkLoop(box, bill.focusAge / 0.16f, bill.focusSeed, kPencil, paper, small ? 4.0f : 7.0f);
+            box.y -= small ? 4.0f : 0.0f;
+            box.height += small ? 8.0f : 0.0f;
+            inkLoop(box, bill.focusAge / 0.16f, bill.focusSeed, kPencil, paper, small ? 4.5f : 7.0f);
         }
         endInk();
     }
@@ -1147,7 +1313,9 @@ void main()
 
         // life
         float time = 0.0f, appear = 0.0f;
-        Vector2 parallax{}, shift{}; // shift: the room's drift, frame pixels
+        // The view turns round a point between the table and the room (K): the room leans toward the cursor, the
+        // table the other way. Frame pixels.
+        Vector2 parallax{}, roomShift{}, tableShift{};
         float overlays = 1.0f, homeLife = 1.0f, bookLight = 0.0f, volume = 0.0f;
         std::vector<bool> eaten;
         std::vector<float> eatenAt;
@@ -1155,14 +1323,25 @@ void main()
         float smoothieEmptyAt = -1.0f;
         std::vector<Floating> floats;
         std::vector<Mote> motes;
-        // the droplet on the glass
-        float dropNext = 6.0f, dropStart = -1.0f, dropX = 0.5f, dropY0 = 0.1f, dropLen = 0.7f, dropDur = 2.6f;
+        // the drop on the glass: it runs down the glass's curve in spurts (a lane across the drink, 0..1), leaving a trail
+        struct TrailPoint
+        {
+            Vector2 at; // in the glass's box, pixels
+            float born;
+        };
+        std::vector<Vector2> drinkLocal; // the drink polygon in the glass's box, pixels
+        float drinkTop = 0.0f, drinkBottom = 0.0f;
+        bool dropRunning = false;
+        float dropNext = 5.0f, dropLane = 0.3f, dropY = 0.0f, dropEndY = 0.0f, dropSpeed = 12.0f, dropPhase = 0.0f, dropStopAt = -1.0f;
+        Vector2 dropAt{};
+        std::vector<TrailPoint> trail;
+        bool prewarmed = false;
 
         // drawing
         Shader shadowShader{}, raysShader{}, steamShader{}, frostShader{};
-        int raysWeightLoc = -1, raysShiftLoc = -1, raysSourceLoc = -1, raysSizeLoc = -1, raysTimeLoc = -1, raysWarpLoc = -1;
+        int raysWeightLoc = -1, raysRoomLoc = -1, raysTableLoc = -1, raysSourceLoc = -1, raysSizeLoc = -1, raysTimeLoc = -1, raysMotionLoc = -1;
         int steamTimeLoc = -1, steamAspectLoc = -1;
-        int frostSizeLoc = -1, frostDropLoc = -1, frostTrailLoc = -1;
+        int frostSizeLoc = -1, frostRimLoc = -1, frostDropLoc = -1, frostTrailLoc = -1;
         Texture2D dot{}, vignette{}, paper{}, white{};
         float vignetteMade = -1.0f;
         float viewScale = 1.0f;
@@ -1173,6 +1352,11 @@ void main()
         // ---------------------------------------------------------------------------------------------------------
         Vector2 frameToScreen(float x, float y) const { return Vector2{origin.x + x * viewScale, origin.y + y * viewScale}; }
         Vector2 screenToFrame(Vector2 p) const { return Vector2{(p.x - origin.x) / viewScale, (p.y - origin.y) / viewScale}; }
+        Vector2 onTable(Vector2 screen) const // a point on screen in the table set's own frame pixels (its drift undone)
+        {
+            const Vector2 p = screenToFrame(screen);
+            return Vector2{p.x - tableShift.x, p.y - tableShift.y};
+        }
         Rectangle frameRect(Rectangle r) const
         {
             const Vector2 p = frameToScreen(r.x, r.y);
@@ -1458,14 +1642,16 @@ void main()
                 return false;
             }
             raysWeightLoc = GetShaderLocation(raysShader, "weightMap");
-            raysShiftLoc = GetShaderLocation(raysShader, "shift");
+            raysRoomLoc = GetShaderLocation(raysShader, "shiftRoom");
+            raysTableLoc = GetShaderLocation(raysShader, "shiftTable");
             raysSourceLoc = GetShaderLocation(raysShader, "source");
             raysSizeLoc = GetShaderLocation(raysShader, "size");
             raysTimeLoc = GetShaderLocation(raysShader, "time");
-            raysWarpLoc = GetShaderLocation(raysShader, "warp");
+            raysMotionLoc = GetShaderLocation(raysShader, "motion");
             steamTimeLoc = GetShaderLocation(steamShader, "time");
             steamAspectLoc = GetShaderLocation(steamShader, "aspect");
             frostSizeLoc = GetShaderLocation(frostShader, "size");
+            frostRimLoc = GetShaderLocation(frostShader, "rim");
             frostDropLoc = GetShaderLocation(frostShader, "drop");
             frostTrailLoc = GetShaderLocation(frostShader, "trail");
             makeTextures();
@@ -1557,6 +1743,14 @@ void main()
                 std::vector<Vector2> drink;
                 for (const Vector2 &p : glassDrink)
                     drink.push_back(Vector2{p.x * frameW - glassBox.x, p.y * frameH - glassBox.y});
+                drinkLocal = drink;
+                drinkTop = 1e9f;
+                drinkBottom = -1e9f;
+                for (const Vector2 &p : drink)
+                {
+                    drinkTop = std::min(drinkTop, p.y);
+                    drinkBottom = std::max(drinkBottom, p.y);
+                }
                 Image image = GenImageColor(w, h, BLANK);
                 auto *px = static_cast<Color *>(image.data);
                 for (int y = 0; y < h; ++y)
@@ -1637,15 +1831,19 @@ void main()
             volume = in.volume;
             parallax = in.parallax;
             const float reach = parallaxMax * frameH * tuning.drift;
-            shift = frame == 0 ? Vector2{parallax.x * reach, parallax.y * reach} : Vector2{0.0f, 0.0f};
+            const float tableShare = std::clamp(tuning.tableShare, 0.0f, 1.0f);
+            const Vector2 lean = frame == 0 ? parallax : Vector2{0.0f, 0.0f};
+            roomShift = Vector2{lean.x * reach * (1.0f - tableShare), lean.y * reach * (1.0f - tableShare)};
+            tableShift = Vector2{-lean.x * reach * tableShare, -lean.y * reach * tableShare};
 
             // the zoom: stepped frames
             if (direction != 0)
             {
                 stepClock += dt;
-                while (direction != 0 && stepClock >= 1.0f / kZoomFps)
+                const float step = 1.0f / std::clamp(tuning.zoomFps, 4.0f, 60.0f);
+                while (direction != 0 && stepClock >= step)
                 {
-                    stepClock -= 1.0f / kZoomFps;
+                    stepClock -= step;
                     frame += direction;
                     if (frame >= kZoomFrames)
                     {
@@ -1676,7 +1874,7 @@ void main()
                     flingShown = k;
                 }
             }
-            else if (doorStream.count() > 0)
+            else if (doorStream.count() > 0 && frame == 0) // (no uploads while the zoom shows)
             {
                 const int k = static_cast<int>(time * 24.0f) % doorStream.count();
                 if (k != doorShown)
@@ -1693,20 +1891,74 @@ void main()
             floats.erase(std::remove_if(floats.begin(), floats.end(), [&](const Floating &f) { return time - f.start >= kFloatTime; }),
                          floats.end());
 
-            // the droplet: every 7-13 s while the drink is cold
-            if (dropStart < 0.0f && time >= dropNext && smoothieState < 4)
+            updateDrop(dt);
+        }
+
+        // The drink's left and right edges at a height (the glass's box, pixels).
+        bool drinkEdges(float y, float &left, float &right) const
+        {
+            left = 1e9f;
+            right = -1e9f;
+            for (size_t i = 0, j = drinkLocal.size() - 1; i < drinkLocal.size(); j = i++)
             {
-                static std::mt19937 random(0xD20Bu);
-                std::uniform_real_distribution<float> unit(0.0f, 1.0f);
-                dropStart = time;
-                dropX = 0.25f + 0.5f * unit(random);
-                dropY0 = 0.10f + 0.15f * unit(random);
-                dropLen = 0.40f + 0.30f * unit(random);
-                dropDur = 2.2f + 1.6f * unit(random);
-                dropNext = time + dropDur + 7.0f + 6.0f * unit(random);
+                const Vector2 a = drinkLocal[i], b = drinkLocal[j];
+                if ((a.y > y) == (b.y > y))
+                    continue;
+                const float x = a.x + (y - a.y) * (b.x - a.x) / (b.y - a.y);
+                left = std::min(left, x);
+                right = std::max(right, x);
             }
-            if (dropStart >= 0.0f && time - dropStart > dropDur + 8.0f)
-                dropStart = -1.0f;
+            return right > left;
+        }
+
+        // Every 10-20 s while the drink is cold (once the last trail has fogged over): a drop runs down the glass in
+        // spurts, keeping its lane across the drink so it follows the glass's curve in.
+        void updateDrop(float dt)
+        {
+            static std::mt19937 random(0xD20Bu);
+            std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+            if (drinkLocal.size() < 3)
+                return;
+            if (!dropRunning && dropStopAt < 0.0f && time >= dropNext && smoothieState < 4)
+            {
+                dropRunning = true;
+                dropLane = unit(random) < 0.5f ? 0.12f + 0.22f * unit(random) : 0.66f + 0.22f * unit(random);
+                dropY = drinkTop + 3.0f + 4.0f * unit(random);
+                dropEndY = drinkBottom - 6.0f - 10.0f * unit(random);
+                dropSpeed = 9.0f + 6.0f * unit(random);
+                dropPhase = unit(random) * 6.28f;
+                trail.clear();
+            }
+            if (dropRunning)
+            {
+                // spurts: it sticks, lets go, sticks again, a little faster each time (it gathers water as it goes)
+                const float spurt = std::max(0.0f, std::sin(dropPhase));
+                dropPhase += dt * 6.28f / 0.95f;
+                dropSpeed += dt * 4.0f;
+                dropY += dt * dropSpeed * spurt * spurt * 2.2f;
+                float left = 0.0f, right = 0.0f;
+                if (dropY >= dropEndY || !drinkEdges(dropY, left, right))
+                {
+                    dropRunning = false;
+                    dropStopAt = time; // it stops low on the glass and soaks back into the film
+                }
+                else
+                {
+                    dropAt = Vector2{left + dropLane * (right - left), dropY};
+                    if (trail.empty() || std::hypot(dropAt.x - trail.back().at.x, dropAt.y - trail.back().at.y) > 4.5f)
+                    {
+                        trail.push_back(TrailPoint{dropAt, time});
+                        if (trail.size() > 24)
+                            trail.erase(trail.begin());
+                    }
+                }
+            }
+            if (dropStopAt >= 0.0f && time - dropStopAt > 12.0f) // the trail has fogged over: the next one later
+            {
+                dropStopAt = -1.0f;
+                trail.clear();
+                dropNext = time + 4.0f + 6.0f * unit(random);
+            }
         }
 
         void showDoor(const Pixels &pixels)
@@ -1782,7 +2034,7 @@ void main()
             EndBlendMode();
         }
 
-        void drawFloats(float rise)
+        void drawFloats(float rise, Vector2 offset)
         {
             BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             for (const Floating &f : floats)
@@ -1793,17 +2045,20 @@ void main()
                 if (f.piece >= 0)
                 {
                     const Piece &p = snacks.pieces[static_cast<size_t>(f.piece)];
-                    drawAt(p.sprite, Rectangle{p.rect.x, p.rect.y - rise * e, p.rect.width, p.rect.height}, tint);
+                    drawAt(p.sprite, Rectangle{p.rect.x + offset.x, p.rect.y + offset.y - rise * e, p.rect.width, p.rect.height}, tint);
                 }
                 else if (f.garnish >= 0 && static_cast<size_t>(f.garnish) < snacks.smoothie.garnish.size())
                 {
                     const Rectangle r = snacks.smoothie.rect;
-                    drawAt(snacks.smoothie.garnish[static_cast<size_t>(f.garnish)], Rectangle{r.x, r.y - rise * e, r.width, r.height}, tint);
+                    drawAt(snacks.smoothie.garnish[static_cast<size_t>(f.garnish)],
+                           Rectangle{r.x + offset.x, r.y + offset.y - rise * e, r.width, r.height}, tint);
                 }
             }
             EndBlendMode();
         }
 
+        // (Blend mode first, then the shader, then its extra texture: raylib forgets a shader's extra textures at every
+        // batch flush, and changing the blend mode flushes.)
         void drawRays()
         {
             if (rays.id == 0u)
@@ -1811,27 +2066,28 @@ void main()
             const Rectangle r{-backMargin, -backMargin, static_cast<float>(rays.width), static_cast<float>(rays.height)};
             const unsigned char strength = static_cast<unsigned char>(std::clamp(tuning.rays, 0.0f, 1.0f) * 255.0f);
             const bool shaded = usable(raysShader) && raysWeight.id != 0u;
+            beginScreen();
             if (shaded)
             {
                 BeginShaderMode(raysShader);
-                const float shiftUv[2] = {shift.x / rays.width, shift.y / rays.height};
-                // the rays fan out from the doorway's upper glare
+                const float room[2] = {roomShift.x / rays.width, roomShift.y / rays.height};
+                const float table[2] = {tableShift.x / rays.width, tableShift.y / rays.height};
+                // the doorway's rays fan out from its upper glare
                 const float source[2] = {(0.5f * frameW + backMargin) / rays.width, (0.27f * frameH + backMargin) / rays.height};
                 const float size[2] = {static_cast<float>(rays.width), static_cast<float>(rays.height)};
-                SetShaderValue(raysShader, raysShiftLoc, shiftUv, SHADER_UNIFORM_VEC2);
+                SetShaderValue(raysShader, raysRoomLoc, room, SHADER_UNIFORM_VEC2);
+                SetShaderValue(raysShader, raysTableLoc, table, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysSourceLoc, source, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysSizeLoc, size, SHADER_UNIFORM_VEC2);
                 SetShaderValue(raysShader, raysTimeLoc, &time, SHADER_UNIFORM_FLOAT);
-                SetShaderValue(raysShader, raysWarpLoc, &tuning.raysWarp, SHADER_UNIFORM_FLOAT);
+                SetShaderValue(raysShader, raysMotionLoc, &tuning.raysMotion, SHADER_UNIFORM_FLOAT);
                 SetShaderValueTexture(raysShader, raysWeightLoc, raysWeight);
-            }
-            beginScreen();
-            // without the shader the rays drift with the room whole
-            const Rectangle at = shaded ? r : Rectangle{r.x + shift.x, r.y + shift.y, r.width, r.height};
-            drawAt(rays, at, shaded ? Color{255, 255, 255, strength} : Color{strength, strength, strength, 255});
-            EndBlendMode();
-            if (shaded)
+                drawAt(rays, r, Color{255, 255, 255, strength});
                 EndShaderMode();
+            }
+            else // without the shader the rays drift with the room whole
+                drawAt(rays, Rectangle{r.x + roomShift.x, r.y + roomShift.y, r.width, r.height}, Color{strength, strength, strength, 255});
+            EndBlendMode();
         }
 
         void drawBloom(const Texture2D &texture, Rectangle at)
@@ -1855,10 +2111,12 @@ void main()
             for (const Mote &m : motes)
             {
                 const float t = time;
-                const float x = m.base.x + m.swing.x * (std::sin(t * 6.2832f / m.px + m.phase1) + 0.35f * std::sin(t * 6.2832f / m.p2 + m.phase2)) +
-                                shift.x * (0.4f + 0.4f * m.depth);
+                // in the air between the table and the room: their drift between the two by depth
+                const float k = 0.3f + 0.6f * m.depth;
+                const Vector2 drift{tableShift.x + (roomShift.x - tableShift.x) * k, tableShift.y + (roomShift.y - tableShift.y) * k};
+                const float x = m.base.x + m.swing.x * (std::sin(t * 6.2832f / m.px + m.phase1) + 0.35f * std::sin(t * 6.2832f / m.p2 + m.phase2)) + drift.x;
                 const float y = m.base.y + m.swing.y * std::sin(t * 6.2832f / m.py + m.phase3) + 0.25f * m.swing.y * std::sin(t * 0.9f + m.phase2) +
-                                shift.y * (0.4f + 0.4f * m.depth);
+                                drift.y;
                 const float light = sample(raysLuma, (x + backMargin) / (frameW + 2.0f * backMargin), (y + backMargin) / (frameH + 2.0f * backMargin));
                 const float twinkle = 0.75f + 0.25f * std::sin(t * (1.3f + m.depth) + m.phase3 * 3.0f);
                 const float a = std::clamp((light - 0.05f) * 1.6f, 0.0f, 1.0f) * m.bright * twinkle * life;
@@ -1885,48 +2143,55 @@ void main()
                 x0 = std::min(x0, p.x);
                 x1 = std::max(x1, p.x);
             }
-            const float width = (x1 - x0) * frameW * 1.9f;
+            const float width = (x1 - x0) * frameW * 1.6f;
             const float up = std::hypot(curryUp.x * frameW, curryUp.y * frameH);
-            const float cx = curryCentre.x * frameW, cy = curryCentre.y * frameH;
-            const Rectangle r{cx - width * 0.5f, cy - up * 1.55f, width, up * 1.55f + up * 0.08f};
+            const float cx = curryCentre.x * frameW + tableShift.x, cy = curryCentre.y * frameH + tableShift.y;
+            const Rectangle r{cx - width * 0.5f, cy - up * 1.7f, width, up * 1.7f + up * 0.06f};
             const float aspect = r.width / r.height;
+            BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             BeginShaderMode(steamShader);
             SetShaderValue(steamShader, steamTimeLoc, &time, SHADER_UNIFORM_FLOAT);
             SetShaderValue(steamShader, steamAspectLoc, &aspect, SHADER_UNIFORM_FLOAT);
-            BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             drawAt(white, r, Color{255, 255, 255, static_cast<unsigned char>(std::clamp(strength, 0.0f, 1.0f) * 255.0f)});
-            EndBlendMode();
             EndShaderMode();
+            EndBlendMode();
         }
 
         void drawFrost()
         {
+            // the cold drink gone (the last sip), the film dries off over a few seconds
             float strength = homeLife * tuning.frost;
             if (smoothieState >= 4)
-                strength *= 0.0f; // the cold drink is gone
+                strength *= smoothieEmptyAt < 0.0f ? 0.0f : std::max(0.0f, 1.0f - (time - smoothieEmptyAt) / 4.0f);
             if (strength <= 0.01f || !usable(frostShader) || drinkMask.id == 0u)
                 return;
-            float drop[4] = {0.5f, 0.0f, 0.0f, 0.0f};
-            float trail = 99.0f;
-            if (dropStart >= 0.0f)
+            float drop[4] = {0.0f, 0.0f, 1.7f, 0.0f};
+            if (dropRunning || (dropStopAt >= 0.0f && time - dropStopAt < 0.8f))
             {
-                const float u = std::clamp((time - dropStart) / dropDur, 0.0f, 1.0f);
-                const float run = u * u * (1.5f - 0.5f * u); // a slow start, then it lets go
-                drop[0] = dropX + 0.02f * std::sin(u * 9.0f);
-                drop[1] = dropY0;
-                drop[2] = dropY0 + dropLen * run;
-                drop[3] = u < 1.0f ? 1.0f : std::max(0.0f, 1.0f - (time - dropStart - dropDur) / 0.4f);
-                trail = std::max(0.0f, time - dropStart - dropDur);
+                drop[0] = dropAt.x / glassBox.width;
+                drop[1] = dropAt.y / glassBox.height;
+                drop[3] = dropRunning ? 1.0f : 1.0f - (time - dropStopAt) / 0.8f;
+            }
+            float points[24 * 4] = {};
+            for (size_t i = 0; i < trail.size() && i < 24; ++i)
+            {
+                points[i * 4 + 0] = trail[i].at.x / glassBox.width;
+                points[i * 4 + 1] = trail[i].at.y / glassBox.height;
+                points[i * 4 + 2] = time - trail[i].born;
+                points[i * 4 + 3] = 1.0f;
             }
             const float size[2] = {glassBox.width, glassBox.height};
+            const float rim = (rimY * frameH - glassBox.y) / glassBox.height;
+            BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             BeginShaderMode(frostShader);
             SetShaderValue(frostShader, frostSizeLoc, size, SHADER_UNIFORM_VEC2);
+            SetShaderValue(frostShader, frostRimLoc, &rim, SHADER_UNIFORM_FLOAT);
             SetShaderValue(frostShader, frostDropLoc, drop, SHADER_UNIFORM_VEC4);
-            SetShaderValue(frostShader, frostTrailLoc, &trail, SHADER_UNIFORM_FLOAT);
-            BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
-            drawAt(drinkMask, glassBox, Color{255, 255, 255, static_cast<unsigned char>(std::clamp(strength, 0.0f, 1.0f) * 255.0f)});
-            EndBlendMode();
+            SetShaderValueV(frostShader, frostTrailLoc, points, SHADER_UNIFORM_VEC4, 24);
+            drawAt(drinkMask, Rectangle{glassBox.x + tableShift.x, glassBox.y + tableShift.y, glassBox.width, glassBox.height},
+                   Color{255, 255, 255, static_cast<unsigned char>(std::clamp(strength, 0.0f, 1.0f) * 255.0f)});
             EndShaderMode();
+            EndBlendMode();
         }
 
         void drawVignette()
@@ -1943,26 +2208,27 @@ void main()
         void drawHome()
         {
             // the room (and the doors in it) drifting with the cursor
-            drawAt(back, Rectangle{-backMargin + shift.x, -backMargin + shift.y, static_cast<float>(back.width), static_cast<float>(back.height)});
+            const Vector2 room = roomShift, table = tableShift;
+            drawAt(back, Rectangle{-backMargin + room.x, -backMargin + room.y, static_cast<float>(back.width), static_cast<float>(back.height)});
             BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
             if (doorTexture.id != 0u)
-                drawAt(doorTexture, Rectangle{doorRect.x + shift.x, doorRect.y + shift.y, doorRect.width, doorRect.height});
-            // the table set stays put
-            drawAt(fg, Rectangle{-fgMargin, -fgMargin, static_cast<float>(fg.width), static_cast<float>(fg.height)});
+                drawAt(doorTexture, Rectangle{doorRect.x + room.x, doorRect.y + room.y, doorRect.width, doorRect.height});
+            // the table set leans the other way
+            drawAt(fg, Rectangle{-fgMargin + table.x, -fgMargin + table.y, static_cast<float>(fg.width), static_cast<float>(fg.height)});
             EndBlendMode();
-            drawSnacks(snacks, Vector2{0.0f, 0.0f});
+            drawSnacks(snacks, table);
             if (bookLight > 0.0f && bookLit.id != 0u)
             {
                 BeginBlendMode(BLEND_ALPHA_PREMULTIPLY);
                 const unsigned char a = static_cast<unsigned char>(std::clamp(bookLight, 0.0f, 1.0f) * 255.0f);
-                drawAt(bookLit, bookRect, Color{a, a, a, a});
+                drawAt(bookLit, Rectangle{bookRect.x + table.x, bookRect.y + table.y, bookRect.width, bookRect.height}, Color{a, a, a, a});
                 EndBlendMode();
             }
-            drawFloats(tuning.floatHeight * frameH);
+            drawFloats(tuning.floatHeight * frameH, table);
             drawFrost();
             drawSteam();
             drawRays();
-            drawBloom(bloom, Rectangle{-backMargin + shift.x, -backMargin + shift.y, frameW + 2.0f * backMargin, frameH + 2.0f * backMargin});
+            drawBloom(bloom, Rectangle{-backMargin + room.x, -backMargin + room.y, frameW + 2.0f * backMargin, frameH + 2.0f * backMargin});
             drawMotes();
         }
 
@@ -1982,6 +2248,21 @@ void main()
                 return;
             BeginScissorMode(static_cast<int>(pictureRect.x), static_cast<int>(pictureRect.y), static_cast<int>(std::ceil(pictureRect.width)),
                              static_cast<int>(std::ceil(pictureRect.height)));
+            if (zoomLoaded && !prewarmed) // a tiny draw of every zoom texture under Home, so the first zoom doesn't hitch
+            {
+                prewarmed = true;
+                for (const ZoomFrame &z : zoom)
+                {
+                    const Rectangle tiny{pictureRect.x, pictureRect.y, 2.0f, 2.0f};
+                    for (const Texture2D *t : {&z.frame, &z.bloom})
+                        if (t->id != 0u)
+                            DrawTexturePro(*t, Rectangle{0, 0, static_cast<float>(t->width), static_cast<float>(t->height)}, tiny, Vector2{0, 0}, 0.0f, WHITE);
+                    for (const Piece &p : z.snacks.pieces)
+                        for (const Texture2D *t : {&p.sprite, &p.shadow})
+                            if (t->id != 0u)
+                                DrawTexturePro(*t, Rectangle{0, 0, static_cast<float>(t->width), static_cast<float>(t->height)}, tiny, Vector2{0, 0}, 0.0f, WHITE);
+                }
+            }
             if (frame == 0)
                 drawHome();
             else
@@ -1998,7 +2279,7 @@ void main()
         {
             if (!homeReady || frame != 0 || direction != 0 || !floats.empty())
                 return Bite::None;
-            const Vector2 p = screenToFrame(screen);
+            const Vector2 p = onTable(screen);
             for (int i = static_cast<int>(snacks.pieces.size()) - 1; i >= 0; --i)
             {
                 const Piece &piece = snacks.pieces[static_cast<size_t>(i)];
@@ -2022,6 +2303,8 @@ void main()
                     if (smoothieState < 3)
                         floats.push_back(Floating{-1, smoothieState, time});
                     ++smoothieState;
+                    if (smoothieState >= 4)
+                        smoothieEmptyAt = time;
                     return Bite::Smoothie;
                 }
             }
@@ -2032,7 +2315,7 @@ void main()
         {
             if (!homeReady || frame != 0)
                 return false;
-            const Vector2 p = screenToFrame(screen);
+            const Vector2 p = onTable(screen);
             for (size_t i = 0; i < snacks.pieces.size(); ++i)
                 if (!eaten[i] && at(snacks.pieces[i].hit, static_cast<int>(p.x - snacks.pieces[i].rect.x),
                                     static_cast<int>(p.y - snacks.pieces[i].rect.y)) > 110)
@@ -2046,7 +2329,7 @@ void main()
         {
             if (!homeReady || frame != 0 || bookMask.empty())
                 return false;
-            const Vector2 p = screenToFrame(screen);
+            const Vector2 p = onTable(screen);
             return at(bookMask, static_cast<int>(p.x - bookRect.x), static_cast<int>(p.y - bookRect.y)) > 127;
         }
 
@@ -2142,6 +2425,8 @@ void main()
             if (!s.hasBill)
                 return false;
             q = s.billN;
+            for (Vector2 &p : q.p)
+                p = Vector2{p.x + s.tableShift.x / s.frameW, p.y + s.tableShift.y / s.frameH};
         }
         else
         {
@@ -2167,7 +2452,7 @@ void main()
             if (!s.hasDoor)
                 return false;
             q = s.doorN;
-            drift = Vector2{s.shift.x * s.tuning.logoDrift, s.shift.y * s.tuning.logoDrift};
+            drift = Vector2{s.roomShift.x * s.tuning.logoDrift, s.roomShift.y * s.tuning.logoDrift};
         }
         else
         {
@@ -2263,7 +2548,8 @@ void main()
             float min, max;
         };
         constexpr TuningField kTuningFields[] = {
-            {"Drift", "Room drift", &Tuning::drift, 0.0f, 2.0f},
+            {"Drift", "Drift (room against table)", &Tuning::drift, 0.0f, 2.0f},
+            {"TableShare", "Table's share of it", &Tuning::tableShare, 0.0f, 1.0f},
             {"LogoU", "Logo across", &Tuning::logoU, 0.2f, 0.8f},
             {"LogoV", "Logo down", &Tuning::logoV, -0.2f, 0.6f},
             {"LogoWidth", "Logo width", &Tuning::logoWidth, 0.5f, 2.0f},
@@ -2272,7 +2558,7 @@ void main()
             {"KanaY", "Kana down", &Tuning::kanaY, -0.2f, 0.2f},
             {"KanaDrift", "Kana drift", &Tuning::kanaDrift, -1.0f, 2.0f},
             {"Burst", "Burst size", &Tuning::burst, 0.0f, 2.0f},
-            {"RaysWarp", "Rays warp", &Tuning::raysWarp, 0.0f, 2.0f},
+            {"RaysMotion", "Rays motion", &Tuning::raysMotion, 0.0f, 2.0f},
             {"Rays", "Rays", &Tuning::rays, 0.0f, 1.0f},
             {"Bloom", "Bloom", &Tuning::bloom, 0.0f, 2.0f},
             {"Motes", "Motes", &Tuning::motes, 0.0f, 2.0f},
@@ -2280,6 +2566,7 @@ void main()
             {"Steam", "Steam", &Tuning::steam, 0.0f, 3.0f},
             {"Frost", "Frost", &Tuning::frost, 0.0f, 2.0f},
             {"FloatHeight", "Snack float height", &Tuning::floatHeight, 0.0f, 0.2f},
+            {"ZoomFps", "Zoom frames a second", &Tuning::zoomFps, 6.0f, 40.0f},
         };
     }
 
@@ -2313,7 +2600,7 @@ void main()
         bool open = true;
         ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Saloon tuning (F3)", &open, ImGuiWindowFlags_NoSavedSettings))
+        if (ImGui::Begin("Saloon tuning (F4)", &open, ImGuiWindowFlags_NoSavedSettings))
         {
             ImGui::TextDisabled("Dev build only. Values go to GHR.ini [SaloonTuning].");
             for (const TuningField &field : kTuningFields)

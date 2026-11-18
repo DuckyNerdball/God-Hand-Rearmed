@@ -8,7 +8,8 @@ Newest first, one line per change; the code comments say how.
 - Launcher: light rays, dust in the light, a glowing doorway, steam off the curry (louder volume, more steam) and a frosty smoothie glass.
 - Launcher: Options zooms down to the book on the table (Back zooms out); the book lights up when Options is selected and opens Options when clicked.
 - Launcher: the snacks on the table can be eaten.
-- Launcher: Add to Steam, the version and the volume are paper slips in the corners.
+- Launcher: Add to Steam is a Steam mark on the bill; the version and the volume are on a paper slip in the corner.
+- Launcher: the legal notice is fine print on the bill; Skip Launcher (hold Shift while starting to see it) replaces "Don't show this again".
 
 ## November 17, 2026
 
