@@ -3341,7 +3341,27 @@ namespace kamite::launcher
             return true;
         }
 
-        // The settings drawn by hand: Display Mode (two keys), Character, texture packs.
+        // The chosen character's costumes (the Costume row shows only for a character that has some).
+        const std::vector<characters::Costume> &costumesOf(const State &state)
+        {
+            static const std::vector<characters::Character> list = characters::list(state.context->exeDir);
+            static const std::vector<characters::Costume> none;
+            const std::string current = lower(state.ini.get("Mods", "Character", "gene"));
+            for (const characters::Character &c : list)
+                if (lower(c.id) == current)
+                    return c.costumes;
+            return none;
+        }
+        int costumeIndex(const State &state, const std::vector<characters::Costume> &costumes)
+        {
+            const std::string current = lower(state.ini.get("Mods", "Costume", ""));
+            for (size_t i = 0; i < costumes.size(); ++i)
+                if (costumes[i].id == current)
+                    return static_cast<int>(i);
+            return 0;
+        }
+
+        // The settings drawn by hand: Display Mode (two keys), Character, Costume, texture packs.
         void customControl(State &state, const settings::Setting &setting)
         {
             const std::string id = setting.id;
@@ -3377,6 +3397,19 @@ namespace kamite::launcher
                     state.ini.set("Mods", "Character", list[static_cast<size_t>(picked)].id);
                 if (!list.empty() && !list[static_cast<size_t>(picked)].credit.empty())
                     ImGui::TextColored(kTextDim, "%s", list[static_cast<size_t>(picked)].credit.c_str());
+            }
+            else if (id == "Costume")
+            {
+                const std::vector<characters::Costume> &costumes = costumesOf(state);
+                int picked = costumeIndex(state, costumes);
+                std::vector<const char *> names;
+                for (const characters::Costume &c : costumes)
+                    names.push_back(c.name.c_str());
+                ImGui::SetNextItemWidth(-1.0f);
+                const bool pickedNew = ImGui::Combo("##costume", &picked, names.data(), static_cast<int>(names.size()));
+                tickItem();
+                if (pickedNew && picked >= 0 && picked < static_cast<int>(costumes.size()))
+                    state.ini.set("Mods", "Costume", costumes[static_cast<size_t>(picked)].id);
             }
             else if (id == "Textures")
             {
@@ -3448,6 +3481,7 @@ namespace kamite::launcher
             return any;
         }
 
+
         // One tab: its settings in the table's order, a heading per category. Sub-options show while their parent
         // allows them (Window Size greyed instead; Camera & FOV's values only with Custom).
         void drawTab(State &state, settings::Tab tab)
@@ -3463,8 +3497,11 @@ namespace kamite::launcher
                 const bool allowed = settings::parentAllows(state.ini, s);
                 if (!allowed && !s.greyed)
                     continue;
-                // Character only with a character besides Gene (built from the disc; none in a release yet).
+                // Character only with a character besides Gene (built from the disc; none in a release yet), Costume only
+                // for a character with costumes.
                 if (std::strcmp(s.id, "Character") == 0 && !otherCharacters(state))
+                    continue;
+                if (std::strcmp(s.id, "Costume") == 0 && costumesOf(state).empty())
                     continue;
                 if (!category || std::strcmp(category, s.category) != 0)
                 {
@@ -4313,6 +4350,19 @@ namespace kamite::launcher
                 if (next >= 0 && next < static_cast<int>(list.size()))
                     state.ini.set("Mods", "Character", list[static_cast<size_t>(next)].id);
             }
+            else if (std::strcmp(s.id, "Costume") == 0)
+            {
+                const std::vector<characters::Costume> &costumes = costumesOf(state);
+                const int picked = costumeIndex(state, costumes);
+                std::vector<std::string> names;
+                for (const characters::Costume &c : costumes)
+                    names.push_back(c.name);
+                const Row r = bookRow(state, b, id.c_str(), s.name, s.description, s.note, sub, faded);
+                bookValue(state, b, r, names.empty() ? "" : names[static_cast<size_t>(picked)].c_str(), faded);
+                const int next = listOf(names, picked, r);
+                if (next >= 0 && next < static_cast<int>(costumes.size()))
+                    state.ini.set("Mods", "Costume", costumes[static_cast<size_t>(next)].id);
+            }
             else if (std::strcmp(s.id, "Textures") == 0)
             {
                 bool on = state.ini.getBool("Runtime", "PS2X_PCSX2_TEXTURES", true);
@@ -4358,6 +4408,8 @@ namespace kamite::launcher
                 if (!settings::parentAllows(state.ini, s) && !s.greyed)
                     continue;
                 if (std::strcmp(s.id, "Character") == 0 && !otherCharacters(state))
+                    continue;
+                if (std::strcmp(s.id, "Costume") == 0 && costumesOf(state).empty())
                     continue;
                 if (!category || std::strcmp(category, s.category) != 0)
                 {

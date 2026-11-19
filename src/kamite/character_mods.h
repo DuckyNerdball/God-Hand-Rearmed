@@ -11,14 +11,20 @@ namespace kamite::characters
     // A playable character model in place of Gene: <exe>/mods/characters/<id>/ holds replacement game files under
     // their disc paths (pl/pl00.dat ...), built by 'build.py models' from your disc and the mod's own data, plus
     // character.ini ([Character] Name=, Credit=).
+    struct Costume
+    {
+        std::string id;   // [Mods] Costume
+        std::string name; // shown in the launcher
+    };
     struct Character
     {
-        std::string id;     // folder name; "gene" = the game's own
+        std::string id;     // folder name; "gene" = the game's own, "olivia" = built at boot (olivia_player.h)
         std::string name;   // shown in the launcher
         std::string credit; // shown under it
+        std::vector<Costume> costumes; // the launcher's Costume row (none: no row); the first is the default
     };
 
-    // Gene first, then every folder under mods/characters that holds files.
+    // Gene first, Olivia (not in releases), then every folder under mods/characters that holds files.
     std::vector<Character> list(const std::filesystem::path &exeDir);
 
     // After PS2Runtime::setIoPaths, before the game runs: [Mods] Character (KAMITE_CHARACTER). Every file in the

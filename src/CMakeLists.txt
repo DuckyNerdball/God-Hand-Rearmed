@@ -56,6 +56,8 @@ set(KAMITE_HOST_SOURCES
     kamite/body_detail.cpp
     kamite/body_detail_build.cpp
     kamite/olivia_model.cpp
+    kamite/olivia_player.cpp
+    kamite/olivia_player_build.cpp
     kamite/jukebox.cpp
     kamite/widescreen.cpp
     kamite/camera.cpp

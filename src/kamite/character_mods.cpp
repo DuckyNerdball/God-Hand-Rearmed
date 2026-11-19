@@ -50,6 +50,10 @@ namespace kamite::characters
     std::vector<Character> list(const fs::path &exeDir)
     {
         std::vector<Character> out{{"gene", "Gene", "Vanilla Thrilla"}};
+#if !defined(KAMITE_RELEASE)
+        // Built from the disc at boot (olivia_player.h); testers only until K names her.
+        out.push_back({"olivia", "Olivia", "Pre-Alpha", {{"dress", "Dress"}, {"bunny", "Bunny Suit"}}});
+#endif
         std::error_code error;
         const fs::path root = exeDir / "mods" / "characters";
         std::vector<fs::path> folders;
@@ -58,7 +62,7 @@ namespace kamite::characters
                 folders.push_back(entry.path());
         std::sort(folders.begin(), folders.end());
         for (const fs::path &folder : folders)
-            if (lower(utf8(folder.filename())) != "gene")
+            if (const std::string id = lower(utf8(folder.filename())); id != "gene" && id != "olivia")
                 out.push_back(describe(folder));
         return out;
     }
@@ -142,7 +146,7 @@ namespace kamite::characters
         registerTextures(exeDir);
         const char *chosen = std::getenv("KAMITE_CHARACTER");
         const std::string id = chosen ? lower(chosen) : std::string();
-        if (id.empty() || id == "gene")
+        if (id.empty() || id == "gene" || id == "olivia") // Olivia: olivia_player.h
             return;
         const fs::path folder = exeDir / "mods" / "characters" / id;
         std::error_code error;

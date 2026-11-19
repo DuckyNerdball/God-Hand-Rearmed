@@ -81,6 +81,7 @@ namespace kamite::body_detail
             std::vector<uint8_t> scr;
         };
         std::vector<Body> g_bodies; // set at boot, read-only afterwards
+        std::map<std::string, std::vector<uint8_t>> g_grownBlocks; // kGrowModels' files: the model block as the game reads it
         std::vector<std::string> g_nodeNames{"body"}; // the nodes check() looks at (the grown models' too)
 
         uint64_t fnv(const std::vector<uint8_t> &b)
@@ -460,6 +461,7 @@ namespace kamite::body_detail
             }
             if (isOlivia)
                 std::copy(block.begin(), block.end(), olivia.dat.begin() + olivia.md);
+            g_grownBlocks[g.file] = block;
             ++grown;
         }
         if (oliviaBuilt)
@@ -512,6 +514,12 @@ namespace kamite::body_detail
             node = rd32(rdram, node + kNodeNext);
         }
         return out;
+    }
+
+    std::vector<uint8_t> grownBlock(const char *file)
+    {
+        const auto it = g_grownBlocks.find(file);
+        return it == g_grownBlocks.end() ? std::vector<uint8_t>() : it->second;
     }
 
     bool bustDetailed(const uint8_t *rdram, uint32_t model)

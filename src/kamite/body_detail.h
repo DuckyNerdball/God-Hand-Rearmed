@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 class PS2Runtime;
 
@@ -33,4 +34,9 @@ namespace kamite::body_detail
         float pelvis[3] = {}, bust[3] = {}; // bind positions of bones 17 and 29
     };
     Jiggle jiggleOf(const uint8_t *rdram, uint32_t model);
+
+    // After install: the model block (the dat entry) of a file it keeps with Cash's growth (Shannon, Olivia: em/ema0.dat,
+    // el/elf4.dat ...) as the game reads it (re-skinned to the jiggle bones where it is), so a copy of its nodes is a
+    // body Money / Cash know. Empty when it has none.
+    std::vector<uint8_t> grownBlock(const char *file);
 }

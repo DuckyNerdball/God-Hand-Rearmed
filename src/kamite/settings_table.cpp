@@ -383,6 +383,7 @@ namespace kamite::settings
         // ---- Mods (the launcher only) ---------------------------------------------------------------------------
         custom("Character", Tab::Mods, "Character", "Character",
                "Who you play as. Currently, other characters use Gene's moves and his God Hand."),
+        custom("Costume", Tab::Mods, "Character", "Costume", "What your character wears."),
         custom("Textures", Tab::Mods, "Texture Packs", "Replacement Textures", "HD texture packs in PCSX2's format."),
     };
     const size_t kSettingCount = std::size(kSettings);

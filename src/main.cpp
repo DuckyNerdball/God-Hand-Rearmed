@@ -15,6 +15,7 @@
 #include "runtime/gs/gs_gpu_backend.h"
 #include "runtime/gs/gs_pcsx2_backend.h"
 #include "runtime/gs/gs_threaded_backend.h"
+#include "kamite/olivia_player.h"
 #include "kamite/call_profile.h"
 #include "kamite/guest_symbols.h"
 #include "kamite/button_prompts.h"
@@ -425,6 +426,7 @@ namespace
         {"game", "money", "KAMITE_MONEY"},
         {"game", "cash", "KAMITE_CASH"},
         {"mods", "character", "KAMITE_CHARACTER"},
+        {"mods", "costume", "KAMITE_COSTUME"},
         {"run", "headless", "KAMITE_HEADLESS"},
         {"run", "timelimitseconds", "KAMITE_TIME_LIMIT_SECONDS"},
         {"run", "dumpontimelimit", "KAMITE_DUMP_ON_TIME_LIMIT"},
@@ -1076,6 +1078,7 @@ int main(int argc, char *argv[])
         kamite::texture_slots::install(); // the per-frame texture slots reserve a texture's real VRAM footprint
         kamite::model_detail::install(); // the full character meshes at every distance (no distance LOD)
         kamite::body_detail::install(runtime); // the women's detailed bust / seat (Money / Cash above 100%), from the disc
+        kamite::olivia_player::install(runtime); // [Mods] Character=olivia: her player files from the disc (after body_detail)
         kamite::installSteadyIdleCamera(runtime); // [Video] SteadyIdleCamera
         kamite::jukebox::install(runtime); // the shop's radio: Gene stays in the picture while it plays
         kamite::message_guard::install(runtime); // an empty message text no longer hangs the text measurer

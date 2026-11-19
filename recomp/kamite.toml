@@ -2296,6 +2296,20 @@ hook = "km_cam_distance"
 flag = "fov"
 replace = true
 
+# Playable Olivia (olivia_player.cpp): the camera's look height above the player's feet (lwc1 $f1,0x404(s1) before it
+# is added to the feet's y, func_00139FF8 and func_0013AD90) times her height / Gene's (1 for Gene).
+[[patches.hooks]]
+address = "0x0013A3E4"
+hook = "km_cam_look_height"
+flag = "fov"
+replace = true
+
+[[patches.hooks]]
+address = "0x0013B25C"
+hook = "km_cam_look_height"
+flag = "fov"
+replace = true
+
 # The game's own wall hiding (func_00307B28, the hide-model manager): each update it shows again every mesh it hid,
 # casts rays from the camera to Gene (and to either side of him) and hides every mesh a ray hits (+0x380 |= 1). With
 # the see-through oval on (camera.cpp, flag "keep_walls") the meshes stay: ori v0,v0,0x1 -> ori v0,v0,0x0.

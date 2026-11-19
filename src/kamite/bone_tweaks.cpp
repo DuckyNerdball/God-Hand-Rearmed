@@ -562,12 +562,10 @@ namespace kamite::bone_tweaks
             if (GPR_U32(ctx, 31) != kTransCallSite)
                 return;
             const uint32_t model = GPR_U32(ctx, 4);
-            if (model != rd32(rdram, GameWork::address(GameWork::kPlayerObj)))
-            {
-                placeMoney(rdram, model);
-                placeJiggle(rdram, model);
-                return;
-            }
+            // Every model, the player's too (playable Olivia, olivia_player.h): both leave a body that isn't a woman's
+            // (Gene's, Xavier's: bone 29 on the head, no rebuilt body) alone.
+            placeMoney(rdram, model);
+            placeJiggle(rdram, model);
             if (model != rd32(rdram, GameWork::address(GameWork::kPlayerObj)))
                 return;
             if (characters::hair().back.bone < 0 && characters::hair().side.bone < 0)
