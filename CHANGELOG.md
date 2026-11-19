@@ -4,6 +4,8 @@ Newest first, one line per change; the code comments say how.
 
 ## November 19, 2026
 
+- With several controllers connected, the one that pressed a button last controls Gene (and its button prompts show).
+- Launcher: with a controller, Y / triangle eats a piece of fruit and X / square takes from the smoothie.
 - Launcher: with a controller (or the arrow keys), Steam's mark goes down / right to Play, Play right to the volume mark, the volume mark left to Play; on the volume mark up / down turn the volume and A mutes.
 - Restored the alpha's Hold to Brawl control scheme: Control Style Modern: Hold (hold L1 to brawl, double-tap for a 180° turn); the old Modern is now Modern: Toggle.
 - Modern: Hold: Auto's brawl mode ends by itself once no enemy is near.

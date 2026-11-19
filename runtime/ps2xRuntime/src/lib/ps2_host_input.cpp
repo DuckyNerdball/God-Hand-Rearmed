@@ -556,6 +556,19 @@ namespace ps2_host_input
         // The extra buttons (extra:: in the header). Player 1's controller (the first controller element of its
         // bindings, as the menu layer's; -1: a keyboard-only layout), the state the page reads, what fired.
         int g_extraDevice = -1;                    // window thread
+        // Player 1's controller follows the one used last (K, Nov 19, until split screen): a button (or a trigger past
+        // half) newly pressed on another connected controller makes it player 1's. It swaps places with the
+        // controller player 1's bindings name (g_extraDevice) for every player, so player 2's bindings get that one
+        // (mapDevice). -1: no swap. Window thread.
+        int g_activePad = -1;
+        std::array<uint32_t, ps2_host_gamepads::kMaxDevices> g_padHeld{};
+        int mapDevice(int device)
+        {
+            if (g_activePad < 0 || g_extraDevice < 0)
+                return device;
+            return device == g_extraDevice ? g_activePad : device == g_activePad ? g_extraDevice : device;
+        }
+        int playerOneDevice() { return mapDevice(g_extraDevice); }
         std::mutex g_extraMutex;
         extra::State g_extraState;                 // g_extraMutex
         std::atomic<uint8_t> g_extraPaddles{0u};
@@ -1005,12 +1018,45 @@ namespace ps2_host_input
             return g_configs;
         }
 
+        // Each sample, before the pads are read: a button newly pressed on a controller other than player 1's makes it
+        // player 1's (g_activePad); a controller that went away gives the place back.
+        void updateActivePad()
+        {
+            namespace gp = ps2_host_gamepads;
+            if (g_activePad >= 0 && !gp::connected(g_activePad))
+            {
+                g_activePad = -1;
+                std::cerr << "[input] player 1's controller: back to its own (the other one went away)" << std::endl;
+            }
+            for (int d = 0; d < gp::kMaxDevices; ++d)
+            {
+                uint32_t held = 0u;
+                if (gp::connected(d))
+                {
+                    for (int b = 0; b < gp::ButtonCount; ++b)
+                        if (gp::button(d, static_cast<gp::Button>(b)))
+                            held |= 1u << b;
+                    if (gp::axis(d, gp::LeftTrigger) > 0.5f)
+                        held |= 1u << gp::ButtonCount;
+                    if (gp::axis(d, gp::RightTrigger) > 0.5f)
+                        held |= 1u << (gp::ButtonCount + 1);
+                }
+                const uint32_t pressed = held & ~g_padHeld[static_cast<size_t>(d)];
+                g_padHeld[static_cast<size_t>(d)] = held;
+                if (pressed != 0u && g_extraDevice >= 0 && d != playerOneDevice())
+                {
+                    g_activePad = d == g_extraDevice ? -1 : d;
+                    std::cerr << "[input] player 1's controller: #" << d + 1 << " (pressed last)" << std::endl;
+                }
+            }
+        }
+
         // Each sample, before the pads are read: the paddles there are, and the commands (a SaveLoad hold's Start is
         // hidden from the game until it is released).
         void updateExtra()
         {
             namespace gp = ps2_host_gamepads;
-            const int device = g_extraDevice;
+            const int device = playerOneDevice();
             const bool present = device >= 0 && gp::connected(device);
             uint8_t paddles = 0u;
             if (present)
@@ -1698,9 +1744,9 @@ namespace ps2_host_input
                     return 0.0f;
                 return IsWindowFocused() && !g_menuMouse.load(std::memory_order_relaxed) && IsMouseButtonDown(element.code) ? 1.0f : 0.0f;
             case Source::PadButton:
-                return ps2_host_gamepads::button(element.device, static_cast<ps2_host_gamepads::Button>(element.code)) ? 1.0f : 0.0f;
+                return ps2_host_gamepads::button(mapDevice(element.device), static_cast<ps2_host_gamepads::Button>(element.code)) ? 1.0f : 0.0f;
             case Source::PadAxis:
-                return std::max(0.0f, element.sign * ps2_host_gamepads::axis(element.device, static_cast<ps2_host_gamepads::Axis>(element.code)));
+                return std::max(0.0f, element.sign * ps2_host_gamepads::axis(mapDevice(element.device), static_cast<ps2_host_gamepads::Axis>(element.code)));
             }
             return 0.0f;
         }
@@ -1732,7 +1778,7 @@ namespace ps2_host_input
                         else
                         {
                             fired->controller = true;
-                            fired->pad = element.device;
+                            fired->pad = mapDevice(element.device);
                         }
                     }
                 }
@@ -1769,7 +1815,7 @@ namespace ps2_host_input
                 for (const Chord &chord : bindings)
                     for (const Element &element : chord)
                         if (element.source == Source::Keyboard || element.source == Source::Pointer ||
-                            ps2_host_gamepads::connected(element.device))
+                            ps2_host_gamepads::connected(mapDevice(element.device)))
                             return true;
                 return false;
             };
@@ -2101,11 +2147,11 @@ namespace ps2_host_input
                 const PadConfig &config = padConfigs()[player];
                 const float largeValue = static_cast<float>(motors >> 8u) / 255.0f * config.largeMotorScale;
                 const float smallValue = (motors & 0xFFu) != 0u ? config.smallMotorScale : 0.0f;
-                for (int device : config.largeMotor)
-                    if (device >= 0 && device < ps2_host_gamepads::kMaxDevices)
+                for (int bound : config.largeMotor)
+                    if (const int device = mapDevice(bound); device >= 0 && device < ps2_host_gamepads::kMaxDevices)
                         large[static_cast<size_t>(device)] = std::max(large[static_cast<size_t>(device)], largeValue);
-                for (int device : config.smallMotor)
-                    if (device >= 0 && device < ps2_host_gamepads::kMaxDevices)
+                for (int bound : config.smallMotor)
+                    if (const int device = mapDevice(bound); device >= 0 && device < ps2_host_gamepads::kMaxDevices)
                         small[static_cast<size_t>(device)] = std::max(small[static_cast<size_t>(device)], smallValue);
             }
             for (int device = 0; device < ps2_host_gamepads::kMaxDevices; ++device)
@@ -2291,6 +2337,7 @@ namespace ps2_host_input
         // Only the players that have a (port, slot): 2 without a multitap, 5 with one, 8 with two.
         const uint32_t taps = multitapPorts();
         const uint32_t players = 2u + ((taps & 1u) ? 3u : 0u) + ((taps & 2u) ? 3u : 0u);
+        updateActivePad();
         updateExtra();
         if (g_menuKeysChanged.exchange(false, std::memory_order_acq_rel))
             rebuildConfigs(); // Menu Controls changed: the keyboard's confirm and cancel keys follow

@@ -2116,6 +2116,15 @@ namespace kamite::launcher
                 else if (const saloon::Scene::Bite bite = scene.snackClick(mouse); bite != saloon::Scene::Bite::None)
                     eatSound(state, bite == saloon::Scene::Bite::Drink);
             }
+            // The pad's snacks (K, Nov 19): north (Y / triangle) a random piece of fruit, west (X / square) the smoothie.
+            if (home && !popup && billShown)
+            {
+                const bool fruit = ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false);
+                const bool smoothie = !fruit && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false);
+                if (fruit || smoothie)
+                    if (const saloon::Scene::Bite bite = scene.eatSnack(smoothie); bite != saloon::Scene::Bite::None)
+                        eatSound(state, bite == saloon::Scene::Bite::Drink);
+            }
             // The mouse moved off everything (the bill's lines, the book, the slip's controls): nothing stays focused, so
             // no loop lingers and the book goes dark (K, Nov 18). The next key or button focuses the first item.
             if (home && billShown && !popup && moved && !overTarget && !overBook && !overPlate && !ImGui::IsAnyItemHovered())

@@ -200,6 +200,9 @@ namespace kamite::launcher::saloon
         };
         // A click at Home: a snack under it is eaten (floats up). None: nothing there, or one is still floating.
         Bite snackClick(Vector2 screen);
+        // The pad (K, Nov 19): the north button eats a random piece of fruit, the west one takes the smoothie's next
+        // bite / sip (as clicking them). None: nothing left, or one is still floating.
+        Bite eatSnack(bool smoothie);
         bool snackHit(Vector2 screen) const;
 
         // The Options zoom: 8 frames at 12 a second, stepped; Back reverses from the frame showing.

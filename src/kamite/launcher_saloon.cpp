@@ -3004,9 +3004,35 @@ float soft(vec2 p)
         }
 
         // ---- input -------------------------------------------------------------------------------------------------
+        bool canEat() const { return homeReady && frame == 0 && direction == 0 && floats.empty(); }
+        bool smoothieLeft() const
+        {
+            const Smoothie &s = snacks.smoothie;
+            return s.present && smoothieState < 4 && static_cast<size_t>(smoothieState) < s.hit.size();
+        }
+        Bite eatPiece(int i)
+        {
+            eaten[static_cast<size_t>(i)] = true;
+            eatenAt[static_cast<size_t>(i)] = time;
+            floats.push_back(Floating{i, -1, time});
+            return Bite::Fruit;
+        }
+        Bite sipSmoothie()
+        {
+            if (smoothieState < 3)
+                floats.push_back(Floating{-1, smoothieState, time});
+            ++smoothieState;
+            if (smoothieState >= 4)
+            {
+                smoothieEmptyAt = time;
+                return Bite::Drink;
+            }
+            return Bite::Smoothie;
+        }
+
         Bite snackClick(Vector2 screen)
         {
-            if (!homeReady || frame != 0 || direction != 0 || !floats.empty())
+            if (!canEat())
                 return Bite::None;
             const Vector2 p = onTable(screen);
             for (int i = static_cast<int>(snacks.pieces.size()) - 1; i >= 0; --i)
@@ -3016,31 +3042,29 @@ float soft(vec2 p)
                     continue;
                 const int x = static_cast<int>(p.x - piece.rect.x), y = static_cast<int>(p.y - piece.rect.y);
                 if (at(piece.hit, x, y) > 110)
-                {
-                    eaten[static_cast<size_t>(i)] = true;
-                    eatenAt[static_cast<size_t>(i)] = time;
-                    floats.push_back(Floating{i, -1, time});
-                    return Bite::Fruit;
-                }
+                    return eatPiece(i);
             }
             const Smoothie &s = snacks.smoothie;
-            if (s.present && smoothieState < 4 && static_cast<size_t>(smoothieState) < s.hit.size())
+            if (smoothieLeft())
             {
                 const int x = static_cast<int>(p.x - s.rect.x), y = static_cast<int>(p.y - s.rect.y);
                 if (at(s.hit[static_cast<size_t>(smoothieState)], x, y) > 48) // the glass counts too
-                {
-                    if (smoothieState < 3)
-                        floats.push_back(Floating{-1, smoothieState, time});
-                    ++smoothieState;
-                    if (smoothieState >= 4)
-                    {
-                        smoothieEmptyAt = time;
-                        return Bite::Drink;
-                    }
-                    return Bite::Smoothie;
-                }
+                    return sipSmoothie();
             }
             return Bite::None;
+        }
+
+        Bite eatSnack(bool smoothie)
+        {
+            if (!canEat())
+                return Bite::None;
+            if (smoothie)
+                return smoothieLeft() ? sipSmoothie() : Bite::None;
+            std::vector<int> left;
+            for (size_t i = 0; i < snacks.pieces.size(); ++i)
+                if (!eaten[i])
+                    left.push_back(static_cast<int>(i));
+            return left.empty() ? Bite::None : eatPiece(left[static_cast<size_t>(std::rand()) % left.size()]);
         }
 
         bool snackHit(Vector2 screen) const
@@ -3247,6 +3271,7 @@ float soft(vec2 p)
     float Scene::overlays() const { return m->homeReady ? m->overlays : 0.0f; }
     bool Scene::bookHit(Vector2 screen) const { return m->bookHit(screen); }
     Scene::Bite Scene::snackClick(Vector2 screen) { return m->snackClick(screen); }
+    Scene::Bite Scene::eatSnack(bool smoothie) { return m->eatSnack(smoothie); }
     bool Scene::snackHit(Vector2 screen) const { return m->snackHit(screen); }
     bool Scene::zoomReady() const { return m->zoomLoaded; }
     bool Scene::zoomBroken() const { return m->zoomBad; }
