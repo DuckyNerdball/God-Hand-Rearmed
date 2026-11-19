@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 19, 2026
 
+- Performance: the port's hooks on the game's code no longer take a lock on every call (some run for every character every frame).
 - Mods can replace any number of game files of any size; the game reads them in place of the disc's (Character mods use it).
 - Launcher: the version and updates are a newspaper in the corner (red EXTRA! when there's an update); open it for the news, BACK / UPDATE NOW.
 - Sway Bar: killing a mid-boss (Mr. Gold, Mr. Silver) no longer takes the health and Sway bars away from the enemies after it.

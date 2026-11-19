@@ -35,11 +35,47 @@ namespace kamite
             FunctionBinding binding;
             GuestFunction original = nullptr;
             std::vector<EntryObserver> observers;
-            std::shared_ptr<const std::vector<EntryObserver>> snapshot;
         };
 
         std::mutex g_mutex;
         std::unordered_map<uint32_t, Hook> g_hooks;
+
+        // What observedTrampoline reads: every observed address with its original and observers, sorted, immutable.
+        // Rebuilt under g_mutex whenever an observer is added and published with one atomic store, so a call of an
+        // observed function costs one atomic load and a binary search (it took the mutex, a hash lookup and a
+        // shared_ptr copy before: cModel_getMeshPtr alone is observed for every model every frame). Old tables are
+        // kept until exit, as a trampoline may still be reading one; there are a few dozen hooks, added mostly at boot.
+        struct ObservedEntry
+        {
+            uint32_t address = 0;
+            GuestFunction original = nullptr;
+            std::vector<EntryObserver> observers;
+        };
+        using ObservedTable = std::vector<ObservedEntry>;
+        std::atomic<const ObservedTable *> g_observed{nullptr};
+        std::vector<std::unique_ptr<const ObservedTable>> g_retiredTables; // under g_mutex
+
+        // Under g_mutex.
+        void publishObservedTable()
+        {
+            auto table = std::make_unique<ObservedTable>();
+            for (const auto &[address, hook] : g_hooks)
+                if (!hook.observers.empty())
+                    table->push_back(ObservedEntry{address, hook.original, hook.observers});
+            std::sort(table->begin(), table->end(), [](const ObservedEntry &a, const ObservedEntry &b) { return a.address < b.address; });
+            g_observed.store(table.get(), std::memory_order_release);
+            g_retiredTables.push_back(std::move(table));
+        }
+
+        const ObservedEntry *findObserved(uint32_t address)
+        {
+            const ObservedTable *table = g_observed.load(std::memory_order_acquire);
+            if (!table)
+                return nullptr;
+            const auto it = std::lower_bound(table->begin(), table->end(), address,
+                                             [](const ObservedEntry &entry, uint32_t value) { return entry.address < value; });
+            return it != table->end() && it->address == address ? &*it : nullptr;
+        }
 
         const char *statusName(ReplacementStatus status)
         {
@@ -108,7 +144,7 @@ namespace kamite
             }
         }
         it->second.observers.push_back(std::move(observer));
-        it->second.snapshot = std::make_shared<const std::vector<EntryObserver>>(it->second.observers);
+        publishObservedTable();
         return true;
     }
 
@@ -130,31 +166,16 @@ namespace kamite
     {
         // The dispatcher stores the called address in ctx->pc before invoking the slot.
         const uint32_t address = ctx->pc;
-        GuestFunction original = nullptr;
-        std::vector<EntryObserver> observers;
-        std::shared_ptr<const std::vector<EntryObserver>> snapshot;
-        static const bool fast = [] {
-            const char *setting = std::getenv("KAMITE_FAST_OBSERVERS");
-            return !setting || std::string_view(setting) != "0";
-        }();
+        const ObservedEntry *entry = findObserved(address);
+        if (!entry)
         {
-            std::lock_guard<std::mutex> lock(g_mutex);
-            const auto it = g_hooks.find(address);
-            if (it == g_hooks.end())
-            {
-                KM_ERROR(Hook, "trampoline entered with unknown pc 0x" << std::hex << address);
-                runtime->requestStop();
-                return;
-            }
-            original = it->second.original;
-            if (fast)
-                snapshot = it->second.snapshot;
-            else
-                observers = it->second.observers;
+            KM_ERROR(Hook, "trampoline entered with unknown pc 0x" << std::hex << address);
+            runtime->requestStop();
+            return;
         }
-        for (const auto &observer : snapshot ? *snapshot : observers)
+        for (const EntryObserver &observer : entry->observers)
             observer(rdram, ctx, runtime);
-        original(rdram, ctx, runtime);
+        entry->original(rdram, ctx, runtime);
     }
 
     void FunctionHooks::logBindings() const
