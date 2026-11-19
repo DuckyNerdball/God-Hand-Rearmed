@@ -122,7 +122,7 @@ which preset first switches a feature on; `Toggle` means none does, it's yours t
 - Internal resolution up to 8x, Vulkan by default with Direct3D 11 as the fallback.
 - Texture filtering from the PS2's own smoothing to Dangerously Crunchy, plus trilinear, anisotropic, FXAA,
   brightness and depth of field.
-- HD texture packs in PCSX2's format, with the game's own transparency kept intact.
+- HD texture packs in PCSX2's format, with the game's own transparency kept intact. (K recommends this [texture pack](https://gbatemp.net/threads/god-hand-usa-uhd-remaster-definitive-fixed-transparency-glitches.638847), and no, Santins, you didn't fix the transparency issues, but no worries, GHR fixed 'em for you)
 
 **Interface**
 - The HUD out at the screen edges or where the PS2 had it. <!-- tag:HudLayout --> `Remastered+`
