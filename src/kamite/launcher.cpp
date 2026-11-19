@@ -1954,6 +1954,7 @@ namespace kamite::launcher
                 billShown = true;
                 const saloon::Homography paper = saloon::Homography::rectToQuad(saloon::kPaperW, saloon::kPaperH, quad);
                 const std::vector<Rectangle> targets = saloon::billTargets(state.billFonts, bill);
+                std::vector<ImGuiID> ids(targets.size(), 0u); // for the pad's own routes below
                 if (!home)
                     ImGui::BeginDisabled();
                 for (size_t i = 0; i < targets.size(); ++i)
@@ -1961,6 +1962,7 @@ namespace kamite::launcher
                     ImGui::PushID(static_cast<int>(i));
                     bool focused = false;
                     const bool pressed = paperButton("##bill", targets[i], paper, home, &focused);
+                    ids[i] = ImGui::GetItemID();
                     overTarget = overTarget || saloon::inside(paperQuad(targets[i], paper), mouse);
                     if (home && ((state.focusFirst && i == 0) || (state.focusOptions && i == kBillOptions)))
                     {
@@ -2013,9 +2015,10 @@ namespace kamite::launcher
                     }
                     ImGui::PopID();
                 }
-                // the volume ruler down the bill's right edge: an ImGui slider with nothing of its own showing over it
-                // (keyboard / gamepad: activate it, then up / down); a mouse drag follows the paperclip through the
-                // bill's perspective. Its focus draws no loop (K).
+                // the volume ruler down the bill's right edge: an ImGui slider with nothing of its own showing over it; a
+                // mouse drag follows the paperclip through the bill's perspective. Its focus draws no loop (K), so the
+                // keyboard / pad never land on it (K, Nov 19: they went there from Steam's mark, invisibly): the mute
+                // mark is their volume (up / down below).
                 {
                     const Rectangle r = saloon::billRuler();
                     const Vector2 top = paper.map(r.x + r.width * 0.5f, r.y), bottom = paper.map(r.x + r.width * 0.5f, r.y + r.height);
@@ -2027,8 +2030,10 @@ namespace kamite::launcher
                     for (const ImGuiCol col : hidden)
                         ImGui::PushStyleColor(col, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
                     float percent = state.volume * 100.0f;
+                    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
                     bool changed = ImGui::VSliderFloat("##volume", ImVec2(std::max(1.0f, x1 - x0), std::max(1.0f, std::fabs(bottom.y - top.y))), &percent,
                                                        0.0f, 100.0f, "", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput);
+                    ImGui::PopItemFlag();
                     ImGui::PopStyleColor(static_cast<int>(std::size(hidden)));
                     state.volumeSliderId = ImGui::GetItemID();
                     if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left))
@@ -2055,6 +2060,46 @@ namespace kamite::launcher
                         state.ini.save();
                     }
                     overTarget = overTarget || ImGui::IsItemHovered();
+                }
+                // The pad's (and arrow keys') routes on the bill (K, Nov 19), over ImGui's own by position: Steam's mark
+                // down / right to Play, Play right to the mute mark, the mute mark left to Play; on the mute mark (or
+                // the ruler, focused by the mouse) up / down turn the volume 5% a step (held: repeats), A mutes.
+                ImGuiContext &g = *GImGui;
+                if (home && !popup && g.NavMoveSubmitted && g.NavWindow == ImGui::GetCurrentWindow() && !ids.empty())
+                {
+                    const ImGuiDir dir = g.NavMoveDir;
+                    const ImGuiID at = g.NavId;
+                    const bool onMute = muteItem < ids.size() && at == ids[muteItem];
+                    const bool onSteam = steamItem < ids.size() && at == ids[steamItem];
+                    const bool onRuler = at != 0u && at == state.volumeSliderId;
+                    ImGuiID to = 0u;
+                    if ((onMute || onRuler) && (dir == ImGuiDir_Up || dir == ImGuiDir_Down))
+                    {
+                        ImGui::NavMoveRequestCancel();
+                        const float level = std::round(state.volume * 20.0f) + (dir == ImGuiDir_Up ? 1.0f : -1.0f);
+                        state.volume = std::clamp(level / 20.0f, 0.0f, 1.0f);
+                        if (state.muted && dir == ImGuiDir_Up)
+                        {
+                            state.muted = false;
+                            state.ini.setBool("Launcher", "Mute", false);
+                        }
+                        char text[16];
+                        std::snprintf(text, sizeof(text), "%.2f", state.volume);
+                        state.ini.set("Launcher", "Volume", text);
+                        state.ini.save();
+                    }
+                    else if (onMute && dir == ImGuiDir_Left)
+                        to = ids[0];
+                    else if (onSteam && (dir == ImGuiDir_Down || dir == ImGuiDir_Right))
+                        to = ids[0];
+                    else if (at == ids[0] && dir == ImGuiDir_Right && muteItem < ids.size())
+                        to = ids[muteItem];
+                    if (to != 0u)
+                    {
+                        ImGui::NavMoveRequestCancel();
+                        ImGui::SetFocusID(to, ImGui::GetCurrentWindow());
+                        ImGui::SetNavCursorVisible(true);
+                    }
                 }
                 if (!home)
                     ImGui::EndDisabled();
