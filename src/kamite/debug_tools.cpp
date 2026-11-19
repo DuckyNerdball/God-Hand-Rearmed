@@ -140,14 +140,14 @@ namespace kamite::debug_tools
                 if (!want && !forcing)
                     return;
                 uint32_t w = 0;
-                std::memcpy(&w, rdram + (address & 0x01FFFFFFu), 4);
+                std::memcpy(&w, rdram + (address & PS2_RAM_MASK), 4);
                 const uint32_t starting = want & ~forcing, stopping = forcing & ~want;
                 gameWants = (gameWants & ~starting) | (w & starting); // what the game had when the forcing began
                 gameWants &= ~(~w & want & forcing);                   // cleared by the game while forced
                 w = (w | want) & ~(stopping & ~gameWants);
                 gameWants &= ~stopping;
                 forcing = want;
-                std::memcpy(rdram + (address & 0x01FFFFFFu), &w, 4);
+                std::memcpy(rdram + (address & PS2_RAM_MASK), &w, 4);
             }
         };
         ForcedBits g_hide;       // GameWork DSP: a set bit hides that part
@@ -204,14 +204,14 @@ namespace kamite::debug_tools
         uint32_t rd32(const uint8_t *rdram, uint32_t address)
         {
             uint32_t v = 0;
-            std::memcpy(&v, rdram + (address & 0x01FFFFFFu), 4);
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), 4);
             return v;
         }
-        void wr32(uint8_t *rdram, uint32_t address, uint32_t v) { std::memcpy(rdram + (address & 0x01FFFFFFu), &v, 4); }
+        void wr32(uint8_t *rdram, uint32_t address, uint32_t v) { std::memcpy(rdram + (address & PS2_RAM_MASK), &v, 4); }
         bool inRam(uint32_t address, uint32_t size)
         {
             const uint32_t a = address & 0x1FFFFFFFu;
-            return a >= 0x100000u && a + size <= PS2_RAM_SIZE;
+            return a >= 0x100000u && a + size <= PS2_RDRAM_SIZE;
         }
 
         // km_dbg_muteki at 0x1FD038 (func_001FCF20, the hit loop: `addiu s3,zero,1`, then `beql v0,s3` skips the hit
@@ -242,9 +242,9 @@ namespace kamite::debug_tools
             if (inRam(data, 0x14A0u))
             {
                 const uint16_t one = 1, freeSlot = 0xFFFFu;
-                std::memcpy(rdram + ((data + 0x288u) & 0x01FFFFFFu), &one, 2);
+                std::memcpy(rdram + ((data + 0x288u) & PS2_RAM_MASK), &one, 2);
                 for (uint32_t i = 0; i < 0x80u; ++i)
-                    std::memcpy(rdram + ((data + 0x28Au + 0x10u * i) & 0x01FFFFFFu), &freeSlot, 2);
+                    std::memcpy(rdram + ((data + 0x28Au + 0x10u * i) & PS2_RAM_MASK), &freeSlot, 2);
             }
             KM_INFO(Game, "room jump: stage reset for r" << std::hex << room << std::dec);
         }
@@ -259,11 +259,11 @@ namespace kamite::debug_tools
                 wr32(rdram, obj + 0x5B4u, 100000u);
         }
 
-        void setHp(uint8_t *rdram, uint32_t obj, int16_t hp) { std::memcpy(rdram + ((obj + kObjHp) & 0x01FFFFFFu), &hp, 2); }
+        void setHp(uint8_t *rdram, uint32_t obj, int16_t hp) { std::memcpy(rdram + ((obj + kObjHp) & PS2_RAM_MASK), &hp, 2); }
         int16_t getHp(const uint8_t *rdram, uint32_t obj)
         {
             int16_t hp = 0;
-            std::memcpy(&hp, rdram + ((obj + kObjHp) & 0x01FFFFFFu), 2);
+            std::memcpy(&hp, rdram + ((obj + kObjHp) & PS2_RAM_MASK), 2);
             return hp;
         }
         // km_dbg_pl_damage at 0x12C2A4 (Gene's damage step, after `sh v0,0x54A(s1)` / the clamp to 0); s1 = Gene.
@@ -681,10 +681,10 @@ namespace kamite::debug_tools
             if (inRam(player, 0x700u))
             {
                 int16_t max = 0, hp = 0;
-                std::memcpy(&max, rdram + ((player + kObjHpMax) & 0x01FFFFFFu), sizeof(max));
-                std::memcpy(&hp, rdram + ((player + kObjHp) & 0x01FFFFFFu), sizeof(hp));
+                std::memcpy(&max, rdram + ((player + kObjHpMax) & PS2_RAM_MASK), sizeof(max));
+                std::memcpy(&hp, rdram + ((player + kObjHp) & PS2_RAM_MASK), sizeof(hp));
                 if (max > 0 && hp > 0 && hp < max)
-                    std::memcpy(rdram + ((player + kObjHp) & 0x01FFFFFFu), &max, sizeof(max));
+                    std::memcpy(rdram + ((player + kObjHp) & PS2_RAM_MASK), &max, sizeof(max));
             }
         }
         {
@@ -700,9 +700,9 @@ namespace kamite::debug_tools
                     continue;
                 uint16_t kind = 0;
                 int16_t hp = 0, max = 0;
-                std::memcpy(&kind, rdram + ((em + 0x2FEu) & 0x01FFFFFFu), sizeof(kind));
-                std::memcpy(&hp, rdram + ((em + kObjHp) & 0x01FFFFFFu), sizeof(hp));
-                std::memcpy(&max, rdram + ((em + kObjHpMax) & 0x01FFFFFFu), sizeof(max));
+                std::memcpy(&kind, rdram + ((em + 0x2FEu) & PS2_RAM_MASK), sizeof(kind));
+                std::memcpy(&hp, rdram + ((em + kObjHp) & PS2_RAM_MASK), sizeof(hp));
+                std::memcpy(&max, rdram + ((em + kObjHpMax) & PS2_RAM_MASK), sizeof(max));
                 const int32_t flags = static_cast<int32_t>(rd32(rdram, em + 0x250u));
                 if (kind < 0x200u || kind >= 0x280u || hp <= 0 || flags < 0)
                     continue;
@@ -711,10 +711,10 @@ namespace kamite::debug_tools
                 {
                     const int16_t one = 1; // wins over "can't die": otherwise the two would trade HP every frame
                     if (hp > 1)
-                        std::memcpy(rdram + ((em + kObjHp) & 0x01FFFFFFu), &one, sizeof(one));
+                        std::memcpy(rdram + ((em + kObjHp) & PS2_RAM_MASK), &one, sizeof(one));
                 }
                 else if (noDeath && max > 0 && hp <= max / 4)
-                    std::memcpy(rdram + ((em + kObjHp) & 0x01FFFFFFu), &max, sizeof(max));
+                    std::memcpy(rdram + ((em + kObjHp) & PS2_RAM_MASK), &max, sizeof(max));
             }
             g_enemiesAlive.store(alive, std::memory_order_relaxed);
         }

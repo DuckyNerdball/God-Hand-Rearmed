@@ -649,13 +649,13 @@ namespace
         std::ptrdiff_t offset = ptr_u8 - rdram;
 
         // Check if is in rdram range
-        if (offset >= 0 && static_cast<size_t>(offset) < PS2_RAM_SIZE)
+        if (offset >= 0 && static_cast<size_t>(offset) < PS2_RDRAM_SIZE)
         {
             return PS2_RAM_BASE + static_cast<uint32_t>(offset);
         }
         else
         {
-            std::cerr << "Warning: hostPtrToPs2Addr failed - host pointer " << hostPtr << " is outside rdram range [" << static_cast<void *>(rdram) << ", " << static_cast<void *>(rdram + PS2_RAM_SIZE) << ")" << std::endl;
+            std::cerr << "Warning: hostPtrToPs2Addr failed - host pointer " << hostPtr << " is outside rdram range [" << static_cast<void *>(rdram) << ", " << static_cast<void *>(rdram + PS2_RDRAM_SIZE) << ")" << std::endl;
             return 0;
         }
     }

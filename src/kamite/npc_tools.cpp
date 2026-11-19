@@ -98,31 +98,31 @@ namespace kamite::npc_tools
         uint32_t rd32(const uint8_t *r, uint32_t a)
         {
             uint32_t v = 0;
-            std::memcpy(&v, r + (a & 0x01FFFFFFu), 4);
+            std::memcpy(&v, r + (a & PS2_RAM_MASK), 4);
             return v;
         }
         uint16_t rd16(const uint8_t *r, uint32_t a)
         {
             uint16_t v = 0;
-            std::memcpy(&v, r + (a & 0x01FFFFFFu), 2);
+            std::memcpy(&v, r + (a & PS2_RAM_MASK), 2);
             return v;
         }
         int16_t rds16(const uint8_t *r, uint32_t a) { return static_cast<int16_t>(rd16(r, a)); }
-        uint8_t rd8(const uint8_t *r, uint32_t a) { return r[a & 0x01FFFFFFu]; }
+        uint8_t rd8(const uint8_t *r, uint32_t a) { return r[a & PS2_RAM_MASK]; }
         float rdf(const uint8_t *r, uint32_t a)
         {
             float v = 0.0f;
-            std::memcpy(&v, r + (a & 0x01FFFFFFu), 4);
+            std::memcpy(&v, r + (a & PS2_RAM_MASK), 4);
             return v;
         }
-        void wr32(uint8_t *r, uint32_t a, uint32_t v) { std::memcpy(r + (a & 0x01FFFFFFu), &v, 4); }
-        void wr16(uint8_t *r, uint32_t a, uint16_t v) { std::memcpy(r + (a & 0x01FFFFFFu), &v, 2); }
-        void wr8(uint8_t *r, uint32_t a, uint8_t v) { r[a & 0x01FFFFFFu] = v; }
-        void wrf(uint8_t *r, uint32_t a, float v) { std::memcpy(r + (a & 0x01FFFFFFu), &v, 4); }
+        void wr32(uint8_t *r, uint32_t a, uint32_t v) { std::memcpy(r + (a & PS2_RAM_MASK), &v, 4); }
+        void wr16(uint8_t *r, uint32_t a, uint16_t v) { std::memcpy(r + (a & PS2_RAM_MASK), &v, 2); }
+        void wr8(uint8_t *r, uint32_t a, uint8_t v) { r[a & PS2_RAM_MASK] = v; }
+        void wrf(uint8_t *r, uint32_t a, float v) { std::memcpy(r + (a & PS2_RAM_MASK), &v, 4); }
         bool inRam(uint32_t a, uint32_t size)
         {
             const uint32_t x = a & 0x1FFFFFFFu;
-            return x >= 0x100000u && x + size <= PS2_RAM_SIZE;
+            return x >= 0x100000u && x + size <= PS2_RDRAM_SIZE;
         }
 
         GuestFunction resolve(uint32_t address)

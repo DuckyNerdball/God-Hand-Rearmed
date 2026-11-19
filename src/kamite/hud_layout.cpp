@@ -200,13 +200,13 @@ namespace kamite::hud
         uint32_t read32(const uint8_t *rdram, uint32_t address)
         {
             uint32_t value;
-            std::memcpy(&value, rdram + (address & (PS2_RAM_SIZE - 1u)), sizeof(value));
+            std::memcpy(&value, rdram + (address & PS2_RAM_MASK), sizeof(value));
             return value;
         }
 
         void write32(uint8_t *rdram, uint32_t address, uint32_t value)
         {
-            std::memcpy(rdram + (address & (PS2_RAM_SIZE - 1u)), &value, sizeof(value));
+            std::memcpy(rdram + (address & PS2_RAM_MASK), &value, sizeof(value));
         }
 
         // The tutorial pop-up is up (and no sub screen is open over it).
@@ -214,9 +214,9 @@ namespace kamite::hud
         bool tutorialUp(const uint8_t *rdram)
         {
             const uint32_t game = read32(rdram, kGameObject);
-            if (game < 0x100000u || game >= PS2_RAM_SIZE - 0x2000u)
+            if (game < 0x100000u || game >= PS2_RDRAM_SIZE - 0x2000u)
                 return false;
-            const int8_t state = static_cast<int8_t>(rdram[(game + kTutorialState) & (PS2_RAM_SIZE - 1u)]);
+            const int8_t state = static_cast<int8_t>(rdram[(game + kTutorialState) & PS2_RAM_MASK]);
             return state > 0 && state < 5;
         }
 
@@ -352,12 +352,12 @@ namespace kamite::hud
             if (g_dumping && g_inIdTrans && g_entry >= 0x100000u && g_entry != g_dumpSlotEntry && g_curLayout >= 0x100000u)
             {
                 g_dumpSlotEntry = g_entry;
-                const uint8_t mode = rdram[(g_curLayout + 0x46u) & 0x01FFFFFFu];
+                const uint8_t mode = rdram[(g_curLayout + 0x46u) & PS2_RAM_MASK];
                 int16_t pos;
-                std::memcpy(&pos, rdram + ((g_entry + 0x8Eu) & 0x01FFFFFFu), sizeof(pos));
+                std::memcpy(&pos, rdram + ((g_entry + 0x8Eu) & PS2_RAM_MASK), sizeof(pos));
                 char line[120];
                 std::snprintf(line, sizeof(line), "    slot ent %08X layout mode %u list %u pos %d (text: pos 5)", g_entry, mode,
-                              mode == 6u ? rdram[(g_entry + 0x8Du) & 0x01FFFFFFu] : mode, pos);
+                              mode == 6u ? rdram[(g_entry + 0x8Du) & PS2_RAM_MASK] : mode, pos);
                 dump(line);
             }
             // The minimap's right edge, for the gold counter (at every aspect and layout: both use the same mapping).
@@ -385,10 +385,10 @@ namespace kamite::hud
             {
                 if (g_inIdTrans && g_entry >= 0x100000u && g_curLayout >= 0x100000u)
                 {
-                    const uint8_t mode = rdram[(g_curLayout + 0x46u) & 0x01FFFFFFu];
-                    const int list = mode == 6u ? rdram[(g_entry + 0x8Du) & 0x01FFFFFFu] : mode;
+                    const uint8_t mode = rdram[(g_curLayout + 0x46u) & PS2_RAM_MASK];
+                    const int list = mode == 6u ? rdram[(g_entry + 0x8Du) & PS2_RAM_MASK] : mode;
                     int16_t pos;
-                    std::memcpy(&pos, rdram + ((g_entry + 0x8Eu) & 0x01FFFFFFu), sizeof(pos));
+                    std::memcpy(&pos, rdram + ((g_entry + 0x8Eu) & PS2_RAM_MASK), sizeof(pos));
                     if (g_radarListSeen < 0)
                         g_radarListSeen = list;
                     if (list == g_radarListSeen)
@@ -589,7 +589,7 @@ namespace kamite::hud
         void idBegin(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             g_inIdTrans = true;
-            g_curLayout = GPR_U32(ctx, 18) & 0x01FFFFFFu;
+            g_curLayout = GPR_U32(ctx, 18) & PS2_RAM_MASK;
             g_idCaller = read32(rdram, GPR_U32(ctx, 29) + 0x40u);
             if (g_dumping)
             {
@@ -609,7 +609,7 @@ namespace kamite::hud
                     std::memcpy(&x, &xb, sizeof(x));
                     std::memcpy(&y, &yb, sizeof(y));
                     std::snprintf(line, sizeof(line), "  entry %3d %08X kind %u flags %08X colour %u msg %04X pos %.1f,%.1f", i, e,
-                                  rdram[(e + ent::kKind) & 0x01FFFFFFu], read32(rdram, e + ent::kFlags), rdram[(e + ent::kColourSet) & 0x01FFFFFFu],
+                                  rdram[(e + ent::kKind) & PS2_RAM_MASK], read32(rdram, e + ent::kFlags), rdram[(e + ent::kColourSet) & PS2_RAM_MASK],
                                   read32(rdram, e + ent::kMsg) & 0xFFFFu, x, y);
                     dump(line);
                 }
@@ -638,7 +638,7 @@ namespace kamite::hud
                 g_ctx = Context{};
                 return;
             }
-            const uint32_t layout = GPR_U32(ctx, 18) & 0x01FFFFFFu;
+            const uint32_t layout = GPR_U32(ctx, 18) & PS2_RAM_MASK;
             const float width = screenWidth(rdram);
             float fallback = 0.5f * width;
             if (g_last.find(layout) == g_last.end() && g_seen.find(layout) == g_seen.end() && g_known.find(layout) == g_known.end())
@@ -670,7 +670,7 @@ namespace kamite::hud
 
         void idEntry(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            g_entry = GPR_U32(ctx, 5) & 0x01FFFFFFu;
+            g_entry = GPR_U32(ctx, 5) & PS2_RAM_MASK;
             g_glyphIndex = 0;
             roulette_bar::onEntry(rdram, g_curLayout, g_entry);
             if (g_entryOverride)
@@ -701,8 +701,8 @@ namespace kamite::hud
                 }
             }
             if (!leftEdge && g_moneyLayout != 0u && g_curLayout == g_moneyLayout &&
-                (g_entry == (read32(rdram, g_moneyLayout + kMoneyText) & 0x01FFFFFFu) ||
-                 g_entry == (read32(rdram, g_moneyLayout + kMoneyShadow) & 0x01FFFFFFu)))
+                (g_entry == (read32(rdram, g_moneyLayout + kMoneyText) & PS2_RAM_MASK) ||
+                 g_entry == (read32(rdram, g_moneyLayout + kMoneyShadow) & PS2_RAM_MASK)))
                 leftEdge = true;
             if (leftEdge && g_wide && !menuNow())
             {
@@ -732,16 +732,16 @@ namespace kamite::hud
             if (!g_inIdTrans || g_moneyLayout == 0u || g_curLayout != g_moneyLayout || g_entryOverride || menuNow() ||
                 !std::isfinite(g_radarRight))
                 return;
-            const uint32_t text = read32(rdram, g_moneyLayout + kMoneyText) & 0x01FFFFFFu;
-            const uint32_t shadow = read32(rdram, g_moneyLayout + kMoneyShadow) & 0x01FFFFFFu;
+            const uint32_t text = read32(rdram, g_moneyLayout + kMoneyText) & PS2_RAM_MASK;
+            const uint32_t shadow = read32(rdram, g_moneyLayout + kMoneyShadow) & PS2_RAM_MASK;
             if (g_entry == 0u || (g_entry != text && g_entry != shadow))
                 return;
             auto loadF = [&](uint32_t a) {
                 float v;
-                std::memcpy(&v, rdram + (a & (PS2_RAM_SIZE - 1u)), sizeof(v));
+                std::memcpy(&v, rdram + (a & PS2_RAM_MASK), sizeof(v));
                 return v;
             };
-            const uint32_t font = GPR_U32(ctx, 18) & 0x01FFFFFFu;
+            const uint32_t font = GPR_U32(ctx, 18) & PS2_RAM_MASK;
             // The same two text entries carry the game's action prompt ("A :Throw", message 0x3010), drawn at the top
             // (y about 23..49 in the F6 dump, left of the minimap). Right-aligning it to the minimap's edge put it
             // inside the minimap (Nov 1, K; since 5142a68). Only the counter under the minimap (y past its bottom,
@@ -756,7 +756,7 @@ namespace kamite::hud
             float x = right - textWidth;
             if (read32(rdram, font + 0x28u) & 1u)
                 x += 0.5f * textWidth; // centred: the draw takes half the width off again
-            std::memcpy(rdram + ((font + 0x20u) & (PS2_RAM_SIZE - 1u)), &x, sizeof(x));
+            std::memcpy(rdram + ((font + 0x20u) & PS2_RAM_MASK), &x, sizeof(x));
         }
 
         template <uint32_t Key, Region Mode>
@@ -890,7 +890,7 @@ namespace kamite::hud
         if (rdram)
         {
             const uint32_t subScr = read32(rdram, kSubScrPointer);
-            if (subScr >= 0x100000u && subScr < PS2_RAM_SIZE - 0x100u)
+            if (subScr >= 0x100000u && subScr < PS2_RDRAM_SIZE - 0x100u)
                 subScreen = static_cast<int32_t>(read32(rdram, subScr + game::SubScr::kKind)) >= 0;
             // A tutorial pop-up is drawn over the game with a full-screen backing: it is part of the game view, not a
             // menu (counted as one, the picture went 4:3 and back and the health block landed in its 4:3 place, Oct 25).

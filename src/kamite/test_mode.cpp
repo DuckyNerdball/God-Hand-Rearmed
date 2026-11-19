@@ -34,6 +34,7 @@
 #include "runtime/ps2_hotkeys.h"
 #include "runtime/ps2_pad_tap.h"
 #include "runtime/ps2_save_state.h"
+#include "runtime/ps2_xram.h"
 #include "ps2_runtime_macros.h" // GPR_U32
 
 #include <algorithm>
@@ -144,26 +145,26 @@ namespace kamite::test_mode
         bool inRam(uint32_t address, uint32_t size)
         {
             const uint32_t a = address & 0x1FFFFFFFu;
-            return a >= 0x100000u && a + size <= PS2_RAM_SIZE;
+            return a >= 0x100000u && a + size <= PS2_RDRAM_SIZE;
         }
         uint32_t rd32(const uint8_t *rdram, uint32_t address)
         {
             uint32_t v = 0;
-            std::memcpy(&v, rdram + (address & 0x01FFFFFFu), 4);
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), 4);
             return v;
         }
         uint16_t rd16(const uint8_t *rdram, uint32_t address)
         {
             uint16_t v = 0;
-            std::memcpy(&v, rdram + (address & 0x01FFFFFFu), 2);
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), 2);
             return v;
         }
         int16_t rds16(const uint8_t *rdram, uint32_t address) { return static_cast<int16_t>(rd16(rdram, address)); }
-        uint8_t rd8(const uint8_t *rdram, uint32_t address) { return rdram[address & 0x01FFFFFFu]; }
+        uint8_t rd8(const uint8_t *rdram, uint32_t address) { return rdram[address & PS2_RAM_MASK]; }
         float rdf(const uint8_t *rdram, uint32_t address)
         {
             float v = 0.0f;
-            std::memcpy(&v, rdram + (address & 0x01FFFFFFu), 4);
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), 4);
             return v;
         }
 
@@ -1044,6 +1045,8 @@ namespace kamite::test_mode
             if (!ok)
                 run.failed = true;
             KM_INFO(Game, "test: " << (ok ? "done" : "failed") << " after " << run.frame << " frames; stopping the run");
+            if (runtime) // the limit break's check: a vanilla replay leaves the extension untouched
+                KM_INFO(Game, "test: extension RAM in use: " << ps2x::xram::usedBytes(runtime->memory().getRDRAM()) << " bytes");
             if (runtime)
                 runtime->requestStop();
         }
@@ -1620,7 +1623,7 @@ namespace kamite::test_mode
         {
             if (g_readPort != 0u || g_readSlot != 0u)
                 return;
-            uint8_t *status = rdram + ((GPR_U32(ctx, 29) + kReadFirst) & 0x1FFFFFFu);
+            uint8_t *status = rdram + ((GPR_U32(ctx, 29) + kReadFirst) & PS2_RAM_MASK);
             std::lock_guard<std::mutex> lock(g_mutex);
             Run &run = g_run;
             if (run.phase == Run::Phase::Off)

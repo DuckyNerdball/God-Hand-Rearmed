@@ -15,7 +15,7 @@ namespace kamite::model_detail
         uint32_t r32(const uint8_t *rdram, uint32_t a)
         {
             a &= PS2_RAM_MASK;
-            if (a > PS2_RAM_SIZE - 4u)
+            if (a > PS2_RDRAM_SIZE - 4u)
                 return 0u;
             uint32_t v = 0;
             std::memcpy(&v, rdram + a, 4);

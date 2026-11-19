@@ -322,23 +322,23 @@ namespace kamite::modern
         uint32_t ram32(const uint8_t *rdram, uint32_t address)
         {
             uint32_t value;
-            std::memcpy(&value, rdram + (address & 0x1FFFFFFu), sizeof(value));
+            std::memcpy(&value, rdram + (address & PS2_RAM_MASK), sizeof(value));
             return value;
         }
 
         float ramFloat(const uint8_t *rdram, uint32_t address)
         {
             float value;
-            std::memcpy(&value, rdram + (address & 0x1FFFFFFu), sizeof(value));
+            std::memcpy(&value, rdram + (address & PS2_RAM_MASK), sizeof(value));
             return value;
         }
 
-        bool validPointer(uint32_t pointer) { return pointer >= 0x100000u && pointer < 0x2000000u; }
+        bool validPointer(uint32_t pointer) { return pointer >= 0x100000u && pointer < PS2_RDRAM_SIZE; }
 
         // Gene stands or walks: major step 0, sub-step 0 / 10 (standing) or 1 / 2 (walking).
         bool geneMoves(const uint8_t *rdram, uint32_t player)
         {
-            const uint8_t major = rdram[(player + 0x2F4u) & 0x1FFFFFFu], sub = rdram[(player + 0x2F5u) & 0x1FFFFFFu];
+            const uint8_t major = rdram[(player + 0x2F4u) & PS2_RAM_MASK], sub = rdram[(player + 0x2F5u) & PS2_RAM_MASK];
             return major == 0u && (sub == 0u || sub == 1u || sub == 2u || sub == 10u);
         }
 
@@ -561,7 +561,7 @@ namespace kamite::modern
             if (host.turned && validPointer(player))
             {
                 yaw = host.geneYaw;
-                std::memcpy(rdram + ((player + 0x104u) & 0x1FFFFFFu), &yaw, sizeof(yaw));
+                std::memcpy(rdram + ((player + 0x104u) & PS2_RAM_MASK), &yaw, sizeof(yaw));
             }
             g_geneYaw.store(yaw, std::memory_order_relaxed);
             g_cameraYaw.store(host.yaw, std::memory_order_relaxed);
@@ -655,7 +655,7 @@ namespace kamite::modern
                 const float target = g_moveYaw.load(std::memory_order_relaxed);
                 const float step = std::fmin(std::fmax(wrapAngle(target - geneYaw), -kTurnRate * dt), kTurnRate * dt);
                 const float turned = wrapAngle(geneYaw + step);
-                std::memcpy(rdram + ((player + 0x104u) & 0x1FFFFFFu), &turned, sizeof(turned));
+                std::memcpy(rdram + ((player + 0x104u) & PS2_RAM_MASK), &turned, sizeof(turned));
                 g_geneYaw.store(turned, std::memory_order_relaxed);
                 g_turned = true;
                 g_turnedYaw = turned;

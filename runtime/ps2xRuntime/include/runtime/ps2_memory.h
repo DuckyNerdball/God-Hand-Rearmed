@@ -23,8 +23,17 @@
 
 class GS;
 
-constexpr uint32_t PS2_RAM_SIZE = 32u * 1024u * 1024u; // 32MB
-constexpr uint32_t PS2_RAM_MASK = PS2_RAM_SIZE - 1u;   // Mask for 32MB alignment
+// The game's own RAM: the 32 MB a retail PS2 has. Everything the game can see stays this size (its stack, heaps, the
+// memory-size syscalls, the function table, RAM dumps / snapshots). Above it, the backing goes on to PS2_RDRAM_SIZE:
+// the extension (PS2_XRAM_*) that only the port's own code hands out (ps2_xram.h). A power of two, so the fast path's
+// single AND still maps the cached / uncached / kseg views of an address onto the same byte. 256 MB is the ceiling:
+// the PS2's I/O starts at 0x10000000.
+constexpr uint32_t PS2_RAM_SIZE = 32u * 1024u * 1024u;    // 32MB, what the game sees
+constexpr uint32_t PS2_RDRAM_SIZE = 128u * 1024u * 1024u; // 128MB, the backing: game RAM + extension
+constexpr uint32_t PS2_RAM_MASK = PS2_RDRAM_SIZE - 1u;    // guest address -> offset into the backing
+constexpr uint32_t PS2_XRAM_BASE = PS2_RAM_SIZE;           // the extension starts right above the game's RAM
+constexpr uint32_t PS2_XRAM_SIZE = PS2_RDRAM_SIZE - PS2_RAM_SIZE;
+static_assert((PS2_RDRAM_SIZE & (PS2_RDRAM_SIZE - 1u)) == 0u && PS2_RDRAM_SIZE <= 0x10000000u, "backing: power of two, <= 256 MB");
 constexpr uint32_t PS2_RAM_BASE = 0x00000000;          // Physical base of RDRAM
 constexpr uint32_t PS2_SCRATCHPAD_BASE = 0x70000000;
 constexpr uint32_t PS2_SCRATCHPAD_ALIAS_BASE = 0xF0000000;
@@ -68,7 +77,7 @@ inline constexpr uint32_t PS2_FIO_S_IFDIR = 0x1000;
 inline constexpr uint32_t PS2_FIO_S_IFREG = 0x2000;
 
 static_assert((PS2_RAM_SIZE & (PS2_RAM_SIZE - 1u)) == 0u, "PS2_RAM_SIZE must be a power of two");
-static_assert(PS2_RAM_MASK == (PS2_RAM_SIZE - 1u), "PS2_RAM_MASK must match PS2_RAM_SIZE");
+static_assert(PS2_RAM_MASK == (PS2_RDRAM_SIZE - 1u), "PS2_RAM_MASK must match PS2_RDRAM_SIZE");
 
 inline std::atomic<uint8_t *> &ps2ScratchpadHostPtrStorage()
 {
@@ -134,7 +143,7 @@ inline bool ps2ResolveGuestPointer(uint32_t addr, uint32_t &offset, bool &scratc
         phys = addr & 0x1FFFFFFFu;
     }
 
-    if (phys >= PS2_RAM_SIZE)
+    if (phys >= PS2_RDRAM_SIZE)
     {
         phys &= PS2_RAM_MASK;
     }
@@ -270,7 +279,7 @@ public:
     PS2Memory &operator=(PS2Memory &&) = delete;
 
     // Initialize memory
-    bool initialize(size_t ramSize = PS2_RAM_SIZE);
+    bool initialize(size_t ramSize = PS2_RDRAM_SIZE);
 
     // Memory access methods
     uint8_t *getRDRAM() { return m_rdram; }

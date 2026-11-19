@@ -340,7 +340,7 @@ inline float ps2VuRsqrt(uint16_t &status, float numerator, float value)
 
 static PS2_FORCEINLINE bool Ps2FastRangeIsContiguous(uint32_t offset, uint32_t bytes)
 {
-    return offset <= (PS2_RAM_SIZE - bytes);
+    return offset <= (PS2_RDRAM_SIZE - bytes);
 }
 
 static PS2_FORCEINLINE uint8_t Ps2FastRead8(const uint8_t *rdram, uint32_t addr)

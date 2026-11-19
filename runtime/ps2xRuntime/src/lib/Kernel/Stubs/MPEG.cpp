@@ -1481,7 +1481,7 @@ namespace ps2_stubs
             {
                 const uint32_t curAddr = addr + static_cast<uint32_t>(copied);
                 const uint32_t offset = curAddr & PS2_RAM_MASK;
-                size_t chunk = std::min<size_t>(size - copied, PS2_RAM_SIZE - offset);
+                size_t chunk = std::min<size_t>(size - copied, PS2_RDRAM_SIZE - offset);
                 if (chunk == 0u)
                 {
                     break;
@@ -1521,7 +1521,7 @@ namespace ps2_stubs
 
             const uint32_t base = ringBaseAddr & PS2_RAM_MASK;
             const uint32_t data = dataAddr & PS2_RAM_MASK;
-            if (ringBaseAddr != 0u && ringSize != 0u && ringSize <= PS2_RAM_SIZE)
+            if (ringBaseAddr != 0u && ringSize != 0u && ringSize <= PS2_RDRAM_SIZE)
             {
                 const uint32_t ringOffset = (data - base) & PS2_RAM_MASK;
                 if (ringOffset < ringSize)
@@ -1889,7 +1889,7 @@ namespace ps2_stubs
             {
                 const uint32_t curAddr = dataAddr + static_cast<uint32_t>(copied);
                 const uint32_t offset = curAddr & PS2_RAM_MASK;
-                const size_t chunk = std::min<size_t>(static_cast<size_t>(byteCount) - copied, PS2_RAM_SIZE - offset);
+                const size_t chunk = std::min<size_t>(static_cast<size_t>(byteCount) - copied, PS2_RDRAM_SIZE - offset);
                 const uint8_t *src = getConstMemPtr(rdram, curAddr);
                 if (!src || chunk == 0u)
                 {

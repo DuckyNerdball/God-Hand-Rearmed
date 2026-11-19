@@ -188,7 +188,7 @@ namespace kamite::options_screen
 
         // ---- guest memory --------------------------------------------------------------------------------------
         uint8_t *g_ram = nullptr;
-        uint8_t *at(uint32_t address) { return g_ram + (address & 0x01FFFFFFu); }
+        uint8_t *at(uint32_t address) { return g_ram + (address & PS2_RAM_MASK); }
         uint32_t rd32(uint32_t address)
         {
             uint32_t v;
@@ -209,7 +209,7 @@ namespace kamite::options_screen
         }
         void wr32(uint32_t address, uint32_t v) { std::memcpy(at(address), &v, sizeof(v)); }
         void wrF(uint32_t address, float v) { std::memcpy(at(address), &v, sizeof(v)); }
-        bool valid(uint32_t address, uint32_t bytes = 4u) { return address >= 0x100000u && address + bytes <= 0x2000000u; }
+        bool valid(uint32_t address, uint32_t bytes = 4u) { return address >= 0x100000u && address + bytes <= PS2_RDRAM_SIZE; }
 
         // A guest function run to its end on a copy of the registers (game_options' callGuest).
         bool callGuest(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t address, std::initializer_list<uint32_t> args,
@@ -325,7 +325,7 @@ namespace kamite::options_screen
                 g_pickupBackAt = nowMsSteady() + kRecordBackMs;
             }
             const uint32_t gene = rd32(kPlayer);
-            if (id == kSePickupLine && gene >= 0x100000u && gene < 0x2000000u) // in play: Gene's own call, as the game's
+            if (id == kSePickupLine && gene >= 0x100000u && gene < PS2_RDRAM_SIZE) // in play: Gene's own call, as the game's
                 callGuest(rdram, ctx, runtime, kSeCallObj, {kSeManager, 0u, id, gene, 0u, 0u, 0u, 0u}, &g_previewHandle);
             else
                 callGuest(rdram, ctx, runtime, kSePlay, {kSeManager, 0u, id, 0xFFFFFFFFu, 0xFFFFFFFFu, 0u, 0u}, &g_previewHandle);

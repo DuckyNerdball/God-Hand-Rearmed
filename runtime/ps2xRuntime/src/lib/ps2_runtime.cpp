@@ -1896,7 +1896,7 @@ void PS2Runtime::reportMissingFunction(uint8_t *rdram,
     auto readGuestU32At = [rdram](uint32_t addr, uint32_t &out) -> bool
     {
         // TODO this !rdram exist only because of test fix those test later
-        if (!rdram || addr > PS2_RAM_SIZE - sizeof(uint32_t))
+        if (!rdram || addr > PS2_RDRAM_SIZE - sizeof(uint32_t))
         {
             out = 0u;
             return false;
@@ -1908,7 +1908,7 @@ void PS2Runtime::reportMissingFunction(uint8_t *rdram,
 
     auto readGuestU32Offset = [&readGuestU32At](uint32_t base, uint32_t offset, uint32_t &out) -> bool
     {
-        if (base > PS2_RAM_SIZE - sizeof(uint32_t) || offset > PS2_RAM_SIZE - sizeof(uint32_t) - base)
+        if (base > PS2_RDRAM_SIZE - sizeof(uint32_t) || offset > PS2_RDRAM_SIZE - sizeof(uint32_t) - base)
         {
             out = 0u;
             return false;
@@ -2419,7 +2419,7 @@ uint32_t PS2Runtime::clampGuestHeapBase(uint32_t guestBase) const
     uint32_t normalized = guestBase;
     if (normalized >= PS2_RAM_SIZE)
     {
-        normalized &= PS2_RAM_MASK;
+        normalized &= PS2_RAM_SIZE - 1u; // the game's 32 MB (the heap never reaches the extension)
     }
     const uint32_t hardLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
     return std::min(normalized, hardLimit);

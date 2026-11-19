@@ -44,8 +44,8 @@ namespace kamite::bone_tweaks
         Saved g_saved[2]; // the two hair bones
         bool g_applied = false;
 
-        uint32_t rd32(const uint8_t *rdram, uint32_t a) { uint32_t v; std::memcpy(&v, rdram + (a & 0x01FFFFFFu), 4); return v; }
-        bool inRam(uint32_t a, uint32_t size = 4u) { a &= 0x01FFFFFFu; return a >= 0x100000u && a + size <= 0x02000000u; }
+        uint32_t rd32(const uint8_t *rdram, uint32_t a) { uint32_t v; std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4); return v; }
+        bool inRam(uint32_t a, uint32_t size = 4u) { a &= PS2_RAM_MASK; return a >= 0x100000u && a + size <= PS2_RDRAM_SIZE; }
 
         using Vec = std::array<float, 3>;
         using Mat = std::array<float, 9>; // row-major, column vectors: v' = M v
@@ -78,8 +78,8 @@ namespace kamite::bone_tweaks
                 m[12] = p[0]; m[13] = p[1]; m[14] = p[2];
             }
         };
-        Bone readBone(const uint8_t *rdram, uint32_t part) { Bone b; std::memcpy(b.m.data(), rdram + ((part + kPartMtx) & 0x01FFFFFFu), 64); return b; }
-        void writeBone(uint8_t *rdram, uint32_t part, const Bone &b) { std::memcpy(rdram + ((part + kPartMtx) & 0x01FFFFFFu), b.m.data(), 64); }
+        Bone readBone(const uint8_t *rdram, uint32_t part) { Bone b; std::memcpy(b.m.data(), rdram + ((part + kPartMtx) & PS2_RAM_MASK), 64); return b; }
+        void writeBone(uint8_t *rdram, uint32_t part, const Bone &b) { std::memcpy(rdram + ((part + kPartMtx) & PS2_RAM_MASK), b.m.data(), 64); }
 
         // The player's cParts in bone order (0 on failure).
         int playerParts(const uint8_t *rdram, uint32_t parts[32])
@@ -87,7 +87,7 @@ namespace kamite::bone_tweaks
             const uint32_t model = rd32(rdram, GameWork::address(GameWork::kPlayerObj));
             if (!inRam(model, 0x2E4u))
                 return 0;
-            const int n = rdram[(model + kPartNum) & 0x01FFFFFFu];
+            const int n = rdram[(model + kPartNum) & PS2_RAM_MASK];
             uint32_t p = rd32(rdram, model + kPartsFirst);
             int i = 0;
             for (; i < n && i < 32 && inRam(p, 0x160u); ++i)
@@ -117,7 +117,7 @@ namespace kamite::bone_tweaks
             for (int i = 0; i < count; ++i)
             {
                 float t[3];
-                std::memcpy(t, rdram + ((parts[i] + 0xE0u) & 0x01FFFFFFu), 12);
+                std::memcpy(t, rdram + ((parts[i] + 0xE0u) & PS2_RAM_MASK), 12);
                 const uint32_t parent = rd32(rdram, parts[i] + 0x148u);
                 int pi = -1;
                 for (int j = 0; j < i; ++j)
@@ -253,7 +253,7 @@ namespace kamite::bone_tweaks
             const float hold = punish_fit::bustHold(rdram, model);
             if ((std::fabs(scale - 1.0f) < 0.001f && hold <= 0.0f) || !inRam(model, 0x2E4u))
                 return;
-            const int n = rdram[(model + kPartNum) & 0x01FFFFFFu];
+            const int n = rdram[(model + kPartNum) & PS2_RAM_MASK];
             if (n <= kChestBone || n > 64)
                 return;
             uint32_t part = rd32(rdram, model + kPartsFirst), parent = 0u, chest = 0u;
@@ -272,7 +272,7 @@ namespace kamite::bone_tweaks
             if (rd32(rdram, chest + 0x148u) != parent)
                 return;
             float bind[3];
-            std::memcpy(bind, rdram + ((chest + 0xE0u) & 0x01FFFFFFu), 12);
+            std::memcpy(bind, rdram + ((chest + 0xE0u) & PS2_RAM_MASK), 12);
             if (bind[1] < 0.03f || bind[1] > 0.25f || bind[2] < 0.0f || bind[2] > 0.15f || std::fabs(bind[0]) > 0.03f)
                 return;
             for (const Saved &s : g_moneySaved)
@@ -386,7 +386,7 @@ namespace kamite::bone_tweaks
             const body_detail::Jiggle jg = body_detail::jiggleOf(rdram, model);
             if (jg.flags == 0 || std::find(g_jigDone.begin(), g_jigDone.end(), model) != g_jigDone.end())
                 return;
-            const int n = rdram[(model + kPartNum) & 0x01FFFFFFu];
+            const int n = rdram[(model + kPartNum) & PS2_RAM_MASK];
             if (n <= kBustBone || n > 64)
                 return;
             uint32_t parts[kBustBone + 1] = {};
@@ -423,7 +423,7 @@ namespace kamite::bone_tweaks
             JigState &st = g_jigs[model];
             st.seen = g_frame;
             uint32_t frame = 0;
-            std::memcpy(&frame, rdram + (GameWork::address(GameWork::kFrameCount) & 0x01FFFFFFu), 4);
+            std::memcpy(&frame, rdram + (GameWork::address(GameWork::kFrameCount) & PS2_RAM_MASK), 4);
             const int32_t elapsed = static_cast<int32_t>(frame - st.frame);
             if (!st.live || elapsed < 0 || elapsed > 4 || length(sub(seatSpot, st.seat.rest)) > 0.5f)
             {
@@ -659,7 +659,7 @@ namespace kamite::bone_tweaks
                 continue;
             Bone now = readBone(rdram, s.address);
             if (std::memcmp(now.m.data(), s.mirrored.data(), 64) == 0) // still ours: the game's own back
-                std::memcpy(rdram + ((s.address + kPartMtx) & 0x01FFFFFFu), s.original.data(), 64);
+                std::memcpy(rdram + ((s.address + kPartMtx) & PS2_RAM_MASK), s.original.data(), 64);
             s.address = 0;
         }
         for (const Saved &s : g_moneySaved)
@@ -668,7 +668,7 @@ namespace kamite::bone_tweaks
                 continue;
             Bone now = readBone(rdram, s.address);
             if (std::memcmp(now.m.data(), s.mirrored.data(), 64) == 0)
-                std::memcpy(rdram + ((s.address + kPartMtx) & 0x01FFFFFFu), s.original.data(), 64);
+                std::memcpy(rdram + ((s.address + kPartMtx) & PS2_RAM_MASK), s.original.data(), 64);
         }
         g_moneySaved.clear();
         if (g_frame % 600u == 0u)
@@ -706,7 +706,7 @@ namespace kamite::bone_tweaks
             if (inRam(info, 0x10u))
             {
                 char name[9] = {};
-                std::memcpy(name, rdram + ((info + kInfoName) & 0x01FFFFFFu), 8);
+                std::memcpy(name, rdram + ((info + kInfoName) & PS2_RAM_MASK), 8);
                 const bool hidden = (rd32(rdram, node + kNodeFlags) & 1u) != 0u;
                 if (std::strstr(name, "H_") && !hidden)
                     out += std::string(out.empty() ? "" : " ") + name;

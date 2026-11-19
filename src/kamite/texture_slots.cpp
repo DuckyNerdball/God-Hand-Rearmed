@@ -25,8 +25,8 @@ namespace kamite::texture_slots
         // At 0x151C70 in func_00151990 (the TIM2 loader), before `srl v1,v1,8` turns the picture's size into blocks.
         void onTimSize(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            const uint32_t header = (GPR_U32(ctx, 21) - 0x30u) & 0x1FFFFFFu; // $s5 is past the 0x30-byte picture header
-            if (header + 0x30u > 0x2000000u)
+            const uint32_t header = (GPR_U32(ctx, 21) - 0x30u) & PS2_RAM_MASK; // $s5 is past the 0x30-byte picture header
+            if (header + 0x30u > PS2_RDRAM_SIZE)
                 return;
             const uint8_t type = rdram[header + 0x13u];
             uint16_t width, height;

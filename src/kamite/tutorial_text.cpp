@@ -42,7 +42,7 @@ namespace kamite::tutorial_text
 {
     namespace
     {
-        constexpr uint32_t kRamBytes = 0x2000000u;
+        constexpr uint32_t kRamBytes = PS2_RDRAM_SIZE;
         constexpr uint32_t kText = 0x000FE000u;     // our text (6 KB up to 0xFF800): entries 0, 1, 2, then the
                                                     // titles (0x100 each, up to 0xFFA00), the dash (entry 4, up to
                                                     // 0xFFC00); buck_breaker's slot text at 0xFFC00

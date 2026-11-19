@@ -222,7 +222,7 @@ namespace kamite
                 return false;
             }
             physical = address & 0x0FFFFFFFu;
-            return physical < PS2_RAM_SIZE && size <= PS2_RAM_SIZE - physical;
+            return physical < PS2_RDRAM_SIZE && size <= PS2_RDRAM_SIZE - physical;
         }
 
         bool readHeader(const uint8_t *rdram, uint32_t base, Snr2Header &header, uint8_t &version)
@@ -243,7 +243,7 @@ namespace kamite
             if (!toPhysical(address, 1u, physical))
                 return "<bad pointer>";
             std::string text;
-            for (size_t i = 0; i < maxLength && physical + i < PS2_RAM_SIZE; ++i)
+            for (size_t i = 0; i < maxLength && physical + i < PS2_RDRAM_SIZE; ++i)
             {
                 const char c = static_cast<char>(rdram[physical + i]);
                 if (c == '\0')
@@ -561,13 +561,13 @@ namespace kamite
         uint32_t ramU32(const uint8_t *rdram, uint32_t address)
         {
             uint32_t value = 0;
-            std::memcpy(&value, rdram + (address & 0x01FFFFFFu), 4u);
+            std::memcpy(&value, rdram + (address & PS2_RAM_MASK), 4u);
             return value;
         }
 
         void setRamU32(uint8_t *rdram, uint32_t address, uint32_t value)
         {
-            std::memcpy(rdram + (address & 0x01FFFFFFu), &value, 4u);
+            std::memcpy(rdram + (address & PS2_RAM_MASK), &value, 4u);
         }
 
         uint32_t slotDllBase(const DllSlot &slot)
@@ -617,7 +617,7 @@ namespace kamite
             {
                 const uint32_t entry = kSnr2Registry + 8u + 12u * i;
                 const uint32_t base = ramU32(rdram, entry + 4u);
-                if (base != 0u && (base & 0x01FFFFFFu) >= begin && (base & 0x01FFFFFFu) < end)
+                if (base != 0u && (base & PS2_RAM_MASK) >= begin && (base & PS2_RAM_MASK) < end)
                     out.push_back(RegistryEntry{ramU32(rdram, entry), base});
             }
             return out;
@@ -806,7 +806,7 @@ namespace kamite
             std::lock_guard<std::mutex> lock(g_slotMutex);
             for (DllSlot &slot : g_slots)
             {
-                const uint32_t physical = base & 0x01FFFFFFu;
+                const uint32_t physical = base & PS2_RAM_MASK;
                 if (physical >= slot.heapBase && physical < slot.heapBase + slot.heapSize)
                     slot.highWater = std::max(slot.highWater, std::min(slot.heapSize, physical - slot.heapBase + ((size + 0x7FFu) & ~0x7FFu)));
             }

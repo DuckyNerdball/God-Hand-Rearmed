@@ -196,7 +196,7 @@ namespace kamite
         uint32_t ram32(const uint8_t *rdram, uint32_t address)
         {
             uint32_t value = 0;
-            std::memcpy(&value, rdram + (address & 0x1FFFFFFu), sizeof(value));
+            std::memcpy(&value, rdram + (address & PS2_RAM_MASK), sizeof(value));
             return value;
         }
 
@@ -205,7 +205,7 @@ namespace kamite
         void rouletteNoOrbs(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             uint32_t save = ram32(rdram, GPR_U32(ctx, 4));
-            if (save != 0u && rdram[(save + 0xA8u) & 0x1FFFFFFu] == 0u)
+            if (save != 0u && rdram[(save + 0xA8u) & PS2_RAM_MASK] == 0u)
                 save = kNonZeroByte - 0xA8u;
             SET_GPR_U32(ctx, 3, save);
         }
@@ -215,12 +215,12 @@ namespace kamite
         void rouletteGreyWithoutOrbs(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             const uint32_t save = ram32(rdram, kCoreSave);
-            if (save == 0u || rdram[(save + 0xA8u) & 0x1FFFFFFu] != 0u)
+            if (save == 0u || rdram[(save + 0xA8u) & PS2_RAM_MASK] != 0u)
                 return;
             const uint32_t index = GPR_U32(ctx, 18);
             if (ram32(rdram, GPR_U32(ctx, 21) + index * 0xCu) == 0xBu) // Dead Pan costs nothing
                 return;
-            rdram[(GPR_U32(ctx, 29) + 0x30u + index * 0xCu + 8u) & 0x1FFFFFFu] = 1u;
+            rdram[(GPR_U32(ctx, 29) + 0x30u + index * 0xCu + 8u) & PS2_RAM_MASK] = 1u;
         }
 
         // Replaces the language loads in func_00125048 (flag dead_pan, always on): 0 (Japanese) once Dead Pan is earned.
@@ -317,11 +317,11 @@ namespace kamite
         float ramF(const uint8_t *rdram, uint32_t address)
         {
             float v = 0.0f;
-            std::memcpy(&v, rdram + (address & 0x1FFFFFFu), sizeof(v));
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), sizeof(v));
             return v;
         }
-        void putF(uint8_t *rdram, uint32_t address, float v) { std::memcpy(rdram + (address & 0x1FFFFFFu), &v, sizeof(v)); }
-        void put32(uint8_t *rdram, uint32_t address, uint32_t v) { std::memcpy(rdram + (address & 0x1FFFFFFu), &v, sizeof(v)); }
+        void putF(uint8_t *rdram, uint32_t address, float v) { std::memcpy(rdram + (address & PS2_RAM_MASK), &v, sizeof(v)); }
+        void put32(uint8_t *rdram, uint32_t address, uint32_t v) { std::memcpy(rdram + (address & PS2_RAM_MASK), &v, sizeof(v)); }
 
         uint32_t meshByName(const uint8_t *rdram, uint32_t obj, const char *name)
         {
@@ -329,11 +329,11 @@ namespace kamite
             for (int i = 0; i < 8 && name[i]; ++i)
                 key |= static_cast<uint64_t>(static_cast<uint8_t>(name[i])) << (8 * i);
             uint32_t mesh = ram32(rdram, obj + 0x25Cu);
-            for (int guard = 0; guard < 256 && mesh >= 0x100000u && mesh < 0x2000000u; ++guard)
+            for (int guard = 0; guard < 256 && mesh >= 0x100000u && mesh < PS2_RDRAM_SIZE; ++guard)
             {
                 const uint32_t info = ram32(rdram, mesh + 0x414u);
                 uint64_t have = 0;
-                if (info >= 0x100000u && info < 0x2000000u)
+                if (info >= 0x100000u && info < PS2_RDRAM_SIZE)
                     std::memcpy(&have, rdram + info + 8u, sizeof(have));
                 if (have == key)
                     return mesh;
@@ -377,14 +377,14 @@ namespace kamite
         {
             // The parameter block func_00268788 builds on its stack (0x80 bytes), here below the caller's stack.
             const uint32_t block = (GPR_U32(ctx, 29) - 0x400u) & ~0xFu;
-            std::memset(rdram + (block & 0x1FFFFFFu), 0, 0x80);
+            std::memset(rdram + (block & PS2_RAM_MASK), 0, 0x80);
             for (uint32_t o : {0x00u, 0x04u, 0x08u, 0x0Cu, 0x30u, 0x34u, 0x38u, 0x3Cu})
                 putF(rdram, block + o, 1.0f);
             for (uint32_t o : {0x1Cu, 0x2Cu, 0x6Cu}) // vf0 = (0, 0, 0, 1) at +0x10, +0x20, +0x60
                 putF(rdram, block + o, 1.0f);
             putF(rdram, block + 0x40u, ramF(rdram, gene + 0x114u));
-            rdram[(block + 0x4Cu) & 0x1FFFFFFu] = 0xFFu;
-            rdram[(block + 0x4Fu) & 0x1FFFFFFu] = 0xFFu;
+            rdram[(block + 0x4Cu) & PS2_RAM_MASK] = 0xFFu;
+            rdram[(block + 0x4Fu) & PS2_RAM_MASK] = 0xFFu;
             callGuest(rdram, ctx, runtime, kSetEffect, {0x58u, 7u, gene, block, 5u, 0xFFFFFFFFu}, block);
             callGuest(rdram, ctx, runtime, kSetEffect, {0x58u, 0xFu, gene, block, 0xFFFFFFFFu, 0xFFFFFFFFu}, block);
         }
@@ -406,15 +406,15 @@ namespace kamite
         DeadPanLook &look = g_look;
         const uint32_t gene = ram32(rdram, kGameWork + 0x5F4u);
         const uint32_t now = ps2x::savestate::loadCount();
-        if (now != loads || gene != look.gene || gene < 0x100000u || gene >= 0x2000000u)
+        if (now != loads || gene != look.gene || gene < 0x100000u || gene >= PS2_RDRAM_SIZE)
         {
             loads = now;
             look = DeadPanLook{};
-            look.gene = (gene >= 0x100000u && gene < 0x2000000u) ? gene : 0u;
+            look.gene = (gene >= 0x100000u && gene < PS2_RDRAM_SIZE) ? gene : 0u;
             return; // a new Gene (room change, load): his meshes and effects are new too
         }
-        const bool inMove = rdram[(gene + 0x2F5u) & 0x1FFFFFFu] == kDeadPanPhase;
-        if (inMove && rdram[(gene + 0x2F6u) & 0x1FFFFFFu] >= 2u) // from the pan's hit on (step 2), not the wind-up
+        const bool inMove = rdram[(gene + 0x2F5u) & PS2_RAM_MASK] == kDeadPanPhase;
+        if (inMove && rdram[(gene + 0x2F6u) & PS2_RAM_MASK] >= 2u) // from the pan's hit on (step 2), not the wind-up
             look.active = true;
         else if (look.active && ramF(rdram, gene + 0x54Cu) <= 0.0f)
             look.active = false;
@@ -640,13 +640,13 @@ namespace kamite
             // the frame of both hands (their mean rotation, the point between them) or of one, taken relative to the
             // reference pose (D = Ref^T A): R = Turn Ref D, middle = origin + (Ref middle - Ref origin + offset) D.
             // Gene's parts are this frame's (he updates before MoveObj). Blended in from the motion's pose by +0x624.
-            const uint32_t at = ram32(rdram, part + 0xD0u) & 0x1FFFFFFu;
-            const uint32_t angles = (part + 0x100u) & 0x1FFFFFFu;
-            auto vec = [&](uint32_t address, float *out) { std::memcpy(out, rdram + (address & 0x1FFFFFFu), sizeof(float) * 3); };
+            const uint32_t at = ram32(rdram, part + 0xD0u) & PS2_RAM_MASK;
+            const uint32_t angles = (part + 0x100u) & PS2_RAM_MASK;
+            auto vec = [&](uint32_t address, float *out) { std::memcpy(out, rdram + (address & PS2_RAM_MASK), sizeof(float) * 3); };
             float e[3], t[3], blend = 0.0f;
             vec(angles, e);
             vec(at, t);
-            std::memcpy(&blend, rdram + ((obj + 0x624u) & 0x1FFFFFFu), sizeof(blend));
+            std::memcpy(&blend, rdram + ((obj + 0x624u) & PS2_RAM_MASK), sizeof(blend));
             constexpr float kDeg = 3.14159265f / 180.0f;
             const Mat3 turn = turnMatrix(live.turn[0].load(std::memory_order_relaxed) * kDeg,
                                          live.turn[1].load(std::memory_order_relaxed) * kDeg,
@@ -659,7 +659,7 @@ namespace kamite
             float middle[3];
             const uint32_t gene = ram32(rdram, obj + 0x644u);
             const uint32_t geneParts = gene ? ram32(rdram, gene + 0x278u) : 0u;
-            if (follow == kFollowMotion || !geneParts || rdram[(gene + 0x2B4u) & 0x1FFFFFFu] <= kGeneRightHand)
+            if (follow == kFollowMotion || !geneParts || rdram[(gene + 0x2B4u) & PS2_RAM_MASK] <= kGeneRightHand)
             {
                 // The crate's way: the motion's pose re-centred on the chair's middle, at the motion's origin + offset.
                 r = mul(turn, turnMatrix(e[0], e[1], e[2]));
@@ -674,7 +674,7 @@ namespace kamite
                 const Mat3 rootT = transpose(turnMatrix(rootAngles[0], rootAngles[1], rootAngles[2]));
                 // A hand part's rotation (world +0x80 rows) and position (+0xB0) in the root frame.
                 auto hand = [&](uint32_t index, Mat3 &rot, float *origin) {
-                    const uint32_t p = ram32(rdram, geneParts + 4u * index) & 0x1FFFFFFu;
+                    const uint32_t p = ram32(rdram, geneParts + 4u * index) & PS2_RAM_MASK;
                     Mat3 w{};
                     float wp[3];
                     for (int row = 0; row < 3; ++row)
@@ -729,12 +729,12 @@ namespace kamite
             // in by the blend from whatever it is. It scales part 0's translation too, so the middle is placed at
             // middle / size. It stays when the item is thrown (it flies and breaks at that size).
             float size = 1.0f;
-            std::memcpy(&size, rdram + ((obj + 0x110u) & 0x1FFFFFFu), sizeof(size));
+            std::memcpy(&size, rdram + ((obj + 0x110u) & PS2_RAM_MASK), sizeof(size));
             if (!(size > 0.1f && size < 10.0f))
                 size = 1.0f;
             size += (live.size.load(std::memory_order_relaxed) - size) * blend;
             const float sizes[3] = {size, size, size};
-            std::memcpy(rdram + ((obj + 0x110u) & 0x1FFFFFFu), sizes, sizeof(sizes));
+            std::memcpy(rdram + ((obj + 0x110u) & PS2_RAM_MASK), sizes, sizeof(sizes));
             for (int k = 0; k < 3; ++k)
             {
                 float placed = middle[k] / size;
@@ -845,7 +845,7 @@ namespace kamite
         float ramFloat(const uint8_t *rdram, uint32_t address)
         {
             float value = 0.0f;
-            std::memcpy(&value, rdram + (address & 0x1FFFFFFu), sizeof(value));
+            std::memcpy(&value, rdram + (address & PS2_RAM_MASK), sizeof(value));
             return value;
         }
 
@@ -857,7 +857,7 @@ namespace kamite
         // Replaces lbu v1,0x10(a0) at 0x123AF4 (a0 = cHeatSys, s1 = Gene; R2 was just pressed).
         void tensionR2Mode(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            uint32_t mode = rdram[(GPR_U32(ctx, 4) + 0x10u) & 0x1FFFFFFu];
+            uint32_t mode = rdram[(GPR_U32(ctx, 4) + 0x10u) & PS2_RAM_MASK];
             g_placeEnd = mode != 0u && (ram32(rdram, GPR_U32(ctx, 17) + 0x15F4u) & kPlUnleashed) != 0u;
             if (g_placeEnd)
                 mode = 0u;
@@ -872,7 +872,7 @@ namespace kamite
             {
                 callGuest(rdram, ctx, runtime, kHeatSetMode, {kHeat, 0u});
                 const float guard = 3.0f;
-                std::memcpy(rdram + ((GPR_U32(ctx, 17) + 0x54Cu) & 0x1FFFFFFu), &guard, sizeof(guard));
+                std::memcpy(rdram + ((GPR_U32(ctx, 17) + 0x54Cu) & PS2_RAM_MASK), &guard, sizeof(guard));
                 phase = 9u;
             }
             g_placeEnd = false;
@@ -882,7 +882,7 @@ namespace kamite
         // Replaces lbu v1,0x10(v0) at 0x109398 (func_00108AB0, v0 = cHeatSys): an Off the Cuff unleash holds no guard.
         void tensionGuard(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            uint32_t mode = rdram[(GPR_U32(ctx, 2) + 0x10u) & 0x1FFFFFFu];
+            uint32_t mode = rdram[(GPR_U32(ctx, 2) + 0x10u) & PS2_RAM_MASK];
             if (mode != 0u && ram32(rdram, kPartialUnleash) != 0u)
                 mode = 0u;
             SET_GPR_U32(ctx, 3, mode);
@@ -1474,7 +1474,7 @@ namespace kamite
             const uint32_t list = GPR_U32(ctx, 7), count = GPR_U32(ctx, 8);
             const uint32_t game = ram32(rdram, 0x3BD6E8u);
             // The list is on the builder's stack, which (run from the frame hook) can sit above inGuest's range.
-            if (inGuest(game) && list >= 0x100000u && list + 12u * count <= 0x2000000u && count <= 36u)
+            if (inGuest(game) && list >= 0x100000u && list + 12u * count <= PS2_RDRAM_SIZE && count <= 36u)
             {
                 const uint32_t wheel = game + 0xEA0u;
                 uint16_t n = 0;

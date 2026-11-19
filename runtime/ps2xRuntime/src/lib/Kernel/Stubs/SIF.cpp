@@ -472,7 +472,7 @@ namespace ps2_stubs
         }
 
         const uint32_t size = static_cast<uint32_t>(sizeSigned);
-        if (size > PS2_RAM_SIZE)
+        if (size > PS2_RDRAM_SIZE)
         {
             static uint32_t warnCount = 0;
             if (warnCount < 32u)
@@ -776,7 +776,7 @@ namespace ps2_stubs
             }
 
             const uint32_t sizeBytes = static_cast<uint32_t>(xfer.size);
-            if (sizeBytes > PS2_RAM_SIZE)
+            if (sizeBytes > PS2_RDRAM_SIZE)
             {
                 ok = false;
                 break;

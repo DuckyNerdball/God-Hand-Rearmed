@@ -296,13 +296,13 @@ namespace kamite::style_presets
         uint32_t rd32(uint32_t address)
         {
             uint32_t v;
-            std::memcpy(&v, g_ram + (address & 0x1FFFFFFu), sizeof(v));
+            std::memcpy(&v, g_ram + (address & PS2_RAM_MASK), sizeof(v));
             return v;
         }
 
         bool validPointer(uint32_t p, uint32_t room = 0x100u)
         {
-            return p >= 0x100000u && p < 0x2000000u - room;
+            return p >= 0x100000u && p < PS2_RDRAM_SIZE - room;
         }
 
         uint32_t dataPointer()
@@ -464,7 +464,7 @@ namespace kamite::style_presets
         bool techniquesBrowsing(uint32_t subScr, bool subScreenOpen)
         {
             return subScreenOpen && static_cast<int32_t>(rd32(subScr + game::SubScr::kKind)) == kTechniquesKind &&
-                   g_ram[(wazaScreen(subScr) + kWazaState) & 0x1FFFFFFu] == 0u;
+                   g_ram[(wazaScreen(subScr) + kWazaState) & PS2_RAM_MASK] == 0u;
         }
 
         // Gene in a stage under the player's control (research of Oct 25, SLUS_215.03; addresses in the game work block
@@ -814,21 +814,21 @@ namespace kamite::style_presets
                 out.push_back(glyph(*c));
         }
 
-        void wr16(uint32_t address, uint16_t value) { std::memcpy(g_ram + (address & 0x1FFFFFFu), &value, sizeof(value)); }
-        void wr32(uint32_t address, uint32_t value) { std::memcpy(g_ram + (address & 0x1FFFFFFu), &value, sizeof(value)); }
+        void wr16(uint32_t address, uint16_t value) { std::memcpy(g_ram + (address & PS2_RAM_MASK), &value, sizeof(value)); }
+        void wr32(uint32_t address, uint32_t value) { std::memcpy(g_ram + (address & PS2_RAM_MASK), &value, sizeof(value)); }
         uint16_t rd16(uint32_t address)
         {
             uint16_t v;
-            std::memcpy(&v, g_ram + (address & 0x1FFFFFFu), sizeof(v));
+            std::memcpy(&v, g_ram + (address & PS2_RAM_MASK), sizeof(v));
             return v;
         }
         float rdFloat(uint32_t address)
         {
             float v;
-            std::memcpy(&v, g_ram + (address & 0x1FFFFFFu), sizeof(v));
+            std::memcpy(&v, g_ram + (address & PS2_RAM_MASK), sizeof(v));
             return v;
         }
-        void wrFloat(uint32_t address, float value) { std::memcpy(g_ram + (address & 0x1FFFFFFu), &value, sizeof(value)); }
+        void wrFloat(uint32_t address, float value) { std::memcpy(g_ram + (address & PS2_RAM_MASK), &value, sizeof(value)); }
 
         void writeText(uint32_t address, std::vector<uint16_t> text, uint32_t room)
         {
@@ -838,7 +838,7 @@ namespace kamite::style_presets
                 text.resize(most);
                 text.back() = kEnd;
             }
-            std::memcpy(g_ram + (address & 0x1FFFFFFu), text.data(), text.size() * sizeof(uint16_t));
+            std::memcpy(g_ram + (address & PS2_RAM_MASK), text.data(), text.size() * sizeof(uint16_t));
         }
 
         // Points a message id at a string of ours (the bank adds its offsets as u32, so a string below it is fine).
@@ -1028,7 +1028,7 @@ namespace kamite::style_presets
             for (const uint32_t e : {text, shadow})
             {
                 const uint16_t msg = rd16(e + ent::kMsg);
-                if (g_ram[(e + ent::kKind) & 0x1FFFFFFu] != game::kIdentKindText ||
+                if (g_ram[(e + ent::kKind) & PS2_RAM_MASK] != game::kIdentKindText ||
                     (msg != 0u && msg != kHudMessage && msg != kHudShadowMessage && msg != kGamePromptMessage))
                     return 0;
             }
@@ -1045,7 +1045,7 @@ namespace kamite::style_presets
             was.noDraw = rd32(entry + ent::kFlags) & kNoDraw;
             was.sclX = rdFloat(entry + ent::kDrawSclX);
             was.sclY = rdFloat(entry + ent::kDrawSclY);
-            was.align = g_ram[(entry + ent::kAlign) & 0x1FFFFFFu];
+            was.align = g_ram[(entry + ent::kAlign) & PS2_RAM_MASK];
         }
         // Scale and alignment from the entry's source record (ent +0x1C; cIDBase_initEntry: scale +0x28 / +0x2C,
         // alignment +0x54 = 1, left), whatever the entry holds: a save state taken while the indicator showed carries
@@ -1058,7 +1058,7 @@ namespace kamite::style_presets
                 return;
             wrFloat(entry + ent::kDrawSclX, rdFloat(src + 0x28u));
             wrFloat(entry + ent::kDrawSclY, rdFloat(src + 0x2Cu));
-            g_ram[(entry + ent::kAlign) & 0x1FFFFFFu] = g_ram[(src + 0x54u) & 0x1FFFFFFu];
+            g_ram[(entry + ent::kAlign) & PS2_RAM_MASK] = g_ram[(src + 0x54u) & PS2_RAM_MASK];
         }
 
         // The game's prompt is in them: its scale and alignment back; the text's no-draw is the game's (clear), the
@@ -1077,7 +1077,7 @@ namespace kamite::style_presets
                     wr32(was.entry + ent::kFlags, (rd32(was.entry + ent::kFlags) & ~kNoDraw) | was.noDraw);
                 wrFloat(was.entry + ent::kDrawSclX, was.sclX);
                 wrFloat(was.entry + ent::kDrawSclY, was.sclY);
-                g_ram[(was.entry + ent::kAlign) & 0x1FFFFFFu] = was.align;
+                g_ram[(was.entry + ent::kAlign) & PS2_RAM_MASK] = was.align;
                 restoreFromSource(was.entry);
                 was.entry = 0u;
             }
@@ -1136,7 +1136,7 @@ namespace kamite::style_presets
             for (const uint32_t e : {text, shadow})
             {
                 wr16(e + ent::kMsg, e == text ? kHudMessage : kHudShadowMessage);
-                g_ram[(e + ent::kAlign) & 0x1FFFFFFu] = 0u; // align: the block centred on its position
+                g_ram[(e + ent::kAlign) & PS2_RAM_MASK] = 0u; // align: the block centred on its position
                 wrFloat(e + ent::kDrawSclX, kHudScale);
                 wrFloat(e + ent::kDrawSclY, kHudScale);
                 setNoDraw(e, false);
@@ -1423,8 +1423,8 @@ namespace kamite::style_presets
         {
             if (!g_ram)
                 return;
-            const uint32_t entry = GPR_U32(ctx, 17) & 0x1FFFFFFu;
-            hudTextSlot(entry, GPR_U32(ctx, 16) & 0x1FFFFFFu);
+            const uint32_t entry = GPR_U32(ctx, 17) & PS2_RAM_MASK;
+            hudTextSlot(entry, GPR_U32(ctx, 16) & PS2_RAM_MASK);
         }
 
 #if defined(KAMITE_HAS_GS_MENU)
@@ -1558,7 +1558,7 @@ namespace kamite::style_presets
 
     int hudGlyph(uint32_t entry, int index, float &dx, float &dy)
     {
-        entry &= 0x1FFFFFFu;
+        entry &= PS2_RAM_MASK;
         dx = dy = 0.0f;
         if (!lettersOnRadar() || !g_hudShown || (entry != g_hudText && entry != g_hudShadow) || index < 0)
             return -1; // the keyboard's line: the glyphs where the text puts them
@@ -1574,7 +1574,7 @@ namespace kamite::style_presets
 
     bool onHudEntry(uint32_t entry)
     {
-        entry &= 0x1FFFFFFu;
+        entry &= PS2_RAM_MASK;
         if (!g_ram || !g_hudShown || (entry != g_hudText && entry != g_hudShadow))
             return false;
         // Placed here, after the layout's move put the entry where its data says (the top left corner). Round the minimap

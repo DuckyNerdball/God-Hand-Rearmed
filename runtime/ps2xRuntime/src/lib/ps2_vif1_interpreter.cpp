@@ -324,12 +324,12 @@ namespace
 
 void PS2Memory::processVIF0Data(uint32_t srcPhys, uint32_t sizeBytes)
 {
-    if (sizeBytes == 0u || srcPhys >= PS2_RAM_SIZE)
+    if (sizeBytes == 0u || srcPhys >= PS2_RDRAM_SIZE)
         return;
 
     const uint64_t requestedEnd = static_cast<uint64_t>(srcPhys) + static_cast<uint64_t>(sizeBytes);
-    if (requestedEnd > static_cast<uint64_t>(PS2_RAM_SIZE))
-        sizeBytes = PS2_RAM_SIZE - srcPhys;
+    if (requestedEnd > static_cast<uint64_t>(PS2_RDRAM_SIZE))
+        sizeBytes = PS2_RDRAM_SIZE - srcPhys;
 
     processVIF0Data(m_rdram + srcPhys, sizeBytes);
 }
@@ -526,12 +526,12 @@ void PS2Memory::processVIF0Data(const uint8_t *data, uint32_t sizeBytes)
 
 void PS2Memory::processVIF1Data(uint32_t srcPhys, uint32_t sizeBytes)
 {
-    if (sizeBytes == 0u || srcPhys >= PS2_RAM_SIZE)
+    if (sizeBytes == 0u || srcPhys >= PS2_RDRAM_SIZE)
         return;
 
     const uint64_t requestedEnd = static_cast<uint64_t>(srcPhys) + static_cast<uint64_t>(sizeBytes);
-    if (requestedEnd > static_cast<uint64_t>(PS2_RAM_SIZE))
-        sizeBytes = PS2_RAM_SIZE - srcPhys;
+    if (requestedEnd > static_cast<uint64_t>(PS2_RDRAM_SIZE))
+        sizeBytes = PS2_RDRAM_SIZE - srcPhys;
 
     processVIF1Data(m_rdram + srcPhys, sizeBytes);
 }

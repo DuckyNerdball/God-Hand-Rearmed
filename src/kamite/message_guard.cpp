@@ -17,8 +17,8 @@ namespace kamite::message_guard
         constexpr uint16_t kPageEnd = 0x8001u; // the game's own strings end with it; cMessCommon_isPageEndCode takes 0x80xx (0xA0xx only ends a line: measurePage then walked on)
         std::set<uint32_t> g_reported;
 
-        uint32_t rd32(const uint8_t *rdram, uint32_t a) { uint32_t v; std::memcpy(&v, rdram + (a & 0x01FFFFFFu), 4); return v; }
-        bool inRam(uint32_t a, uint32_t size) { a &= 0x01FFFFFFu; return a >= 0x100000u && a + size <= 0x02000000u; }
+        uint32_t rd32(const uint8_t *rdram, uint32_t a) { uint32_t v; std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4); return v; }
+        bool inRam(uint32_t a, uint32_t size) { a &= PS2_RAM_MASK; return a >= 0x100000u && a + size <= PS2_RDRAM_SIZE; }
 
         void onSetMessage(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
@@ -35,11 +35,11 @@ namespace kamite::message_guard
             const uint32_t text = bank + rd32(rdram, bank + 8u * (id & 0xFFFu) + 4u);
             if (!inRam(text, 2u * kEmptyCodes))
                 return;
-            const uint8_t *p = rdram + (text & 0x01FFFFFFu);
+            const uint8_t *p = rdram + (text & PS2_RAM_MASK);
             for (uint32_t i = 0; i < 2u * kEmptyCodes; ++i)
                 if (p[i] != 0u)
                     return;
-            std::memcpy(rdram + (text & 0x01FFFFFFu), &kPageEnd, 2);
+            std::memcpy(rdram + (text & PS2_RAM_MASK), &kPageEnd, 2);
             if (g_reported.insert(id).second)
                 KM_WARN(Game, "message guard: message 0x" << std::hex << id << " at 0x" << text << std::dec
                                                         << " was an empty buffer (no end code); ended it, so it draws as nothing instead of hanging the text measurer");

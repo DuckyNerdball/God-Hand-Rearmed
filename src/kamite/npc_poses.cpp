@@ -170,19 +170,19 @@ namespace kamite::npc_poses
         uint32_t read32(const uint8_t *rdram, uint32_t address)
         {
             uint32_t value = 0;
-            std::memcpy(&value, rdram + (address & 0x01FFFFFFu), 4);
+            std::memcpy(&value, rdram + (address & PS2_RAM_MASK), 4);
             return value;
         }
         float readFloat(const uint8_t *rdram, uint32_t address)
         {
             float value = 0.0f;
-            std::memcpy(&value, rdram + (address & 0x01FFFFFFu), 4);
+            std::memcpy(&value, rdram + (address & PS2_RAM_MASK), 4);
             return value;
         }
         uint16_t read16(const uint8_t *rdram, uint32_t address)
         {
             uint16_t value = 0;
-            std::memcpy(&value, rdram + (address & 0x01FFFFFFu), 2);
+            std::memcpy(&value, rdram + (address & PS2_RAM_MASK), 2);
             return value;
         }
         // The motion edits (mot_edit.cpp, moved out of this file on Nov 8 for punish_fit).
@@ -199,7 +199,7 @@ namespace kamite::npc_poses
         bool inRam(uint32_t address, uint32_t size)
         {
             const uint32_t a = address & 0x1FFFFFFFu;
-            return a >= 0x100000u && a + size <= PS2_RAM_SIZE;
+            return a >= 0x100000u && a + size <= PS2_RDRAM_SIZE;
         }
 
 
@@ -470,7 +470,7 @@ namespace kamite::npc_poses
         {
             if (!inRam(actor, 0x2B8))
                 return false;
-            const int n = rdram[(actor + 0x2B4u) & 0x01FFFFFFu];
+            const int n = rdram[(actor + 0x2B4u) & PS2_RAM_MASK];
             if (n < 17 || n > 32)
                 return false;
             uint32_t parts[32];
@@ -487,7 +487,7 @@ namespace kamite::npc_poses
             for (int i = 0; i < n; ++i)
             {
                 float t[3];
-                std::memcpy(t, rdram + ((parts[i] + 0xE0u) & 0x01FFFFFFu), 12);
+                std::memcpy(t, rdram + ((parts[i] + 0xE0u) & PS2_RAM_MASK), 12);
                 if (!std::isfinite(t[0]) || !std::isfinite(t[1]) || !std::isfinite(t[2]))
                     return false;
                 out.t[i] = {t[0], t[1], t[2]};
@@ -885,8 +885,8 @@ namespace kamite::npc_poses
             const uint32_t actor = GPR_U32(ctx, 4), motion = GPR_U32(ctx, 5);
             if (!inRam(actor, 0x600) || !inRam(motion, 8))
                 return;
-            const uint32_t available = std::min(kMaxMotion, PS2_RAM_SIZE - (motion & 0x01FFFFFFu));
-            const uint8_t *bytes = rdram + (motion & 0x01FFFFFFu);
+            const uint32_t available = std::min(kMaxMotion, PS2_RDRAM_SIZE - (motion & PS2_RAM_MASK));
+            const uint8_t *bytes = rdram + (motion & PS2_RAM_MASK);
             const uint32_t length = motionLength(bytes, available);
             if (length == 0 || length > kSlotSize)
                 return;
@@ -931,7 +931,7 @@ namespace kamite::npc_poses
             npc.fargs[1] = ctx->f[13];
             npc.fargs[2] = ctx->f[14];
             npc.motionData = read32(rdram, actor + GameObj::kMotionData);
-            npc.mode = rdram[(actor + GameObj::kMode) & 0x01FFFFFFu];
+            npc.mode = rdram[(actor + GameObj::kMode) & PS2_RAM_MASK];
             npc.restart = false;
             if (npc.slot >= 0)
                 SET_GPR_U32(ctx, 5, slotAddress(npc));
@@ -1246,7 +1246,7 @@ namespace kamite::npc_poses
             // Only while the actor is still the one that started the idle and still in that state (not hit, not
             // gone: its data block and state byte as they were).
             if (!inRam(actor, 0x600) || read32(rdram, actor + GameObj::kMotionData) != npc.motionData ||
-                rdram[(actor + GameObj::kMode) & 0x01FFFFFFu] != npc.mode)
+                rdram[(actor + GameObj::kMode) & PS2_RAM_MASK] != npc.mode)
                 continue;
             // The motion start called again with the arguments the game gave it, on a copy of the registers.
             const R5900Context saved = *ctx;

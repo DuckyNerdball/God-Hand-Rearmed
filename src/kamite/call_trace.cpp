@@ -55,7 +55,7 @@ namespace kamite::calltrace
 
         uint8_t readByte(const uint8_t *rdram, uint32_t address)
         {
-            return rdram[address & 0x01FFFFFFu];
+            return rdram[address & PS2_RAM_MASK];
         }
 
         uint32_t readWord(const uint8_t *rdram, uint32_t address)
@@ -192,7 +192,7 @@ namespace kamite::calltrace
             g_hwRuntime = &runtime;
             g_hwGuestAddress = static_cast<uint32_t>(std::stoul(item.substr(0, comma), nullptr, 16));
             g_hwLength = comma == std::string::npos ? 1u : static_cast<uint32_t>(std::stoul(item.substr(comma + 1)));
-            g_hwHostAddress = reinterpret_cast<uintptr_t>(runtime.memory().getRDRAM() + (g_hwGuestAddress & 0x01FFFFFFu));
+            g_hwHostAddress = reinterpret_cast<uintptr_t>(runtime.memory().getRDRAM() + (g_hwGuestAddress & PS2_RAM_MASK));
             AddVectoredExceptionHandler(1, &hwWatchHandler);
             std::thread(&armWhenGameThreadExists).detach();
         }

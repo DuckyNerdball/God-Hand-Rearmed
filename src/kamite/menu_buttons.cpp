@@ -55,7 +55,7 @@ namespace kamite::menu_buttons
         constexpr uint32_t kDiscOk[2] = {0x20u, 0x60u}, kDiscCancel[2] = {0x40u, 0x10u};
         constexpr uint32_t kRawCircle = 0x20u, kRawCross = 0x40u;
         constexpr uint32_t kCorePointer = game::GameWork::address(game::GameWork::kLangData); // GameWork.langData: where core_usa.bin was loaded
-        constexpr uint32_t kRamBytes = 0x2000000u;
+        constexpr uint32_t kRamBytes = PS2_RDRAM_SIZE;
         constexpr uint32_t kDpadEntry = 24u; // entries 24..27: up, down, right, left
 
         // ---- places (menu_buttons.h "Pinned menus") ----
@@ -226,12 +226,12 @@ namespace kamite::menu_buttons
         uint32_t rd32(uint32_t address)
         {
             uint32_t value;
-            std::memcpy(&value, g_ram + (address & 0x1FFFFFFu), sizeof(value));
+            std::memcpy(&value, g_ram + (address & PS2_RAM_MASK), sizeof(value));
             return value;
         }
         void wr32(uint32_t address, uint32_t value)
         {
-            std::memcpy(g_ram + (address & 0x1FFFFFFu), &value, sizeof(value));
+            std::memcpy(g_ram + (address & PS2_RAM_MASK), &value, sizeof(value));
         }
 
         // EE thread, every vblank: the OK, Cancel and d-pad entries of the style. The menus see the controller's default
@@ -383,7 +383,7 @@ namespace kamite::menu_buttons
                     forms = g_forms;
                 }
                 std::vector<std::pair<size_t, uint32_t>> found;
-                const uint8_t *begin = g_ram + 0x100000u, *end = g_ram + kRamBytes;
+                const uint8_t *begin = g_ram + 0x100000u, *end = g_ram + PS2_RAM_SIZE; // the game's own 32 MB
                 for (size_t i = 0; i < forms.size(); ++i)
                     for (const std::vector<uint16_t> &form : forms[i])
                     {
@@ -533,11 +533,11 @@ namespace kamite::menu_buttons
         float rdF(uint32_t address)
         {
             float value;
-            std::memcpy(&value, g_ram + (address & 0x1FFFFFFu), sizeof(value));
+            std::memcpy(&value, g_ram + (address & PS2_RAM_MASK), sizeof(value));
             return value;
         }
-        void wrF(uint32_t address, float value) { std::memcpy(g_ram + (address & 0x1FFFFFFu), &value, sizeof(value)); }
-        bool ramPointer(uint32_t p, uint32_t room) { return p >= 0x100000u && p < 0x2000000u - room; }
+        void wrF(uint32_t address, float value) { std::memcpy(g_ram + (address & PS2_RAM_MASK), &value, sizeof(value)); }
+        bool ramPointer(uint32_t p, uint32_t room) { return p >= 0x100000u && p < PS2_RDRAM_SIZE - room; }
 
         float wrapPi(float a)
         {
@@ -557,7 +557,7 @@ namespace kamite::menu_buttons
             const uint32_t subScr = rd32(game::SubScr::kPointer);
             const bool open = ramPointer(subScr, 0x1000u) && static_cast<int32_t>(rd32(subScr + game::SubScr::kKind)) == 1;
             const uint32_t player = open ? rd32(subScr + 0x310u + 0x264u) : 0u;
-            if (!open || !ramPointer(player, 0x700u) || g_ram[(subScr + 0x310u + 0x5Au) & 0x1FFFFFFu] == 2u)
+            if (!open || !ramPointer(player, 0x700u) || g_ram[(subScr + 0x310u + 0x5Au) & PS2_RAM_MASK] == 2u)
             {
                 g_turnOpen = open && g_turnOpen; // leaving (state 2): keep the turn until it closes
                 if (!open)
@@ -749,7 +749,7 @@ namespace kamite::menu_buttons
             const uint32_t window = bit == 0x80u ? 0x621u : bit == 0x10u ? 0x622u : bit == 0x40u ? 0x623u : bit == 0x08u ? 0x624u
                                   : bit == 0x20u ? 0x625u : 0u;
             if (window != 0u)
-                rdram[(GPR_U32(ctx, 17) + window) & 0x1FFFFFFu] = 0u;
+                rdram[(GPR_U32(ctx, 17) + window) & PS2_RAM_MASK] = 0u;
         }
 
         // places(): worked out again when the bindings or the device in use change.

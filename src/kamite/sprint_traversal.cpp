@@ -93,28 +93,28 @@ namespace kamite::sprint_traversal
         bool inRam(uint32_t address, uint32_t size)
         {
             const uint32_t a = address & 0x1FFFFFFFu;
-            return a >= 0x100000u && a + size <= PS2_RAM_SIZE;
+            return a >= 0x100000u && a + size <= PS2_RDRAM_SIZE;
         }
         uint32_t rd32(const uint8_t *rdram, uint32_t a)
         {
             uint32_t v = 0;
-            std::memcpy(&v, rdram + (a & 0x01FFFFFFu), 4);
+            std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4);
             return v;
         }
         uint16_t rd16(const uint8_t *rdram, uint32_t a)
         {
             uint16_t v = 0;
-            std::memcpy(&v, rdram + (a & 0x01FFFFFFu), 2);
+            std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 2);
             return v;
         }
-        void wr32(uint8_t *rdram, uint32_t a, uint32_t v) { std::memcpy(rdram + (a & 0x01FFFFFFu), &v, 4); }
+        void wr32(uint8_t *rdram, uint32_t a, uint32_t v) { std::memcpy(rdram + (a & PS2_RAM_MASK), &v, 4); }
         float rdf(const uint8_t *rdram, uint32_t a)
         {
             float v = 0.0f;
-            std::memcpy(&v, rdram + (a & 0x01FFFFFFu), 4);
+            std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4);
             return v;
         }
-        void wrf(uint8_t *rdram, uint32_t a, float v) { std::memcpy(rdram + (a & 0x01FFFFFFu), &v, 4); }
+        void wrf(uint8_t *rdram, uint32_t a, float v) { std::memcpy(rdram + (a & PS2_RAM_MASK), &v, 4); }
 
         std::string windowText(const Window &w)
         {
@@ -288,10 +288,10 @@ namespace kamite::sprint_traversal
         int motionIndex(const uint8_t *rdram, uint32_t gene)
         {
             const uint32_t pack = rd32(rdram, gene + kMotionPack), motion = rd32(rdram, gene + kMotion);
-            if (pack < 0x100000u || pack >= 0x2000000u || motion <= pack)
+            if (pack < 0x100000u || pack >= PS2_RDRAM_SIZE || motion <= pack)
                 return -1;
             const uint32_t count = rd32(rdram, pack);
-            if (count == 0u || count > 4096u || pack + 4u + count * 4u >= 0x2000000u)
+            if (count == 0u || count > 4096u || pack + 4u + count * 4u >= PS2_RDRAM_SIZE)
                 return -1;
             const uint32_t offset = motion - pack;
             for (uint32_t i = 0; i < count; ++i)
@@ -302,7 +302,7 @@ namespace kamite::sprint_traversal
 
         int moveKind(const uint8_t *rdram, uint32_t gene)
         {
-            if (rdram[(gene + kPhase) & 0x01FFFFFFu] != kSprintAttackPhase)
+            if (rdram[(gene + kPhase) & PS2_RAM_MASK] != kSprintAttackPhase)
                 return 0;
             const int motion = motionIndex(rdram, gene);
             for (int m : kJumpMotions)
@@ -356,7 +356,7 @@ namespace kamite::sprint_traversal
                     for (uint32_t i = 0; i < groupCount; ++i)
                     {
                         char name[9] = {};
-                        std::memcpy(name, rdram + ((groups + i * kGroupStride + kGroupName) & 0x01FFFFFFu), 8);
+                        std::memcpy(name, rdram + ((groups + i * kGroupStride + kGroupName) & PS2_RAM_MASK), 8);
                         const auto it = g_marks.find({room, oneWord(name)});
                         if (it != g_marks.end() && it->second)
                             g_cache.emplace_back(i, it->second);

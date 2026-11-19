@@ -2028,7 +2028,7 @@ void EeScheduler::setVSyncFlag(uint32_t flagAddress, uint32_t tickAddress)
     if (tickAddress != 0u)
     {
         const uint32_t physical = tickAddress & 0x1FFFFFFFu;
-        if (m_rdram && physical <= PS2_RAM_SIZE - sizeof(uint64_t))
+        if (m_rdram && physical <= PS2_RDRAM_SIZE - sizeof(uint64_t))
         {
             const uint64_t zero = 0u;
             std::memcpy(m_rdram + physical, &zero, sizeof(zero));
@@ -2902,7 +2902,7 @@ void EeScheduler::processEvent(const EeEvent &event)
         if (m_vsyncTickAddress != 0u)
         {
             const uint32_t physical = m_vsyncTickAddress & 0x1FFFFFFFu;
-            if (m_rdram && physical <= PS2_RAM_SIZE - sizeof(uint64_t))
+            if (m_rdram && physical <= PS2_RDRAM_SIZE - sizeof(uint64_t))
             {
                 std::memcpy(m_rdram + physical, &m_vsyncTick, sizeof(m_vsyncTick));
             }
@@ -3009,7 +3009,7 @@ void EeScheduler::writeGuestU32(uint32_t address, uint32_t value)
         return;
     }
     const uint32_t physical = address & 0x1FFFFFFFu;
-    if (!m_rdram || physical > PS2_RAM_SIZE - sizeof(value))
+    if (!m_rdram || physical > PS2_RDRAM_SIZE - sizeof(value))
     {
         return;
     }

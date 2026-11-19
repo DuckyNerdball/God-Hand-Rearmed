@@ -49,18 +49,18 @@ namespace kamite::style_pose
         {
             return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         }
-        bool inRam(uint32_t a, uint32_t size) { return a >= 0x100000u && a + size <= 0x2000000u; }
+        bool inRam(uint32_t a, uint32_t size) { return a >= 0x100000u && a + size <= PS2_RDRAM_SIZE; }
         uint32_t rd32(uint32_t a)
         {
             uint32_t v = 0;
-            std::memcpy(&v, g_ram + (a & 0x01FFFFFFu), 4);
+            std::memcpy(&v, g_ram + (a & PS2_RAM_MASK), 4);
             return v;
         }
-        void wrF(uint32_t a, float f) { std::memcpy(g_ram + (a & 0x01FFFFFFu), &f, 4); }
+        void wrF(uint32_t a, float f) { std::memcpy(g_ram + (a & PS2_RAM_MASK), &f, 4); }
         float rdF(uint32_t a)
         {
             float f = 0.0f;
-            std::memcpy(&f, g_ram + (a & 0x01FFFFFFu), 4);
+            std::memcpy(&f, g_ram + (a & PS2_RAM_MASK), 4);
             return f;
         }
         // Free: mode 0 (+0x2F4) and phase (+0x2F5) 0..3, the only phases that call the action chooser func_00123938
@@ -93,7 +93,7 @@ namespace kamite::style_pose
         uint16_t rd16(uint32_t a)
         {
             uint16_t v = 0;
-            std::memcpy(&v, g_ram + (a & 0x01FFFFFFu), 2);
+            std::memcpy(&v, g_ram + (a & PS2_RAM_MASK), 2);
             return v;
         }
         // The rotation of `bone` at frame t: out[c] set where the motion keys component c (found[c]).

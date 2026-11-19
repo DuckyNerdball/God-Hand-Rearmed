@@ -23,13 +23,13 @@ namespace kamite::jukebox
         uint32_t rd32(const uint8_t *rdram, uint32_t address)
         {
             uint32_t v;
-            std::memcpy(&v, rdram + (address & 0x1FFFFFFu), sizeof(v));
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), sizeof(v));
             return v;
         }
 
         void wr32(uint8_t *rdram, uint32_t address, uint32_t v)
         {
-            std::memcpy(rdram + (address & 0x1FFFFFFu), &v, sizeof(v));
+            std::memcpy(rdram + (address & PS2_RAM_MASK), &v, sizeof(v));
         }
 
         // The player's Move: with the radio open, the player-off bits are out of the game-state word while it runs and

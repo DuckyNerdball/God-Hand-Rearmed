@@ -605,7 +605,7 @@ void PS2AudioBackend::onVagTransfer(const uint8_t *rdram, uint32_t srcAddr, uint
         return;
 
     const uint32_t physAddr = srcAddr & PS2_RAM_MASK;
-    if (physAddr + sizeBytes > PS2_RAM_SIZE)
+    if (physAddr + sizeBytes > PS2_RDRAM_SIZE)
         return;
 
     std::vector<int16_t> pcm;
@@ -683,7 +683,7 @@ void PS2AudioBackend::onSoundCommand(uint32_t sid, uint32_t rpcNum,
             {
                 uint32_t cand = 0;
                 std::memcpy(&cand, sendBuf + off, sizeof(cand));
-                if (cand >= kMinPlausibleAddr && (cand <= PS2_RAM_MASK || (cand & ~PS2_RAM_MASK) == 0))
+                if (cand >= kMinPlausibleAddr && cand < PS2_RAM_SIZE)
                     sampleAddr = cand;
             }
         }

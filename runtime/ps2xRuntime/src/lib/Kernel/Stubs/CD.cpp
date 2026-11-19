@@ -227,7 +227,7 @@ namespace ps2_stubs
                 return 0;
             }
 
-            const uint64_t maxBytes = static_cast<uint64_t>(PS2_RAM_SIZE - offset);
+            const uint64_t maxBytes = static_cast<uint64_t>(PS2_RDRAM_SIZE - offset);
             const uint64_t clamped = std::min<uint64_t>(requested, maxBytes);
             return static_cast<size_t>(clamped);
         };
@@ -255,7 +255,7 @@ namespace ps2_stubs
         {
             // Some game-side wrappers use a nonstandard register layout.
             // If primary decode does not resolve to a known LBN, try safe alternatives.
-            constexpr uint32_t kMaxReasonableSectors = PS2_RAM_SIZE / kCdSectorSize;
+            constexpr uint32_t kMaxReasonableSectors = PS2_RDRAM_SIZE / kCdSectorSize;
             if (!isResolvableCdLbn(selected.lbn))
             {
                 const std::array<CdReadArgs, 5> alternatives = {
@@ -494,7 +494,7 @@ namespace ps2_stubs
 
             uint32_t offset = buf & PS2_RAM_MASK;
             size_t bytes = static_cast<size_t>(sectors) * kCdSectorSize;
-            const size_t maxBytes = PS2_RAM_SIZE - offset;
+            const size_t maxBytes = PS2_RDRAM_SIZE - offset;
             if (bytes > maxBytes)
             {
                 bytes = maxBytes;
@@ -817,7 +817,7 @@ namespace ps2_stubs
                 const uint64_t destination64 = static_cast<uint64_t>(state.buffer) + static_cast<uint64_t>(state.sectorsRead) * kCdSectorSize;
                 const uint32_t destination = static_cast<uint32_t>(destination64);
                 const uint32_t offset = destination & PS2_RAM_MASK;
-                const size_t maxBytes = PS2_RAM_SIZE - offset;
+                const size_t maxBytes = PS2_RDRAM_SIZE - offset;
                 sectors = std::min<uint32_t>(sectors, static_cast<uint32_t>(maxBytes / kCdSectorSize));
 
                 if (sectors == 0u)

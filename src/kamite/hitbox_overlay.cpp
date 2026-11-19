@@ -149,24 +149,24 @@ namespace kamite::hitbox_overlay
         bool inRam(uint32_t address, uint32_t size)
         {
             const uint32_t a = address & 0x1FFFFFFFu;
-            return a >= 0x100000u && a + size <= PS2_RAM_SIZE;
+            return a >= 0x100000u && a + size <= PS2_RDRAM_SIZE;
         }
         uint32_t rd32(const uint8_t *rdram, uint32_t address)
         {
             uint32_t v = 0;
-            std::memcpy(&v, rdram + (address & 0x01FFFFFFu), 4);
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), 4);
             return v;
         }
         uint16_t rd16(const uint8_t *rdram, uint32_t address)
         {
             uint16_t v = 0;
-            std::memcpy(&v, rdram + (address & 0x01FFFFFFu), 2);
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), 2);
             return v;
         }
         float rdf(const uint8_t *rdram, uint32_t address)
         {
             float v = 0.0f;
-            std::memcpy(&v, rdram + (address & 0x01FFFFFFu), 4);
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), 4);
             return v;
         }
         Vec3 rdv(const uint8_t *rdram, uint32_t address)
@@ -350,7 +350,7 @@ namespace kamite::hitbox_overlay
                     float m[16] = {};
                     const bool haveMatrix = inRam(matrix, 64u);
                     if (haveMatrix)
-                        std::memcpy(m, rdram + (matrix & 0x01FFFFFFu), sizeof(m));
+                        std::memcpy(m, rdram + (matrix & PS2_RAM_MASK), sizeof(m));
                     if (dump)
                     {
                         char text[256];
@@ -449,7 +449,7 @@ namespace kamite::hitbox_overlay
                     const uint32_t f = s.polys + p * kPolyStride + kPolyFlags;
                     const uint32_t flags = rd32(rdram, f);
                     const uint32_t next = on ? (flags & ~kPolyOff) : (flags | kPolyOff);
-                    std::memcpy(rdram + (f & 0x01FFFFFFu), &next, 4);
+                    std::memcpy(rdram + (f & PS2_RAM_MASK), &next, 4);
                 }
                 KM_INFO(Game, "stage collision: group " << index << " switched " << (on ? "on" : "off") << " from the Debug tab");
             }
@@ -485,7 +485,7 @@ namespace kamite::hitbox_overlay
             {
                 const uint32_t g = s.groups + i * kGroupStride;
                 char name[9] = {};
-                std::memcpy(name, rdram + ((g + kGroupName) & 0x01FFFFFFu), 8);
+                std::memcpy(name, rdram + ((g + kGroupName) & PS2_RAM_MASK), 8);
                 groups[i].name = name[0] ? name : "(no name)";
                 groups[i].first = rd16(rdram, g + kGroupFirst);
                 groups[i].count = rd16(rdram, g + kGroupCount);
@@ -592,7 +592,7 @@ namespace kamite::hitbox_overlay
                                            flat ? "floor" : "wall", group >= 0 ? groups[group].name.c_str() : "-", flags,
                                            rd16(rdram, rec + kPolyAttr));
                     for (uint32_t b = 0; b < kAttrStride && inRam(attr, kAttrStride) && at < 400; ++b)
-                        at += std::snprintf(text + at, sizeof(text) - at, "%02X", rdram[(attr + b) & 0x01FFFFFFu]);
+                        at += std::snprintf(text + at, sizeof(text) - at, "%02X", rdram[(attr + b) & PS2_RAM_MASK]);
                     at += std::snprintf(text + at, sizeof(text) - at, "]");
                     for (int c = 0; c < corners && at < 480; ++c)
                         at += std::snprintf(text + at, sizeof(text) - at, " (%.2f %.2f %.2f)", v[c].x, v[c].y, v[c].z);
@@ -704,7 +704,7 @@ namespace kamite::hitbox_overlay
             uint32_t slot = rd32(rdram, kEnemyList);
             for (int guard = 0; guard < 64 && inRam(slot, 16u); ++guard)
             {
-                const uint32_t em = rd32(rdram, slot + 8u) & 0x01FFFFFFu;
+                const uint32_t em = rd32(rdram, slot + 8u) & PS2_RAM_MASK;
                 slot = rd32(rdram, slot + 4u);
                 if (!inRam(em, 0x700u))
                     continue;

@@ -89,12 +89,12 @@ namespace kamite
         float fovFactor() { return g_fovPercent.load(std::memory_order_relaxed) / 100.0f; }
         float fightFactor() { return g_fightPercent.load(std::memory_order_relaxed) / 100.0f; }
 
-        uint32_t cameraAt(R5900Context *ctx, uint32_t offset) { return (GPR_U32(ctx, 17) + offset) & (PS2_RAM_SIZE - 1u); }
+        uint32_t cameraAt(R5900Context *ctx, uint32_t offset) { return (GPR_U32(ctx, 17) + offset) & PS2_RAM_MASK; }
 
         float loadFloat(const uint8_t *rdram, uint32_t address)
         {
             float value;
-            std::memcpy(&value, rdram + (address & (PS2_RAM_SIZE - 1u)), sizeof(value));
+            std::memcpy(&value, rdram + (address & PS2_RAM_MASK), sizeof(value));
             return value;
         }
 
@@ -231,7 +231,7 @@ namespace kamite
         {
             if (!g_freeNow)
                 return;
-            const uint32_t at = (GPR_U32(ctx, 29) + 128u + 4u) & (PS2_RAM_SIZE - 1u);
+            const uint32_t at = (GPR_U32(ctx, 29) + 128u + 4u) & PS2_RAM_MASK;
             std::memcpy(rdram + at, &g_freeYaw, sizeof(g_freeYaw));
         }
 
@@ -363,17 +363,17 @@ namespace kamite
         {
             float a[3], d[3]; // from a, a + d
         };
-        bool inGuestRam(uint32_t a, uint32_t bytes) { return a >= 0x100000u && a < PS2_RAM_SIZE && bytes <= PS2_RAM_SIZE - a; }
+        bool inGuestRam(uint32_t a, uint32_t bytes) { return a >= 0x100000u && a < PS2_RDRAM_SIZE && bytes <= PS2_RDRAM_SIZE - a; }
         uint32_t rdWord(const uint8_t *rdram, uint32_t a)
         {
             uint32_t v = 0;
-            std::memcpy(&v, rdram + (a & (PS2_RAM_SIZE - 1u)), 4);
+            std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4);
             return v & 0x1FFFFFFFu;
         }
         uint16_t rdHalf(const uint8_t *rdram, uint32_t a)
         {
             uint16_t v = 0;
-            std::memcpy(&v, rdram + (a & (PS2_RAM_SIZE - 1u)), 2);
+            std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 2);
             return v;
         }
         // Moller-Trumbore on the segment (t in 0..1).
@@ -505,7 +505,7 @@ namespace kamite
         void cameraFadeCalled(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             const uint32_t obj = GPR_U32(ctx, 4);
-            if (obj < 0x100000u || obj >= PS2_RAM_SIZE - 0x600u)
+            if (obj < 0x100000u || obj >= PS2_RDRAM_SIZE - 0x600u)
                 return;
             CameraFade &f = g_cameraFade[obj];
             f.frame = gameFrame(rdram);
@@ -552,11 +552,11 @@ namespace kamite
             updateKeepWalls();
             cameraFadeSweep(rdram);
             const uint32_t camera = GPR_U32(ctx, 20);
-            if (camera >= 0x100000u && camera < PS2_RAM_SIZE - 0x1000u)
+            if (camera >= 0x100000u && camera < PS2_RDRAM_SIZE - 0x1000u)
                 hitbox_overlay::noteScreenMatrix(reinterpret_cast<const float *>(rdram + camera)); // any camera: the last built wins
             if (camera != g_playerCamera.load(std::memory_order_relaxed))
                 return;
-            const auto valid = [](uint32_t p) { return p >= 0x100000u && p < PS2_RAM_SIZE - 0x1000u; };
+            const auto valid = [](uint32_t p) { return p >= 0x100000u && p < PS2_RDRAM_SIZE - 0x1000u; };
             if (!g_seeThrough.load(std::memory_order_relaxed) || !valid(camera) ||
                 steadyMs() - g_playerCameraMs.load(std::memory_order_relaxed) > 100)
             {
@@ -828,11 +828,11 @@ namespace kamite
             uint32_t gene = 0, pos = 0;
             std::memcpy(&gene, rdram + 0x747A94u, 4);
             gene &= 0x1FFFFFFFu;
-            if (gene < 0x100000u || gene + 0x200u > PS2_RAM_SIZE)
+            if (gene < 0x100000u || gene + 0x200u > PS2_RDRAM_SIZE)
                 return g_freeYaw;
             std::memcpy(&pos, rdram + gene + 0xF0u, 4);
             pos &= 0x1FFFFFFFu;
-            if (pos < 0x100000u || pos + 12u > PS2_RAM_SIZE)
+            if (pos < 0x100000u || pos + 12u > PS2_RDRAM_SIZE)
                 return g_freeYaw;
             const float dx = ex - loadFloat(rdram, pos), dz = ez - loadFloat(rdram, pos + 8u);
             uint32_t save = 0, first = 0;
@@ -840,7 +840,7 @@ namespace kamite
             std::memcpy(&first, rdram + 0x3BF160u, 4);
             save &= 0x1FFFFFFFu;
             int16_t points = 0x7FFF;
-            if (save >= 0x100000u && save + 0x20u <= PS2_RAM_SIZE)
+            if (save >= 0x100000u && save + 0x20u <= PS2_RDRAM_SIZE)
                 std::memcpy(&points, rdram + save + 0x1Cu, 2);
             const float pointBlank = static_cast<int32_t>(points) < static_cast<int32_t>(first) ? 2.0f : 2.5f;
             if (dx * dx + dz * dz >= pointBlank * pointBlank)
@@ -866,9 +866,9 @@ namespace kamite
             if (!facingSwap())
                 return;
             uint32_t pos = 0;
-            std::memcpy(&pos, rdram + ((GPR_U32(ctx, reg) + 0xF0u) & (PS2_RAM_SIZE - 1u)), 4);
+            std::memcpy(&pos, rdram + ((GPR_U32(ctx, reg) + 0xF0u) & PS2_RAM_MASK), 4);
             pos &= 0x1FFFFFFFu;
-            ctx->f[12] = pos >= 0x100000u && pos + 12u <= PS2_RAM_SIZE ? facingYawFor(rdram, loadFloat(rdram, pos), loadFloat(rdram, pos + 8u))
+            ctx->f[12] = pos >= 0x100000u && pos + 12u <= PS2_RDRAM_SIZE ? facingYawFor(rdram, loadFloat(rdram, pos), loadFloat(rdram, pos + 8u))
                                                                         : g_freeYaw;
         }
         // The twin at 0x2096D8 passes a position on the stack (a1 = sp).
@@ -893,7 +893,7 @@ namespace kamite
             std::memcpy(&gene, rdram + 0x747A94u, 4);
             gene &= 0x1FFFFFFFu;
             const uint32_t spot = GPR_U32(ctx, 20) & 0x1FFFFFFFu;
-            if (gene < 0x100000u || gene + 0x100u > PS2_RAM_SIZE || spot < 0x100000u || spot + 12u > PS2_RAM_SIZE)
+            if (gene < 0x100000u || gene + 0x100u > PS2_RDRAM_SIZE || spot < 0x100000u || spot + 12u > PS2_RDRAM_SIZE)
                 return;
             const float delta = g_freeYaw - loadFloat(rdram, gene + 0x104u);
             const float tx = loadFloat(rdram, gene + 0xB0u), tz = loadFloat(rdram, gene + 0xB8u);
@@ -953,8 +953,8 @@ namespace kamite
                 return 0;
             uint32_t player;
             std::memcpy(&player, rdram + kPlayerPointer, sizeof(player));
-            player &= PS2_RAM_SIZE - 1u;
-            if (player == 0 || player + 0x300u > PS2_RAM_SIZE)
+            player &= PS2_RDRAM_SIZE - 1u;
+            if (player == 0 || player + 0x300u > PS2_RDRAM_SIZE)
                 return 0;
             const uint8_t mode = rdram[player + game::GameObj::kMode], phase = rdram[player + game::GameObj::kMode + 1u];
             return mode == 0 && (phase == 0 || phase == 10) ? player : 0;
@@ -967,8 +967,8 @@ namespace kamite
             if (player)
             {
                 std::memcpy(&pos, rdram + player + game::GameObj::kPos, sizeof(pos));
-                pos &= PS2_RAM_SIZE - 1u;
-                if (pos == 0 || pos + 12u > PS2_RAM_SIZE)
+                pos &= PS2_RDRAM_SIZE - 1u;
+                if (pos == 0 || pos + 12u > PS2_RDRAM_SIZE)
                     pos = 0;
             }
             if (!pos)
@@ -995,9 +995,9 @@ namespace kamite
         // course, its decay and length, stays the game's).
         void cameraUpdateSteady(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            const uint32_t camera = GPR_U32(ctx, 4) & (PS2_RAM_SIZE - 1u);
-            const bool still = camera != 0 && camera == (g_playerCamera.load(std::memory_order_relaxed) & (PS2_RAM_SIZE - 1u)) &&
-                               camera + 0x280u <= PS2_RAM_SIZE && idlePlayer(rdram) != 0;
+            const uint32_t camera = GPR_U32(ctx, 4) & PS2_RAM_MASK;
+            const bool still = camera != 0 && camera == (g_playerCamera.load(std::memory_order_relaxed) & PS2_RAM_MASK) &&
+                               camera + 0x280u <= PS2_RDRAM_SIZE && idlePlayer(rdram) != 0;
             float amplitude[2] = {};
             if (still)
                 for (int i = 0; i < 2; ++i)

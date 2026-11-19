@@ -2,6 +2,7 @@
 #include "kamite/roulette_bar.h"
 
 #include "kamite/menu_buttons.h"
+#include "runtime/ps2_memory.h" // PS2_RAM_MASK
 
 #include <algorithm>
 #include <cmath>
@@ -47,17 +48,17 @@ namespace kamite::roulette_bar
         float rdF(const uint8_t *rdram, uint32_t address)
         {
             float v;
-            std::memcpy(&v, rdram + (address & 0x1FFFFFFu), sizeof(v));
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), sizeof(v));
             return v;
         }
         void wrF(uint8_t *rdram, uint32_t address, float v)
         {
-            std::memcpy(rdram + (address & 0x1FFFFFFu), &v, sizeof(v));
+            std::memcpy(rdram + (address & PS2_RAM_MASK), &v, sizeof(v));
         }
         uint16_t rd16(const uint8_t *rdram, uint32_t address)
         {
             uint16_t v;
-            std::memcpy(&v, rdram + (address & 0x1FFFFFFu), sizeof(v));
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), sizeof(v));
             return v;
         }
 
@@ -89,7 +90,7 @@ namespace kamite::roulette_bar
     {
         if (!menu_buttons::modern() || !rdram || entry == 0u)
             return;
-        const bool isText = rdram[(entry + kEntryKind) & 0x1FFFFFFu] == kKindText && rd16(rdram, entry + kEntryMsg) == kBarMessage;
+        const bool isText = rdram[(entry + kEntryKind) & PS2_RAM_MASK] == kKindText && rd16(rdram, entry + kEntryMsg) == kBarMessage;
         if (isText && (entry != g_text || layout != g_layout))
         {
             g_text = entry;

@@ -374,21 +374,21 @@ namespace kamite::punish_fit
         bool inRam(uint32_t p, uint32_t size)
         {
             p &= 0x1FFFFFFFu;
-            return p >= 0x100000u && p < PS2_RAM_SIZE && size <= PS2_RAM_SIZE - p;
+            return p >= 0x100000u && p < PS2_RDRAM_SIZE && size <= PS2_RDRAM_SIZE - p;
         }
         uint32_t rd32(const uint8_t *rdram, uint32_t a)
         {
             uint32_t v;
-            std::memcpy(&v, rdram + (a & (PS2_RAM_SIZE - 1u)), sizeof(v));
+            std::memcpy(&v, rdram + (a & PS2_RAM_MASK), sizeof(v));
             return v;
         }
         float rdF(const uint8_t *rdram, uint32_t a)
         {
             float v;
-            std::memcpy(&v, rdram + (a & (PS2_RAM_SIZE - 1u)), sizeof(v));
+            std::memcpy(&v, rdram + (a & PS2_RAM_MASK), sizeof(v));
             return v;
         }
-        void wrF(uint8_t *rdram, uint32_t a, float v) { std::memcpy(rdram + (a & (PS2_RAM_SIZE - 1u)), &v, sizeof(v)); }
+        void wrF(uint8_t *rdram, uint32_t a, float v) { std::memcpy(rdram + (a & PS2_RAM_MASK), &v, sizeof(v)); }
 
         float wrap(float a)
         {
@@ -405,7 +405,7 @@ namespace kamite::punish_fit
         std::string enemyName(const uint8_t *rdram, uint32_t enemy)
         {
             uint16_t id;
-            std::memcpy(&id, rdram + ((enemy + kModelId) & (PS2_RAM_SIZE - 1u)), sizeof(id));
+            std::memcpy(&id, rdram + ((enemy + kModelId) & PS2_RAM_MASK), sizeof(id));
             char text[8];
             std::snprintf(text, sizeof(text), "em%02x", id & 0xFFu);
             return text;
@@ -417,7 +417,7 @@ namespace kamite::punish_fit
         // The enemy's parts (root first); their count, 0 if they can't be read.
         int readParts(const uint8_t *rdram, uint32_t enemy, uint32_t parts[64])
         {
-            const int n = rdram[(enemy + kPartCount) & (PS2_RAM_SIZE - 1u)];
+            const int n = rdram[(enemy + kPartCount) & PS2_RAM_MASK];
             if (n < 2 || n > 64)
                 return 0;
             uint32_t p = rd32(rdram, enemy + kParts);
@@ -425,7 +425,7 @@ namespace kamite::punish_fit
             {
                 if (!inRam(p, 0x150u))
                     return 0;
-                parts[i] = p & 0x1FFFFFFu;
+                parts[i] = p & PS2_RAM_MASK;
                 p = rd32(rdram, p + kParts);
             }
             return n;
@@ -444,7 +444,7 @@ namespace kamite::punish_fit
             for (int i = 1; i < n; ++i)
             {
                 int8_t index = -1;
-                const uint32_t parent = rd32(rdram, parts[i] + kPartParent) & 0x1FFFFFFu;
+                const uint32_t parent = rd32(rdram, parts[i] + kPartParent) & PS2_RAM_MASK;
                 for (int j = 0; j < n; ++j)
                     if (parts[j] == parent && j != i)
                         index = static_cast<int8_t>(j);
@@ -484,7 +484,7 @@ namespace kamite::punish_fit
                     text << "unknown:";
                     for (int i = 1; i < n; ++i)
                     {
-                        const uint32_t parent = rd32(rdram, parts[i] + kPartParent) & 0x1FFFFFFu;
+                        const uint32_t parent = rd32(rdram, parts[i] + kPartParent) & PS2_RAM_MASK;
                         int index = -1;
                         for (int j = 0; j < n; ++j)
                             if (parts[j] == parent && j != i)
@@ -517,7 +517,7 @@ namespace kamite::punish_fit
         size_t g_changedNext = 0u;
         bool changedFor(uint32_t enemy)
         {
-            enemy &= 0x1FFFFFFu;
+            enemy &= PS2_RAM_MASK;
             for (const Changed &c : g_changed)
                 if (c.enemy == enemy)
                     return c.changed;
@@ -544,7 +544,7 @@ namespace kamite::punish_fit
             for (int i = 0; i < 64 && inRam(node, 0x418u); ++i)
             {
                 const uint32_t info = rd32(rdram, node + kNodeInfo);
-                if (inRam(info, 16u) && std::memcmp(rdram + ((info + kInfoName) & (PS2_RAM_SIZE - 1u)), prefix.data(), prefix.size()) == 0)
+                if (inRam(info, 16u) && std::memcmp(rdram + ((info + kInfoName) & PS2_RAM_MASK), prefix.data(), prefix.size()) == 0)
                     return true;
                 node = rd32(rdram, node + kNodeNext);
             }
@@ -577,14 +577,14 @@ namespace kamite::punish_fit
         // The motion `index` of an enemy's em00-style table (pack + its offset, u32 wrap like the game), 0 if none.
         uint32_t entry(const uint8_t *rdram, uint32_t enemy, uint16_t index)
         {
-            const uint32_t pack = rd32(rdram, enemy + game::GameObj::kMotionData) & 0x1FFFFFFu;
+            const uint32_t pack = rd32(rdram, enemy + game::GameObj::kMotionData) & PS2_RAM_MASK;
             if (!inRam(pack, 4u + 4u * kEm00Entries) || rd32(rdram, pack) != kEm00Entries)
                 return 0u;
             const uint32_t offset = rd32(rdram, pack + 4u + 4u * index);
-            return offset ? (pack + offset) & 0x1FFFFFFu : 0u;
+            return offset ? (pack + offset) & PS2_RAM_MASK : 0u;
         }
 
-        uint32_t player(const uint8_t *rdram) { return rd32(rdram, work::address(work::kPlayerObj)) & 0x1FFFFFFu; }
+        uint32_t player(const uint8_t *rdram) { return rd32(rdram, work::address(work::kPlayerObj)) & PS2_RAM_MASK; }
 
         void logPair(int punish, uint32_t body, uint32_t enemy, const char *what, float size)
         {
@@ -726,7 +726,7 @@ namespace kamite::punish_fit
             for (const Call &c : kCalls)
                 if (c.ra == ra)
                     call = &c;
-            const uint32_t gene = GPR_U32(ctx, 4) & 0x1FFFFFFu, enemy = GPR_U32(ctx, 5) & 0x1FFFFFFu;
+            const uint32_t gene = GPR_U32(ctx, 4) & PS2_RAM_MASK, enemy = GPR_U32(ctx, 5) & PS2_RAM_MASK;
             if (!call || !inRam(gene, 0x700u) || !inRam(enemy, 0x700u))
             {
                 g_align(rdram, ctx, runtime);
@@ -1079,7 +1079,7 @@ namespace kamite::punish_fit
                                              posed ? static_cast<int>(std::lround(money * 100.0f)) : 0, camVariant);
             if (const auto it = g_copies.find(key); it != g_copies.end())
                 return it->second;
-            const uint32_t length = mot::motionLength(rdram + motion, PS2_RAM_SIZE - motion);
+            const uint32_t length = mot::motionLength(rdram + motion, PS2_RDRAM_SIZE - motion);
             if (length == 0u || length > 0x10000u)
                 return 0u;
             std::vector<uint8_t> m(rdram + motion, rdram + motion + length);
@@ -1332,8 +1332,8 @@ namespace kamite::punish_fit
         {
             if (g_floatPoses.empty())
                 return;
-            const uint32_t actor = GPR_U32(ctx, 4) & 0x1FFFFFFu;
-            if (!inRam(actor, 0x700u) || !g_floatPoses.count(rd32(rdram, actor + kMotionPlaying) & 0x1FFFFFFu))
+            const uint32_t actor = GPR_U32(ctx, 4) & PS2_RAM_MASK;
+            if (!inRam(actor, 0x700u) || !g_floatPoses.count(rd32(rdram, actor + kMotionPlaying) & PS2_RAM_MASK))
                 return;
             g_sampledAt[actor] = rdF(rdram, actor + kMotionFrame);
         }
@@ -1344,10 +1344,10 @@ namespace kamite::punish_fit
         {
             if (g_floatPoses.empty())
                 return;
-            const uint32_t model = GPR_U32(ctx, 4) & 0x1FFFFFFu;
+            const uint32_t model = GPR_U32(ctx, 4) & PS2_RAM_MASK;
             if (!inRam(model, 0x700u))
                 return;
-            const auto it = g_floatPoses.find(rd32(rdram, model + kMotionPlaying) & 0x1FFFFFFu);
+            const auto it = g_floatPoses.find(rd32(rdram, model + kMotionPlaying) & PS2_RAM_MASK);
             const auto at = g_sampledAt.find(model);
             if (it == g_floatPoses.end() || at == g_sampledAt.end())
                 return;
@@ -1367,7 +1367,7 @@ namespace kamite::punish_fit
                     const uint32_t a = parts[c.bone] + kPartRotation + 4u * static_cast<uint32_t>(c.component - 3);
                     wrF(rdram, a, mot::nearAngle(v, rdF(rdram, a)));
                 }
-                else if (const uint32_t anchor = rd32(rdram, parts[c.bone] + kPartAnchor) & 0x1FFFFFFu; inRam(anchor, 16u))
+                else if (const uint32_t anchor = rd32(rdram, parts[c.bone] + kPartAnchor) & PS2_RAM_MASK; inRam(anchor, 16u))
                     wrF(rdram, anchor + 4u * static_cast<uint32_t>(c.component), v);
             }
             for (const FloatPose &p : it->second.poses)
@@ -1393,15 +1393,15 @@ namespace kamite::punish_fit
         // from their rewritten copies.
         void onStartMotion(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            const uint32_t actor = GPR_U32(ctx, 4) & 0x1FFFFFFu, motion = GPR_U32(ctx, 5) & 0x1FFFFFFu;
+            const uint32_t actor = GPR_U32(ctx, 4) & PS2_RAM_MASK, motion = GPR_U32(ctx, 5) & PS2_RAM_MASK;
             if (!inRam(actor, 0x700u) || !inRam(motion, 8u))
                 return;
             const uint32_t gene = player(rdram);
             if (!inRam(gene, 0x700u))
                 return;
             const bool isGene = actor == gene;
-            const uint32_t enemy = isGene ? rd32(rdram, gene + kCaught) & 0x1FFFFFFu : actor;
-            if (!inRam(enemy, 0x700u) || (!isGene && (rd32(rdram, gene + kCaught) & 0x1FFFFFFu) != actor))
+            const uint32_t enemy = isGene ? rd32(rdram, gene + kCaught) & PS2_RAM_MASK : actor;
+            if (!inRam(enemy, 0x700u) || (!isGene && (rd32(rdram, gene + kCaught) & PS2_RAM_MASK) != actor))
                 return;
             for (int p = 0; p < kPunishCount; ++p)
             {
@@ -1541,12 +1541,12 @@ namespace kamite::punish_fit
             const uint32_t gene = player(g_ram);
             if (gene != g_pair.gene || !inRam(gene, 0x700u) || g_ram[gene + game::GameObj::kMode] != 0u ||
                 g_ram[gene + game::GameObj::kMode + 1u] != kGenePhase[g_pair.punish] ||
-                (rd32(g_ram, gene + kCaught) & 0x1FFFFFFu) != g_pair.enemy)
+                (rd32(g_ram, gene + kCaught) & PS2_RAM_MASK) != g_pair.enemy)
             {
                 g_pair.live = false;
                 return;
             }
-            if (!g_pair.geneTrack || (rd32(g_ram, gene + kMotionPlaying) & 0x1FFFFFFu) != g_pair.geneMotionPtr)
+            if (!g_pair.geneTrack || (rd32(g_ram, gene + kMotionPlaying) & PS2_RAM_MASK) != g_pair.geneMotionPtr)
                 return;
             float v[kValues];
             g_pair.geneTrack->at(rdF(g_ram, gene + kMotionFrame), v);
@@ -1759,7 +1759,7 @@ namespace kamite::punish_fit
 
     void setChanged(uint32_t enemy, bool changed)
     {
-        enemy &= 0x1FFFFFFu;
+        enemy &= PS2_RAM_MASK;
         for (Changed &c : g_changed)
             if (c.enemy == enemy)
             {
@@ -1774,7 +1774,7 @@ namespace kamite::punish_fit
     {
         if (!g_on || punish < 0 || punish >= kPunishCount || !inRam(enemy, 0x700u))
             return false;
-        enemy &= 0x1FFFFFFu;
+        enemy &= PS2_RAM_MASK;
         const Fits *fits = fitsFor(punish, variantOf(rdram, enemy, punish, bodyOf(rdram, enemy)));
         if (!fits)
             return false;
@@ -1787,7 +1787,7 @@ namespace kamite::punish_fit
     {
         if (!g_on || !inRam(enemy, 0x700u))
             return false;
-        enemy &= 0x1FFFFFFu;
+        enemy &= PS2_RAM_MASK;
         const Fit *fit = fitFor(Suplex, variantOf(rdram, enemy, Suplex, bodyOf(rdram, enemy)));
         return fit && fit->gorilla;
     }
@@ -1796,7 +1796,7 @@ namespace kamite::punish_fit
     {
         if (!g_on || !inRam(enemy, 0x700u))
             return false;
-        enemy &= 0x1FFFFFFu;
+        enemy &= PS2_RAM_MASK;
         const Fit *fit = fitFor(Suplex, variantOf(rdram, enemy, Suplex, bodyOf(rdram, enemy)));
         return fit && fit->frontCam && !fit->off;
     }
@@ -1804,9 +1804,9 @@ namespace kamite::punish_fit
     float bustHold(const uint8_t *rdram, uint32_t model)
     {
         const Fit *fit = g_pair.fit;
-        if (!g_pair.live || !fit || fit->bust.empty() || (model & 0x1FFFFFFu) != g_pair.enemy || !g_pair.geneTrack ||
+        if (!g_pair.live || !fit || fit->bust.empty() || (model & PS2_RAM_MASK) != g_pair.enemy || !g_pair.geneTrack ||
             g_pair.geneTrack->motion != fit->bustMotion || !inRam(g_pair.gene, 0x700u) ||
-            (rd32(rdram, g_pair.gene + kMotionPlaying) & 0x1FFFFFFu) != g_pair.geneMotionPtr)
+            (rd32(rdram, g_pair.gene + kMotionPlaying) & PS2_RAM_MASK) != g_pair.geneMotionPtr)
             return 0.0f;
         const float frame = rdF(rdram, g_pair.gene + kMotionFrame);
         const auto &b = fit->bust;
@@ -1832,11 +1832,11 @@ namespace kamite::punish_fit
         constexpr Contact kContacts[] = {{1339, 4.0f, 1.0f}, {1341, 2.0f, 1.0f}, {1341, 21.0f, 1.5f}};
         static uint32_t s_ptr = 0u;
         static float s_frame = 0.0f;
-        model &= 0x1FFFFFFu;
+        model &= PS2_RAM_MASK;
         const uint32_t gene = player(rdram);
-        if (!inRam(gene, 0x700u) || (rd32(rdram, gene + kCaught) & 0x1FFFFFFu) != model || !inRam(model, 0x700u))
+        if (!inRam(gene, 0x700u) || (rd32(rdram, gene + kCaught) & PS2_RAM_MASK) != model || !inRam(model, 0x700u))
             return 0.0f;
-        const uint32_t ptr = rd32(rdram, gene + kMotionPlaying) & 0x1FFFFFFu;
+        const uint32_t ptr = rd32(rdram, gene + kMotionPlaying) & PS2_RAM_MASK;
         uint16_t number = 0;
         if (ptr == entry(rdram, model, 1339))
             number = 1339;
@@ -1867,7 +1867,7 @@ namespace kamite::punish_fit
     {
         label.clear();
         status.clear();
-        enemy &= 0x1FFFFFFu;
+        enemy &= PS2_RAM_MASK;
         if (!inRam(enemy, 0x700u))
             return;
         float scale[3];
@@ -1880,7 +1880,7 @@ namespace kamite::punish_fit
         label = text;
         // In Gene's punish: which one, and what the fit does.
         const uint32_t gene = player(rdram);
-        if (!inRam(gene, 0x700u) || (rd32(rdram, gene + kCaught) & 0x1FFFFFFu) != enemy || rdram[gene + game::GameObj::kMode] != 0u)
+        if (!inRam(gene, 0x700u) || (rd32(rdram, gene + kCaught) & PS2_RAM_MASK) != enemy || rdram[gene + game::GameObj::kMode] != 0u)
             return;
         const uint8_t phase = rdram[gene + game::GameObj::kMode + 1u];
         for (int p = 0; p < kPunishCount; ++p)

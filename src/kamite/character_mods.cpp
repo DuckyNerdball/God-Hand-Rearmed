@@ -421,7 +421,7 @@ namespace kamite::characters
         uint32_t r32(uint8_t *rdram, uint32_t a)
         {
             uint32_t v = 0;
-            std::memcpy(&v, rdram + (a & (PS2_RAM_SIZE - 4u)), 4);
+            std::memcpy(&v, rdram + (a & (PS2_RAM_MASK & ~3u)), 4);
             return v;
         }
     }
@@ -434,7 +434,7 @@ namespace kamite::characters
             if (g_replaced.empty())
                 return nullptr;
             std::string path;
-            for (uint32_t a = GPR_U32(ctx, 5) & 0x01FFFFFFu, i = 0; i < 128u && a + i < PS2_RAM_SIZE && rdram[a + i]; ++i)
+            for (uint32_t a = GPR_U32(ctx, 5) & PS2_RAM_MASK, i = 0; i < 128u && a + i < PS2_RDRAM_SIZE && rdram[a + i]; ++i)
             {
                 char c = static_cast<char>(std::tolower(rdram[a + i]));
                 path.push_back(c == '\\' ? '/' : c);
@@ -464,13 +464,13 @@ namespace kamite::characters
         void heapRoom(uint8_t *rdram, uint32_t heap, uint32_t &largest, uint32_t &total)
         {
             largest = total = 0u;
-            uint32_t block = r32(rdram, heap) & 0x01FFFFFFu;
-            for (uint32_t n = 0; block && block + 0x14u <= PS2_RAM_SIZE && n < 4096u; ++n)
+            uint32_t block = r32(rdram, heap) & PS2_RAM_MASK;
+            for (uint32_t n = 0; block && block + 0x14u <= PS2_RDRAM_SIZE && n < 4096u; ++n)
             {
                 const uint32_t freeBytes = r32(rdram, block + 0xCu);
                 largest = std::max(largest, freeBytes);
                 total += freeBytes;
-                block = r32(rdram, block + 8u) & 0x01FFFFFFu;
+                block = r32(rdram, block + 8u) & PS2_RAM_MASK;
             }
         }
 
@@ -490,9 +490,9 @@ namespace kamite::characters
                 if (need <= asked)
                     return;
                 ctx->r[4] = _mm_set_epi64x(_mm_extract_epi64(ctx->r[4], 1), static_cast<int64_t>(static_cast<int32_t>(need)));
-                const uint32_t heap = GPR_U32(ctx, 6) & 0x01FFFFFFu;
+                const uint32_t heap = GPR_U32(ctx, 6) & PS2_RAM_MASK;
                 uint32_t largest = 0u, total = 0u;
-                if (heap != 0u && heap + 8u <= PS2_RAM_SIZE)
+                if (heap != 0u && heap + 8u <= PS2_RDRAM_SIZE)
                     heapRoom(rdram, heap, largest, total);
                 if (largest >= need + 0x40u)
                     KM_INFO(Game, "character: " << b.file << " buffer " << asked << " -> " << need << " bytes (heap 0x" << std::hex << heap
@@ -515,7 +515,7 @@ namespace kamite::characters
             const auto *it = replacedRead(rdram, ctx);
             if (!it)
                 return;
-            const uint32_t buffer = GPR_U32(ctx, 6) & 0x01FFFFFFu, asked = GPR_U32(ctx, 8);
+            const uint32_t buffer = GPR_U32(ctx, 6) & PS2_RAM_MASK, asked = GPR_U32(ctx, 8);
             const uint32_t used = buffer >= 0x20u ? r32(rdram, buffer - 0x20u + 0x10u) : 0u;
             if (asked != 0u && asked < it->second.second)
                 KM_WARN(Game, "character: " << it->first << " read into a buffer with " << asked << " bytes asked; the replacement is "

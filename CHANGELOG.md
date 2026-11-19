@@ -4,6 +4,8 @@ Newest first, one line per change; the code comments say how.
 
 ## November 19, 2026
 
+- 128 MB of extra RAM above the game's own 32 MB, for mods and bigger models; older save states and test cases still load.
+- Test cases: every replay is fingerprinted, and its whole-RAM snapshots are compared with the previous build's.
 - Launcher: the disc image and folder pickers no longer stay hidden behind the fullscreen launcher until the Start key.
 
 ## November 18, 2026

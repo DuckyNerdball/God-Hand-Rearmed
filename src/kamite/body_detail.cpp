@@ -84,13 +84,13 @@ namespace kamite::body_detail
         uint32_t rd32(const uint8_t *rdram, uint32_t a)
         {
             uint32_t v;
-            std::memcpy(&v, rdram + (a & (PS2_RAM_SIZE - 4u)), 4);
+            std::memcpy(&v, rdram + (a & (PS2_RAM_MASK & ~3u)), 4);
             return v;
         }
         bool inRam(uint32_t a, uint32_t size)
         {
             a &= PS2_RAM_MASK;
-            return a >= 0x100000u && size <= PS2_RAM_SIZE - a;
+            return a >= 0x100000u && size <= PS2_RDRAM_SIZE - a;
         }
 
         // The bytes of a body's mdb that neither state touches: the header's first 12 (with the buffer and bone

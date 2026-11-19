@@ -431,7 +431,7 @@ namespace ps2_syscalls
                 return true;
             }
             const uint32_t normalized = value & 0x1FFFFFFFu;
-            return normalized >= 0x10000u && normalized < PS2_RAM_SIZE;
+            return normalized >= 0x10000u && normalized < PS2_RDRAM_SIZE;
         };
         const auto looksLikeSize = [](uint32_t value)
         {

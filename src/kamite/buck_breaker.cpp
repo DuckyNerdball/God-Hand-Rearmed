@@ -73,7 +73,7 @@ namespace kamite::buck_breaker
         uint32_t ram32(const uint8_t *rdram, uint32_t address)
         {
             uint32_t v;
-            std::memcpy(&v, rdram + (address & 0x1FFFFFFu), sizeof(v));
+            std::memcpy(&v, rdram + (address & PS2_RAM_MASK), sizeof(v));
             return v;
         }
 
@@ -210,8 +210,8 @@ namespace kamite::buck_breaker
         {
             if (pick == Pummel)
                 return true;
-            const uint32_t pack = ram32(rdram, enemy + game::GameObj::kMotionData) & 0x1FFFFFFu;
-            if (pack < 0x100000u || pack > 0x2000000u - 8u * kEm00Entries - 8u || ram32(rdram, pack) != kEm00Entries)
+            const uint32_t pack = ram32(rdram, enemy + game::GameObj::kMotionData) & PS2_RAM_MASK;
+            if (pack < 0x100000u || pack > PS2_RDRAM_SIZE - 8u * kEm00Entries - 8u || ram32(rdram, pack) != kEm00Entries)
                 return false;
             MotionSet &set = g_sets[pick];
             bool missing = false;
@@ -281,7 +281,7 @@ namespace kamite::buck_breaker
         uint32_t g_boobplexNext = 0;
         void markBoobplex(uint32_t enemy, bool on)
         {
-            enemy &= 0x1FFFFFFu;
+            enemy &= PS2_RAM_MASK;
             for (uint32_t &e : g_boobplexEnemies)
                 if (e == enemy)
                 {
@@ -306,10 +306,10 @@ namespace kamite::buck_breaker
         {
             const uint32_t word = GPR_U32(ctx, 2);
             uint32_t message = word + 0x3011u;
-            const uint32_t entry = GPR_U32(ctx, 5) & 0x1FFFFFFu;
-            if (word == 0xDu && entry >= 0x100000u && entry < 0x2000000u - 0x44u && ram32(rdram, entry + 0x18u) == 0xAu)
+            const uint32_t entry = GPR_U32(ctx, 5) & PS2_RAM_MASK;
+            if (word == 0xDu && entry >= 0x100000u && entry < PS2_RDRAM_SIZE - 0x44u && ram32(rdram, entry + 0x18u) == 0xAu)
             {
-                const uint32_t enemy = ram32(rdram, entry + 0x14u) & 0x1FFFFFFu;
+                const uint32_t enemy = ram32(rdram, entry + 0x14u) & PS2_RAM_MASK;
                 if (enemy && std::find(std::begin(g_boobplexEnemies), std::end(g_boobplexEnemies), enemy) != std::end(g_boobplexEnemies))
                 {
                     // B O O B P L E X in the menu font, then the end code.
@@ -406,40 +406,40 @@ namespace kamite::buck_breaker
         }
 
         uint32_t rd32(uint32_t address) { return ram32(g_ram, address); }
-        void wr32(uint32_t address, uint32_t value) { std::memcpy(g_ram + (address & 0x1FFFFFFu), &value, sizeof(value)); }
+        void wr32(uint32_t address, uint32_t value) { std::memcpy(g_ram + (address & PS2_RAM_MASK), &value, sizeof(value)); }
         uint64_t rd64(uint32_t address)
         {
             uint64_t v;
-            std::memcpy(&v, g_ram + (address & 0x1FFFFFFu), sizeof(v));
+            std::memcpy(&v, g_ram + (address & PS2_RAM_MASK), sizeof(v));
             return v;
         }
-        void wr64(uint32_t address, uint64_t value) { std::memcpy(g_ram + (address & 0x1FFFFFFu), &value, sizeof(value)); }
+        void wr64(uint32_t address, uint64_t value) { std::memcpy(g_ram + (address & PS2_RAM_MASK), &value, sizeof(value)); }
         uint16_t rd16(uint32_t address)
         {
             uint16_t v;
-            std::memcpy(&v, g_ram + (address & 0x1FFFFFFu), sizeof(v));
+            std::memcpy(&v, g_ram + (address & PS2_RAM_MASK), sizeof(v));
             return v;
         }
-        void wr16(uint32_t address, uint16_t value) { std::memcpy(g_ram + (address & 0x1FFFFFFu), &value, sizeof(value)); }
+        void wr16(uint32_t address, uint16_t value) { std::memcpy(g_ram + (address & PS2_RAM_MASK), &value, sizeof(value)); }
         float rdFloat(uint32_t address)
         {
             float v;
-            std::memcpy(&v, g_ram + (address & 0x1FFFFFFu), sizeof(v));
+            std::memcpy(&v, g_ram + (address & PS2_RAM_MASK), sizeof(v));
             return v;
         }
-        void wrFloat(uint32_t address, float value) { std::memcpy(g_ram + (address & 0x1FFFFFFu), &value, sizeof(value)); }
-        uint8_t &byteAt(uint32_t address) { return g_ram[address & 0x1FFFFFFu]; }
+        void wrFloat(uint32_t address, float value) { std::memcpy(g_ram + (address & PS2_RAM_MASK), &value, sizeof(value)); }
+        uint8_t &byteAt(uint32_t address) { return g_ram[address & PS2_RAM_MASK]; }
 
         bool validPointer(uint32_t p, uint32_t room = 0x100u)
         {
-            p &= 0x1FFFFFFu;
-            return p >= 0x100000u && room < 0x2000000u && p < 0x2000000u - room;
+            p &= PS2_RAM_MASK;
+            return p >= 0x100000u && room < PS2_RDRAM_SIZE && p < PS2_RDRAM_SIZE - room;
         }
 
         uint32_t dataPointer()
         {
             const uint32_t data = rd32(kCoreSave);
-            return validPointer(data, kSaveSize) ? (data & 0x1FFFFFFu) : 0u;
+            return validPointer(data, kSaveSize) ? (data & PS2_RAM_MASK) : 0u;
         }
 
         void readBlock(uint32_t data, Block &block)
@@ -463,7 +463,7 @@ namespace kamite::buck_breaker
             std::memcpy(g_ram + data + kBlockOffset, &block, sizeof(Block));
             // The checkpoint slot, when it holds this game's record: every move it owns is owned now (moves are only
             // ever gained), as style_presets checks.
-            const uint32_t checkpoint = rd32(kCheckpointPointer) & 0x1FFFFFFu;
+            const uint32_t checkpoint = rd32(kCheckpointPointer) & PS2_RAM_MASK;
             if (validPointer(checkpoint, kSaveSize) && checkpoint != data)
             {
                 const int8_t *was = reinterpret_cast<const int8_t *>(g_ram + checkpoint + kSkills);
@@ -539,12 +539,12 @@ namespace kamite::buck_breaker
 
         uint32_t techniquesScreen()
         {
-            const uint32_t subScr = rd32(kSubScrPointer) & 0x1FFFFFFu;
+            const uint32_t subScr = rd32(kSubScrPointer) & PS2_RAM_MASK;
             if (!validPointer(subScr, 0x1000u) || static_cast<int32_t>(rd32(subScr + game::SubScr::kKind)) != kTechniquesKind)
                 return 0u;
             return subScr + kWazaOffset;
         }
-        uint32_t part(uint32_t waza, int id) { return rd32(waza + 0x80u + 4u * static_cast<uint32_t>(id)) & 0x1FFFFFFu; }
+        uint32_t part(uint32_t waza, int id) { return rd32(waza + 0x80u + 4u * static_cast<uint32_t>(id)) & PS2_RAM_MASK; }
         int8_t cursorOf(uint32_t waza) { return static_cast<int8_t>(byteAt(waza + kWazaCursor)); }
 
         bool callGuest(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t address, std::initializer_list<uint32_t> args)
@@ -579,12 +579,12 @@ namespace kamite::buck_breaker
         // "Attack Str" (entries[53], checked by its record's position), when the screen still has it.
         uint32_t infoEntry(uint32_t waza)
         {
-            const uint32_t entries = rd32(waza + game::IDBase::kEnt) & 0x1FFFFFFu;
+            const uint32_t entries = rd32(waza + game::IDBase::kEnt) & PS2_RAM_MASK;
             const uint32_t count = rd32(waza + game::IDBase::kEntNum);
             if (count <= kInfoRecord || count > 400u || !validPointer(entries, count * ent::kSize))
                 return 0u;
             const uint32_t info = entries + kInfoRecord * ent::kSize;
-            const uint32_t src = rd32(info + kEntSrc) & 0x1FFFFFFu;
+            const uint32_t src = rd32(info + kEntSrc) & PS2_RAM_MASK;
             if (!validPointer(src, 0x10u) || rdFloat(src + 0x08u) != kInfoX || rdFloat(src + 0x0Cu) != kInfoY)
                 return 0u;
             return info;
@@ -617,7 +617,7 @@ namespace kamite::buck_breaker
         {
             if (!g_ram)
                 return;
-            const uint32_t waza = GPR_U32(ctx, 4) & 0x1FFFFFFu;
+            const uint32_t waza = GPR_U32(ctx, 4) & PS2_RAM_MASK;
             if (waza != techniquesScreen())
                 return;
             unfake();
@@ -638,7 +638,7 @@ namespace kamite::buck_breaker
         {
             if (!g_faked)
                 return;
-            const uint32_t layout = GPR_U32(ctx, 4) & 0x1FFFFFFu;
+            const uint32_t layout = GPR_U32(ctx, 4) & PS2_RAM_MASK;
             if (layout == g_faked + kSlotsLayout)
             {
                 unfake();
@@ -690,7 +690,7 @@ namespace kamite::buck_breaker
         {
             if (!g_ram || !g_enabled.load(std::memory_order_relaxed))
                 return; // off: no slot (its draw hook is off with the flag too)
-            const uint32_t waza = GPR_U32(ctx, 4) & 0x1FFFFFFu;
+            const uint32_t waza = GPR_U32(ctx, 4) & PS2_RAM_MASK;
             if (waza != techniquesScreen())
                 return;
             unfake();
@@ -755,7 +755,7 @@ namespace kamite::buck_breaker
             const uint32_t holder = rd32(kMessageBankPointer);
             if (!validPointer(holder))
                 return false;
-            const uint32_t bank = rd32((holder & 0x1FFFFFFu) + 0xCu);
+            const uint32_t bank = rd32((holder & PS2_RAM_MASK) + 0xCu);
             if (!validPointer(bank, 0x1000u))
                 return false;
             const uint32_t word = bank + (static_cast<uint32_t>(id) - 0x3000u) * 8u + 4u;
@@ -764,7 +764,7 @@ namespace kamite::buck_breaker
             return true;
         }
 
-        bool sameEntry(uint32_t a, uint32_t b) { return (a & 0x1FFFFFFu) == (b & 0x1FFFFFFu); }
+        bool sameEntry(uint32_t a, uint32_t b) { return (a & PS2_RAM_MASK) == (b & PS2_RAM_MASK); }
 
         // The screen's draw (func_0016DC18, $s4 = the screen), right after its main layout's cIDBase_trans (0x16DD78):
         // our slot, drawn on its own after the rows, as one more row would be.
@@ -772,12 +772,12 @@ namespace kamite::buck_breaker
         {
             if (!g_ram)
                 return;
-            const uint32_t waza = GPR_U32(ctx, 20) & 0x1FFFFFFu;
+            const uint32_t waza = GPR_U32(ctx, 20) & PS2_RAM_MASK;
             if (waza != techniquesScreen())
                 return;
             unfake();
             const uint32_t data = dataPointer();
-            const uint32_t entries = rd32(waza + game::IDBase::kEnt) & 0x1FFFFFFu;
+            const uint32_t entries = rd32(waza + game::IDBase::kEnt) & PS2_RAM_MASK;
             const uint32_t count = rd32(waza + game::IDBase::kEntNum);
             if (!data || count == 0u || count > 400u || !validPointer(entries, count * ent::kSize))
                 return;
@@ -825,8 +825,8 @@ namespace kamite::buck_breaker
             // Everything but the slot's three entries and the name's parents (the screen's own NO_DRAW / CHILD on the
             // column's group still decides, e.g. the picker hides the other column) is NO_DRAW for the second pass.
             std::vector<uint32_t> keep{name, box, button};
-            for (uint32_t p = rd32(name + kEntParent) & 0x1FFFFFFu; p && inLayout(p) && keep.size() < 24u;
-                 p = rd32(p + kEntParent) & 0x1FFFFFFu)
+            for (uint32_t p = rd32(name + kEntParent) & PS2_RAM_MASK; p && inLayout(p) && keep.size() < 24u;
+                 p = rd32(p + kEntParent) & PS2_RAM_MASK)
                 keep.push_back(p);
             std::vector<uint32_t> flags(count);
             for (uint32_t i = 0; i < count; ++i)

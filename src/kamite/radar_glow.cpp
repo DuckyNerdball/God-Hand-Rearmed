@@ -14,6 +14,7 @@
 #include "kamite/disc_files.h"
 #include "kamite/hd_textures.h"
 #include "kamite/log.h"
+#include "runtime/ps2_memory.h" // PS2_RAM_MASK, PS2_RDRAM_SIZE
 #include "kamite/modern_controls.h"
 #include "kamite/sha256.h"
 #include "kamite/game_layout.h"
@@ -55,7 +56,7 @@ namespace kamite::radar_glow
         uint32_t rd32(uint32_t address)
         {
             uint32_t value;
-            std::memcpy(&value, g_ram + (address & 0x1FFFFFFu), sizeof(value));
+            std::memcpy(&value, g_ram + (address & PS2_RAM_MASK), sizeof(value));
             return value;
         }
 
@@ -352,7 +353,7 @@ namespace kamite::radar_glow
             static uint32_t vblanks = 0u;
             ++vblanks;
             const uint32_t core = rd32(kCorePointer);
-            if (core < 0x100000u || core > 0x2000000u - kClut - kClutBytes || (core & 0xFu) != 0u)
+            if (core < 0x100000u || core > PS2_RDRAM_SIZE - kClut - kClutBytes || (core & 0xFu) != 0u)
                 return;
             uint8_t *data = g_ram + core + kData, *clut = g_ram + core + kClut;
             if (!g_captured)

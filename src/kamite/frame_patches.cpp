@@ -94,7 +94,7 @@ namespace kamite
 
         uint8_t &ram8(uint8_t *rdram, uint32_t address)
         {
-            return rdram[address & (PS2_RAM_SIZE - 1u)];
+            return rdram[address & PS2_RAM_MASK];
         }
 
         // The game's own frame counter (GameWork +0x210, +1 each main loop): it lives in RAM, so a save state carries
@@ -301,7 +301,7 @@ namespace kamite
                 g_dashArmed = true;
             uint32_t gene = 0;
             std::memcpy(&gene, &ram8(rdram, game::GameWork::address(game::GameWork::kPlayerObj)), sizeof(gene));
-            if (gene >= 0x100000u && gene < PS2_RAM_SIZE - 0x1000u && g_dashArmed)
+            if (gene >= 0x100000u && gene < PS2_RDRAM_SIZE - 0x1000u && g_dashArmed)
             {
                 if (ram8(rdram, gene + 0x2F5u) == 6u || g_dashFrames > 10u * perFrame)
                     g_dashArmed = false;
@@ -932,7 +932,7 @@ namespace kamite
         void seqBefore(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             const uint32_t obj = GPR_U32(ctx, 17);
-            if (obj < 0x100000u || obj >= 0x2000000u - 0x500u)
+            if (obj < 0x100000u || obj >= PS2_RDRAM_SIZE - 0x500u)
                 return;
             g_seqPreObj = obj;
             g_seqPre = readSeq(rdram, obj);
@@ -1012,7 +1012,7 @@ namespace kamite
         {
             SET_GPR_U32(ctx, 2, 0x740000u);
             const uint32_t obj = GPR_U32(ctx, 17);
-            if (obj < 0x100000u || obj >= 0x2000000u - 0x500u || !motion60(rdram))
+            if (obj < 0x100000u || obj >= PS2_RDRAM_SIZE - 0x500u || !motion60(rdram))
                 return;
             seqAfter(rdram, obj);
             uint32_t motion = 0;
@@ -1220,7 +1220,7 @@ namespace kamite
         void geneFallY(uint8_t *rdram, R5900Context *ctx, PS2Runtime *) // add.s Dst, Dst, V (y + new vy); Gene in s1
         {
             float g = 0.0f;
-            std::memcpy(&g, rdram + ((GPR_U32(ctx, 17) + 0x1604u) & 0x01FFFFFFu), 4);
+            std::memcpy(&g, rdram + ((GPR_U32(ctx, 17) + 0x1604u) & PS2_RAM_MASK), 4);
             ctx->f[Dst] = ctx->f[Dst] + ctx->f[V] * 0.5f - g * 0.125f;
         }
 
@@ -1231,15 +1231,15 @@ namespace kamite
             const float after = ctx->f[F];
             float before = 0.0f, rate = 0.0f, y = 0.0f;
             uint32_t pos = 0u;
-            std::memcpy(&before, rdram + ((obj + 0x5C4u) & 0x01FFFFFFu), 4);
-            std::memcpy(&rate, rdram + ((obj + 0x5A8u) & 0x01FFFFFFu), 4);
-            std::memcpy(rdram + ((obj + 0x5C4u) & 0x01FFFFFFu), &after, 4);
-            std::memcpy(&pos, rdram + ((obj + 0xF0u) & 0x01FFFFFFu), 4);
+            std::memcpy(&before, rdram + ((obj + 0x5C4u) & PS2_RAM_MASK), 4);
+            std::memcpy(&rate, rdram + ((obj + 0x5A8u) & PS2_RAM_MASK), 4);
+            std::memcpy(rdram + ((obj + 0x5C4u) & PS2_RAM_MASK), &after, 4);
+            std::memcpy(&pos, rdram + ((obj + 0xF0u) & PS2_RAM_MASK), 4);
             if (pos == 0u)
                 return;
-            std::memcpy(&y, rdram + ((pos + 4u) & 0x01FFFFFFu), 4);
+            std::memcpy(&y, rdram + ((pos + 4u) & PS2_RAM_MASK), 4);
             y += (before - after) * rate * 0.5f;
-            std::memcpy(rdram + ((pos + 4u) & 0x01FFFFFFu), &y, 4);
+            std::memcpy(rdram + ((pos + 4u) & PS2_RAM_MASK), &y, 4);
         }
 
         // cGameObj_SetTgtTurn (0x2A7498) is 60-aware: the turn per call is f12 x GameWork +0x55C (1.0, or 0.5 when the
@@ -1381,7 +1381,7 @@ namespace kamite
         {
             const uint32_t owner = GPR_U32(ctx, 5), ra = GPR_U32(ctx, 31);
             bool stale = false;
-            if (!g_fps60 || ctx->pc != 0x1348E8u || owner < 0x100000u || owner >= 0x2000000u - 0x100u || !bodyPushSite(ra, stale))
+            if (!g_fps60 || ctx->pc != 0x1348E8u || owner < 0x100000u || owner >= PS2_RDRAM_SIZE - 0x100u || !bodyPushSite(ra, stale))
                 return g_origChkHit(rdram, ctx, runtime);
             const uint32_t counter = gameFrames(rdram);
             if (!thinkSkipped(rdram))
@@ -1465,15 +1465,15 @@ namespace kamite
                 return 0u;
             uint32_t parts = 0, part = 0;
             std::memcpy(&parts, &ram8(rdram, obj + 0x278u), 4);
-            if (parts < 0x100000u || parts >= 0x2000000u - 0x80u)
+            if (parts < 0x100000u || parts >= PS2_RDRAM_SIZE - 0x80u)
                 return 0u;
             std::memcpy(&part, &ram8(rdram, parts + 0x74u), 4);
-            return part >= 0x100000u && part < 0x2000000u - 0x110u ? part : 0u;
+            return part >= 0x100000u && part < PS2_RDRAM_SIZE - 0x110u ? part : 0u;
         }
         void moveBust(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t obj = GPR_U32(ctx, 4);
-            const bool live = g_fps60 && ctx->pc == 0x2B6A40u && obj >= 0x100000u && obj < 0x2000000u - 0x3000u;
+            const bool live = g_fps60 && ctx->pc == 0x2B6A40u && obj >= 0x100000u && obj < PS2_RDRAM_SIZE - 0x3000u;
             if (live && thinkSkipped(rdram))
             {
                 const auto it = g_bustHold.find(obj);
@@ -1502,7 +1502,7 @@ namespace kamite
         void ringResult(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t self = GPR_U32(ctx, 4);
-            if (g_fps60 && ctx->pc == 0x1EF180u && self >= 0x100000u && self < 0x2000000u - 0x100u && thinkSkipped(rdram))
+            if (g_fps60 && ctx->pc == 0x1EF180u && self >= 0x100000u && self < PS2_RDRAM_SIZE - 0x100u && thinkSkipped(rdram))
             {
                 uint32_t step = 0;
                 std::memcpy(&step, &ram8(rdram, self + 0x8u), sizeof(step));
@@ -1629,7 +1629,7 @@ namespace kamite
         {
             constexpr uint32_t kMaxParts = 256u;
             const uint32_t obj = GPR_U32(ctx, 4);
-            auto inRam = [](uint32_t a, uint32_t size) { return a >= 0x100000u && a + size <= 0x2000000u; };
+            auto inRam = [](uint32_t a, uint32_t size) { return a >= 0x100000u && a + size <= PS2_RDRAM_SIZE; };
             if (!g_fps60 || !g_motionSmooth || ctx->pc != kMotionPose || !inRam(obj, 0x440u))
                 return g_origMotionPose(rdram, ctx, runtime);
             const float t = ramF32(rdram, obj + 0x430u);
@@ -2234,7 +2234,7 @@ namespace kamite
         {
             uint32_t slot = 0;
             std::memcpy(&slot, &ram8(rdram, 0x5864F0u + 0x500u), sizeof(slot));
-            for (int guard = 0; guard < 128 && slot >= 0x100000u && slot < 0x2000000u - 16u; ++guard)
+            for (int guard = 0; guard < 128 && slot >= 0x100000u && slot < PS2_RDRAM_SIZE - 16u; ++guard)
             {
                 uint32_t object = 0, next = 0;
                 std::memcpy(&object, &ram8(rdram, slot + 8u), sizeof(object));
@@ -2351,7 +2351,7 @@ namespace kamite
         void moneyRoll(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             uint32_t value = 0;
-            std::memcpy(&value, rdram + ((GPR_U32(ctx, 6) + 0x84u) & 0x01FFFFFFu), 4);
+            std::memcpy(&value, rdram + ((GPR_U32(ctx, 6) + 0x84u) & PS2_RAM_MASK), 4);
             if (skipFrame(rdram))
             {
                 SET_GPR_U32(ctx, 3, value - 1u);
@@ -2376,7 +2376,7 @@ namespace kamite
         void countupLoad(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             uint32_t value = 0;
-            std::memcpy(&value, rdram + ((GPR_U32(ctx, Base) + Offset) & 0x01FFFFFFu), Bytes);
+            std::memcpy(&value, rdram + ((GPR_U32(ctx, Base) + Offset) & PS2_RAM_MASK), Bytes);
             SET_GPR_U32(ctx, Dst, skipFrame(rdram) && value != 0u ? value - 1u : value);
         }
         // `lw v0,X(base)` before a countdown whose `addiu v0,v0,-1` sits in a branch delay slot (no hook there): on the
@@ -2387,7 +2387,7 @@ namespace kamite
         void countdownLoad(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             uint32_t value = 0;
-            std::memcpy(&value, rdram + ((GPR_U32(ctx, Base) + Offset) & 0x01FFFFFFu), 4);
+            std::memcpy(&value, rdram + ((GPR_U32(ctx, Base) + Offset) & PS2_RAM_MASK), 4);
             SET_GPR_U32(ctx, 2, skipFrame(rdram) && value != 0u ? value + 1u : value);
         }
 
@@ -2397,7 +2397,7 @@ namespace kamite
         void countdownLoadAll(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             uint32_t value = 0;
-            std::memcpy(&value, rdram + ((GPR_U32(ctx, Base) + Offset) & 0x01FFFFFFu), 4);
+            std::memcpy(&value, rdram + ((GPR_U32(ctx, Base) + Offset) & PS2_RAM_MASK), 4);
             SET_GPR_U32(ctx, 2, skipFrame(rdram) ? value + 1u : value);
         }
 
@@ -2406,7 +2406,7 @@ namespace kamite
         void countdownLoadAny(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             uint32_t value = 0;
-            std::memcpy(&value, rdram + ((GPR_U32(ctx, Base) + Offset) & 0x01FFFFFFu), Bytes);
+            std::memcpy(&value, rdram + ((GPR_U32(ctx, Base) + Offset) & PS2_RAM_MASK), Bytes);
             SET_GPR_U32(ctx, Dst, skipFrame(rdram) && value != 0u ? value + 1u : value);
         }
 
@@ -2451,7 +2451,7 @@ namespace kamite
         template <int Base, uint32_t Offset, int Dst, int Bytes>
         void countdownLoadExact(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            const uint32_t addr = (GPR_U32(ctx, Base) + Offset) & 0x01FFFFFFu;
+            const uint32_t addr = (GPR_U32(ctx, Base) + Offset) & PS2_RAM_MASK;
             uint32_t value = 0;
             std::memcpy(&value, rdram + addr, Bytes);
             if (!skipFrame(rdram))
@@ -2469,7 +2469,7 @@ namespace kamite
         template <int Base, uint32_t Offset, int Dst, int Bytes, int Threshold>
         void countdownGuard(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            const uint32_t addr = (GPR_U32(ctx, Base) + Offset) & 0x01FFFFFFu;
+            const uint32_t addr = (GPR_U32(ctx, Base) + Offset) & PS2_RAM_MASK;
             int32_t value = 0;
             if constexpr (Bytes == 2)
             {
@@ -2510,7 +2510,7 @@ namespace kamite
         template <int Base, uint32_t Offset, int Dst>
         void toggleLoad(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
-            const uint32_t addr = (GPR_U32(ctx, Base) + Offset) & 0x01FFFFFFu;
+            const uint32_t addr = (GPR_U32(ctx, Base) + Offset) & PS2_RAM_MASK;
             uint32_t value = 0;
             std::memcpy(&value, rdram + addr, 4);
             const uint32_t now = gameFrames(rdram);
@@ -2582,7 +2582,7 @@ namespace kamite
         void tickOnlyGate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             uint32_t value = 0;
-            std::memcpy(&value, rdram + (GPR_U32(ctx, Base) & 0x01FFFFFFu), 4);
+            std::memcpy(&value, rdram + (GPR_U32(ctx, Base) & PS2_RAM_MASK), 4);
             SET_GPR_U32(ctx, 2, skipFrame(rdram) ? (value & ~Mask) : value);
         }
 
@@ -2592,7 +2592,7 @@ namespace kamite
         void countdownStore(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             const uint32_t value = GPR_U32(ctx, Src) + (skipFrame(rdram) ? 1u : 0u);
-            std::memcpy(rdram + ((GPR_U32(ctx, Base) + Offset) & 0x01FFFFFFu), &value, 4);
+            std::memcpy(rdram + ((GPR_U32(ctx, Base) + Offset) & PS2_RAM_MASK), &value, 4);
         }
 
         // The stick-wiggle button prompt (cCockActButton move, type 4, 0x13BF08..0x13C020) swings its stick icon a

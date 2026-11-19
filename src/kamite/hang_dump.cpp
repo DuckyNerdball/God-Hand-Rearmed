@@ -163,7 +163,7 @@ namespace kamite::hangdump
                     {
                         std::fprintf(stderr, "[hang-dump]   mem %08x:", address + offset);
                         for (uint32_t i = 0; i < 16 && offset + i < length; ++i)
-                            std::fprintf(stderr, " %02x", rdram[(address + offset + i) & 0x01FFFFFFu]);
+                            std::fprintf(stderr, " %02x", rdram[(address + offset + i) & PS2_RAM_MASK]);
                         std::fprintf(stderr, "\n");
                     }
                 }

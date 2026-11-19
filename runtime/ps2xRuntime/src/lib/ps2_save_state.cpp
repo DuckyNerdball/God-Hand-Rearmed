@@ -8,6 +8,7 @@
 #include "Kernel/Stubs/CD.h"
 #include "Kernel/Stubs/SIF.h"
 #include "GuestKernelMemory.h"
+#include "runtime/ps2_xram.h"
 
 #include <atomic>
 #include <chrono>
@@ -29,7 +30,10 @@ namespace ps2x::savestate
     namespace
     {
         constexpr uint64_t kMagic = 0x3145544154535832ull;
-        constexpr uint32_t kVersion = 1u;
+        // 2: the XRAM section (the extension RAM above the game's 32 MB) after EEXT. 1 still loads (the extension is
+        // cleared); older builds refuse a 2 instead of loading half of it.
+        constexpr uint32_t kVersion = 2u;
+        constexpr uint32_t kOldestVersion = 1u;
 
         struct Extension
         {
@@ -724,6 +728,14 @@ bool EeScheduler::serviceStateRequests()
                     ps2x::state::fields(out, extension.name, blob.data());
                 }
             }
+            out.section(ps2x::state::fourcc("XRAM"));
+            {
+                const uint8_t *rdram = m_runtime.memory().getRDRAM();
+                uint32_t xramSize = PS2_XRAM_SIZE;
+                uint32_t used = ps2x::xram::usedBytes(rdram);
+                ps2x::state::fields(out, xramSize, used);
+                out.raw(rdram + PS2_XRAM_BASE, used);
+            }
             out.section(ps2x::state::fourcc("END "));
             std::error_code ec;
             if (path.has_parent_path())
@@ -775,7 +787,7 @@ bool EeScheduler::serviceStateRequests()
         uint32_t version = 0;
         uint64_t tick = 0;
         ps2x::state::fields(in, magic, version, tick);
-        if (magic != kMagic || version != kVersion)
+        if (magic != kMagic || version < kOldestVersion || version > kVersion)
             throw ps2x::state::Error("not a compatible save state");
         serializeMachine(in);
         in.section(ps2x::state::fourcc("EEXT"));
@@ -799,6 +811,21 @@ bool EeScheduler::serviceStateRequests()
                     ps2x::state::Reader blobReader(blob.data(), blob.size());
                     extension.load(blobReader);
                 }
+            }
+        }
+        {
+            uint8_t *rdram = m_runtime.memory().getRDRAM();
+            ps2x::xram::clear(rdram);
+            if (version >= 2u)
+            {
+                in.section(ps2x::state::fourcc("XRAM"));
+                uint32_t xramSize = 0u;
+                uint32_t used = 0u;
+                ps2x::state::fields(in, xramSize, used);
+                if (used > PS2_XRAM_SIZE)
+                    throw ps2x::state::Error("the state uses " + std::to_string(used >> 20) + " MB of extension RAM; this build has " +
+                                             std::to_string(PS2_XRAM_SIZE >> 20) + " MB");
+                in.raw(rdram + PS2_XRAM_BASE, used);
             }
         }
         in.section(ps2x::state::fourcc("END "));

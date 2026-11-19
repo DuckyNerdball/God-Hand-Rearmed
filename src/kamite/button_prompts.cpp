@@ -116,13 +116,13 @@ namespace kamite::button_prompts
         uint32_t rd32(uint32_t address)
         {
             uint32_t value;
-            std::memcpy(&value, g_ram + (address & 0x1FFFFFFu), sizeof(value));
+            std::memcpy(&value, g_ram + (address & PS2_RAM_MASK), sizeof(value));
             return value;
         }
 
         bool coreOk(uint32_t core)
         {
-            return core >= 0x100000u && core <= 0x2000000u - kCoreSpan && (core & 0xFu) == 0u;
+            return core >= 0x100000u && core <= PS2_RDRAM_SIZE - kCoreSpan && (core & 0xFu) == 0u;
         }
 
         // The sheet's TEX0 (data - 0xC0) is the 128x128 PSMT8 TBW 2 the design checked in every dump.

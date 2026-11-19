@@ -8,7 +8,7 @@ namespace ps2_stubs
     {
         uint32_t sanitizeMemTransferSize(uint32_t size, const char *op)
         {
-            constexpr uint32_t kMaxTransfer = PS2_RAM_SIZE;
+            constexpr uint32_t kMaxTransfer = PS2_RDRAM_SIZE;
             if (size <= kMaxTransfer)
             {
                 return size;
@@ -42,7 +42,7 @@ namespace ps2_stubs
             {
                 return (offset < PS2_SCRATCHPAD_SIZE) ? (PS2_SCRATCHPAD_SIZE - offset) : 0u;
             }
-            return (offset < PS2_RAM_SIZE) ? (PS2_RAM_SIZE - offset) : 0u;
+            return (offset < PS2_RDRAM_SIZE) ? (PS2_RDRAM_SIZE - offset) : 0u;
         }
 
     }
