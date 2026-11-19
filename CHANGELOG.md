@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 19, 2026
 
+- Olivia in gameplay wears her cutscene model: the detailed face (her mouth still moves when she talks), hands with fingers, sharper textures.
 - Female Models: the horned woman, the casino's bunny girl and the masked dancer get the new bodies too (the dancer keeps her own seat under her skirt).
 - Performance: the port's hooks on the game's code no longer take a lock on every call (some run for every character every frame).
 - Mods can replace any number of game files of any size; the game reads them in place of the disc's (Character mods use it).

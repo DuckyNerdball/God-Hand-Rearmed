@@ -6,12 +6,14 @@
 #include "kamite/file_layer.h"
 #include "kamite/function_hooks.h"
 #include "kamite/log.h"
+#include "kamite/olivia_model.h"
 #include "runtime/ps2_cd_image.h"
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -291,6 +293,61 @@ namespace kamite::body_detail
         }
     }
 
+    namespace
+    {
+        // Gameplay Olivia from her cutscene parts (olivia_model.h; claude/limit-break-handoff.md decision 10), unless
+        // KAMITE_OLIVIA_MODEL=0. Built only on the disc whose em/ema0.dat model kGrowModels lists.
+        bool buildOlivia(const GrowModel &listed, olivia_model::Built &out)
+        {
+            if (const char *v = std::getenv("KAMITE_OLIVIA_MODEL"); v && *v == '0')
+                return false;
+            std::vector<uint8_t> files[4];
+            const char *paths[4] = {"em/ema0.dat", "el/el0a.dat", "el/el0b.dat", "el/el0c.dat"};
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto file = disc_files::find(paths[i]);
+                if (!file || !disc_files::read(*file, files[i]))
+                    return false;
+            }
+            if (files[0].size() < size_t{listed.offset} + listed.size ||
+                fnv(std::vector<uint8_t>(files[0].begin() + listed.offset, files[0].begin() + listed.offset + listed.size)) != listed.hash)
+                return false;
+            if (!olivia_model::build(files[0], files[1], files[2], files[3], out))
+            {
+                KM_WARN(Boot, "body detail: gameplay Olivia keeps her model (" << out.error << ")");
+                return false;
+            }
+            return true;
+        }
+
+        // PROBE (strip with K's OK, claude/strip-list.md): the game's texture cache in video memory. cVram (0x4664A0)
+        // is emptied every frame (func_00150AA8, from the main loop) and refilled from GS block 0x2800 (textures; CLUTs
+        // from 0x1C20) by each of its three lists (DEF / ALPHA / COKPIT), so a frame's textures per list must fit in
+        // 0x1800 blocks (1.5 MB) below the top of the GS's 4 MB. Logs each list's highest use so far (in KB, at every new
+        // high 64 KB above the last one logged), to see what the bigger Olivia costs.
+        constexpr uint32_t kVramReset = 0x00150AA8u, kVram = 0x004664A0u;
+        constexpr uint32_t kTexEnd[3] = {0x3DC60u, 0x3DC78u, 0x3DC6Cu}; // DEF, ALPHA, COKPIT: the next texture block
+        uint32_t g_vramPeak[3] = {}, g_vramLogged[3] = {};
+        void onVramReset(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            if (GPR_U32(ctx, 4) != kVram)
+                return;
+            static const char *const names[3] = {"DEF", "ALPHA", "COKPIT"};
+            for (int i = 0; i < 3; ++i)
+            {
+                const uint32_t end = rd32(rdram, kVram + kTexEnd[i]);
+                const uint32_t used = end > 0x2800u && end < 0x8000u ? end - 0x2800u : 0u; // 256-byte blocks
+                if (used <= g_vramPeak[i])
+                    continue;
+                g_vramPeak[i] = used;
+                if (used < g_vramLogged[i] + 256u)
+                    continue;
+                g_vramLogged[i] = used;
+                KM_INFO(Game, "vram probe: " << names[i] << " textures peak " << used / 4u << " KB of 1536" << (used > 0x1800u ? " (OVER)" : ""));
+            }
+        }
+    }
+
     void install(PS2Runtime &runtime)
     {
         if (!runtime.hasFunction(kGetMeshPtr))
@@ -347,15 +404,25 @@ namespace kamite::body_detail
             placed[m.file].push_back({m.offset, m.size, it->second.second});
             ++models;
         }
-        // Shannon and Olivia keep their models; Cash grows their own seats (and what hangs over them).
+        // Shannon and Olivia keep their models; Cash grows their own seats (and what hangs over them). Gameplay Olivia's
+        // is first rebuilt from her cutscene parts (served whole below), and grown as that.
         int grown = 0;
+        olivia_model::Built olivia;
+        bool oliviaBuilt = false;
         for (const GrowModel &g : kGrowModels)
         {
+            const bool isOlivia = std::strcmp(g.file, "em/ema0.dat") == 0 && (oliviaBuilt = buildOlivia(g, olivia));
             const auto file = disc_files::find(g.file);
             std::vector<uint8_t> block;
             std::vector<GrownNode> nodes;
-            if (!file || !disc_files::readRange(*file, g.offset, g.size, block) || block.size() != g.size || fnv(block) != g.hash ||
-                !growOnly(block.data(), block.size(), g.rules, nodes))
+            if (isOlivia)
+                block.assign(olivia.dat.begin() + olivia.md, olivia.dat.begin() + olivia.md + olivia.mdSize);
+            if (!isOlivia && (!file || !disc_files::readRange(*file, g.offset, g.size, block) || block.size() != g.size || fnv(block) != g.hash))
+            {
+                ++other;
+                continue;
+            }
+            if (!growOnly(block.data(), block.size(), g.rules, nodes))
             {
                 ++other;
                 continue;
@@ -373,7 +440,7 @@ namespace kamite::body_detail
             for (const GrownNode &n : nodes)
                 known += isReskinned(n.name) ? 1 : 0;
             int jiggle = 0;
-            if (g.jiggle && known == named && (jiggle = reskin(block.data(), block.size(), g.reskin, named, g.jiggle)) != 0)
+            if (g.jiggle && known == named && (jiggle = reskin(block.data(), block.size(), g.reskin, named, g.jiggle)) != 0 && !isOlivia)
                 placed[g.file].push_back({g.offset, g.size, block});
             else if (g.jiggle)
                 KM_WARN(Boot, "body detail: " << g.file << ": no jiggle bones (" << known << " of " << named << " nodes known)");
@@ -390,7 +457,20 @@ namespace kamite::body_detail
                 if (std::find(g_nodeNames.begin(), g_nodeNames.end(), std::string(n.name)) == g_nodeNames.end())
                     g_nodeNames.emplace_back(n.name);
             }
+            if (isOlivia)
+                std::copy(block.begin(), block.end(), olivia.dat.begin() + olivia.md);
             ++grown;
+        }
+        if (oliviaBuilt)
+        {
+            const size_t size = olivia.dat.size();
+            if (file_layer::replace("em/ema0.dat", std::move(olivia.dat)))
+            {
+                KM_INFO(Boot, "body detail: gameplay Olivia from her cutscene models (" << olivia.nodes << " nodes, " << olivia.vertices
+                                                                                      << " vertices; textures " << olivia.textureBytes / 1024u << " KB, the game's "
+                                                                                      << olivia.gameTextureBytes / 1024u << " KB; " << size << " bytes)");
+                FunctionHooks::instance().observeEntry(kVramReset, "vram_probe", &onVramReset);
+            }
         }
         if (placed.empty() && grown == 0)
         {
