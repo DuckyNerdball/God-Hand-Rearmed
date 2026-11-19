@@ -59,7 +59,9 @@ namespace kamite::launcher::update
     };
     // test: a dev build's [Launcher] UpdateTest (any release counts as newer). Dev builds read the releases too (the
     // newspaper's notes), but only offer an update with `test`.
-    void startCheck(Checker &checker, bool test);
+    // tester: [Launcher] Channel=tester (the tester zip's GHR.ini): the rolling tester-build release instead, whose zip
+    // is a build of main (tools/win/Publish-Tester.ps1, after each of K's builds); a newer commit's build is offered.
+    void startCheck(Checker &checker, bool test, bool tester);
 
     enum class Stage : int
     {

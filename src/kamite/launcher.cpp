@@ -5669,7 +5669,13 @@ namespace kamite::launcher
         state.exePath = platform::thisExe();
         update::cleanup(context.exeDir);
         if (g_updateCheck.state.load() == static_cast<int>(update::CheckState::Off))
-            update::startCheck(g_updateCheck, state.ini.getBool("Launcher", "UpdateTest", false)); // a dev build's test switch
+        {
+            std::string channel = state.ini.get("Launcher", "Channel", "");
+            for (char &ch : channel)
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            // UpdateTest: a dev build's test switch; Channel=tester: the tester zip's (builds of main).
+            update::startCheck(g_updateCheck, state.ini.getBool("Launcher", "UpdateTest", false), channel == "tester");
+        }
         KM_INFO(Boot, "launcher: " << update::versionLabel());
 #if KAMITE_LAUNCHER_STEAM
         state.steam = steam::probe();

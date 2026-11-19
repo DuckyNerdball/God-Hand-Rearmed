@@ -16,6 +16,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <string_view>
 #include <vector>
 
 // raylib's own inflate (rcore.c builds sinfl.h with SUPPORT_COMPRESSION_API): the zip's deflate streams.
@@ -181,6 +182,99 @@ namespace kamite::launcher::update
                 release.editions.push_back(Edition{it->tag, it->date, body});
             }
             KM_INFO(Boot, "update: " << release.tag << " is out (" << release.zipSize / (1024 * 1024) << " MB)");
+            checker.state.store(static_cast<int>(CheckState::Available));
+        }
+
+        // ---- the tester channel -----------------------------------------------------------------------------------
+        // [Launcher] Channel=tester (the tester zip's GHR.ini): the rolling pre-release tagged tester-build, whose zip
+        // tools/win/Publish-Tester.ps1 replaces after each of K's builds of main, named
+        // GHR-tester-<commit>-<commit time, Unix seconds>.zip. A build of a newer commit than ours is offered. Players'
+        // checks skip that release (its tag is not a version).
+        constexpr const char *kTesterApi = "https://api.github.com/repos/God-Hand-Rearmed/God-Hand-Rearmed/releases/tags/tester-build";
+        std::atomic<bool> g_testerChannel{false};
+
+        // "ghr-tester-1a2b3c4-1795100000.zip" (lower case) -> commit, time.
+        bool parseTesterAsset(const std::string &name, std::string &commit, uint64_t &time)
+        {
+            constexpr std::string_view kPrefix = "ghr-tester-", kSuffix = ".zip";
+            if (name.size() <= kPrefix.size() + kSuffix.size() || name.compare(0, kPrefix.size(), kPrefix) != 0 ||
+                name.compare(name.size() - kSuffix.size(), kSuffix.size(), kSuffix) != 0)
+                return false;
+            const std::string middle = name.substr(kPrefix.size(), name.size() - kPrefix.size() - kSuffix.size());
+            const size_t dash = middle.find('-');
+            if (dash == std::string::npos || dash == 0 || dash + 1 == middle.size())
+                return false;
+            commit = middle.substr(0, dash);
+            time = 0;
+            for (size_t i = dash + 1; i < middle.size(); ++i)
+            {
+                if (!std::isdigit(static_cast<unsigned char>(middle[i])))
+                    return false;
+                time = time * 10u + static_cast<uint64_t>(middle[i] - '0');
+            }
+            return true;
+        }
+
+        // Short commits of different lengths name the same commit when one starts the other.
+        bool sameCommit(const std::string &a, const std::string &b)
+        {
+            const size_t n = std::min(a.size(), b.size());
+            return n >= 7 && lower(a).compare(0, n, lower(b), 0, n) == 0;
+        }
+
+        void checkTester(Checker &checker)
+        {
+            std::vector<uint8_t> bytes;
+            Json item;
+            if (!platform::httpGet(kTesterApi, bytes, 8u << 20, "application/vnd.github+json") ||
+                !JsonReader(std::string(bytes.begin(), bytes.end())).read(item) || item.kind != Json::Kind::Object)
+            {
+                KM_INFO(Boot, "update: the tester build could not be read (offline, or none published yet)");
+                checker.state.store(static_cast<int>(CheckState::Failed));
+                return;
+            }
+            std::string commit, url, date;
+            uint64_t time = 0, size = 0;
+            if (const Json *assets = item["assets"]; assets && assets->kind == Json::Kind::Array)
+                for (const Json &asset : assets->items)
+                {
+                    std::string c;
+                    uint64_t t = 0;
+                    if (!parseTesterAsset(lower(text(asset["name"])), c, t) || (!url.empty() && t <= time))
+                        continue;
+                    commit = c;
+                    time = t;
+                    url = text(asset["browser_download_url"]);
+                    date = paperDate(text(asset["updated_at"]));
+                    const Json *bytesJson = asset["size"];
+                    size = bytesJson && bytesJson->kind == Json::Kind::Number ? static_cast<uint64_t>(bytesJson->number) : 0u;
+                }
+            if (url.empty())
+            {
+                KM_INFO(Boot, "update: no tester build published yet");
+                checker.state.store(static_cast<int>(CheckState::UpToDate));
+                return;
+            }
+            std::string body = text(item["body"]);
+            body.erase(std::remove(body.begin(), body.end(), '\r'), body.end());
+            const Edition edition{"Build " + commit, date, body};
+            const std::string ours = KAMITE_GIT_COMMIT;
+            const uint64_t ourTime = KAMITE_GIT_TIME;
+            if (sameCommit(commit, ours) || (ourTime != 0 && time <= ourTime))
+            {
+                checker.current = edition;
+                checker.hasCurrent = true;
+                KM_INFO(Boot, "update: tester build " << commit << " is not newer than ours (" << ours << ")");
+                checker.state.store(static_cast<int>(CheckState::UpToDate));
+                return;
+            }
+            Release &release = checker.release;
+            release.tag = edition.tag;
+            release.zipUrl = url;
+            release.zipSize = size;
+            release.notes = "# " + edition.tag + "\n" + body + "\n\n";
+            release.editions.push_back(edition);
+            KM_INFO(Boot, "update: tester build " << commit << " is out (" << size / (1024 * 1024) << " MB)");
             checker.state.store(static_cast<int>(CheckState::Available));
         }
 
@@ -486,7 +580,7 @@ namespace kamite::launcher::update
             c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         return name + " EDITION";
 #else
-        return "DEV EDITION";
+        return g_testerChannel.load() ? "TESTER EDITION" : "DEV EDITION";
 #endif
     }
 
@@ -499,10 +593,11 @@ namespace kamite::launcher::update
 #endif
     }
 
-    void startCheck(Checker &checker, bool test)
+    void startCheck(Checker &checker, bool test, bool tester)
     {
+        g_testerChannel.store(tester);
         checker.state.store(static_cast<int>(CheckState::Checking));
-        checker.worker = std::thread([&checker, test] { check(checker, test); });
+        checker.worker = std::thread([&checker, test, tester] { tester ? checkTester(checker) : check(checker, test); });
     }
 
     void startInstall(Installer &installer, const Release &release, const std::filesystem::path &exeDir)
