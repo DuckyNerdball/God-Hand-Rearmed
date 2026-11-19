@@ -268,6 +268,9 @@ namespace ps2_host_input
         // The device player 1 last pressed a bound input with (past half: stick drift and unbound buttons never count),
         // at most one change per 500 ms, only while the window has focus. Starts as Keys.
         [[nodiscard]] Device lastDevice();
+        // A case replay (test_mode): the device stays `device` whatever is pressed or connected, so menus and HUD hints
+        // (both follow the device) replay the same every run (Nov 19: a controller seen at start in one run of two).
+        void pinDevice(Device device);
         // From the name of the controller that last pressed a bound input (before any press: player 1's first
         // controller binding's controller); Unknown while that controller is not connected.
         [[nodiscard]] PadStyle padStyle();

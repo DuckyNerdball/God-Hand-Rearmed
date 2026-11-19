@@ -583,6 +583,7 @@ namespace ps2_host_input
         prompts::Snapshot g_prompts; // g_promptMutex
         std::atomic<uint32_t> g_promptGeneration{0u};
         std::atomic<prompts::Device> g_promptDevice{prompts::Device::Keys};
+        std::atomic<bool> g_promptDevicePinned{false}; // prompts::pinDevice: a case replay's device, never switched
         std::atomic<prompts::PadStyle> g_promptStyle{prompts::PadStyle::Unknown};
         // Last-device detector (window thread). Bit = binding key index (the 16 buttons, then the 8 stick halves).
         uint32_t g_promptKeysHeld = 0u; // held past half by a key or mouse button binding
@@ -1936,13 +1937,14 @@ namespace ps2_host_input
             // device has its own control style, so a controller player starts with the controller's, not the keys').
             static bool anyPress = false;
             anyPress = anyPress || keyEdge != 0u || padEdge != 0u;
-            if (!anyPress && ps2_host_gamepads::connected(g_promptBoundPad) &&
+            const bool pinned = g_promptDevicePinned.load(std::memory_order_relaxed);
+            if (!pinned && !anyPress && ps2_host_gamepads::connected(g_promptBoundPad) &&
                 g_promptDevice.load(std::memory_order_relaxed) != prompts::Device::Controller)
             {
                 g_promptDevice.store(prompts::Device::Controller, std::memory_order_relaxed);
                 std::cerr << "[prompts] device: controller (connected at start)" << std::endl;
             }
-            if ((keyEdge != 0u || padEdge != 0u) && IsWindowFocused())
+            if (!pinned && (keyEdge != 0u || padEdge != 0u) && IsWindowFocused())
             {
                 if (padEdge != 0u && pad >= 0)
                     g_promptPad = pad;
@@ -2534,6 +2536,14 @@ namespace ps2_host_input
         Device lastDevice()
         {
             return g_promptDevice.load(std::memory_order_relaxed);
+        }
+
+        void pinDevice(Device device)
+        {
+            g_promptDevice.store(device, std::memory_order_relaxed);
+            g_promptDevicePinned.store(true, std::memory_order_relaxed);
+            std::cerr << "[prompts] device: " << (device == Device::Keys ? "keyboard/mouse" : "controller")
+                      << " (pinned for a case replay)" << std::endl;
         }
 
         PadStyle padStyle()

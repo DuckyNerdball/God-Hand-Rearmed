@@ -8,6 +8,7 @@ Newest first, one line per change; the code comments say how.
 - Modern: Hold: Auto's brawl mode ends by itself once no enemy is near.
 - Button Mapping: with Modern: Hold, R3 can take a single-press 180° turn (off by default).
 - Rearmed and Sleazy Mode presets use Modern: Hold (installs already on them show Custom until you pick the preset again).
+- Test cases: replays keep the recorder's input device (older cases: keyboard & mouse), so a controller waking up during a replay no longer changes its menus and HUD hints.
 - 128 MB of extra RAM above the game's own 32 MB, for mods and bigger models; older save states and test cases still load.
 - Test cases: every replay is fingerprinted, and its whole-RAM snapshots are compared with the previous build's.
 - Launcher: the disc image and folder pickers no longer stay hidden behind the fullscreen launcher until the Start key.

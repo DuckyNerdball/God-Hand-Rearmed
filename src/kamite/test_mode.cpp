@@ -36,6 +36,7 @@
 #include "runtime/ps2_save_state.h"
 #include "runtime/ps2_xram.h"
 #include "ps2_runtime_macros.h" // GPR_U32
+#include "ps2_host_input.h"   // prompts::pinDevice
 
 #include <algorithm>
 #include <cctype>
@@ -111,7 +112,7 @@ namespace kamite::test_mode
                                                  "KAMITE_SPRINT_TRAVERSAL", "KAMITE_CHARACTER", "KAMITE_LIFT_CHAIRS",
                                                  "KAMITE_TENSION_PLACABLE", "KAMITE_OFF_THE_CUFF",
                                                  "KAMITE_BALL_BUSTER_WOMEN", "KAMITE_ROULETTE_CYCLE",
-                                                 "KAMITE_BUCK_BREAKER"};
+                                                 "KAMITE_BUCK_BREAKER", "KAMITE_CASE_DEVICE"};
         // The game's own value of the gameplay settings above when nothing sets them (GHR.ini's defaults). A case
         // without one (the recorder's GHR.ini had no such line, or the option is newer than the case) ran with this
         // value, so its replay does too instead of taking the replaying machine's (Nov 6: T1's Elvis case replayed
@@ -126,7 +127,10 @@ namespace kamite::test_mode
             {"KAMITE_ROULETTE_NO_ORBS", "0"},    {"KAMITE_STYLE_SWITCHING", "0"},     {"KAMITE_SPRINT_TRAVERSAL", "0"},
             {"KAMITE_CHARACTER", "gene"},        {"KAMITE_LIFT_CHAIRS", "0"},         {"KAMITE_TENSION_PLACABLE", "0"},
             {"KAMITE_OFF_THE_CUFF", "0"},        {"KAMITE_BALL_BUSTER_WOMEN", "0"},   {"KAMITE_ROULETTE_CYCLE", "0"},
-            {"KAMITE_BUCK_BREAKER", "0"}};
+            {"KAMITE_BUCK_BREAKER", "0"},
+            // The device in effect (menus and HUD hints follow it; K, Nov 16). Older cases replayed as keyboard & mouse
+            // whenever no controller was awake at the start, which is what their fingerprints hold (Nov 19).
+            {"KAMITE_CASE_DEVICE", "keys"}};
         const char *caseDefault(const std::string &name)
         {
             for (const CaseDefault &d : kCaseDefaults)
@@ -1443,7 +1447,9 @@ namespace kamite::test_mode
                     value = resolved.c_str();
                 }
                 // The control style in effect (the device used last: K, Nov 16, one per device), not the controller's.
-                if (std::strcmp(name, "KAMITE_CONTROL_STYLE") == 0)
+                if (std::strcmp(name, "KAMITE_CASE_DEVICE") == 0)
+                    value = ps2_host_input::prompts::lastDevice() == ps2_host_input::prompts::Device::Keys ? "keys" : "controller";
+                else if (std::strcmp(name, "KAMITE_CONTROL_STYLE") == 0)
                     value = !modern::caseStyle().modern ? "classic" : modern::caseStyle().hold ? "hold" : "modern";
                 else if (std::strcmp(name, "KAMITE_MODERN_AUTO") == 0)
                     value = modern::caseStyle().autoOn ? "1" : "0";
@@ -1769,6 +1775,11 @@ namespace kamite::test_mode
                 if (!g_run.record && g_run.phase == Run::Phase::Loading)
                     npc_tools::setTarget(g_run.target, g_run.targetCantDie);
             });
+            // The recorder's device, whatever this machine's controller does during the replay (applyCaseSettings set it).
+            const char *device = std::getenv("KAMITE_CASE_DEVICE");
+            ps2_host_input::prompts::pinDevice(device && std::strcmp(device, "controller") == 0
+                                                   ? ps2_host_input::prompts::Device::Controller
+                                                   : ps2_host_input::prompts::Device::Keys);
             KM_INFO(Game, "test: replaying " << path.string() << ": " << g_run.rec.polls() << " polls recorded at "
                                             << (g_run.rec.divider == 1u ? 60 : 30) << " FPS, log " << g_run.csv.string());
         }
