@@ -72,7 +72,7 @@ namespace kamite::body_detail
 
     struct Built
     {
-        std::vector<uint8_t> scr;  // the model rebuilt, zero-padded to the original's size, flat state
+        std::vector<uint8_t> scr;  // the model rebuilt, flat state: zero-padded to the original's size, or larger (grow)
         uint32_t bodyMdb = 0;      // the body node's mdb in scr
         uint32_t bodyMdbSize = 0;
         std::vector<Change> changes;
@@ -85,8 +85,10 @@ namespace kamite::body_detail
     };
 
     // bust = false: her own bust (one already detailed, with attachments on it); seat = false: her own seat (a skirt or
-    // a dress over it).
-    bool build(const uint8_t *scr, size_t size, const Mesh &bunny, const Mesh &shannon, bool bust, bool seat, Built &out);
+    // a dress over it). grow: the model may come out larger than size (its file is then laid out again around it and
+    // served by the file layer); otherwise it must fit and is zero-padded to size.
+    bool build(const uint8_t *scr, size_t size, const Mesh &bunny, const Mesh &shannon, bool bust, bool seat, Built &out,
+               bool grow = false);
 
     // Cash's growth (tools/models/body_detail/cash.py): every body's seat region grown from the detailed state along a
     // side profile K picked (Nov 15), so Cash above 101% makes the seat fuller (the most in the cheeks' lower half), the

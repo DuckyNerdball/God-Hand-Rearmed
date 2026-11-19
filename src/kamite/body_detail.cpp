@@ -3,6 +3,7 @@
 #include "kamite/body_detail_build.h"
 #include "kamite/bone_tweaks.h"
 #include "kamite/disc_files.h"
+#include "kamite/file_layer.h"
 #include "kamite/function_hooks.h"
 #include "kamite/log.h"
 #include "runtime/ps2_cd_image.h"
@@ -25,9 +26,10 @@ namespace kamite::body_detail
         struct Model
         {
             const char *file;
-            uint32_t offset, size;
+            uint32_t offset, size; // a dat entry: its offset in the file, the room up to the next entry
             uint64_t hash;
             bool bust, seat;
+            bool grow = false; // no room in her own block: the model comes out bigger and her file is served whole
         };
         constexpr Model kModels[] = {
 #include "kamite/body_detail_models.inc"
@@ -69,6 +71,12 @@ namespace kamite::body_detail
             bool bust = false, seat = false;
             int jiggle = 0; // kJiggle*: the jiggle bones its records use (bone_tweaks places them every draw)
             JiggleBind bind;
+        };
+        // A rebuilt block for its file: where it goes, the room it had, its bytes (bigger than the room: grown).
+        struct Placed
+        {
+            uint32_t offset = 0, room = 0;
+            std::vector<uint8_t> scr;
         };
         std::vector<Body> g_bodies; // set at boot, read-only afterwards
         std::vector<std::string> g_nodeNames{"body"}; // the nodes check() looks at (the grown models' too)
@@ -204,6 +212,85 @@ namespace kamite::body_detail
         }
     }
 
+    namespace
+    {
+        uint32_t le32(const std::vector<uint8_t> &b, size_t o)
+        {
+            uint32_t v = 0;
+            std::memcpy(&v, b.data() + o, 4);
+            return v;
+        }
+
+        // A file's rebuilt blocks reach the game: all the same size as their room -> byte patches over the disc
+        // (PS2DiscOverlay); any bigger (the no-room women) -> the whole file laid out again and served by the file layer,
+        // with its other rebuilt blocks written in too (the overlay never reaches a served file). A dat is (u32 count,
+        // u32 offset[count], char type[4][count], entries); a bigger entry pushes every later one back by whole 2 KB
+        // (their alignment kept), and their offsets with them.
+        void place(const std::map<std::string, std::vector<Placed>> &placed)
+        {
+            std::vector<PS2DiscOverlay::Patch> patches;
+            for (const auto &[path, blocks] : placed)
+            {
+                const auto file = disc_files::find(path);
+                if (!file)
+                    continue;
+                const bool whole = std::any_of(blocks.begin(), blocks.end(), [](const Placed &p) { return p.scr.size() > p.room; });
+                if (!whole)
+                {
+                    for (const Placed &p : blocks)
+                        patches.emplace_back(file->imageOffset + p.offset, p.scr);
+                    continue;
+                }
+                std::vector<uint8_t> bytes;
+                if (!disc_files::read(*file, bytes) || bytes.size() < 4u)
+                    continue;
+                const uint32_t count = le32(bytes, 0);
+                if (count == 0u || count > 0x10000u || bytes.size() < 4u + 8u * count)
+                {
+                    KM_WARN(Boot, "body detail: " << path << " is not a dat; its bigger models are left out");
+                    continue;
+                }
+                std::vector<Placed> order = blocks;
+                std::sort(order.begin(), order.end(), [](const Placed &a, const Placed &b) { return a.offset > b.offset; });
+                int bigger = 0;
+                uint32_t added = 0;
+                for (const Placed &p : order)
+                {
+                    if (p.scr.size() <= p.room)
+                    {
+                        std::memcpy(bytes.data() + p.offset, p.scr.data(), p.scr.size());
+                        continue;
+                    }
+                    bool entry = false;
+                    for (uint32_t i = 0; i < count; ++i)
+                        entry = entry || le32(bytes, 4u + 4u * i) == p.offset;
+                    if (!entry || p.offset + p.room > bytes.size())
+                    {
+                        KM_WARN(Boot, "body detail: " << path << " @0x" << std::hex << p.offset << std::dec << " is not an entry; left out");
+                        continue;
+                    }
+                    const uint32_t grow = (static_cast<uint32_t>(p.scr.size()) - p.room + 0x7FFu) & ~0x7FFu;
+                    bytes.insert(bytes.begin() + p.offset + p.room, grow, 0u);
+                    std::memcpy(bytes.data() + p.offset, p.scr.data(), p.scr.size());
+                    for (uint32_t i = 0; i < count; ++i)
+                        if (const uint32_t o = le32(bytes, 4u + 4u * i); o > p.offset)
+                        {
+                            const uint32_t moved = o + grow;
+                            std::memcpy(bytes.data() + 4u + 4u * i, &moved, 4);
+                        }
+                    ++bigger;
+                    added += grow;
+                }
+                const size_t size = bytes.size();
+                if (bigger != 0 && file_layer::replace(path, std::move(bytes)))
+                    KM_INFO(Boot, "body detail: " << path << " served whole (" << bigger << " model(s) bigger, +" << added / 1024u << " KB, "
+                                                  << size << " bytes)");
+            }
+            if (!patches.empty())
+                PS2DiscOverlay::add(std::move(patches));
+        }
+    }
+
     void install(PS2Runtime &runtime)
     {
         if (!runtime.hasFunction(kGetMeshPtr))
@@ -221,7 +308,7 @@ namespace kamite::body_detail
             return;
         }
         std::map<uint64_t, std::pair<int, std::vector<uint8_t>>> built; // block hash -> body (-1: failed), its scr
-        std::vector<PS2DiscOverlay::Patch> patches;
+        std::map<std::string, std::vector<Placed>> placed;              // file -> its rebuilt blocks
         int models = 0, other = 0;
         for (const Model &m : kModels)
         {
@@ -236,7 +323,7 @@ namespace kamite::body_detail
             if (it == built.end())
             {
                 Built b;
-                if (!build(block.data(), block.size(), bunny, shannon, m.bust, m.seat, b))
+                if (!build(block.data(), block.size(), bunny, shannon, m.bust, m.seat, b, m.grow))
                 {
                     KM_WARN(Boot, "body detail: " << m.file << " @0x" << std::hex << m.offset << std::dec << ": " << b.error);
                     built.emplace(m.hash, std::make_pair(-1, std::vector<uint8_t>()));
@@ -257,7 +344,7 @@ namespace kamite::body_detail
             }
             if (it->second.first < 0)
                 continue;
-            patches.emplace_back(file->imageOffset + m.offset, it->second.second);
+            placed[m.file].push_back({m.offset, m.size, it->second.second});
             ++models;
         }
         // Shannon and Olivia keep their models; Cash grows their own seats (and what hangs over them).
@@ -287,7 +374,7 @@ namespace kamite::body_detail
                 known += isReskinned(n.name) ? 1 : 0;
             int jiggle = 0;
             if (g.jiggle && known == named && (jiggle = reskin(block.data(), block.size(), g.reskin, named, g.jiggle)) != 0)
-                patches.emplace_back(file->imageOffset + g.offset, block);
+                placed[g.file].push_back({g.offset, g.size, block});
             else if (g.jiggle)
                 KM_WARN(Boot, "body detail: " << g.file << ": no jiggle bones (" << known << " of " << named << " nodes known)");
             for (GrownNode &n : nodes)
@@ -305,13 +392,12 @@ namespace kamite::body_detail
             }
             ++grown;
         }
-        if (patches.empty() && grown == 0)
+        if (placed.empty() && grown == 0)
         {
             KM_WARN(Boot, "body detail: no model matched (" << other << " listed blocks differ on this disc)");
             return;
         }
-        if (!patches.empty())
-            PS2DiscOverlay::add(std::move(patches));
+        place(placed);
         FunctionHooks::instance().observeEntry(kGetMeshPtr, "body_detail", &onGetMeshPtr);
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
         KM_INFO(Boot, "body detail: " << models << " women's models rebuilt, " << grown << " grown as they are (" << g_bodies.size() << " bodies, " << ms << " ms"

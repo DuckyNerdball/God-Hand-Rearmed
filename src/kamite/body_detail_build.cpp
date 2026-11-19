@@ -2165,7 +2165,8 @@ namespace kamite::body_detail
         return false;
     }
 
-    bool build(const uint8_t *scr, size_t size, const Mesh &bunny, const Mesh &shannon, bool withBust, bool withSeat, Built &out)
+    bool build(const uint8_t *scr, size_t size, const Mesh &bunny, const Mesh &shannon, bool withBust, bool withSeat, Built &out,
+               bool grow)
     {
         out = Built{};
         std::vector<NodeRef> nodes;
@@ -2515,12 +2516,12 @@ namespace kamite::body_detail
             w32(o, 16 + 4 * i, at);
         }
         out.used = o.size();
-        if (o.size() > size)
+        if (o.size() > size && !grow)
         {
             out.error = "does not fit (" + std::to_string(o.size()) + " > " + std::to_string(size) + " bytes)";
             return false;
         }
-        o.resize(size, 0u);
+        o.resize(std::max(o.size(), size), 0u);
         out.scr = std::move(o);
         out.changes = std::move(changes);
         // Per region a change whose position tells the states apart: the largest growth (any Cash value shows), else

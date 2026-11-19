@@ -1,9 +1,11 @@
 // The women's models rebuilt by body_detail (SLUS-21503): file, scr block offset, size, FNV-1a 64 of its bytes, the
 // bust (false: em0d's body, horns on her bra cups and a bigger bust of her own), the seat (false: a dress keeps her own). From a scan of every em / ema file's MD entries with the women's skeleton,
-// rendered and sorted by hand (claude/female-models.md); a block that does not match is left alone.
+// rendered and sorted by hand (claude/female-models.md); a block that does not match is left alone. Last field true:
+// the new body does not fit her block, so it comes out bigger and her file is laid out again (served by the file layer).
 {"em/em00.dat", 0x100D80u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
 {"em/em01.dat", 0x1166C0u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
 {"em/em05.dat", 0x7CE40u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/em06.dat", 0x2B340u, 0x29E80u, 0x4702314F3A741854ULL, true, true, true}, // horned woman
 {"em/em07.dat", 0x70680u, 0x2A480u, 0x642322C7F2C7984EULL, true, false}, // bdcce0
 {"em/em0a.dat", 0xB17C0u, 0x25D40u, 0x0FBCAACE2B4E9150ULL, true, true}, // f2852f
 {"em/em0a.dat", 0xFE680u, 0x26D40u, 0x43DDA339C07F6B1FULL, true, true}, // e33b02
@@ -42,8 +44,14 @@
 {"em/em46.dat", 0xFF680u, 0x2A480u, 0x642322C7F2C7984EULL, true, false}, // bdcce0
 {"em/em4f.dat", 0x13D340u, 0x26300u, 0xF132B9D867717222ULL, true, true}, // e47353
 {"em/em52.dat", 0xEE380u, 0x25CC0u, 0x4167F836EA76E84BULL, true, true}, // 5d250a
+{"em/em5a.dat", 0x300C0u, 0x1C700u, 0xE0397071623F2C2DULL, true, true, true}, // bunny girl
+{"em/ema3.dat", 0x1F420u, 0x183C0u, 0x1C9992E71A1A09DBULL, true, false, true}, // masked dancer (skirt: her own seat)
+{"em/ema5.dat", 0xD4B80u, 0x183C0u, 0x1C9992E71A1A09DBULL, true, false, true}, // masked dancer
+{"em/ema5.dat", 0x144EC0u, 0x1C700u, 0xE0397071623F2C2DULL, true, true, true}, // bunny girl
 {"em/ema6.dat", 0x119080u, 0x26300u, 0xF132B9D867717222ULL, true, true}, // e47353
 {"em/ema6.dat", 0x26E5C0u, 0x26D40u, 0x43DDA339C07F6B1FULL, true, true}, // e33b02
 {"em/ema6.dat", 0x3CA440u, 0x2A480u, 0x642322C7F2C7984EULL, true, false}, // bdcce0
+{"em/ema6.dat", 0x452140u, 0x183C0u, 0x1C9992E71A1A09DBULL, true, false, true}, // masked dancer
 {"em/ema6.dat", 0x4DFD40u, 0x25CC0u, 0x4167F836EA76E84BULL, true, true}, // 5d250a
 {"em/ema6.dat", 0x52D580u, 0x26700u, 0x56EB68FC7CE29012ULL, true, true}, // 76e547
+{"em/ema6.dat", 0x6A1200u, 0x29E80u, 0x4702314F3A741854ULL, true, true, true}, // horned woman
