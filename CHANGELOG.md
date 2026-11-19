@@ -6,6 +6,7 @@ Newest first, one line per change; the code comments say how.
 
 - Performance: the port's hooks on the game's code no longer take a lock on every call (some run for every character every frame).
 - Mods can replace any number of game files of any size; the game reads them in place of the disc's (Character mods use it).
+- Mods: a game file made bigger than the original loads into the extra RAM; the game's own memory keeps its usual layout.
 - Launcher: the version and updates are a newspaper in the corner (red EXTRA! when there's an update); open it for the news, BACK / UPDATE NOW.
 - Sway Bar: killing a mid-boss (Mr. Gold, Mr. Silver) no longer takes the health and Sway bars away from the enemies after it.
 - With several controllers connected, the one that pressed a button last controls Gene (and its button prompts show).

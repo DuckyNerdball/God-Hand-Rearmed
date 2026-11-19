@@ -43,9 +43,4 @@ namespace kamite::characters
         float backForward = 8.0f, backBack = 40.0f, backSide = 25.0f, sideSwing = 20.0f; // degrees
     };
     const Hair &hair();
-
-    // Gives a replaced player file (pl/pl00.dat, pl/pl01.dat) a buffer large enough for it where the game allocates
-    // the player's buffers (0x30EE08 called from 0x30D7A8 / 0x30D7C8), logging heap A's room. (A read into a buffer too
-    // small for a replacement is cut by the file layer.)
-    void installLoadWatch();
 }

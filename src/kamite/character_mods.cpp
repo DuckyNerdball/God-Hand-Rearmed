@@ -2,11 +2,8 @@
 // size, the disc image untouched.
 #include "kamite/character_mods.h"
 #include "kamite/file_layer.h"
-#include "kamite/function_hooks.h"
 #include "kamite/ini_file.h"
 #include "kamite/log.h"
-#include "ps2_runtime.h"
-#include "ps2_runtime_macros.h"
 
 #include <algorithm>
 #include <cctype>
@@ -164,80 +161,4 @@ namespace kamite::characters
         KM_INFO(Boot, "playing as " << describe(folder).name << " (" << replaced << " files)");
         // Its full-resolution textures were registered with every character's (registerTextures).
     }
-
-    namespace
-    {
-        uint32_t r32(uint8_t *rdram, uint32_t a)
-        {
-            uint32_t v = 0;
-            std::memcpy(&v, rdram + (a & (PS2_RAM_MASK & ~3u)), 4);
-            return v;
-        }
-    }
-
-    namespace
-    {
-        // The player's files are read (cDvd_ReadToBuffer, func_0030D5C8 at 0x30D98C / 0x30D9D4) into two buffers the
-        // game allocates from heap A (0x754200) through 0x30EE08 (a0 size, a1 alignment, a2 cHeap): 0x1E6800 bytes for
-        // pl/pl00.dat at 0x30D7A8 (the largest costume, pl11, is 973 sectors) and 0x19800 for pl/pl01.dat at
-        // 0x30D7C8; the pointers sit at 0x752C38 / 0x752C3C. A replacement larger than its buffer gets a larger one
-        // (whole sectors), so the read does not run past it. cHeap {+0 first block, +4 size}; block {+8 next,
-        // +0xC free bytes after it}.
-        struct PlayerBuffer
-        {
-            uint32_t ra;
-            const char *file;
-            uint32_t gameSize;
-        };
-        constexpr PlayerBuffer kPlayerBuffers[] = {{0x0030D7B0u, "pl/pl00.dat", 0x1E6800u}, {0x0030D7D0u, "pl/pl01.dat", 0x19800u}};
-
-        void heapRoom(uint8_t *rdram, uint32_t heap, uint32_t &largest, uint32_t &total)
-        {
-            largest = total = 0u;
-            uint32_t block = r32(rdram, heap) & PS2_RAM_MASK;
-            for (uint32_t n = 0; block && block + 0x14u <= PS2_RDRAM_SIZE && n < 4096u; ++n)
-            {
-                const uint32_t freeBytes = r32(rdram, block + 0xCu);
-                largest = std::max(largest, freeBytes);
-                total += freeBytes;
-                block = r32(rdram, block + 8u) & PS2_RAM_MASK;
-            }
-        }
-
-        void onHeapAlloc(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
-        {
-            if (file_layer::replaced().empty())
-                return;
-            const uint32_t ra = GPR_U32(ctx, 31), asked = GPR_U32(ctx, 4);
-            for (const PlayerBuffer &b : kPlayerBuffers)
-            {
-                if (ra != b.ra || asked != b.gameSize)
-                    continue;
-                const auto it = file_layer::replaced().find(b.file);
-                if (it == file_layer::replaced().end())
-                    return;
-                const uint32_t need = (it->second.size + 0x7FFu) & ~0x7FFu;
-                if (need <= asked)
-                    return;
-                ctx->r[4] = _mm_set_epi64x(_mm_extract_epi64(ctx->r[4], 1), static_cast<int64_t>(static_cast<int32_t>(need)));
-                const uint32_t heap = GPR_U32(ctx, 6) & PS2_RAM_MASK;
-                uint32_t largest = 0u, total = 0u;
-                if (heap != 0u && heap + 8u <= PS2_RDRAM_SIZE)
-                    heapRoom(rdram, heap, largest, total);
-                if (largest >= need + 0x40u)
-                    KM_INFO(Game, "character: " << b.file << " buffer " << asked << " -> " << need << " bytes (heap 0x" << std::hex << heap
-                                                << std::dec << ": largest free block " << largest << ", " << total << " free, before it)");
-                else
-                    KM_WARN(Game, "character: " << b.file << " needs a " << need << "-byte buffer; heap 0x" << std::hex << heap << std::dec
-                                                << " has " << largest << " in its largest free block (" << total << " free)");
-                return;
-            }
-        }
-    }
-
-    void installLoadWatch()
-    {
-        FunctionHooks::instance().observeEntry(0x0030EE08u, "character_player_buffer", &onHeapAlloc);
-    }
-
 }

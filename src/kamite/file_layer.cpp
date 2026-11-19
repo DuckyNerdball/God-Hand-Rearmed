@@ -3,6 +3,7 @@
 #include "kamite/disc_files.h"
 #include "kamite/function_hooks.h"
 #include "kamite/log.h"
+#include "kamite/xram_heap.h"
 #include "runtime/ps2_cd_image.h"
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
@@ -23,6 +24,19 @@ namespace kamite::file_layer
         constexpr uint32_t kFstSize = 0x001FFD98u;     // BuildPackedAddr_1FFD98: a path table entry's size
         constexpr uint32_t kReadToBuffer = 0x00200B88u; // cDvd_ReadToBuffer
         constexpr uint32_t kLoadEntry = 0x001FFD00u;    // LoadEntryByValue_1FFD00 (FileBuf_init's fonts)
+        constexpr uint32_t kMemoryAlloc = 0x0030EE08u;  // _MemoryAlloc(a0 size, a1 alignment, a2 cHeap *)
+        // _MemoryAlloc's callers whose buffer holds one file: cDvd_ReadAlloc (jal 0x200D88) and ReadAllocSized
+        // (0x200EC0) keep their job in s0 (+8 its archive index); FileBuf_init (0x2E1378) allocates 4 KB for a font.
+        constexpr uint32_t kReadAllocRa = 0x00200D90u, kReadAllocSizedRa = 0x00200EC8u, kFontBufferRa = 0x002E1380u;
+        // The DLL slot heaps (function_hooks.cpp): a room DLL's read stays where that redirect put it.
+        constexpr uint32_t kSlotDescBegin = 0x00798000u, kSlotDescEnd = 0x00798030u;
+        // Buffers made once that a read fills (cDvd_ReadToBuffer from these returns), and where the game keeps them:
+        // the player's model and motion files (func_0030D8E0; heap A blocks of 0x1E6800 / 0x19800 from func_0030D5C8).
+        struct FixedBuffer
+        {
+            uint32_t ra, pointer;
+        };
+        constexpr FixedBuffer kFixedBuffers[] = {{0x0030D994u, 0x00752C38u}, {0x0030D9DCu, 0x00752C3Cu}};
         constexpr uint32_t kFstTable = 0x00580D40u;    // the path table (func_001FF858)
         constexpr uint32_t kDvdRomName = 0x004545B0u;  // "DVD-ROM" in DVCI's data: the whole disc
         constexpr uint32_t kAfsPartition = 0u;         // _DATA.AFS's CRI partition
@@ -31,7 +45,7 @@ namespace kamite::file_layer
         std::unordered_map<uint32_t, Replaced> g_byIndex;    // archive index -> replacement
         PS2Runtime *g_runtime = nullptr;
         bool g_hooked = false;
-        GuestFunction g_origFnameRange = nullptr, g_origStreamBind = nullptr;
+        GuestFunction g_origFnameRange = nullptr, g_origStreamBind = nullptr, g_origMemoryAlloc = nullptr;
 
         std::string lower(std::string_view s)
         {
@@ -130,42 +144,106 @@ namespace kamite::file_layer
             ctx->pc = GPR_U32(ctx, 31);
         }
 
-        // cDvd_ReadToBuffer(a0 cDvd, a1 path, a2 buffer, a3 id, t0 size or 0): a replaced file read into a buffer the
-        // caller made. A heap block's header sits 0x20 before its data (+0x10 used bytes): a buffer smaller than the
-        // replacement is cut to (t0) so the read cannot run past it into the next block, which hung the game (Oct 27,
-        // Gene's buffer from a save state made with a smaller file).
+        uint32_t sectorBytes(uint32_t size) { return (size + 0x7FFu) & ~0x7FFu; }
+
+        // cDvd_ReadToBuffer(a0 cDvd, a1 path, a2 buffer, a3 id, t0 size or 0): a replaced file read whole into a buffer
+        // the caller made, in whole sectors. A heap block's header sits 0x20 before its data (+0x10 used bytes). Too
+        // small: a buffer the game keeps at a known place (kFixedBuffers) is swapped for an extension one big enough
+        // (the pointer and the read follow it); any other read is cut (t0) so it cannot run past the block into the
+        // next one, which hung the game (Oct 27, Gene's buffer from a save state made with a smaller file).
         void onReadToBuffer(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             std::string path;
             const Replaced *r = replacedPath(rdram, GPR_U32(ctx, 5), &path);
             if (!r)
                 return;
-            const uint32_t buffer = GPR_U32(ctx, 6) & PS2_RAM_MASK, asked = GPR_U32(ctx, 8);
-            const uint32_t used = buffer >= 0x20u ? r32(rdram, buffer - 0x20u + 0x10u) : 0u;
-            if (asked != 0u && asked < r->size)
-                KM_WARN(Game, "file layer: " << path << " read into a buffer with " << asked << " bytes asked; the replacement is "
-                                             << r->size << " (cut short)");
-            else if (used > 0x20u && used - 0x20u < r->size)
+            const uint32_t buffer = GPR_U32(ctx, 6), asked = GPR_U32(ctx, 8), ra = GPR_U32(ctx, 31);
+            const uint32_t need = sectorBytes(r->size), room = xram_heap::blockRoom(rdram, buffer);
+            if (asked != 0u)
             {
-                const uint32_t room = (used - 0x20u) & ~0x7FFu;
-                SET_GPR_U32(ctx, 8, room);
-                KM_ERROR(Game, "file layer: " << path << " (" << r->size << " bytes) does not fit the game's buffer of " << (used - 0x20u)
-                                              << " bytes (ra 0x" << std::hex << GPR_U32(ctx, 31) << std::dec << "); read cut to " << room
-                                              << ". Was a save state made with another build or other mods? Restart the game.");
+                if (asked < r->size)
+                    KM_WARN(Game, "file layer: " << path << " read into a buffer with " << asked << " bytes asked; the replacement is "
+                                                 << r->size << " (cut short)");
+                return;
             }
+            if (room == 0u || room >= need)
+                return;
+            for (const FixedBuffer &f : kFixedBuffers)
+            {
+                if (ra != f.ra || (r32(rdram, f.pointer) & PS2_RAM_MASK) != (buffer & PS2_RAM_MASK))
+                    continue;
+                const uint32_t header = (buffer & PS2_RAM_MASK) - 0x20u;
+                const uint32_t heap = xram_heap::owns(buffer) ? r32(rdram, header + 0x14u) : r32(rdram, header);
+                const uint32_t swapped = xram_heap::alloc(rdram, need, 0x80u, heap);
+                if (swapped == 0u)
+                    break;
+                if (xram_heap::owns(buffer))
+                    xram_heap::free(rdram, buffer);
+                w32(rdram, f.pointer, swapped);
+                SET_GPR_U32(ctx, 6, swapped);
+                KM_INFO(Game, "file layer: " << path << " (" << r->size << " bytes) gets a buffer of " << need << " in the extension (0x"
+                                             << std::hex << swapped << ", was 0x" << buffer << std::dec << ", " << room << " bytes)");
+                return;
+            }
+            const uint32_t cut = room & ~0x7FFu;
+            SET_GPR_U32(ctx, 8, cut);
+            KM_ERROR(Game, "file layer: " << path << " (" << r->size << " bytes) does not fit the game's buffer of " << room
+                                          << " bytes (ra 0x" << std::hex << ra << std::dec << "); read cut to " << cut
+                                          << ". Was a save state made with another build or other mods? Restart the game.");
+        }
+
+        // _MemoryAlloc for a buffer that will hold one file: a replacement bigger than the game's file gets its block in
+        // the extension heap, standing in for a block of the heap the game asked (freed with it, trimmed and freed by the
+        // game's own code). The game's heaps keep the layout they have in vanilla.
+        void onMemoryAlloc(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t size = GPR_U32(ctx, 4), align = GPR_U32(ctx, 5), heap = GPR_U32(ctx, 6), ra = GPR_U32(ctx, 31);
+            uint32_t need = 0u;
+            std::string what;
+            if ((ra == kReadAllocRa || ra == kReadAllocSizedRa) && !(heap >= kSlotDescBegin && heap < kSlotDescEnd))
+            {
+                const uint32_t job = GPR_U32(ctx, 16);
+                if (const auto it = g_byIndex.find(r32(rdram, job + 8u)); it != g_byIndex.end() && it->second.size > it->second.gameSize)
+                {
+                    need = size; // the job's sectors: the replacement's, through the path table's size (onFstSize)
+                    what = "AFS " + std::to_string(it->first);
+                }
+            }
+            else if (ra == kFontBufferRa)
+            {
+                for (const char *font : {"etc/moji8.tm2", "etc/moji81.tm2"})
+                    if (const auto it = g_replaced.find(font); it != g_replaced.end() && sectorBytes(it->second.size) > size)
+                    {
+                        need = std::max(need, sectorBytes(it->second.size));
+                        what = "fonts";
+                    }
+            }
+            if (need != 0u)
+            {
+                if (const uint32_t data = xram_heap::alloc(rdram, need, align, heap))
+                {
+                    KM_INFO(Game, "file layer: " << what << ": " << need << " bytes in the extension at 0x" << std::hex << data << " for heap 0x"
+                                                 << heap << std::dec << " (" << size << " asked)");
+                    SET_GPR_U32(ctx, 2, data);
+                    ctx->pc = ra;
+                    return;
+                }
+                KM_ERROR(Game, "file layer: " << what << ": no room for " << need << " bytes in the extension; the game's heap is asked");
+            }
+            g_origMemoryAlloc(rdram, ctx, runtime);
         }
 
         // LoadEntryByValue_1FFD00(a0 path table, a1 path, a2 buffer) reads the whole file (FileBuf_init: etc/moji8.tm2 or
-        // moji81.tm2 into a 4 KB heap block). It can't be cut; a replacement larger than the block is reported.
+        // moji81.tm2 into a 4 KB heap block, made big enough for a replaced font by onMemoryAlloc). It can't be cut; a
+        // replacement larger than the block is reported.
         void onLoadEntry(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             std::string path;
             const Replaced *r = replacedPath(rdram, GPR_U32(ctx, 5), &path);
-            const uint32_t buffer = GPR_U32(ctx, 6) & PS2_RAM_MASK;
-            const uint32_t used = r && buffer >= 0x20u ? r32(rdram, buffer - 0x20u + 0x10u) : 0u;
-            if (used > 0x20u && used - 0x20u < ((r->size + 0x7FFu) & ~0x7FFu))
-                KM_ERROR(Game, "file layer: " << path << " (" << r->size << " bytes) is read whole into the game's buffer of "
-                                              << (used - 0x20u) << " bytes; the read runs past it");
+            const uint32_t room = r ? xram_heap::blockRoom(rdram, GPR_U32(ctx, 6)) : 0u;
+            if (room != 0u && room < sectorBytes(r->size))
+                KM_ERROR(Game, "file layer: " << path << " (" << r->size << " bytes) is read whole into the game's buffer of " << room
+                                              << " bytes; the read runs past it");
         }
 
         void hook()
@@ -174,8 +252,9 @@ namespace kamite::file_layer
                 return;
             uint8_t *rdram = g_runtime->memory().getRDRAM();
             if (std::memcmp(rdram + kDvdRomName, "DVD-ROM", 8) != 0 || !g_runtime->hasFunction(kFnameRange) ||
-                !g_runtime->hasFunction(kStreamBind) || !g_runtime->hasFunction(kFstSize) ||
-                !(g_origFnameRange = g_runtime->lookupFunction(kFnameRange)) || !(g_origStreamBind = g_runtime->lookupFunction(kStreamBind)))
+                !g_runtime->hasFunction(kStreamBind) || !g_runtime->hasFunction(kFstSize) || !g_runtime->hasFunction(kMemoryAlloc) ||
+                !(g_origFnameRange = g_runtime->lookupFunction(kFnameRange)) || !(g_origStreamBind = g_runtime->lookupFunction(kStreamBind)) ||
+                !(g_origMemoryAlloc = g_runtime->lookupFunction(kMemoryAlloc)))
             {
                 KM_ERROR(File, "file layer: this game's CRI file system is not the one expected; replaced files are not served");
                 return;
@@ -186,7 +265,9 @@ namespace kamite::file_layer
                             hooks.replace(kStreamBind, "ADXSTM bind (file layer)", &onStreamBind, ReplacementStatus::Native,
                                           "a served file is read from the whole disc") &&
                             hooks.replace(kFstSize, "path table file size (file layer)", &onFstSize, ReplacementStatus::Native,
-                                          "a replaced file's own size");
+                                          "a replaced file's own size") &&
+                            hooks.replace(kMemoryAlloc, "_MemoryAlloc (file layer)", &onMemoryAlloc, ReplacementStatus::Native,
+                                          "a bigger replaced file's buffer from the extension heap");
             if (!ok)
             {
                 KM_ERROR(File, "file layer: the hooks could not be installed; replaced files are not served");
@@ -194,6 +275,7 @@ namespace kamite::file_layer
             }
             hooks.observeEntry(kReadToBuffer, "file_layer_read_to_buffer", &onReadToBuffer);
             hooks.observeEntry(kLoadEntry, "file_layer_load_entry", &onLoadEntry);
+            xram_heap::install(*g_runtime);
             g_hooked = true;
             KM_INFO(File, "file layer: " << g_byIndex.size() << " replaced file(s) served");
         }

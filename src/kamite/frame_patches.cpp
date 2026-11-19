@@ -35,7 +35,6 @@
 #include "kamite/frame_patches.h"
 
 #include <cmath>
-#include "kamite/character_mods.h"
 #include "kamite/hud_layout.h"
 #include "kamite/options_screen.h"
 #include "kamite/npc_poses.h"
@@ -2648,7 +2647,6 @@ namespace kamite
         g_l3Dash = envOn("KAMITE_L3_DASH");
         g_rouletteRatchet = envOn("KAMITE_ROULETTE_RATCHET");
         ps2xRegisterHostHook("km_frame_start", &frameStart);
-        characters::installLoadWatch();
         ps2xRegisterHostHook("km_fps60_hitbox_compare", &hitboxCompare);
         ps2xRegisterHostHook("km_fps60_roulette_timer", &rouletteTimer);
         ps2xRegisterHostHook("km_fps60_roulette_dial", &rouletteDial);
