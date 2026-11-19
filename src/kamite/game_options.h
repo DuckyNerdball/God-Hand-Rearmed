@@ -26,6 +26,8 @@ namespace kamite
     // Game thread, once a game frame (frame_patches' frame hook): Dead Pan's invincibility look on Gene (steam, red
     // face), from the pan's hit until the invincibility runs out.
     void deadPanFrame(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
+    // Game thread, once a game frame: Sway Bar puts back anything a mid-boss's gauge draw changed (nothing normally).
+    void swayBarFrame(uint8_t *rdram);
 
     // [Sound] MusicVolume / EffectsVolume / VoicesVolume in percent (any thread): the streams' gains (taken at their next
     // volume change: reapplyStreamVolumes makes that now) and the SPU2's voice gain (at once).

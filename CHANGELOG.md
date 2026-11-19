@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 19, 2026
 
+- Sway Bar: killing a mid-boss (Mr. Gold, Mr. Silver) no longer takes the health and Sway bars away from the enemies after it.
 - With several controllers connected, the one that pressed a button last controls Gene (and its button prompts show).
 - Launcher: with a controller, Y / triangle eats a piece of fruit and X / square takes from the smoothie.
 - Launcher: with a controller (or the arrow keys), Steam's mark goes down / right to Play, Play right to the volume mark, left to Steam's mark and up round to Skip Launcher, the volume mark left to Play; on the volume mark up / down turn the volume and A mutes.

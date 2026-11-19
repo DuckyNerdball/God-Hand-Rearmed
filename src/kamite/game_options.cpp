@@ -946,11 +946,23 @@ namespace kamite
         }
 
         // 0x28EE38 (func_0028EDD0's +0x616 test, s0 = the enemy): a stunned-before mid-boss draws its bar for the gauge.
+        // What it changes goes back right after the gauge's draw (swayBar), and at the next frame's start in any case
+        // (swayBarFrame): K, Nov 19: killing Mr. Gold / Mr. Silver left the hide on (the bar stops drawing once the boss
+        // is down, so swayBar never ran, and middleSwayBar returned before its restore), and the enemies after them had
+        // no health or Sway bars. A boss that is down is let go.
         void midBossDraw(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             const uint32_t enemy = GPR_U32(ctx, 16);
             if (!g_midStun.count(enemy) || rdram[enemy + 0x616u] == 0u)
                 return;
+            int16_t hp;
+            std::memcpy(&hp, rdram + enemy + 0x54Au, sizeof(hp));
+            if (hp <= 0)
+            {
+                g_midStun.erase(enemy);
+                g_swayLag.erase(enemy);
+                return;
+            }
             midBossRestore(rdram); // one at a time (another mid-boss's, if its HUD pass hasn't run)
             const uint32_t layout = ram32(rdram, enemy + 0x660u);
             if (!inGuest(layout))
@@ -1041,6 +1053,8 @@ namespace kamite
                 putF(rdram, e + 0x58u, k.sclX);
                 putF(rdram, e + 0x5Cu, k.sclY);
             }
+            if (gaugeOnly)
+                midBossRestore(rdram); // the mid-boss's flag and its layout's hide back at once
         }
 
         // Bosses (K, Nov 12): the same gauge under the boss health bar on the HUD (cCockBossBar: a cIDBase whose +0x9C is
@@ -1093,6 +1107,7 @@ namespace kamite
         void middleSwayBar(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             (void)runtime;
+            midBossRestore(rdram); // before any early return (a boss that is down returns below)
             const uint32_t self = GPR_U32(ctx, 18), i = GPR_U32(ctx, 16) & 0xFFFFu;
             if (!inGuest(self) || i >= 8u || i >= rdram[self + 0x358u])
                 return;
@@ -1706,6 +1721,11 @@ namespace kamite
     bool swayBar()
     {
         return ps2xPatchFlag("sway_bar");
+    }
+
+    void swayBarFrame(uint8_t *rdram)
+    {
+        midBossRestore(rdram);
     }
 
     void setSwayBar(bool on)
