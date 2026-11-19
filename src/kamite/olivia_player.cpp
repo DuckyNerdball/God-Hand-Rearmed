@@ -113,6 +113,6 @@ namespace kamite::olivia_player
                                                    << built.ankleDy << " m; " << built.channels << " channels in " << built.motions
                                                    << " motions; " << built.skinColours << " skin colours; " << built.spreadHands << " spread hands; " << bodies << " body and "
                                                    << coats << " coat files; Money / Cash "
-                                                   << (in.ema0Md.empty() ? "off (no rebuilt body)" : "on") << "; " << ms << " ms)");
+                                                   << ((in.costume == Costume::Bunny ? in.elf4Md : in.ema0Md).empty() ? "off (no rebuilt body)" : "on") << "; " << ms << " ms)");
     }
 }

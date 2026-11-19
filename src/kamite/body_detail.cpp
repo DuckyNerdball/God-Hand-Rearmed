@@ -44,7 +44,7 @@ namespace kamite::body_detail
             uint64_t hash;
             GrowRules rules; // clothing layers (skirt, the body under it, a belt plate)
             int jiggle = 0;  // the jiggle bones (kJiggle*) on the nodes below, re-skinned in place (body_detail_build reskin)
-            const char *reskin[2] = {nullptr, nullptr};
+            const char *reskin[8] = {};
         };
         constexpr GrowRules kOliviaSkirt{"skirt00", "dress", "z_blt00"}, kOliviaSkirt2{"skirt00", "dress2", "z_blt00"};
         constexpr GrowModel kGrowModels[] = {
@@ -52,7 +52,10 @@ namespace kamite::body_detail
             {"em/ema0.dat", 0x28060u, 0x47700u, 0xF37EDAD64FF2AE63ULL, kOliviaSkirt, kJiggleBust, {"dress", nullptr}}, // Olivia (skirt: no seat)
             {"el/el0a.dat", 0x577A0u, 0x21640u, 0x7E94290CBD92FD0FULL, kOliviaSkirt2}, // Olivia, cutscenes (dress)
             {"el/elf5.dat", 0x273E0u, 0x29D80u, 0xDBA0ADACA05FA7D8ULL, kOliviaSkirt2}, // Olivia, cutscenes (dress + extras)
-            {"el/elf4.dat", 0x25A20u, 0x1E700u, 0x16E4FA36326B5C40ULL, {}},           // Olivia, cutscenes (bunny suit)
+            // Olivia's bunny suit (cutscenes, and playable Olivia's costume): the frills round the leg openings (z_a..z_f)
+            // re-skinned with the body so they ride the seat with it (K, Nov 19).
+            {"el/elf4.dat", 0x25A20u, 0x1E700u, 0x16E4FA36326B5C40ULL, {}, kJiggleSeat | kJiggleBust,
+             {"body", "z_a", "z_b", "z_c", "z_d", "z_e", "z_f"}},
             {"el/el15.dat", 0x24EE0u, 0x1C840u, 0x2C2C47653973ABDAULL, {}},           // Shannon, cutscenes
             {"el/el1a.dat", 0xF460u, 0x46200u, 0x045B558E999D846BULL, {}},            // Shannon, cutscenes (whole)
             // not el09 (the bathtub Olivia: no hips)
@@ -431,7 +434,9 @@ namespace kamite::body_detail
             }
             // The jiggle bones on her own nodes: only when every node to re-skin is one the runtime knows (a grown
             // node), since a re-skinned node drawn without its bones placed would fall apart.
-            const int named = (g.reskin[0] ? 1 : 0) + (g.reskin[1] ? 1 : 0);
+            int named = 0;
+            while (named < 8 && g.reskin[named])
+                ++named;
             const auto isReskinned = [&g](const char *name) {
                 for (const char *r : g.reskin)
                     if (r && std::strncmp(name, r, 8) == 0)
