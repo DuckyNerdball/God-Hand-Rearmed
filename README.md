@@ -1,6 +1,6 @@
 ![God Hand: Rearmed](assets/logo.png)
 
-# God Hand: Rearmed
+# God Hand: Rearmed (かみて · おもてなし)
 
 **God Hand for PS2. Recompiled, Refined, Rearmed.**
 
