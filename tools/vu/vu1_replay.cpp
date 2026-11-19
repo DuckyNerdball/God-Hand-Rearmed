@@ -1,7 +1,5 @@
 // VU1 trace replay: an offline check and benchmark for changes to vu1_recomp (runtime/ps2xTest/tools/vu1_recomp.cpp).
-// Not part of any build target: it compiles the runtime's VU core into itself (#include <pmmintrin.h>
-#include <xmmintrin.h>
-#include "ps2_vu1_core.cpp") and links
+// Not part of any build target: it compiles the runtime's VU core into itself (#include "ps2_vu1_core.cpp") and links
 // one set of generated VU1 code, so two builds of the generated code can be compared run by run.
 //
 // Inputs: an F8 VU1 trace (vu1trace_<tick>.bin, written next to GHR.exe with the vu1_<hash>.bin images it needs),
@@ -11,6 +9,12 @@
 //                                        GIF packets differ (0 expected)
 //   vu1_replay digest <trace>            one hash per run of the compiled results (diff two builds' outputs)
 //   vu1_replay bench <trace> [passes]    time per pass (one pass = the traced frame's VU1 work)
+//   vu1_replay survey <trace> [passes]   per (image, entry pc): runs, compiled time and share, cycles, GIF output
+//   vu1_replay native <trace> [pc]       the native programs (src/kamite/render) against the interpreter, every field
+//   vu1_replay nativebench <trace> [n]   time in the VU call: native programs + AOT vs AOT only
+//   vu1_replay nativedump <trace> <out>  the native programs' runs as test vectors for vu1_native_check.cpp
+//   (the native modes: compile this file with -DVU1_REPLAY_NATIVE -ffp-contract=off -I<repo>/src and link
+//   src/kamite/render/*.cpp)
 //   vu1_replay synth <image dir> [n]     n random states per image from many entry points, one line per run
 //                                        (end pc, E bit, hash without MAC, status, MAC, clip...); SYNTH_VERIFY=1 also
 //                                        compares with the interpreter (random states disagree often, as the compiled
@@ -19,6 +23,8 @@
 // Build (Linux, g++ 13; from runtime/): compile vu1_recomp's output (generated/vu1/*.cpp) with
 //   g++ -std=c++20 -O2 -msse4.1 -w -c -Ips2xRuntime/include -Ips2xIOP/include -Ips2xRuntime/src/lib/vu <file>
 // and this file the same way, then link them all. The VU jobs run with FTZ and DAZ like the game's (main sets them).
+#include <pmmintrin.h>
+#include <xmmintrin.h>
 #include <map>
 #include <string>
 #include <vector>
@@ -38,6 +44,13 @@ void PS2Memory::submitGifPacket(GifPathId, const unsigned char *, unsigned int, 
 void GS::processGIFPacket(const unsigned char *, unsigned int) {}
 
 void registerGeneratedVu1Programs();
+namespace kamite::render
+{
+    void registerNativeVu1Programs(); // src/kamite/render (native mode only; link those files)
+}
+#ifndef VU1_REPLAY_NATIVE
+void kamite::render::registerNativeVu1Programs() {}
+#endif
 
 struct Run
 {
@@ -79,6 +92,8 @@ static uint64_t fnv(const void *p, size_t n, uint64_t h = 0xCBF29CE484222325ull)
 }
 
 static double g_vuSeconds = 0.0;
+static bool g_native = false; // runOne(compiled): a native program first where one matches (native mode)
+static uint64_t g_nativeRuns = 0, g_nativeDeclined = 0;
 static Outcome runOne(const Run &run, std::vector<uint8_t> &code, bool compiled)
 {
     static VU1Interpreter vu(VU1Interpreter::Unit::VU1);
@@ -99,8 +114,19 @@ static Outcome runOne(const Run &run, std::vector<uint8_t> &code, bool compiled)
     packetSink = &sink;
     vu1NormShadow.valid = false;
     const auto t0 = std::chrono::steady_clock::now();
-    VU1InterpreterAccess::runLoopWith(vu, code.data(), static_cast<uint32_t>(code.size()), out.data.data(),
-                                      static_cast<uint32_t>(out.data.size()), gs, nullptr, run.maxCycles, program);
+    bool done = false;
+    if (compiled && g_native && vu1CompiledRegistry().currentNatives)
+        for (const Vu1NativeSlot &slot : *vu1CompiledRegistry().currentNatives)
+            if (slot.pc == run.state.state.pc)
+            {
+                done = VU1InterpreterAccess::runNative(vu, slot.program, code.data(), out.data.data(),
+                                                       static_cast<uint32_t>(out.data.size()), gs, nullptr, run.maxCycles);
+                ++(done ? g_nativeRuns : g_nativeDeclined);
+                break;
+            }
+    if (!done)
+        VU1InterpreterAccess::runLoopWith(vu, code.data(), static_cast<uint32_t>(code.size()), out.data.data(),
+                                          static_cast<uint32_t>(out.data.size()), gs, nullptr, run.maxCycles, program);
     g_vuSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     packetSink = nullptr;
     out.state = vu.state();
@@ -356,6 +382,232 @@ int main(int argc, char **argv)
             for (const auto &[h, n] : perImage)
                 std::printf("  image %016llx: %llu\n", static_cast<unsigned long long>(h), static_cast<unsigned long long>(n));
         }
+        return 0;
+    }
+    if (mode == "nativedump")
+    {
+        // nativedump <trace> <out file>: every run a native program takes, as test vectors for vu1_native_check (the
+        // native programs on another platform, without the runtime): the code image, the state and data memory at the
+        // entry, and the interpreter's state, data memory, packets and cycles at the end.
+        vu1NativeRegistry().mode = 1; // every registered program, checked or not
+        kamite::render::registerNativeVu1Programs();
+        g_native = true;
+        FILE *out = argc > 3 ? std::fopen(argv[3], "wb") : nullptr;
+        if (!out)
+            return 2;
+        uint64_t written = 0;
+        for (size_t i = 0; i < runs.size(); ++i)
+        {
+            std::vector<uint8_t> &code = images[runs[i].hash];
+            if (code.size() != 0x4000u)
+                continue;
+            const uint64_t before = g_nativeRuns;
+            runOne(runs[i], code, true);
+            if (g_nativeRuns == before)
+                continue;
+            const Outcome slow = runOne(runs[i], code, false);
+            const uint32_t magic = 0x4E315556u, packets = static_cast<uint32_t>(slow.packets.size());
+            const uint64_t cycles = slow.cycle - runs[i].state.cycle;
+            std::fwrite(&magic, 4, 1, out);
+            std::fwrite(code.data(), 1, code.size(), out);
+            std::fwrite(&runs[i].state.state, sizeof(VU1State), 1, out);
+            std::fwrite(runs[i].data.data(), 1, runs[i].data.size(), out);
+            std::fwrite(&slow.state, sizeof(VU1State), 1, out);
+            std::fwrite(slow.data.data(), 1, slow.data.size(), out);
+            std::fwrite(&cycles, 8, 1, out);
+            std::fwrite(&packets, 4, 1, out);
+            for (const auto &pk : slow.packets)
+            {
+                const uint32_t size = static_cast<uint32_t>(pk.size());
+                std::fwrite(&size, 4, 1, out);
+                std::fwrite(pk.data(), 1, size, out);
+            }
+            ++written;
+        }
+        std::fclose(out);
+        std::printf("%llu runs written (VU1State %zu bytes)\n", static_cast<unsigned long long>(written), sizeof(VU1State));
+        return 0;
+    }
+    if (mode == "native" || mode == "nativebench")
+    {
+        // native <trace> [entry pc hex]: every run that a native program takes (src/kamite/render) against the
+        // interpreter: each differing field, then counts. nativebench <trace> [passes]: time per pass in the VU call
+        // (state restore and copies left out), native + AOT for the rest vs AOT only, and the native-taken runs alone.
+        vu1NativeRegistry().mode = 1; // every registered program, checked or not
+        kamite::render::registerNativeVu1Programs();
+        g_native = true;
+        if (mode == "nativebench")
+        {
+            const int passes = argc > 3 ? std::atoi(argv[3]) : 5;
+            std::vector<char> taken(runs.size(), 0);
+            for (size_t i = 0; i < runs.size(); ++i)
+            {
+                std::vector<uint8_t> &code = images[runs[i].hash];
+                if (code.size() != 0x4000u)
+                    continue;
+                const uint64_t before = g_nativeRuns;
+                runOne(runs[i], code, true);
+                taken[i] = g_nativeRuns != before;
+            }
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                g_native = pass == 0;
+                double all = 0.0, nativeOnly = 0.0;
+                for (int p = 0; p < passes; ++p)
+                    for (size_t i = 0; i < runs.size(); ++i)
+                    {
+                        std::vector<uint8_t> &code = images[runs[i].hash];
+                        if (code.size() != 0x4000u)
+                            continue;
+                        const double before = g_vuSeconds; // the VU call only, not the harness's state copies
+                        runOne(runs[i], code, true);
+                        const double ms = (g_vuSeconds - before) * 1000.0;
+                        all += ms;
+                        if (taken[i])
+                            nativeOnly += ms;
+                    }
+                std::printf("%s: %.3f ms per pass, the native programs' runs %.3f ms\n", pass == 0 ? "native + AOT" : "AOT only   ",
+                            all / passes, nativeOnly / passes);
+            }
+            return 0;
+        }
+        const uint32_t onlyPc = argc > 3 ? static_cast<uint32_t>(std::strtoul(argv[3], nullptr, 16)) : ~0u;
+        std::map<std::string, uint64_t> fields;
+        uint64_t compared = 0, differ = 0, shown = 0;
+        for (size_t i = 0; i < runs.size(); ++i)
+        {
+            std::vector<uint8_t> &code = images[runs[i].hash];
+            if (code.size() != 0x4000u || (onlyPc != ~0u && runs[i].state.state.pc != onlyPc))
+                continue;
+            const uint64_t before = g_nativeRuns;
+            const Outcome fast = runOne(runs[i], code, true);
+            if (g_nativeRuns == before)
+                continue;
+            const Outcome slow = runOne(runs[i], code, false);
+            ++compared;
+
+            std::vector<std::string> notes;
+            const auto note = [&](const std::string &field, const std::string &text) {
+                ++fields[field];
+                if (notes.size() < 12)
+                    notes.push_back(text);
+            };
+            char line[256];
+            for (int r = 0; r < 32; ++r)
+                for (int c = 0; c < 4; ++c)
+                    if (std::memcmp(&fast.state.vf[r][c], &slow.state.vf[r][c], 4) != 0)
+                    {
+                        uint32_t a, b;
+                        std::memcpy(&a, &fast.state.vf[r][c], 4);
+                        std::memcpy(&b, &slow.state.vf[r][c], 4);
+                        std::snprintf(line, sizeof(line), "vf%02d.%c native %08x (%g) interp %08x (%g)", r, "xyzw"[c], a,
+                                      fast.state.vf[r][c], b, slow.state.vf[r][c]);
+                        note("vf" + std::to_string(r), line);
+                    }
+            for (int r = 0; r < 16; ++r)
+                if (fast.state.vi[r] != slow.state.vi[r])
+                {
+                    std::snprintf(line, sizeof(line), "vi%02d native %d interp %d", r, fast.state.vi[r], slow.state.vi[r]);
+                    note("vi" + std::to_string(r), line);
+                }
+            for (int c = 0; c < 4; ++c)
+                if (std::memcmp(&fast.state.acc[c], &slow.state.acc[c], 4) != 0)
+                {
+                    std::snprintf(line, sizeof(line), "acc.%c native %g interp %g", "xyzw"[c], fast.state.acc[c], slow.state.acc[c]);
+                    note("acc", line);
+                }
+            const auto scalar = [&](const char *name, uint64_t a, uint64_t b) {
+                if (a != b)
+                {
+                    std::snprintf(line, sizeof(line), "%s native %llx interp %llx", name, static_cast<unsigned long long>(a),
+                                  static_cast<unsigned long long>(b));
+                    note(name, line);
+                }
+            };
+            uint32_t qa, qb, pa, pb, ia, ib;
+            std::memcpy(&qa, &fast.state.q, 4);
+            std::memcpy(&qb, &slow.state.q, 4);
+            std::memcpy(&pa, &fast.state.p, 4);
+            std::memcpy(&pb, &slow.state.p, 4);
+            std::memcpy(&ia, &fast.state.i, 4);
+            std::memcpy(&ib, &slow.state.i, 4);
+            scalar("q", qa, qb);
+            scalar("p", pa, pb);
+            scalar("i", ia, ib);
+            scalar("clip", fast.state.clip, slow.state.clip);
+            scalar("mac", fast.state.mac, slow.state.mac);
+            scalar("status", fast.state.status, slow.state.status);
+            scalar("pc", fast.state.pc, slow.state.pc);
+            scalar("cycles", fast.cycle - runs[i].state.cycle, slow.cycle - runs[i].state.cycle);
+            size_t dataDiff = 0;
+            for (size_t b = 0; b < fast.data.size(); b += 4)
+                if (std::memcmp(&fast.data[b], &slow.data[b], 4) != 0)
+                {
+                    if (dataDiff++ == 0)
+                    {
+                        uint32_t a, c;
+                        std::memcpy(&a, &fast.data[b], 4);
+                        std::memcpy(&c, &slow.data[b], 4);
+                        std::snprintf(line, sizeof(line), "data qword %zu.%c native %08x interp %08x", b / 16, "xyzw"[(b / 4) % 4], a, c);
+                        note("data", line);
+                    }
+                }
+            if (fast.packets != slow.packets)
+            {
+                std::snprintf(line, sizeof(line), "packets: %zu vs %zu", fast.packets.size(), slow.packets.size());
+                note("packets", line);
+            }
+            if (!notes.empty())
+            {
+                ++differ;
+                if (shown++ < 20)
+                {
+                    std::printf("run %zu image %016llx pc %04x top %03x:\n", i, static_cast<unsigned long long>(runs[i].hash),
+                                runs[i].state.state.pc, runs[i].state.state.top);
+                    for (const std::string &n : notes)
+                        std::printf("  %s\n", n.c_str());
+                }
+            }
+        }
+        std::printf("%llu runs native (%llu declined), %llu compared, %llu differ\n", static_cast<unsigned long long>(g_nativeRuns),
+                    static_cast<unsigned long long>(g_nativeDeclined), static_cast<unsigned long long>(compared),
+                    static_cast<unsigned long long>(differ));
+        for (const auto &[f, n] : fields)
+            std::printf("  %s: %llu\n", f.c_str(), static_cast<unsigned long long>(n));
+        return 0;
+    }
+    if (mode == "survey")
+    {
+        // survey <trace> [passes]: per (image, entry pc): runs, compiled time, VU cycles, GIF packets and bytes.
+        const int passes = argc > 3 ? std::atoi(argv[3]) : 5;
+        struct Row { uint64_t runs = 0, cycles = 0, packets = 0, bytes = 0; double ms = 0.0; };
+        std::map<std::pair<uint64_t, uint32_t>, Row> rows;
+        double total = 0.0;
+        for (const Run &run : runs)
+        {
+            std::vector<uint8_t> &code = images[run.hash];
+            if (code.size() != 0x4000u)
+                continue;
+            Row &row = rows[{run.hash, run.state.state.pc}];
+            const auto t0 = std::chrono::steady_clock::now();
+            Outcome o;
+            for (int p = 0; p < passes; ++p)
+                o = runOne(run, code, true);
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / passes;
+            ++row.runs;
+            row.ms += ms;
+            total += ms;
+            row.cycles += o.cycle - run.state.cycle;
+            row.packets += o.packets.size();
+            for (const auto &pk : o.packets)
+                row.bytes += pk.size();
+        }
+        std::printf("image             entry  runs   ms/pass  share  cycles/run packets/run bytes/run\n");
+        for (const auto &[key, row] : rows)
+            std::printf("%016llx %04x %6llu %8.3f %5.1f%% %10.0f %10.1f %9.0f\n", static_cast<unsigned long long>(key.first),
+                        key.second, static_cast<unsigned long long>(row.runs), row.ms, 100.0 * row.ms / total,
+                        double(row.cycles) / row.runs, double(row.packets) / row.runs, double(row.bytes) / row.runs);
+        std::printf("total %.3f ms per pass\n", total);
         return 0;
     }
     if (mode == "bench")

@@ -70,11 +70,55 @@ namespace
         return capture;
     }
 
+    // Native programs (runtime/ps2_vu1_native.h): the registered ones, and per micro memory image the entries whose
+    // code it holds.
+    struct Vu1NativeSlot
+    {
+        uint32_t pc;
+        Vu1NativeProgram program;
+    };
+    struct Vu1NativeRegistry
+    {
+        std::vector<Vu1NativeEntry> entries;
+        std::unordered_map<uint64_t, std::vector<Vu1NativeSlot>> byImage; // by image hash; never evicted
+        int mode = -1; // PS2X_VU1_NATIVE: -1 unset (checked programs), 0 none, 1 all
+    };
+    Vu1NativeRegistry &vu1NativeRegistry()
+    {
+        static Vu1NativeRegistry registry = []
+        {
+            Vu1NativeRegistry result;
+            const char *value = std::getenv("PS2X_VU1_NATIVE");
+            if (value && *value)
+                result.mode = std::strcmp(value, "0") == 0 ? 0 : 1;
+            return result;
+        }();
+        return registry;
+    }
+    const std::vector<Vu1NativeSlot> *matchVu1Natives(uint64_t hash, const uint8_t *vuCode, uint32_t codeSize)
+    {
+        Vu1NativeRegistry &natives = vu1NativeRegistry();
+        if (natives.mode == 0 || natives.entries.empty())
+            return nullptr;
+        const auto found = natives.byImage.find(hash);
+        if (found != natives.byImage.end())
+            return found->second.empty() ? nullptr : &found->second;
+        std::vector<Vu1NativeSlot> slots;
+        for (const Vu1NativeEntry &entry : natives.entries)
+            if ((entry.checked || natives.mode == 1) && entry.codeEnd <= codeSize && vu1NativeCodeHash(vuCode, entry) == entry.codeHash)
+                for (uint32_t i = 0; i < entry.entryCount; ++i)
+                    slots.push_back({entry.entryPcs[i], entry.program});
+        const auto &stored = natives.byImage.emplace(hash, std::move(slots)).first->second;
+        return stored.empty() ? nullptr : &stored;
+    }
+    thread_local const std::vector<Vu1NativeSlot> *t_vu1Natives = nullptr;
+
     struct Vu1ImageCacheEntry
     {
         std::vector<uint8_t> image;
         VU1InterpreterAccess::CompiledProgram program = nullptr;
         const VU1InterpreterAccess::FastBlock *table = nullptr; // runAssembledVu1's table (program == runAssembledVu1)
+        const std::vector<Vu1NativeSlot> *natives = nullptr;
     };
 
     // A table of compiled blocks assembled for one micro memory image from the registered units (vu1_recomp: blocks of
@@ -95,6 +139,7 @@ namespace
         uint64_t generation = ~0ull;
         VU1InterpreterAccess::CompiledProgram current = nullptr;
         const VU1InterpreterAccess::FastBlock *currentTable = nullptr;
+        const std::vector<Vu1NativeSlot> *currentNatives = nullptr;
         bool enabled = true;
     };
 
@@ -254,6 +299,7 @@ namespace
                 if (index != 0u)
                     std::swap(registry.recent[index], registry.recent[0]);
                 registry.currentTable = registry.recent[0].table;
+                registry.currentNatives = registry.recent[0].natives;
                 return registry.recent[0].program;
             }
         }
@@ -262,6 +308,7 @@ namespace
         Vu1ImageCacheEntry entry;
         entry.image.assign(vuCode, vuCode + codeSize);
         entry.program = it == registry.programs.end() ? nullptr : it->second;
+        entry.natives = matchVu1Natives(hash, vuCode, codeSize);
         // PS2X_VU1_ASSEMBLE_ONLY=1: images compiled whole are assembled from blocks too (tests the assembly, e.g. with
         // PS2X_VU1_VERIFY=obs, which ignores the stall bookkeeping the compiled code leaves out); =uploads: from the
         // blocks of uploads only.
@@ -280,6 +327,7 @@ namespace
         else if (!entry.program)
             reportUncompiledVu1Image(hash, vuCode, codeSize);
         registry.currentTable = entry.table;
+        registry.currentNatives = entry.natives;
         constexpr size_t kRecentImages = 8u;
         if (registry.recent.size() < kRecentImages)
             registry.recent.push_back(std::move(entry));
@@ -656,6 +704,7 @@ namespace
     VU1InterpreterAccess::CompiledProgram lookupCompiledVu1Program(const uint8_t *vuCode, uint32_t codeSize, const PS2Memory *memory)
     {
         Vu1CompiledRegistry &registry = vu1CompiledRegistry();
+        t_vu1Natives = nullptr;
         if (!registry.enabled || (registry.programs.empty() && registry.units.empty()) || !memory)
             return nullptr;
         const uint64_t generation = memory->getVU1CodeGeneration();
@@ -667,6 +716,7 @@ namespace
             registry.current = findCompiledVu1Image(registry, vuCode, codeSize);
         }
         t_vu1AssembledTable = registry.currentTable;
+        t_vu1Natives = registry.currentNatives;
         return registry.current;
     }
 
@@ -1585,7 +1635,89 @@ bool VU1InterpreterAccess::runLoop(VU1Interpreter &vu, uint8_t *vuCode, uint32_t
         !allowCompiled ? nullptr
         : vu.m_unit == VU1Interpreter::Unit::VU1 ? lookupCompiledVu1Program(vuCode, codeSize, memory)
                                                   : lookupCompiledVu0Program(vuCode, codeSize, memory);
+    if (compiled && vu.m_unit == VU1Interpreter::Unit::VU1 && t_vu1Natives)
+        for (const Vu1NativeSlot &slot : *t_vu1Natives)
+            if (slot.pc == vu.m_state.pc)
+            {
+                if (runNative(vu, slot.program, vuCode, vuData, dataSize, gs, memory, maxCycles))
+                    return true;
+                break;
+            }
     return runLoopWith(vu, vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles, compiled);
+}
+
+namespace
+{
+    // XGKICK for a native program: the whole packet at once (the program ends right after; the cycles it takes are in
+    // the program's own count), through finishXgkick like any other: packet sink, PATH1 filters, the GIF.
+    void nativeVu1Kick(void *user, uint32_t qwordAddress, uint32_t kickPc)
+    {
+        VU1InterpreterAccess::nativeKick(*static_cast<VU1Interpreter *>(user), qwordAddress, kickPc);
+    }
+}
+
+void VU1InterpreterAccess::nativeKick(VU1Interpreter &vu, uint32_t qwordAddress, uint32_t kickPc)
+{
+    vu.startXgkick(qwordAddress, kickPc);
+    while (vu.m_xgkick.active)
+        xgkickAdvance(vu, 2u * (VU1Interpreter::XgkickPipeline::kBufferSize / 16u) + 2u);
+}
+
+bool VU1InterpreterAccess::runNative(VU1Interpreter &vu, Vu1NativeProgram program, const uint8_t *vuCode, uint8_t *vuData,
+                                     uint32_t dataSize, GS &gs, PS2Memory *memory, uint32_t maxCycles)
+{
+    // Only at a program's start: nothing in flight (every execute starts so; a resume continues mid-program).
+    if (vu.pipelinesPending() || vu.m_state.branchPending || vu.m_state.ebit)
+        return false;
+    vu.m_activeVuData = vuData;
+    vu.m_activeVuDataSize = dataSize;
+    vu.m_activeGs = &gs;
+    vu.m_activeMemory = memory;
+    Vu1NativeRun run;
+    run.state = &vu.m_state;
+    run.code = vuCode;
+    run.data = vuData;
+    run.dataSize = dataSize;
+    run.budget = maxCycles;
+    run.kick = &nativeVu1Kick;
+    run.user = &vu;
+    if (!program(run))
+        return false;
+    vu.m_cycle += run.cycles;
+    vu.m_state.cycles = vu.m_cycle;
+    vu.m_workingClip = vu.m_state.clip;
+    vu.m_state.ebit = false;
+    vu.m_state.haltAfterDelaySlot = false;
+    vu.m_pendingHaltD = false;
+    vu.m_pendingHaltT = false;
+    vu.m_state.vi[0] = 0;
+    vu.m_state.vf[0][0] = 0.0f;
+    vu.m_state.vf[0][1] = 0.0f;
+    vu.m_state.vf[0][2] = 0.0f;
+    vu.m_state.vf[0][3] = 1.0f;
+    vu1NormShadow.valid = false; // the compiled code's normalized copies of the registers
+    t_vu1BudgetHit = false;
+    return true;
+}
+
+uint64_t vu1NativeCodeHash(const uint8_t *code, const Vu1NativeEntry &entry)
+{
+    uint64_t hash = 0xCBF29CE484222325ull;
+    for (uint32_t at = entry.codeBegin; at < entry.codeEnd; ++at)
+    {
+        uint8_t byte = code[at];
+        for (uint32_t v = 0; v < entry.variableCount; ++v)
+            if (at - entry.variable[v] < 4u)
+                byte = 0u;
+        hash ^= byte;
+        hash *= 0x100000001B3ull;
+    }
+    return hash;
+}
+
+void registerVu1NativeProgram(const Vu1NativeEntry &entry)
+{
+    vu1NativeRegistry().entries.push_back(entry);
 }
 
 bool VU1InterpreterAccess::runLoopWith(VU1Interpreter &vu, uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData, uint32_t dataSize,

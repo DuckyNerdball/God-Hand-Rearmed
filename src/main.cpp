@@ -101,6 +101,7 @@
 
 #if KAMITE_HAS_VU1_PROGRAMS
 void registerGeneratedVu1Programs(); // generated/vu1/vu1_programs.cpp (VU1 microcode compiled ahead of time)
+#include "kamite/render/vu1_programs.h"
 #endif
 
 #if !defined(KAMITE_ARCH_NAME)
@@ -1048,6 +1049,7 @@ int main(int argc, char *argv[])
         kamite::file_layer::install(runtime); // replaced game files (characters::install's) served at the read
 #if KAMITE_HAS_VU1_PROGRAMS
         registerGeneratedVu1Programs();
+        kamite::render::registerNativeVu1Programs(); // native programs first where they match (PS2X_VU1_NATIVE=0: off)
 #endif
         kamite::installDllLoadLogger(runtime); // observe only: [DLL] lines + KAMITE_DLL_LOG CSV
         kamite::installHiresFlipCopy(runtime); // PS2X_GS_SCALE > 1 only: flip copy without the flicker filter

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <smmintrin.h> // SSE4.1: blendps / blendvps (blendDestK, vnorm)
+#include "runtime/ps2_vu1_native.h"
 #include "ps2x/state_io.h"
 #include "runtime/ps2_vu1.h"
 #include "runtime/ps2_vu1_hooks.h"
@@ -2725,6 +2726,10 @@ struct VU1InterpreterAccess
 
     static bool runLoop(VU1Interpreter &vu, uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData, uint32_t dataSize,
                         GS &gs, PS2Memory *memory, uint32_t maxCycles, bool allowCompiled);
+    // A native program (runtime/ps2_vu1_native.h) for the run starting at the current pc; false: it declined.
+    static bool runNative(VU1Interpreter &vu, Vu1NativeProgram program, const uint8_t *vuCode, uint8_t *vuData,
+                          uint32_t dataSize, GS &gs, PS2Memory *memory, uint32_t maxCycles);
+    static void nativeKick(VU1Interpreter &vu, uint32_t qwordAddress, uint32_t kickPc);
     static bool runLoopWith(VU1Interpreter &vu, uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData, uint32_t dataSize,
                             GS &gs, PS2Memory *memory, uint32_t maxCycles, CompiledProgram compiled);
     static void runVerified(VU1Interpreter &vu, uint8_t *vuCode, uint32_t codeSize, uint8_t *vuData, uint32_t dataSize,

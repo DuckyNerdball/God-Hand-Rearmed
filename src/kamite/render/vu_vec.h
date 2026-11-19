@@ -1,0 +1,307 @@
+#pragma once
+
+#include <cstdint>
+#include <cstring>
+
+// Four floats with the VU's arithmetic, for the native VU1 programs (docs: claude/native-vu1.md). Three paths with one
+// API: SSE (x86), NEON (AArch64) and plain C++ (the reference; KAMITE_VU_SCALAR forces it, to diff it against the other
+// two). All of them leave rounding to the float environment (VuFloatEnv below): the VU's round toward zero, with
+// denormal inputs and results flushed to zero. In that environment an overflow saturates to +-FLT_MAX (round toward
+// zero never reaches infinity) and, with operands normalized (norm()), no operation makes an infinity or a NaN.
+// Every operation is a separate rounding step, as on the VU: never contract a multiply and an add (no FMA; GCC/Clang
+// build these files with -ffp-contract=off).
+//
+// Lane order is memory order: x, y, z, w (a VU quadword, x at the lowest address).
+
+#if !defined(KAMITE_VU_SCALAR) && (defined(__SSE4_1__) || defined(_M_X64) || defined(__x86_64__))
+#define KAMITE_VU_SSE 1
+#include <smmintrin.h>
+#elif !defined(KAMITE_VU_SCALAR) && (defined(__ARM_NEON) || defined(_M_ARM64))
+#define KAMITE_VU_NEON 1
+#include <arm_neon.h>
+#else
+#define KAMITE_VU_REF 1
+#endif
+#if defined(__x86_64__) || defined(_M_X64)
+#include <xmmintrin.h>
+#elif !defined(__aarch64__)
+#include <cfenv>
+#endif
+
+namespace kamite::render
+{
+#if defined(KAMITE_VU_SSE)
+    struct Vec4
+    {
+        __m128 v;
+    };
+    inline Vec4 load(const void *p) { return {_mm_loadu_ps(static_cast<const float *>(p))}; }
+    inline void store(void *p, Vec4 a) { _mm_storeu_ps(static_cast<float *>(p), a.v); }
+    inline Vec4 bitsOf(uint32_t x, uint32_t y, uint32_t z, uint32_t w)
+    {
+        return {_mm_castsi128_ps(_mm_setr_epi32(static_cast<int>(x), static_cast<int>(y), static_cast<int>(z), static_cast<int>(w)))};
+    }
+    inline Vec4 splat(float f) { return {_mm_set1_ps(f)}; }
+    template <int L>
+    inline Vec4 splat(Vec4 a) { return {_mm_shuffle_ps(a.v, a.v, _MM_SHUFFLE(L, L, L, L))}; }
+    template <int L>
+    inline float lane(Vec4 a)
+    {
+        if constexpr (L == 0)
+            return _mm_cvtss_f32(a.v);
+        else
+            return _mm_cvtss_f32(_mm_shuffle_ps(a.v, a.v, _MM_SHUFFLE(L, L, L, L)));
+    }
+    template <int L>
+    inline uint32_t laneBits(Vec4 a) { return static_cast<uint32_t>(_mm_extract_ps(a.v, L)); }
+    inline Vec4 add(Vec4 a, Vec4 b) { return {_mm_add_ps(a.v, b.v)}; }
+    inline Vec4 sub(Vec4 a, Vec4 b) { return {_mm_sub_ps(a.v, b.v)}; }
+    inline Vec4 mul(Vec4 a, Vec4 b) { return {_mm_mul_ps(a.v, b.v)}; }
+    // The VU's MINI / MAX: a < b ? a : b and a > b ? a : b (so +0 / -0 give b), as minps / maxps do.
+    inline Vec4 vmin(Vec4 a, Vec4 b) { return {_mm_min_ps(a.v, b.v)}; }
+    inline Vec4 vmax(Vec4 a, Vec4 b) { return {_mm_max_ps(a.v, b.v)}; }
+    // Lanes of b where Mask has the bit (bit 0 = x ... bit 3 = w), else a.
+    template <int Mask>
+    inline Vec4 blend(Vec4 a, Vec4 b) { return {_mm_blend_ps(a.v, b.v, Mask)}; }
+    // A VU operand: exponent 0 -> signed zero, exponent 255 -> signed FLT_MAX.
+    inline Vec4 norm(Vec4 a)
+    {
+        const __m128i bits = _mm_castps_si128(a.v);
+        const __m128i exponent = _mm_and_si128(bits, _mm_set1_epi32(0x7F800000));
+        const __m128 sign = _mm_castsi128_ps(_mm_and_si128(bits, _mm_set1_epi32(static_cast<int>(0x80000000u))));
+        const __m128 zero = _mm_castsi128_ps(_mm_cmpeq_epi32(exponent, _mm_setzero_si128()));
+        const __m128 huge = _mm_castsi128_ps(_mm_cmpeq_epi32(exponent, _mm_set1_epi32(0x7F800000)));
+        const __m128 result = _mm_blendv_ps(a.v, sign, zero);
+        return {_mm_blendv_ps(result, _mm_or_ps(sign, _mm_castsi128_ps(_mm_set1_epi32(0x7F7FFFFF))), huge)};
+    }
+    // ITOF0: the lanes' bits as int32, converted (rounded by the float environment).
+    inline Vec4 itof(Vec4 a) { return {_mm_cvtepi32_ps(_mm_castps_si128(a.v))}; }
+    // FTOI0 of a normalized value: truncated, saturating (2^31 and up -> 0x7FFFFFFF, below -2^31 -> 0x80000000).
+    inline Vec4 ftoi(Vec4 a)
+    {
+        const __m128i truncated = _mm_cvttps_epi32(a.v);
+        const __m128i big = _mm_castps_si128(_mm_cmpge_ps(a.v, _mm_set1_ps(2147483648.0f)));
+        return {_mm_castsi128_ps(_mm_or_si128(_mm_andnot_si128(big, truncated), _mm_and_si128(big, _mm_set1_epi32(0x7FFFFFFF))))};
+    }
+
+#elif defined(KAMITE_VU_NEON)
+    struct Vec4
+    {
+        float32x4_t v;
+    };
+    inline Vec4 load(const void *p) { return {vld1q_f32(static_cast<const float *>(p))}; }
+    inline void store(void *p, Vec4 a) { vst1q_f32(static_cast<float *>(p), a.v); }
+    inline Vec4 bitsOf(uint32_t x, uint32_t y, uint32_t z, uint32_t w)
+    {
+        const uint32_t b[4] = {x, y, z, w};
+        return {vreinterpretq_f32_u32(vld1q_u32(b))};
+    }
+    inline Vec4 splat(float f) { return {vdupq_n_f32(f)}; }
+    template <int L>
+    inline Vec4 splat(Vec4 a) { return {vdupq_laneq_f32(a.v, L)}; }
+    template <int L>
+    inline float lane(Vec4 a) { return vgetq_lane_f32(a.v, L); }
+    template <int L>
+    inline uint32_t laneBits(Vec4 a) { return vgetq_lane_u32(vreinterpretq_u32_f32(a.v), L); }
+    inline Vec4 add(Vec4 a, Vec4 b) { return {vaddq_f32(a.v, b.v)}; }
+    inline Vec4 sub(Vec4 a, Vec4 b) { return {vsubq_f32(a.v, b.v)}; }
+    inline Vec4 mul(Vec4 a, Vec4 b) { return {vmulq_f32(a.v, b.v)}; }
+    // Not vminq/vmaxq: those order -0 below +0, the VU's compare does not.
+    inline Vec4 vmin(Vec4 a, Vec4 b) { return {vbslq_f32(vcltq_f32(a.v, b.v), a.v, b.v)}; }
+    inline Vec4 vmax(Vec4 a, Vec4 b) { return {vbslq_f32(vcgtq_f32(a.v, b.v), a.v, b.v)}; }
+    template <int Mask>
+    inline Vec4 blend(Vec4 a, Vec4 b)
+    {
+        const uint32_t m[4] = {(Mask & 1) ? ~0u : 0u, (Mask & 2) ? ~0u : 0u, (Mask & 4) ? ~0u : 0u, (Mask & 8) ? ~0u : 0u};
+        return {vbslq_f32(vld1q_u32(m), b.v, a.v)};
+    }
+    inline Vec4 norm(Vec4 a)
+    {
+        const uint32x4_t bits = vreinterpretq_u32_f32(a.v);
+        const uint32x4_t exponent = vandq_u32(bits, vdupq_n_u32(0x7F800000u));
+        const uint32x4_t sign = vandq_u32(bits, vdupq_n_u32(0x80000000u));
+        uint32x4_t r = vbslq_u32(vceqq_u32(exponent, vdupq_n_u32(0u)), sign, bits);
+        r = vbslq_u32(vceqq_u32(exponent, vdupq_n_u32(0x7F800000u)), vorrq_u32(sign, vdupq_n_u32(0x7F7FFFFFu)), r);
+        return {vreinterpretq_f32_u32(r)};
+    }
+    inline Vec4 itof(Vec4 a) { return {vcvtq_f32_s32(vreinterpretq_s32_f32(a.v))}; }
+    // FCVTZS saturates both ways, as the VU does.
+    inline Vec4 ftoi(Vec4 a) { return {vreinterpretq_f32_s32(vcvtq_s32_f32(a.v))}; }
+
+#else
+    struct Vec4
+    {
+        float v[4];
+    };
+    inline Vec4 load(const void *p)
+    {
+        Vec4 r;
+        std::memcpy(r.v, p, 16);
+        return r;
+    }
+    inline void store(void *p, Vec4 a) { std::memcpy(p, a.v, 16); }
+    inline uint32_t bitsOfFloat(float f)
+    {
+        uint32_t b;
+        std::memcpy(&b, &f, 4);
+        return b;
+    }
+    inline float floatOfBits(uint32_t b)
+    {
+        float f;
+        std::memcpy(&f, &b, 4);
+        return f;
+    }
+    inline Vec4 bitsOf(uint32_t x, uint32_t y, uint32_t z, uint32_t w) { return {{floatOfBits(x), floatOfBits(y), floatOfBits(z), floatOfBits(w)}}; }
+    inline Vec4 splat(float f) { return {{f, f, f, f}}; }
+    template <int L>
+    inline Vec4 splat(Vec4 a) { return splat(a.v[L]); }
+    template <int L>
+    inline float lane(Vec4 a) { return a.v[L]; }
+    template <int L>
+    inline uint32_t laneBits(Vec4 a) { return bitsOfFloat(a.v[L]); }
+    // volatile keeps each result rounded on its own (no contraction, no wider evaluation).
+    inline Vec4 add(Vec4 a, Vec4 b)
+    {
+        Vec4 r;
+        for (int i = 0; i < 4; ++i)
+        {
+            volatile float x = a.v[i] + b.v[i];
+            r.v[i] = x;
+        }
+        return r;
+    }
+    inline Vec4 sub(Vec4 a, Vec4 b)
+    {
+        Vec4 r;
+        for (int i = 0; i < 4; ++i)
+        {
+            volatile float x = a.v[i] - b.v[i];
+            r.v[i] = x;
+        }
+        return r;
+    }
+    inline Vec4 mul(Vec4 a, Vec4 b)
+    {
+        Vec4 r;
+        for (int i = 0; i < 4; ++i)
+        {
+            volatile float x = a.v[i] * b.v[i];
+            r.v[i] = x;
+        }
+        return r;
+    }
+    inline Vec4 vmin(Vec4 a, Vec4 b)
+    {
+        Vec4 r;
+        for (int i = 0; i < 4; ++i)
+            r.v[i] = a.v[i] < b.v[i] ? a.v[i] : b.v[i];
+        return r;
+    }
+    inline Vec4 vmax(Vec4 a, Vec4 b)
+    {
+        Vec4 r;
+        for (int i = 0; i < 4; ++i)
+            r.v[i] = a.v[i] > b.v[i] ? a.v[i] : b.v[i];
+        return r;
+    }
+    template <int Mask>
+    inline Vec4 blend(Vec4 a, Vec4 b)
+    {
+        Vec4 r = a;
+        for (int i = 0; i < 4; ++i)
+            if (Mask & (1 << i))
+                r.v[i] = b.v[i];
+        return r;
+    }
+    inline Vec4 norm(Vec4 a)
+    {
+        Vec4 r;
+        for (int i = 0; i < 4; ++i)
+        {
+            uint32_t b = bitsOfFloat(a.v[i]);
+            const uint32_t e = b & 0x7F800000u;
+            if (e == 0u)
+                b &= 0x80000000u;
+            else if (e == 0x7F800000u)
+                b = (b & 0x80000000u) | 0x7F7FFFFFu;
+            r.v[i] = floatOfBits(b);
+        }
+        return r;
+    }
+    inline Vec4 itof(Vec4 a)
+    {
+        Vec4 r;
+        for (int i = 0; i < 4; ++i)
+        {
+            int32_t n;
+            std::memcpy(&n, &a.v[i], 4);
+            volatile float x = static_cast<float>(n);
+            r.v[i] = x;
+        }
+        return r;
+    }
+    inline Vec4 ftoi(Vec4 a)
+    {
+        Vec4 r;
+        for (int i = 0; i < 4; ++i)
+        {
+            const float f = a.v[i];
+            const int32_t n = f >= 2147483648.0f ? 0x7FFFFFFF : f < -2147483648.0f ? INT32_MIN : static_cast<int32_t>(f);
+            std::memcpy(&r.v[i], &n, 4);
+        }
+        return r;
+    }
+#endif
+
+    // ITOF12 / FTOI4: the fixed-point forms (exact power-of-two scales).
+    inline Vec4 itof12(Vec4 a) { return mul(itof(a), splat(1.0f / 4096.0f)); }
+    inline Vec4 ftoi4(Vec4 a) { return ftoi(mul(a, splat(16.0f))); }
+
+    inline uint32_t floatBits(float f)
+    {
+        uint32_t b;
+        std::memcpy(&b, &f, 4);
+        return b;
+    }
+    inline float bitsFloat(uint32_t b)
+    {
+        float f;
+        std::memcpy(&f, &b, 4);
+        return f;
+    }
+
+    // The VU's float environment for the duration of a native program: round toward zero, denormals flushed (inputs
+    // and results). The x86 runtime already runs its VU jobs this way (runLoopWith); set it here for every path, so a
+    // program also runs right when called from elsewhere (the replay tool, other platforms).
+    class VuFloatEnv
+    {
+    public:
+#if defined(__x86_64__) || defined(_M_X64)
+        VuFloatEnv() : m_saved(_mm_getcsr()) { _mm_setcsr((m_saved & ~0x6000u) | 0x6000u | 0x8040u); } // RZ, FTZ, DAZ
+        ~VuFloatEnv() { _mm_setcsr(m_saved); }
+
+    private:
+        unsigned m_saved;
+#elif defined(__aarch64__)
+        VuFloatEnv()
+        {
+            __asm__ volatile("mrs %0, fpcr" : "=r"(m_saved));
+            const uint64_t env = (m_saved & ~(3ull << 22)) | (3ull << 22) | (1ull << 24); // RMode = RZ, FZ
+            __asm__ volatile("msr fpcr, %0" : : "r"(env));
+        }
+        ~VuFloatEnv() { __asm__ volatile("msr fpcr, %0" : : "r"(m_saved)); }
+
+    private:
+        uint64_t m_saved;
+#else
+        // Elsewhere: rounding from <cfenv>; flushing denormals has no portable switch, so such a platform must add its
+        // own here (the VU never sees a denormal).
+        VuFloatEnv() : m_saved(std::fegetround()) { std::fesetround(FE_TOWARDZERO); }
+        ~VuFloatEnv() { std::fesetround(m_saved); }
+
+    private:
+        int m_saved;
+#endif
+    };
+}
