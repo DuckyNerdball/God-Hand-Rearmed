@@ -39,7 +39,7 @@ namespace kamite::render
         character.entryPcs[1] = 0x0520u; // MSCNT ("b 0x00B8")
         character.entryCount = 2u;
         character.program = characterSkinProgram();
-        character.checked = false; // PS2X_VU1_NATIVE=1 until checked in the game (claude/native-vu1.md "Done")
+        character.checked = true; // bit-exact on every traced run, K's in-game check and all test cases (Nov 19)
         registerVu1NativeProgram(character);
     }
 }
