@@ -22,3 +22,76 @@ skip = []
 stubs = []
 # No runtime relocations: every import resolves to a boot .sndata export at static-link time
 # (r021_runtime_relocations.csv has 0 rows).
+
+# 60 FPS, the stage results screen (Nov 19; claude/framerate-sheet.md, "Menus in the room DLLs"). Each section
+# (cR021::move_Gold / ClearTime / EM_LV / Result_Out / Continue / Dead_man / Get) slides its panel in from the right 80
+# a frame to its place (clamped), rolls its numbers toward the totals, then waits for a press.
+# The slides: 80 -> 40 a vblank (lui at,0x42A0 before each sub.s; the clamp ends them where they were).
+[[patches.conditional]]
+address = "0x00799A38"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x00799C38"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079A068"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079A4D4"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079A5DC"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079A904"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079AB88"
+value = "0x3C014220"
+flag = "fps60"
+
+# The rolls (+5 a frame per count, the gold roll CuntGold with its tick each call) run once per 30 FPS frame: the
+# sections' sub-step loads (lh v1,2(sN) before the five-case switch) skip those sub-steps on second halves, unless a
+# command is pressed (the press tests stay every vblank). Gold: 2 (the gold roll); ClearTime: 2 (the time); EM_LV: 2
+# (kills), 3 (gold); Continue and Dead_man: 2 (the count), 3 (gold).
+[[patches.hooks]]
+address = "0x0079999C"
+hook = "km_fps60_result_gate_s1_2"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x00799BB8"
+hook = "km_fps60_result_gate_s1_2"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x00799F88"
+hook = "km_fps60_result_gate_s5_23"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079A570"
+hook = "km_fps60_result_gate_s1_23"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079A894"
+hook = "km_fps60_result_gate_s1_23"
+flag = "fps60"
+replace = true

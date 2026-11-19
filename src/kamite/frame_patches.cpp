@@ -2410,6 +2410,67 @@ namespace kamite
             SET_GPR_U32(ctx, Dst, skipFrame(rdram) && value != 0u ? value + 1u : value);
         }
 
+        // ---- the menus in the room DLLs and McPort.rel (Nov 19: the title, the memory-card screens, the results) ----
+        // `lw Dst,Offset(Base)` of a count-up that stores the loaded value + Step back every frame (the title's logos,
+        // cR020::MoveLogo +8: it stores a0 + 1, tests it against 121, then stores a0 + 2): on second halves Dst reads
+        // Step less, so the frame stores the value back and the logo holds as many vblanks as the PS2's frames x 2.
+        // For k: the same on the k-1 frames after the tick.
+        template <int Base, uint32_t Offset, int Dst, int Step>
+        void countupLoadBy(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            int32_t value = 0;
+            std::memcpy(&value, rdram + ((GPR_U32(ctx, Base) + Offset) & PS2_RAM_MASK), sizeof(value));
+            SET_GPR_S32(ctx, Dst, skipFrame(rdram) ? value - Step : value);
+        }
+        // addiu Dst,Src,1 of a frame count-up into another register (McPort.rel's +0xE8 in readFile / formatProc,
+        // a0 = v0 + 1): Dst = Src on second halves.
+        template <int Dst, int Src>
+        void countupTo(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            const int32_t value = GPR_S32(ctx, Src);
+            SET_GPR_S32(ctx, Dst, skipFrame(rdram) ? value : value + 1);
+        }
+        // immSplit into another register: addiu Dst,Src,Step.
+        template <int Dst, int Src, int Step>
+        void immSplitTo(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            constexpr int32_t half = Step / 2;
+            SET_GPR_S32(ctx, Dst, GPR_S32(ctx, Src) + (skipFrame(rdram) ? half : Step - half));
+        }
+        // div.s Dst,A,B where the quotient is a step added once a frame (McPort.rel's save progress bar,
+        // cMcSys::setProgressSave 0x7C7C30: the stage's share / its weight in frames, 30..100): 1/k of it a vblank.
+        template <int Dst, int A, int B>
+        void floatDivPerVblank(uint8_t *, R5900Context *ctx, PS2Runtime *)
+        {
+            ctx->f[Dst] = ctx->f[A] / ctx->f[B] * 0.5f;
+        }
+        // cMcSys::Sleep(n)'s loop count (move s0,a1 at 0x7C8B54, McPort.rel): n frames of the memory-card screen's move
+        // and draw, each a cTaskWork_sleep(1) poll. Sleep(1) is the screens' own per-frame step and stays one vblank;
+        // longer waits (the boot check's minimum 30 frames, 0x7C05DC / 0x7C0618) last n x k vblanks, the task sleep's
+        // rule (family 17).
+        template <int Dst, int Src>
+        void sleepCount(uint8_t *, R5900Context *ctx, PS2Runtime *)
+        {
+            const int32_t n = GPR_S32(ctx, Src);
+            SET_GPR_S32(ctx, Dst, n >= 2 ? n * 2 : n);
+        }
+        // The results screens' rolls (r021 / r022, cR02x::move_ClearTime / EM_LV / Continue / Dead_man / Gold): `lh
+        // Dst,2(Base)` loads a section's sub-step for its five-case jump table. On second halves a sub-step in Mask
+        // reads 0x7FFF (out of range: the switch is skipped, the press test after it still runs), unless a menu command
+        // is down this vblank (GameWork +0x1A0 trg), so a skip press is never lost. The counts rolling toward the totals
+        // (+1 / +2 / +5 a frame) and the gold roll (CuntGold: a power-of-ten step and a tick sound a call) then run once
+        // per 30 FPS frame, sounds included. For k: skipped on the k-1 frames after the tick.
+        template <int Base, int Dst, uint32_t Mask>
+        void substepTickGate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            int16_t sub = 0;
+            std::memcpy(&sub, rdram + ((GPR_U32(ctx, Base) + 2u) & PS2_RAM_MASK), sizeof(sub));
+            uint64_t trg = 0;
+            std::memcpy(&trg, &ram8(rdram, game::GameWork::address(game::GameWork::kTrg)), sizeof(trg));
+            const bool gated = sub >= 0 && sub < 32 && ((Mask >> sub) & 1u) != 0u && trg == 0u && skipFrame(rdram);
+            SET_GPR_S32(ctx, Dst, gated ? 0x7FFF : sub);
+        }
+
         // The 1 -> 0 step (Nov 7 census of the 472 countdown hooks, claude/countdown-step.md): a hooked
         // countdown steps on the tick, so on the second half it already reads 0 where the 30 FPS frame still had 1.
         // `if (n > 0) n--; else { act }` then acted a vblank early, and in a chain of states (an enemy's wait -> attack
@@ -2680,6 +2741,21 @@ namespace kamite
         ps2xRegisterHostHook("km_fps60_r501_cd_s1_18", &countdownLoadExact<17, 0x18u, 2, 4>);
         ps2xRegisterHostHook("km_fps60_r501_cd_s0_70", &countdownLoadExact<16, 0x70u, 2, 4>);
         ps2xRegisterHostHook("km_fps60_r501_store_s1_14", &countdownStore<17, 0x14u, 2>);
+        // The menus in the room DLLs and McPort.rel (Nov 19): the title (r020.toml), the memory-card screens
+        // (mcport.toml), the results screens (r021.toml / r022.toml).
+        ps2xRegisterHostHook("km_fps60_r020_logo_hold", &countupLoadBy<17, 0x8u, 4, 2>);
+        ps2xRegisterHostHook("km_fps60_countup_a0v0", &countupTo<4, 2>); // addiu a0,v0,1
+        ps2xRegisterHostHook("km_fps60_mc_wait_s1_e8_a1", &countdownLoadExact<17, 0xE8u, 5, 4>);
+        ps2xRegisterHostHook("km_fps60_mc_wait_s1_e8_v0", &countdownLoadExact<17, 0xE8u, 2, 4>);
+        ps2xRegisterHostHook("km_fps60_mc_sleep", &sleepCount<16, 5>);              // move s0,a1
+        ps2xRegisterHostHook("km_fps60_mc_filter_up", &immSplit<16, 3>);            // addiu s0,s0,3
+        ps2xRegisterHostHook("km_fps60_mc_filter_down", &immSplitTo<2, 16, -3>);    // addiu v0,s0,-3
+        ps2xRegisterHostHook("km_fps60_mc_progress_step", &floatDivPerVblank<0, 0, 1>); // div.s f0,f0,f1
+        ps2xRegisterHostHook("km_fps60_result_gate_s0_2", &substepTickGate<16, 3, 0x4u>);
+        ps2xRegisterHostHook("km_fps60_result_gate_s1_2", &substepTickGate<17, 3, 0x4u>);
+        ps2xRegisterHostHook("km_fps60_result_gate_s1_23", &substepTickGate<17, 3, 0xCu>);
+        ps2xRegisterHostHook("km_fps60_result_gate_s4_23", &substepTickGate<20, 3, 0xCu>);
+        ps2xRegisterHostHook("km_fps60_result_gate_s5_23", &substepTickGate<21, 3, 0xCu>);
         ps2xRegisterHostHook("km_fps60_flash_guard_rate", &flashGuardRate);
         ps2xRegisterHostHook("km_fps60_tension_drain", &tensionDrainRate);
         ps2xRegisterHostHook("km_fps60_enemy_slow_rate", &enemySlowRate);

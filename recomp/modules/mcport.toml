@@ -23,3 +23,100 @@ skip = []
 stubs = []
 # No runtime relocations: every McPort import resolves to a boot .sndata export at static-link time
 # (mcport_runtime_relocations.csv has 0 rows).
+
+# 60 FPS, the memory-card screens (Nov 19; the title's Load Game, the save points, the boot check). Each screen's main
+# loop runs its mode, then cMcSys::Sleep(1) (one move + draw, a cTaskWork_sleep(1) poll): once a frame, 60 a second
+# at 60 FPS. claude/framerate-sheet.md, "Menus in the room DLLs".
+# The cursor arrows' bob (cMcSys::CursorAnim, every frame): y -/+ 0.5 a frame (f20), wrapping 81 -> 75 / 336 -> 343.
+[[patches.conditional]]
+address = "0x007C7970"
+value = "0x3C013E80"
+flag = "fps60"
+
+# cMcSys::FilterAnim: the dimming filter's alpha (entry 13 +0x4F) +-3 a frame between 0 and 18: split 2 / 1 (immSplit),
+# the same ends.
+[[patches.hooks]]
+address = "0x007C7A8C"
+hook = "km_fps60_mc_filter_up"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x007C7AA0"
+hook = "km_fps60_mc_filter_down"
+flag = "fps60"
+replace = true
+
+# The progress bars. Time mode (cMcSys::setProgressTime(frames), +1/frames a call): 20 frames while a save is read, 160
+# while a card is formatted (the waits below match them), so 40 / 320 vblanks. Save mode (setProgressSave): the bar
+# moves (the stage's share - where it is) / the stage's weight in frames (80, 100, 100, 100, 30, 80) a call.
+[[patches.conditional]]
+address = "0x007C7504"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x007C7534"
+value = "0x3C0143A0"
+flag = "fps60"
+
+[[patches.hooks]]
+address = "0x007C7C30"
+hook = "km_fps60_mc_progress_step"
+flag = "fps60"
+replace = true
+
+# +0xE8 counts the frames a step has run (family 1; nothing counts it down but the complete screens below): cMcBoot's
+# Control (the boot check: Sleep(30 - +0xE8), at least 30 frames of "Checking"), cMcLoad::readFile (at least 20 frames,
+# with the 20-frame bar), cMcSave::slotCheck, cMcSave::formatProc (at least 160 frames, with the 160-frame bar).
+[[patches.hooks]]
+address = "0x007C0400"
+hook = "km_fps60_countup_self"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x007C27A4"
+hook = "km_fps60_countup_a0v0"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x007C4168"
+hook = "km_fps60_countup_self"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x007C4DC8"
+hook = "km_fps60_countup_a0v0"
+flag = "fps60"
+replace = true
+
+# The "complete" messages: +0xE8 = 90 counted down, input taken below 80, gone at 0 (cMcLoad::complete, cMcSave::complete),
+# and the format's (cMcSave::formatComplete). The loads before the delay-slot decrements (countdownLoadExact).
+[[patches.hooks]]
+address = "0x007C2A6C"
+hook = "km_fps60_mc_wait_s1_e8_a1"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x007C6520"
+hook = "km_fps60_mc_wait_s1_e8_a1"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x007C5148"
+hook = "km_fps60_mc_wait_s1_e8_v0"
+flag = "fps60"
+replace = true
+
+# cMcSys::Sleep(n): n frames of move + draw. Sleep(1) is the screens' frame and stays one vblank; the boot check's
+# Sleep(30 - +0xE8) lasts twice the vblanks.
+[[patches.hooks]]
+address = "0x007C8B54"
+hook = "km_fps60_mc_sleep"
+flag = "fps60"
+replace = true

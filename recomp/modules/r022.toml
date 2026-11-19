@@ -30,3 +30,67 @@ hook = "km_fps60_countdown_a0v0"
 flag = "fps60"
 replace = true
 
+
+# 60 FPS, the game's results screen (Nov 19; claude/framerate-sheet.md, "Menus in the room DLLs"): cR022's sections
+# slide in 80 a frame and roll their numbers (+1 the time, +5 kills / continues, +2 deaths, +1 the level) like r021's.
+# The slides: 80 -> 40 a vblank.
+[[patches.conditional]]
+address = "0x00799A1C"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x00799B54"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x00799DC8"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079A30C"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079A3F4"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079A5AC"
+value = "0x3C014220"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079AFA0"
+value = "0x3C014220"
+flag = "fps60"
+
+# The rolls once per 30 FPS frame (see r021.toml): ClearTime 2, EM_LV 2 (kills) and 3 (the level), Continue 2,
+# Dead_man 2. The press tests after each switch still run every vblank.
+[[patches.hooks]]
+address = "0x00799AE0"
+hook = "km_fps60_result_gate_s0_2"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x00799D44"
+hook = "km_fps60_result_gate_s4_23"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079A390"
+hook = "km_fps60_result_gate_s1_2"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079A548"
+hook = "km_fps60_result_gate_s1_2"
+flag = "fps60"
+replace = true

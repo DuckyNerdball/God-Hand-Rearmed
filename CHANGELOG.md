@@ -4,6 +4,9 @@ Newest first, one line per change; the code comments say how.
 
 ## November 19, 2026
 
+- 60 FPS: the title screen runs at the PS2's speed (Press Start's blink, the menus' glows, slides and fades, the boot logos).
+- 60 FPS: the memory-card screens run at the PS2's speed (the cursor arrows, the dimming, the progress bars and their waits).
+- 60 FPS: a stage's results slide in and count up at the PS2's speed, the gold roll's ticks too.
 - Performance: scenery the game cuts at the screen edges is drawn by native code instead of the emulated VU1 microprogram (that part about 4x faster).
 - Mods: Olivia is playable (Pre-Alpha, test builds only), made from your own disc: Gene's moves at her own height, Money and Cash on her.
 - Launcher: a Costume row under Character for characters with costumes (Olivia: Dress, Bunny Suit).

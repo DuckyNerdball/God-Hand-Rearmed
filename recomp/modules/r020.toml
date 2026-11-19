@@ -80,3 +80,175 @@ hook = "km_fps60_countdown_self"
 flag = "fps60"
 replace = true
 
+
+# 60 FPS, the title's menus (Nov 19, K: "the title screen's effects run at double speed at 60"). cR020's moves step
+# their glows, slides and waits once a frame with no rate (claude/framerate-sheet.md, families 1 and 3 "Menus in the
+# room DLLs"). The cIDBase animations themselves already step every other frame (km_fps60_ui_anim).
+# Glows: sine phases in degrees that TitleID (every frame) turns into the entries' alpha (+0x4F). Halved: the same pulse
+# per second, still moving every vblank; the wraps (> 160 -> 20 / 15, > 180 -> 0) and clamps (15, 0, 180) end on the
+# same values.
+#   0x799ACC  TitleID +0x28 += 3.5   "Press Start"'s blink (flag 1)
+#   0x799DA4  TitleID +0x2C += 2.0   entry 6's glow (not in the exit)
+#   0x79A5D8  titleGameSel step 1: the hovered mode's glow +0x40 + 4i += 3.0
+#   0x79A5FC  titleGameSel step 1: the other modes' +0x40 + 4i += 1.0 (to 15)
+#   0x79ABE4  titleGameSel step 10: the modes' fade +-6.0 (to 180 / 0)
+#   0x79B228  titleLevelSel step 1: the hovered difficulty's glow +0x30 + 4i += 3.5
+#   0x79B218  titleLevelSel step 1: the other difficulties' += 1.0 (to 15)
+# Waits counted in degrees (the end tests >= 180 / 40 / 70 land on the same step at half size):
+#   0x79A400  titlePressWait step 4: "Press Start" slides up 20 a frame (entry 3 +0x3C) ...
+#   0x79A408  ... while +0x28 += 15 runs 140 -> 180 (3 frames)
+#   0x79BB78  titleExit step 1: +0x28 += 15 to 180 (the flash, 12 frames)
+#   0x79BC4C  titleExit step 2: +0x28 += 0.5 to 40 (the fade starts) and 70 (the jump)
+[[patches.conditional]]
+address = "0x00799ACC"
+value = "0x3C013FE0"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x00799DA4"
+value = "0x3C013F80"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079A5D8"
+value = "0x3C013FC0"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079A5FC"
+value = "0x3C013F00"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079ABE4"
+value = "0x3C014040"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079B228"
+value = "0x3C013FE0"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079B218"
+value = "0x3C013F00"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079A400"
+value = "0x3C014120"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079A408"
+value = "0x3C0140F0"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079BB78"
+value = "0x3C0140F0"
+flag = "fps60"
+
+[[patches.conditional]]
+address = "0x0079BC4C"
+value = "0x3C013E80"
+flag = "fps60"
+
+# Pops ended by a threshold, then snapped (SetPos_ModeID / SetPos_LevelID put every item in place): the parity form, the
+# full step on the tick and none on the second half, so they run through the PS2's values (a half step would end a
+# vblank early and snap 20 px).
+#   0x79A96C / 0x79B5E8  steps 2: the other items slide +-40 (+0x3C / +0x3C of the menu) ...
+#   0x79A9C0 / 0x79B648  ... while the old item's scale +0x40 grows 0.15 a frame past 1.2
+#   0x79AB18 / 0x79B7D8  steps 3: the new item's scale shrinks 0.15 a frame below 1.0
+[[patches.hooks]]
+address = "0x0079A96C"
+hook = "km_fps60_float_add_f0f1"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079A9C0"
+hook = "km_fps60_float_add_f0f1"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079AB18"
+hook = "km_fps60_sub_parity_f0f0f1"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079B5E8"
+hook = "km_fps60_float_add_f0f1"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079B648"
+hook = "km_fps60_float_add_f0f1"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079B7D8"
+hook = "km_fps60_sub_parity_f0f0f1"
+flag = "fps60"
+replace = true
+
+# Frame counts (family 1; the Nov 2 census looked for countdowns only): +8 counted up once a frame.
+#   0x79A354  titlePressWait step 3: the 6-frame hold after Start
+#   0x79A6E4  titleGameSel step 1: 4 frames before the mode menu takes a press
+#   0x79AC90  titleGameSel step 11: 3 frames before the difficulty menu
+#   0x79B348  titleLevelSel step 1: 4 frames before it takes a press
+#   0x79B8EC  titleLevelSel step 5: the 6-frame hold after the choice
+[[patches.hooks]]
+address = "0x0079A354"
+hook = "km_fps60_countup_self"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079A6E4"
+hook = "km_fps60_countup_self"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079AC90"
+hook = "km_fps60_countup_self"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079B348"
+hook = "km_fps60_countup_self"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079B8EC"
+hook = "km_fps60_countup_self"
+flag = "fps60"
+replace = true
+
+# cR020::MoveLogo states 12 / 32 / 42, the three boot logos' hold: lw a0,8(s1), then +8 = a0 + 1 (121 ends it) and
+# +8 = a0 + 2, so 2 a frame, 61 frames (2 s; a press or a press during the fade-in ends it sooner). On second halves the
+# load reads 2 less, so the logo holds 2 s at 60 too.
+[[patches.hooks]]
+address = "0x0079C094"
+hook = "km_fps60_r020_logo_hold"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079C24C"
+hook = "km_fps60_r020_logo_hold"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079C3E8"
+hook = "km_fps60_r020_logo_hold"
+flag = "fps60"
+replace = true
