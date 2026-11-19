@@ -78,6 +78,47 @@ VU1InterpreterAccess::StepResult VU1InterpreterAccess::fastBlock<0x1ull, 7u>(VU1
     g_cycleOut = vu.m_cycle;
     return StepResult::Fallback;
 }
+// pairs mode: the interpreter one instruction pair at a time, recording each pair's pc and the cycle after it (stalls
+// included), for fitting a native program's cycle count on data-dependent paths.
+struct PairTrace
+{
+    uint8_t *code = nullptr;
+    uint8_t *data = nullptr;
+    GS *gs = nullptr;
+    uint32_t maxCycles = 0;
+    std::vector<std::pair<uint32_t, uint32_t>> pairs; // pc, cycle after the pair (from the entry)
+};
+static PairTrace g_pairTrace;
+template <>
+VU1InterpreterAccess::StepResult VU1InterpreterAccess::fastBlock<0x2ull, 7u>(VU1Interpreter &vu, Vu1FastCtx &)
+{
+    PairTrace &t = g_pairTrace;
+    vu.m_activeVuData = t.data;
+    vu.m_activeVuDataSize = 0x4000u;
+    vu.m_activeGs = t.gs;
+    vu.m_activeMemory = nullptr;
+    const unsigned csr = _mm_getcsr();
+    _mm_setcsr(csr | 0x6000u);
+    const uint64_t start = vu.m_cycle, budgetEnd = vu.m_cycle + t.maxCycles;
+    StepResult r = StepResult::Budget;
+    while (vu.m_cycle < budgetEnd)
+    {
+        vu1NormShadow.valid = false;
+        vu.commitReadyPipelines();
+        const uint32_t pc = vu.m_state.pc;
+        const Decoded &d = vu.getDecodedInstructionPairForPc(t.code, 0x4000u, nullptr, pc);
+        r = stepPair(vu, d, t.data, 0x4000u, *t.gs, nullptr, 0x4000u, budgetEnd);
+        t.pairs.push_back({pc, static_cast<uint32_t>(vu.m_cycle - start)});
+        if (r != StepResult::Continue)
+            break;
+    }
+    if (r == StepResult::Ended)
+        vu.flushPipelines();
+    t.pairs.push_back({0xFFFFu, static_cast<uint32_t>(vu.m_cycle - start)});
+    _mm_setcsr(csr);
+    return r;
+}
+
 static uint64_t cycleOf(VU1Interpreter &vu)
 {
     Vu1FastCtx *none = nullptr;
@@ -639,6 +680,44 @@ int main(int argc, char **argv)
                     static_cast<unsigned long long>(differ));
         for (const auto &[f, n] : fields)
             std::printf("  %s: %llu\n", f.c_str(), static_cast<unsigned long long>(n));
+        return 0;
+    }
+    if (mode == "pairs")
+    {
+        // pairs <trace> <entry pc hex> [image hash prefix]: per run at that entry, "run <i> top <top> cycles <n>" then
+        // one line per instruction pair: pc and the cycles it took (its stalls included); "end <cycles>" last (the
+        // final XGKICK's transfer included).
+        const uint32_t pc = argc > 3 ? static_cast<uint32_t>(std::strtoul(argv[3], nullptr, 16)) : 0u;
+        const std::string prefix = argc > 4 ? argv[4] : "";
+        alignas(64) static uint8_t gsStorage[1 << 16];
+        static VU1Interpreter vu(VU1Interpreter::Unit::VU1);
+        for (size_t i = 0; i < runs.size(); ++i)
+        {
+            char hash[24];
+            std::snprintf(hash, sizeof(hash), "%016llx", static_cast<unsigned long long>(runs[i].hash));
+            std::vector<uint8_t> &code = images[runs[i].hash];
+            if (code.size() != 0x4000u || runs[i].state.state.pc != pc || std::string(hash).rfind(prefix, 0) != 0)
+                continue;
+            std::vector<uint8_t> data = runs[i].data;
+            VU1InterpreterAccess::traceRestore(vu, runs[i].state);
+            g_pairTrace = PairTrace{code.data(), data.data(), reinterpret_cast<GS *>(gsStorage), runs[i].maxCycles, {}};
+            Vu1PacketSink sink;
+            sink.forward = false;
+            packetSink = &sink;
+            Vu1FastCtx *none = nullptr;
+            VU1InterpreterAccess::fastBlock<0x2ull, 7u>(vu, *none);
+            packetSink = nullptr;
+            std::printf("run %zu top %u cycles %u\n", i, runs[i].state.state.top, g_pairTrace.pairs.back().second);
+            uint32_t last = 0;
+            for (const auto &[p, c] : g_pairTrace.pairs)
+            {
+                if (p == 0xFFFFu)
+                    std::printf("end %u\n", c - last);
+                else
+                    std::printf("%04x %u\n", p, c - last);
+                last = c;
+            }
+        }
         return 0;
     }
     if (mode == "survey")

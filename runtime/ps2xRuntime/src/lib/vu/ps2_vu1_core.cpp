@@ -1657,8 +1657,9 @@ bool VU1InterpreterAccess::runLoop(VU1Interpreter &vu, uint8_t *vuCode, uint32_t
 
 namespace
 {
-    // XGKICK for a native program: the whole packet at once (the program ends right after; the cycles it takes are in
-    // the program's own count), through finishXgkick like any other: packet sink, PATH1 filters, the GIF.
+    // XGKICK for a native program: the whole packet at once, in the program's order (it may kick several; the cycles,
+    // transfers and waits for them included, are in the program's own count), through finishXgkick like any other:
+    // packet sink, PATH1 filters, the GIF.
     void nativeVu1Kick(void *user, uint32_t qwordAddress, uint32_t kickPc)
     {
         VU1InterpreterAccess::nativeKick(*static_cast<VU1Interpreter *>(user), qwordAddress, kickPc);

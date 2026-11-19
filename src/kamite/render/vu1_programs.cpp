@@ -6,6 +6,7 @@ namespace kamite::render
 {
     Vu1NativeProgram sceneryStripProgram();
     Vu1NativeProgram characterSkinProgram();
+    Vu1NativeProgram clipSceneryProgram();
 
     void registerNativeVu1Programs()
     {
@@ -41,5 +42,18 @@ namespace kamite::render
         character.program = characterSkinProgram();
         character.checked = true; // bit-exact on every traced run, K's in-game check and all test cases (Nov 19)
         registerVu1NativeProgram(character);
+
+        // Clip scenery (clip_scenery.cpp): pairs 0x00C8..0x11E0 of the scenery image (b847), its clipper included.
+        Vu1NativeEntry clip;
+        clip.name = "clip scenery";
+        clip.codeBegin = 0x00C8u;
+        clip.codeEnd = 0x11E0u;
+        clip.codeHash = 0x3422934862E23555ull;
+        clip.entryPcs[0] = 0x00C8u; // MSCAL
+        clip.entryPcs[1] = 0x0358u; // MSCNT ("b 0x00C8")
+        clip.entryCount = 2u;
+        clip.program = clipSceneryProgram();
+        clip.checked = false; // on with PS2X_VU1_NATIVE=1 until K's in-game check
+        registerVu1NativeProgram(clip);
     }
 }
