@@ -38,7 +38,30 @@ namespace kamite::launcher::platform
                 dialog->SetFileTypes(2, filters);
                 dialog->SetTitle(L"Choose your disc image (USA, SLUS-21503)");
             }
-            if (SUCCEEDED(dialog->Show(static_cast<HWND>(window))))
+            // A borderless window covering the whole monitor has its frames shown straight on screen, without the
+            // desktop's composition, so the dialog opened over it stays invisible until something (the Start key)
+            // brings composition back (the same cause as the Nov 17 black screen after Play). One pixel off the
+            // bottom while the dialog is up gives composition back; the old size returns after it.
+            const HWND owner = static_cast<HWND>(window);
+            RECT kept{};
+            bool shrunk = false;
+            if (owner != nullptr && GetWindowRect(owner, &kept))
+            {
+                MONITORINFO monitor{};
+                monitor.cbSize = sizeof(monitor);
+                const RECT &m = monitor.rcMonitor;
+                if (GetMonitorInfoW(MonitorFromWindow(owner, MONITOR_DEFAULTTONEAREST), &monitor) && kept.left <= m.left &&
+                    kept.top <= m.top && kept.right >= m.right && kept.bottom >= m.bottom)
+                {
+                    shrunk = SetWindowPos(owner, nullptr, m.left, m.top, m.right - m.left, m.bottom - m.top - 1,
+                                          SWP_NOZORDER | SWP_NOACTIVATE) != FALSE;
+                }
+            }
+            const bool chosen = SUCCEEDED(dialog->Show(owner));
+            if (shrunk)
+                SetWindowPos(owner, nullptr, kept.left, kept.top, kept.right - kept.left, kept.bottom - kept.top,
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+            if (chosen)
             {
                 IShellItem *item = nullptr;
                 if (SUCCEEDED(dialog->GetResult(&item)))

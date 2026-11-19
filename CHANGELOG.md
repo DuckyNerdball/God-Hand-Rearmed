@@ -2,6 +2,10 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 19, 2026
+
+- Launcher: the disc image and folder pickers no longer stay hidden behind the fullscreen launcher until the Start key.
+
 ## November 18, 2026
 
 - Launcher: a saloon replaces the desert: the menu is written on the bill of fare, the logo shines in the doorway with its kana outside, dust hangs in the air, the light and the kana drift with the mouse, the doors sway in the breeze and fly open on Play.
