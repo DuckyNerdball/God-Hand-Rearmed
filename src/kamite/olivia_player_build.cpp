@@ -2,6 +2,7 @@
 #include "kamite/olivia_player_build.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -265,6 +266,277 @@ namespace kamite::olivia_player
             return true;
         }
 
+        // ---- Gene's spread palm (02) on her open hand (00) -------------------------------------------------------------
+        // Gene's 00 and 02 are one mesh in two poses (the same strips), so each of his vertices says where it goes.
+        // Her hand (scaled to his by the hands' lengths, both about their hand bone) takes, per vertex, the rigid move of
+        // his 12 nearest vertices (inverse-square weighted), which sends her fingers where his go; then an as-rigid-as-
+        // possible fit (her mesh's own edges, pulled toward those targets with weight 0.1, 30 rounds) keeps every finger
+        // her own shape and thickness (the per-vertex moves alone stretched them into sausages, K Nov 19).
+        using V3 = std::array<double, 3>;
+        using M3 = std::array<double, 9>; // row-major
+        V3 sub3(const V3 &a, const V3 &b) { return {a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
+        V3 apply3(const M3 &m, const V3 &v)
+        {
+            return {m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]};
+        }
+        void addOuter(M3 &m, const V3 &a, const V3 &b, double w)
+        {
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j)
+                    m[3 * i + j] += w * a[static_cast<size_t>(i)] * b[static_cast<size_t>(j)];
+        }
+        // The rotation nearest to m (R = U V^T of m = U S V^T, a reflection turned into a rotation): Kabsch.
+        M3 nearestRotation(const M3 &m)
+        {
+            M3 a{}; // m^T m
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j)
+                    for (int k = 0; k < 3; ++k)
+                        a[3 * i + j] += m[3 * k + i] * m[3 * k + j];
+            M3 v{1, 0, 0, 0, 1, 0, 0, 0, 1};
+            for (int sweep = 0; sweep < 50; ++sweep) // Jacobi
+            {
+                const double off = a[1] * a[1] + a[2] * a[2] + a[5] * a[5];
+                if (off < 1e-24)
+                    break;
+                for (const auto &[p, q] : {std::pair{0, 1}, std::pair{0, 2}, std::pair{1, 2}})
+                {
+                    const double apq = a[3 * p + q];
+                    if (std::fabs(apq) < 1e-30)
+                        continue;
+                    const double theta = (a[3 * q + q] - a[3 * p + p]) / (2.0 * apq);
+                    const double t = (theta >= 0 ? 1.0 : -1.0) / (std::fabs(theta) + std::sqrt(theta * theta + 1.0));
+                    const double c = 1.0 / std::sqrt(t * t + 1.0), sn = t * c;
+                    for (int k = 0; k < 3; ++k) // a = J^T a J
+                    {
+                        const double akp = a[3 * k + p], akq = a[3 * k + q];
+                        a[3 * k + p] = c * akp - sn * akq;
+                        a[3 * k + q] = sn * akp + c * akq;
+                    }
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        const double apk = a[3 * p + k], aqk = a[3 * q + k];
+                        a[3 * p + k] = c * apk - sn * aqk;
+                        a[3 * q + k] = sn * apk + c * aqk;
+                    }
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        const double vkp = v[3 * k + p], vkq = v[3 * k + q];
+                        v[3 * k + p] = c * vkp - sn * vkq;
+                        v[3 * k + q] = sn * vkp + c * vkq;
+                    }
+                }
+            }
+            // columns of v = right singular vectors, sorted by eigenvalue (largest first)
+            int order[3] = {0, 1, 2};
+            std::sort(order, order + 3, [&](int x, int y) { return a[3 * x + x] > a[3 * y + y]; });
+            V3 vc[3], uc[3];
+            for (int i = 0; i < 3; ++i)
+            {
+                vc[i] = {v[order[i]], v[3 + order[i]], v[6 + order[i]]};
+                const V3 mv = apply3(m, vc[i]);
+                const double len = std::sqrt(mv[0] * mv[0] + mv[1] * mv[1] + mv[2] * mv[2]);
+                uc[i] = len > 1e-12 ? V3{mv[0] / len, mv[1] / len, mv[2] / len} : V3{0, 0, 0};
+            }
+            const auto cross = [](const V3 &x, const V3 &y) { return V3{x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]}; };
+            if (uc[1][0] == 0 && uc[1][1] == 0 && uc[1][2] == 0)
+                return {1, 0, 0, 0, 1, 0, 0, 0, 1};
+            uc[2] = cross(uc[0], uc[1]); // a right-handed U: R is a rotation (Kabsch's sign fix)
+            const V3 vx = cross(vc[0], vc[1]);
+            if (vx[0] * vc[2][0] + vx[1] * vc[2][1] + vx[2] * vc[2][2] < 0)
+                vc[2] = {-vc[2][0], -vc[2][1], -vc[2][2]};
+            M3 r{};
+            for (int i = 0; i < 3; ++i)
+                addOuter(r, uc[i], vc[i], 1.0);
+            return r;
+        }
+
+        struct HandMesh
+        {
+            std::vector<V3> pos;
+            std::vector<std::pair<uint32_t, uint32_t>> at; // (buffer offset, vertex) per vertex
+            std::vector<std::array<uint32_t, 3>> tris;
+        };
+        HandMesh handMesh(Bytes &m)
+        {
+            HandMesh h;
+            forEachBuffer(m, [&](uint32_t v) {
+                const uint32_t n = r16(m, v + 20), po = r32(m, v), base = static_cast<uint32_t>(h.pos.size());
+                for (uint32_t k = 0; k < n; ++k)
+                {
+                    h.pos.push_back({rf(m, v + po + 16 * k), rf(m, v + po + 16 * k + 4), rf(m, v + po + 16 * k + 8)});
+                    h.at.emplace_back(v, k);
+                    if (k >= 2 && r32(m, v + po + 16 * k + 12) != 0x8000u)
+                        h.tris.push_back({base + k - 2, base + k - 1, base + k});
+                }
+            });
+            return h;
+        }
+
+        bool spreadHand(Bytes &hers, const Bytes &herBones, const Bytes &geneOpenIn, const Bytes &geneSpreadIn, int handBone)
+        {
+            Bytes geneOpen = geneOpenIn, geneSpread = geneSpreadIn;
+            HandMesh x = handMesh(hers), a = handMesh(geneOpen), b = handMesh(geneSpread);
+            float hoF[3], goF[3];
+            if (a.pos.size() != b.pos.size() || a.pos.size() < 12 || x.pos.size() < 3 || !bindOf(herBones, handBone, hoF) ||
+                !bindOf(geneOpen, handBone, goF))
+                return false;
+            const V3 ho{hoF[0], hoF[1], hoF[2]}, go{goF[0], goF[1], goF[2]};
+            const auto spanX = [](const std::vector<V3> &p) {
+                double lo = 1e9, hi = -1e9;
+                for (const V3 &q : p)
+                    lo = std::min(lo, q[0]), hi = std::max(hi, q[0]);
+                return hi - lo;
+            };
+            const double s = spanX(x.pos) / std::max(spanX(a.pos), 1e-6);
+            for (size_t i = 0; i < a.pos.size(); ++i)
+                for (int c = 0; c < 3; ++c)
+                {
+                    a.pos[i][static_cast<size_t>(c)] = (a.pos[i][static_cast<size_t>(c)] - go[static_cast<size_t>(c)]) * s;
+                    b.pos[i][static_cast<size_t>(c)] = (b.pos[i][static_cast<size_t>(c)] - go[static_cast<size_t>(c)]) * s;
+                }
+            // Her vertices merged where they share a position (the strips repeat them), with the mesh's edges.
+            std::vector<V3> u;
+            std::vector<size_t> idx(x.pos.size());
+            for (size_t i = 0; i < x.pos.size(); ++i)
+            {
+                const V3 p = sub3(x.pos[i], ho);
+                size_t k = 0;
+                while (k < u.size() && std::fabs(u[k][0] - p[0]) + std::fabs(u[k][1] - p[1]) + std::fabs(u[k][2] - p[2]) > 1e-6)
+                    ++k;
+                if (k == u.size())
+                    u.push_back(p);
+                idx[i] = k;
+            }
+            const size_t n = u.size();
+            std::vector<std::vector<size_t>> nb(n);
+            for (const auto &t : x.tris)
+                for (int e = 0; e < 3; ++e)
+                {
+                    const size_t i = idx[t[static_cast<size_t>(e)]], j = idx[t[static_cast<size_t>((e + 1) % 3)]];
+                    if (i != j && std::find(nb[i].begin(), nb[i].end(), j) == nb[i].end())
+                        nb[i].push_back(j), nb[j].push_back(i);
+                }
+            // The targets: his 12 nearest vertices' rigid move.
+            std::vector<V3> target(n);
+            for (size_t i = 0; i < n; ++i)
+            {
+                std::vector<std::pair<double, size_t>> d(a.pos.size());
+                for (size_t k = 0; k < a.pos.size(); ++k)
+                {
+                    const V3 e = sub3(a.pos[k], u[i]);
+                    d[k] = {std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]), k};
+                }
+                std::partial_sort(d.begin(), d.begin() + 12, d.end());
+                double wsum = 0.0;
+                V3 ca{}, cb{};
+                double w[12];
+                for (int k = 0; k < 12; ++k)
+                {
+                    w[k] = 1.0 / ((d[static_cast<size_t>(k)].first + 1e-3) * (d[static_cast<size_t>(k)].first + 1e-3));
+                    wsum += w[k];
+                }
+                for (int k = 0; k < 12; ++k)
+                    for (int c = 0; c < 3; ++c)
+                    {
+                        ca[static_cast<size_t>(c)] += w[k] / wsum * a.pos[d[static_cast<size_t>(k)].second][static_cast<size_t>(c)];
+                        cb[static_cast<size_t>(c)] += w[k] / wsum * b.pos[d[static_cast<size_t>(k)].second][static_cast<size_t>(c)];
+                    }
+                M3 h{};
+                for (int k = 0; k < 12; ++k)
+                    addOuter(h, sub3(b.pos[d[static_cast<size_t>(k)].second], cb), sub3(a.pos[d[static_cast<size_t>(k)].second], ca), w[k] / wsum);
+                const V3 r = apply3(nearestRotation(h), sub3(u[i], ca));
+                target[i] = {r[0] + cb[0], r[1] + cb[1], r[2] + cb[2]};
+            }
+            // As rigid as possible: (L + lambda I) X = lambda T + sum over edges 0.5 (R_i + R_j)(u_i - u_j).
+            constexpr double kLambda = 0.1;
+            std::vector<double> chol(n * n, 0.0);
+            for (size_t i = 0; i < n; ++i)
+            {
+                chol[i * n + i] = static_cast<double>(nb[i].size()) + kLambda;
+                for (const size_t j : nb[i])
+                    chol[i * n + j] -= 1.0;
+            }
+            for (size_t j = 0; j < n; ++j) // Cholesky, lower triangle in place
+            {
+                double dsum = chol[j * n + j];
+                for (size_t k = 0; k < j; ++k)
+                    dsum -= chol[j * n + k] * chol[j * n + k];
+                if (dsum <= 0.0)
+                    return false;
+                chol[j * n + j] = std::sqrt(dsum);
+                for (size_t i = j + 1; i < n; ++i)
+                {
+                    double v = chol[i * n + j];
+                    for (size_t k = 0; k < j; ++k)
+                        v -= chol[i * n + k] * chol[j * n + k];
+                    chol[i * n + j] = v / chol[j * n + j];
+                }
+            }
+            const auto solve = [&](std::vector<double> &y) {
+                for (size_t i = 0; i < n; ++i)
+                {
+                    for (size_t k = 0; k < i; ++k)
+                        y[i] -= chol[i * n + k] * y[k];
+                    y[i] /= chol[i * n + i];
+                }
+                for (size_t i = n; i-- > 0;)
+                {
+                    for (size_t k = i + 1; k < n; ++k)
+                        y[i] -= chol[k * n + i] * y[k];
+                    y[i] /= chol[i * n + i];
+                }
+            };
+            std::vector<V3> xs = target;
+            std::vector<M3> rot(n);
+            for (int round = 0; round < 30; ++round)
+            {
+                for (size_t i = 0; i < n; ++i)
+                {
+                    M3 m{};
+                    for (const size_t j : nb[i])
+                        addOuter(m, sub3(xs[i], xs[j]), sub3(u[i], u[j]), 1.0);
+                    rot[i] = nb[i].empty() ? M3{1, 0, 0, 0, 1, 0, 0, 0, 1} : nearestRotation(m);
+                }
+                for (int c = 0; c < 3; ++c)
+                {
+                    std::vector<double> y(n);
+                    for (size_t i = 0; i < n; ++i)
+                    {
+                        y[i] = kLambda * target[i][static_cast<size_t>(c)];
+                        for (const size_t j : nb[i])
+                        {
+                            const V3 e = sub3(u[i], u[j]);
+                            const V3 ri = apply3(rot[i], e), rj = apply3(rot[j], e);
+                            y[i] += 0.5 * (ri[static_cast<size_t>(c)] + rj[static_cast<size_t>(c)]);
+                        }
+                    }
+                    solve(y);
+                    for (size_t i = 0; i < n; ++i)
+                        xs[i][static_cast<size_t>(c)] = y[i];
+                }
+            }
+            // Back into her mesh: positions, and the normals turned with their vertex.
+            for (size_t i = 0; i < x.pos.size(); ++i)
+            {
+                const auto [v, k] = x.at[i];
+                const V3 &p = xs[idx[i]];
+                for (int c = 0; c < 3; ++c)
+                    putf(hers, v + r32(hers, v) + 16 * k + 4u * static_cast<uint32_t>(c), static_cast<float>(p[static_cast<size_t>(c)] + ho[static_cast<size_t>(c)]));
+                if (const uint32_t no = r32(hers, v + 4); no)
+                {
+                    int8_t raw[3];
+                    std::memcpy(raw, hers.data() + v + no + 4 * k, 3);
+                    const V3 nr = apply3(rot[idx[i]], V3{static_cast<double>(raw[0]), static_cast<double>(raw[1]), static_cast<double>(raw[2])});
+                    const double len = std::max(std::sqrt(nr[0] * nr[0] + nr[1] * nr[1] + nr[2] * nr[2]), 1e-9);
+                    for (int c = 0; c < 3; ++c)
+                        hers[v + no + 4 * k + static_cast<uint32_t>(c)] =
+                            static_cast<uint8_t>(static_cast<int8_t>(std::lround(std::clamp(nr[static_cast<size_t>(c)] / len * 127.0, -127.0, 127.0))));
+                }
+            }
+            return true;
+        }
+
         // ---- TM3: "TM3", count, 4, 0, offsets, names (8 bytes), TIM3s 64-aligned --------------------------------------
         using Textures = std::vector<std::pair<std::string, Bytes>>;
         bool readTm3(const Bytes &t, Textures &out)
@@ -315,9 +587,16 @@ namespace kamite::olivia_player
 
         // ---- skin: a TIM3's palette (+16: picture header; total, CLUT bytes, image bytes, header size; the CLUT after
         // the image, RGBA, alpha 0x80 = opaque). Skin-range colours (hue 8..50 deg or 345+, saturation 0.07..0.45,
-        // value 0.28+: the range the previews used, olivia_skin_variants.png) turned toward cutscene Olivia's
-        // (measured Nov 19, median HSV of the arms: hue -9.6 deg, saturation x1.36, value x1.16) by `t`.
-        int warmSkin(Bytes &tim, float t)
+        // value 0.28+: the range the previews used, olivia_skin_variants.png) turned by a hue / saturation / value shift;
+        // warmth(t): t of the way to cutscene Olivia's (measured Nov 19, median HSV of the arms: hue -9.6 deg,
+        // saturation x1.36, value x1.16).
+        struct SkinShift
+        {
+            float hue = 0.0f, sat = 1.0f, val = 1.0f; // hue in turns, saturation and value as factors
+        };
+        // t of the way from her gameplay skin to cutscene Olivia's (t < 0 or > 1: past either end).
+        SkinShift warmth(float t) { return {-0.0267f * t, 1.0f + 0.36f * t, 1.0f + 0.16f * t}; }
+        int shiftSkin(Bytes &tim, const SkinShift &k)
         {
             constexpr size_t p = 16;
             if (!inside(tim, p, 32))
@@ -342,9 +621,9 @@ namespace kamite::olivia_player
                 const float deg = h * 360.0f;
                 if (!((deg >= 8.0f && deg <= 50.0f) || deg >= 345.0f) || s < 0.07f || s > 0.45f || v < 0.28f)
                     continue;
-                h = std::fmod(h - 0.0267f * t + 1.0f, 1.0f);
-                s = std::min(1.0f, s * (1.0f + 0.36f * t));
-                v = std::min(1.0f, v * (1.0f + 0.16f * t));
+                h = std::fmod(h + k.hue + 1.0f, 1.0f);
+                s = std::min(1.0f, s * k.sat);
+                v = std::min(1.0f, v * k.val);
                 const float hh = h * 6.0f, f = hh - std::floor(hh), pp = v * (1 - s), q = v * (1 - s * f), u = v * (1 - s * (1 - f));
                 float o[3];
                 switch (static_cast<int>(hh) % 6)
@@ -472,10 +751,20 @@ namespace kamite::olivia_player
         Textures herTex, suitTex, texs;
         if (!readTm3(ema0[0].bytes, herTex) || (bunny && !readTm3(elf4[0].bytes, suitTex)))
             return fail(out, "a texture pack could not be read");
-        if (in.skin > 0.0f)
+        const float skin = std::clamp(in.skin, 0.0f, 1.0f);
+        if (skin > 0.0f)
             for (auto &[name, tim] : herTex)
                 if (name == "ema0_01" || name == "ema0_03" || name == "ema0_06")
-                    out.skinColours += warmSkin(tim, std::clamp(in.skin, 0.0f, 1.0f));
+                    out.skinColours += shiftSkin(tim, warmth(skin));
+        // The bunny suit's skin (emaf01) is cutscene Olivia's: brought back to the same warmth as her head and hands
+        // (the cutscene's turned by the inverse of the rest of the way).
+        if (bunny && skin < 1.0f)
+        {
+            const SkinShift full = warmth(1.0f), part = warmth(skin);
+            for (auto &[name, tim] : suitTex)
+                if (name == "emaf01")
+                    out.skinColours += shiftSkin(tim, {part.hue - full.hue, part.sat / full.sat, part.val / full.val});
+        }
         texs = suitTex;
         texs.insert(texs.end(), herTex.begin(), herTex.end());
         const int herBase = static_cast<int>(suitTex.size());
@@ -508,10 +797,18 @@ namespace kamite::olivia_player
             for (const Node &n : her.nodes)
                 take(n, n.name, 0);
         const auto handOf = [&](const char *side, int which) { return find(her, std::string(side) + (which == 1 ? "_01" : "_00")); };
-        take(*handOf("RH", in.hand2), "RH_02", herBase);
-        take(*handOf("RH", in.hand3), "RH_03", herBase);
-        take(*handOf("LH", in.hand2), "LH_02", herBase);
-        take(*handOf("LH", in.hand3), "LH_03", herBase);
+        for (const char *side : {"RH", "LH"})
+        {
+            const std::string s2 = std::string(side) + "_02", s3 = std::string(side) + "_03";
+            take(*handOf(side, in.hand2 == 1 ? 1 : 0), s2, herBase);
+            if (in.hand2 == 2)
+            {
+                const Node *open = find(gene, std::string(side) + "_00"), *spread = find(gene, s2);
+                if (open && spread && spreadHand(made.nodes.back().mdb, herHead->mdb, open->mdb, spread->mdb, side[0] == 'R' ? 10 : 16))
+                    ++out.spreadHands;
+            }
+            take(*handOf(side, in.hand3), s3, herBase);
+        }
         for (const char *name : {"GH_00", "GHA_00"})
         {
             take(*find(her, "z_00"), name, herBase);

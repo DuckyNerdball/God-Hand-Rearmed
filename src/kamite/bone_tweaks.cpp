@@ -484,7 +484,11 @@ namespace kamite::bone_tweaks
             }
             if (!(jg.flags & 2))
                 return;
-            if (money <= kOn)
+            // The player's model (playable Olivia, olivia_player.h) has no bounce of the game's (cObjSimple_MoveBust
+            // moves the enemies' bone 29 only): her bust is on our springs alone at every size, 100% included (K, Nov 19),
+            // as firm and with peaks as low as the size asks (the seat's table: 45% of 130%'s at 100%).
+            const bool own = model == rd32(rdram, GameWork::address(GameWork::kPlayerObj));
+            if (money <= kOn && !own)
             {
                 // 28 as 29 (the game's bounce, or Money's scale below 100% / the chest grab's hold as placeMoney left it).
                 Bone b = readBone(rdram, parts[kRightBone]);
@@ -501,9 +505,10 @@ namespace kamite::bone_tweaks
             // smaller); the side swing is scaled from the game's bounce (recent peak of it / of our pitch) toward ours,
             // side ratio 1.0 -> K's 0.69.
             const float hold = std::clamp(punish_fit::bustHold(rdram, model), 0.0f, 1.0f);
-            const float t = bustU(money); // the blend weight (u, see bustU)
+            const float t = bustU(std::max(money, 1.0f)); // the blend weight (u, see bustU)
             const float rate = (kBustFirmHz + (kJigFull[kHz] - kBustFirmHz) * t) / kJigFull[kHz];
-            const float gain = kJigFull[kGain] * rate * rate;
+            const float gain = (own ? jig(kGain, money) : kJigFull[kGain]) * rate * rate;
+            const float blend = own ? 1.0f : t; // our springs' share of the pitch (the rest is the game's bounce)
             const float side = 1.0f + (kJigFull[kSide] - 1.0f) * t;
             Bone gameBust = bust; // bone 29 before placeMoney's scale and droop
             for (const Saved &sv : g_moneySaved)
@@ -525,11 +530,11 @@ namespace kamite::bone_tweaks
                 st.envOurs = std::max(0.5f * (std::fabs(pitchOurs[0]) + std::fabs(pitchOurs[1])), st.envOurs * fade);
             }
             const float toGame = std::clamp(st.envGame / std::max(st.envOurs, 0.01f), 0.0f, 3.0f);
-            const float yawWeight = (1.0f - t) * toGame + t;
+            const float yawWeight = own ? 1.0f : (1.0f - t) * toGame + t;
             const int bones[2] = {kBustBone, kRightBone};
             for (int i = 0; i < 2; ++i)
             {
-                const float pitch = std::clamp(((1.0f - t) * game + t * pitchOurs[i]) * (1.0f - hold), -kPitchMax * kRad,
+                const float pitch = std::clamp(((1.0f - blend) * game + blend * pitchOurs[i]) * (1.0f - hold), -kPitchMax * kRad,
                                                kPitchMax * kRad);
                 const float yaw = std::clamp(yawWeight * yawOurs[i] * (1.0f - hold), -kYawMax * kRad, kYawMax * kRad);
                 const Mat q = mul(rotY(yaw), rotX(pitch));

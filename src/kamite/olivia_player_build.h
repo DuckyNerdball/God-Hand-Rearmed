@@ -12,7 +12,9 @@
 //     four hand shapes per hand become hers (RH_02 / RH_03 / LH_02 / LH_03 copies of the ones `hands` names); GH_00 and
 //     GHA_00 (the God Hand gauntlet and arm) are empty nodes, so unleashing shows the effects only.
 //   - The bunny suit: el/elf4.dat's body (the cutscene costume) with her gameplay head, hair, lashes and hands.
-//   - Her skin (the face, arms and chest sheets' skin colours) warmed toward cutscene Olivia's by `skin` (0 = as she is).
+//   - Her skin (the face, arms and chest sheets' skin colours) warmed toward cutscene Olivia's by `skin` (0 = as she is);
+//     the bunny suit's skin (cutscene Olivia's) brought back to the same warmth.
+//   - Gene's spread palm (02): her open hand posed as his goes from 00 to 02, keeping her fingers' shape (hand2 = 2).
 //   - Gene's motions on her: what covers ground scaled by her height / Gene's (`ratio`, from the two heads' tops): the
 //     hips' and the ankle targets' x / z, the root motion (bone 255); the hips' and ankles' heights moved by the
 //     difference of the two skeletons (her legs are Gene's length, so the knees bend as his).
@@ -40,7 +42,8 @@ namespace kamite::olivia_player
         std::vector<uint8_t> elf4Md; // its model as body_detail rebuilt it (empty: its own)
         Costume costume = Costume::Dress;
         float skin = 0.0f;           // 0..1: how far toward cutscene Olivia's skin
-        int hand2 = 0, hand3 = 1;    // her hand for Gene's shape 02 (spread palm) / 03 (pointing): 0 relaxed, 1 fist
+        int hand2 = 0, hand3 = 1;    // her hand for Gene's shape 02 (spread palm) / 03 (pointing): 0 relaxed, 1 fist,
+                                     // 2 (02 only) a spread palm made from her relaxed hand by Gene's 00 -> 02
     };
 
     struct Built
@@ -48,7 +51,7 @@ namespace kamite::olivia_player
         std::vector<uint8_t> body;
         float ratio = 1.0f;            // her height / Gene's
         float hipDy = 0.0f, ankleDy = 0.0f;
-        int nodes = 0, motions = 0, channels = 0, skinColours = 0;
+        int nodes = 0, motions = 0, channels = 0, skinColours = 0, spreadHands = 0;
         uint32_t textureBytes = 0;
         std::string error;
     };

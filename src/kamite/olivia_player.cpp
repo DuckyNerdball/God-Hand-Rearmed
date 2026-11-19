@@ -27,9 +27,10 @@ namespace kamite::olivia_player
                                            "pl/pl0e.dat", "pl/pl0f.dat", "pl/pl10.dat", "pl/pl11.dat"};
         constexpr const char *kCoats[] = {"pl/pl01.dat", "pl/pl06.dat", "pl/pl08.dat", "pl/pl0a.dat", "pl/pl12.dat"};
 
-        // K's picks (Nov 19): the skin's warmth toward cutscene Olivia's (0..1), her hand for Gene's 02 / 03.
+        // K's picks (Nov 19): the skin's warmth toward cutscene Olivia's (0..1: medium; all the way also reddens her eyes,
+        // which share the face sheet's palette), a spread palm made from her open hand for Gene's 02, her fist for 03.
         constexpr float kSkin = 0.65f;
-        constexpr int kHand2 = 0, kHand3 = 1;
+        constexpr int kHand2 = 2, kHand3 = 1;
 
         std::string lower(const char *s)
         {
@@ -110,7 +111,7 @@ namespace kamite::olivia_player
                                                    << " nodes, " << built.body.size() << " bytes, textures " << built.textureBytes / 1024u
                                                    << " KB; her height / Gene's " << built.ratio << ", hips " << built.hipDy << " m, ankles "
                                                    << built.ankleDy << " m; " << built.channels << " channels in " << built.motions
-                                                   << " motions; " << built.skinColours << " skin colours; " << bodies << " body and "
+                                                   << " motions; " << built.skinColours << " skin colours; " << built.spreadHands << " spread hands; " << bodies << " body and "
                                                    << coats << " coat files; Money / Cash "
                                                    << (in.ema0Md.empty() ? "off (no rebuilt body)" : "on") << "; " << ms << " ms)");
     }
