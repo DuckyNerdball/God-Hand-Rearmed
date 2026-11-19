@@ -69,6 +69,7 @@ def tags(data):
                 for p, value in enumerate(parent["preset"]):
                     if value.lower() == s["parentValue"].lower():
                         return names[p] + ("" if p == len(names) - 1 else "+")
+                return "Toggle"  # no preset picks that value (Modern: Toggle's Auto)
             return tag(parent)
         return "Toggle"
 

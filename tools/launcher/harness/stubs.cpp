@@ -104,7 +104,7 @@ void startCheck(Checker &c, bool) {
   const char *notes = "- Restored the alpha's Hold to Brawl control scheme: Control Style Modern: Hold (hold L1 to brawl, double-tap for a 180\xC2\xB0 turn); the old Modern is now Modern: Toggle.\n"
                       "- Modern: Hold: Auto's brawl mode ends by itself once no enemy is near.\n"
                       "- Button Mapping: with Modern: Hold, R3 can take a single-press 180\xC2\xB0 turn (off by default).\n"
-                      "- Rearmed and Sleazy Mode presets use Modern: Hold (installs already on them show Custom until you pick the preset again).\n"
+                      "- Remastered, Rearmed and Sleazy Mode presets use Modern: Hold, Modern: Toggle stays an option (installs already on them show Custom until you pick the preset again).\n"
                       "- With several controllers connected, the one that pressed a button last controls Gene (and its button prompts show).\n"
                       "- Launcher: with a controller, Y / triangle eats a piece of fruit and X / square takes from the smoothie.\n"
                       "- 128 MB of extra RAM above the game's own 32 MB, for mods and bigger models; older save states and test cases still load.";

@@ -66,7 +66,7 @@ Switch between classic tank controls and modern third-person freecam on the fly.
 
 Includes a toggle to automatically enter Brawl Mode (tank controls) in combat.
 
-Prefer the alpha's Hold to Brawl? Hold L1 for tank controls, double-tap it to spin around. `Rearmed+`
+The alpha's Hold to Brawl is back: hold L1 for tank controls, double-tap it to spin around. Rather toggle Brawl Mode with R3? Pick Modern: Toggle. `Remastered+`
 
 ---
 
@@ -104,7 +104,7 @@ Too many choices? How about just one? Pick a preset and get to playing right awa
 | --- | --- | --- |
 | **Classic** | Clover's Vanilla Thrilla | Cinetastic 30FPS, 4:3, Classic Camera & Controls, as handed by God. |
 | **Remastered** | Spitshine Edition | Smooth Sexy Silky 60FPS, Fills your screen - edge to edge, Modern Controls, etc. |
-| **Rearmed** | That's the Spice! | Adds: Hold-to-Brawl, New Cam Angle, Roulette Refinements, Moveset Presets, Buck Breaker, Busta-Chan Jive, and Misqué & Risqué. |
+| **Rearmed** | That's the Spice! | Adds: New Cam Angle, Roulette Refinements, Moveset Presets, Buck Breaker, Busta-Chan Jive, and Misqué & Risqué. |
 | **Sleazy Mode** | ...is Now Selectable! For the girl who just wants to have fun. | Adds: Cunt Punter, Tension - Off the Cuff, and Wild Curry Funk. |
 <!-- END GENERATED: presets -->
 
@@ -272,8 +272,8 @@ Every option, with the same help text you'll see in the launcher and in game.
 **Move & Groove**
 
 - **Control Style: Pad:** Classic: PS2's OG fixed facing brawling. Modern (rebindable): Toggle Brawl (R3) | Hold to Brawl (L1). *Classic / Modern: Toggle / Modern: Hold* (F2 > Controls changes it while playing) `Remastered+`
-  - **Modern: Auto:** Brawling starts when dealing or taking damage. Press the stick (rebindable) to go back to freecam. `Remastered+`
-  - **Modern: Auto:** Brawling starts when dealing or taking damage. It stops once no enemy is near. `Rearmed+`
+  - **Modern: Auto:** Brawling starts when dealing or taking damage. Press the stick (rebindable) to go back to freecam.
+  - **Modern: Auto:** Brawling starts when dealing or taking damage. It stops once no enemy is near. `Remastered+`
 - **Control Style: KBM:** Keyboard & mouse. Classic: PS2's OG brawling. Modern: mouse freecam. *Classic / Modern: Toggle* `Remastered+`
   - **Modern: Auto:** Brawling starts when dealing or taking damage. Middle-click (rebindable) to go back to freecam.
   - **Modern: Mouse Look:** Freak... (F2 > Controls sets the sensitivity)

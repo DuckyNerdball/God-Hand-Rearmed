@@ -19,7 +19,7 @@ namespace kamite::presets
         {"REMASTERED", "Remastered", "Spitshine Edition",
          "Smooth Sexy Silky 60FPS, Fills your screen - edge to edge, Modern Controls, etc.", 17},
         {"REARMED", "Rearmed", "That's the Spice!",
-         "Adds: Hold-to-Brawl, New Cam Angle, Roulette Refinements, Moveset Presets, Buck Breaker, Busta-Chan Jive, and "
+         "Adds: New Cam Angle, Roulette Refinements, Moveset Presets, Buck Breaker, Busta-Chan Jive, and "
          "Misqu\xC3\xA9 & Risqu\xC3\xA9.",
          18},
         {"SLEAZY MODE", "Sleazy Mode", "...is Now Selectable! For the girl who just wants to have fun.",
@@ -42,9 +42,9 @@ namespace kamite::presets
         };
         constexpr Entry kTable[] = {
             {"Fps60", {"0", "1", "1", "1"}},
-            {"ControlStyle", {"classic", "modern", "hold", "hold"}}, // Rearmed up: Modern: Hold (K, Nov 19)
-            {"ModernAuto", {"1", "1", "1", "1"}},     // Toggle's Auto (Remastered)
-            {"ModernAutoHold", {"1", "1", "1", "1"}}, // the same key under Hold (Rearmed, Sleazy Mode)
+            {"ControlStyle", {"classic", "hold", "hold", "hold"}}, // Remastered up: Modern: Hold (K, Nov 19; Toggle optional)
+            {"ModernAuto", {"1", "1", "1", "1"}},     // Toggle's Auto: no preset uses Toggle, so never counted
+            {"ModernAutoHold", {"1", "1", "1", "1"}}, // the same [Game] ModernAuto key under Hold
             {"KbmControlStyle", {"classic", "modern", "modern", "modern"}},
             {"KbmModernAuto", {"0", "0", "0", "0"}},
             {"AspectRatio", {"4:3", "auto", "auto", "auto"}},
