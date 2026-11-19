@@ -295,11 +295,12 @@ namespace kamite::body_detail
 
     namespace
     {
-        // Gameplay Olivia from her cutscene parts (olivia_model.h; claude/limit-break-handoff.md decision 10), unless
-        // KAMITE_OLIVIA_MODEL=0. Built only on the disc whose em/ema0.dat model kGrowModels lists.
+        // Gameplay Olivia from her cutscene parts (olivia_model.h; claude/limit-break-handoff.md decision 10), only with
+        // KAMITE_OLIVIA_MODEL=1 (K, Nov 19: the cutscene head and the posed hands look worse in play than her own; off
+        // until decided). Built only on the disc whose em/ema0.dat model kGrowModels lists.
         bool buildOlivia(const GrowModel &listed, olivia_model::Built &out)
         {
-            if (const char *v = std::getenv("KAMITE_OLIVIA_MODEL"); v && *v == '0')
+            if (const char *v = std::getenv("KAMITE_OLIVIA_MODEL"); !v || *v != '1')
                 return false;
             std::vector<uint8_t> files[4];
             const char *paths[4] = {"em/ema0.dat", "el/el0a.dat", "el/el0b.dat", "el/el0c.dat"};
