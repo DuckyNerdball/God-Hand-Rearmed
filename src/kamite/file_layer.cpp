@@ -113,6 +113,14 @@ namespace kamite::file_layer
             w32(rdram, first, it->second.lba);
             w32(rdram, sectors, (it->second.size + PS2CdImage::kSectorSize - 1u) / PS2CdImage::kSectorSize);
             w32(rdram, bytes, it->second.size);
+            static std::unordered_map<uint32_t, bool> told; // the first read of each, so a test shows what the game loads
+            if (!told[index])
+            {
+                told[index] = true;
+                for (const auto &[path, r] : g_replaced)
+                    if (r.index == index)
+                        KM_INFO(File, "file layer: first read of " << path);
+            }
         }
 
         // ADXSTM's bind: a range in a served file is read from the whole disc ("DVD-ROM": LBA = the range's sector).
