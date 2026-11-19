@@ -40,6 +40,7 @@ namespace kamite::file_layer
         constexpr uint32_t kFstTable = 0x00580D40u;    // the path table (func_001FF858)
         constexpr uint32_t kDvdRomName = 0x004545B0u;  // "DVD-ROM" in DVCI's data: the whole disc
         constexpr uint32_t kAfsPartition = 0u;         // _DATA.AFS's CRI partition
+        constexpr uint32_t kPartitionTable = 0x003EB308u; // CRI's partition pointers by id (+0x10 the AFS file's name)
 
         std::map<std::string, Replaced> g_replaced;          // disc path -> replacement
         std::unordered_map<uint32_t, Replaced> g_byIndex;    // archive index -> replacement
@@ -72,11 +73,17 @@ namespace kamite::file_layer
             if (a != 0u)
                 std::memcpy(rdram + (a & (PS2_RAM_MASK & ~3u)), &v, 4);
         }
+        // A string in guest memory, RAM or the scratchpad (some of the game's threads keep their stacks there).
         std::string guestString(const uint8_t *rdram, uint32_t a, size_t max = 260)
         {
             std::string s;
-            for (uint32_t p = a & PS2_RAM_MASK; s.size() < max && p < PS2_RDRAM_SIZE && rdram[p]; ++p)
-                s.push_back(static_cast<char>(rdram[p]));
+            for (uint32_t i = 0; s.size() < max; ++i)
+            {
+                const uint8_t *c = getConstMemPtr(rdram, a + i);
+                if (!c || *c == 0u)
+                    break;
+                s.push_back(static_cast<char>(*c));
+            }
             return s;
         }
 
@@ -94,7 +101,7 @@ namespace kamite::file_layer
         // ADXF_GetFnameRangeEx: a replaced file of _DATA.AFS lies where it is served.
         void onFnameRange(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            const uint32_t partition = GPR_U32(ctx, 4), index = GPR_U32(ctx, 5), name = GPR_U32(ctx, 6);
+            const uint32_t partition = GPR_U32(ctx, 4), index = GPR_U32(ctx, 5);
             const uint32_t first = GPR_U32(ctx, 8), sectors = GPR_U32(ctx, 9), bytes = GPR_U32(ctx, 10);
             g_origFnameRange(rdram, ctx, runtime);
             if (partition != kAfsPartition || static_cast<int32_t>(GPR_U32(ctx, 2)) < 0)
@@ -102,7 +109,8 @@ namespace kamite::file_layer
             const auto it = g_byIndex.find(index);
             if (it == g_byIndex.end())
                 return;
-            if (const std::string afs = guestString(rdram, name); !isDataAfs(afs))
+            // The partition's own name (its fname out can be a buffer guest RAM doesn't hold, e.g. on the scratchpad).
+            if (const std::string afs = guestString(rdram, r32(rdram, kPartitionTable) + 0x10u); !isDataAfs(afs))
             {
                 static bool told = false;
                 if (!told)

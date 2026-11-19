@@ -9,7 +9,8 @@ rem Each run also appends the SHA-256 of its CSV / RAM / snapshot files to cases
 rem and run): identical lines across builds = the game ran exactly the same. RUNS replays every case that many times
 rem per build (2 while the limit break is being checked). With 2, the whole-RAM snapshots of the previous build
 rem (.snap.prev.bin) are compared with this build's, leaving out the words that differ between this build's own two
-rem runs (tools\fps60\snap_compare.py; its verdicts go to fingerprints.txt too).
+rem runs (tools\fps60\snap_compare.py; its verdicts go to fingerprints.txt too). Run 1's CSV stays as <case>.<rate>.csv.run1,
+rem so a run whose CSV differs can be compared frame by frame.
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 set RUNS=2
@@ -25,7 +26,7 @@ for %%f in (cases\*.case) do (
         set "FAILED="
         for %%r in (30 60) do (
             if exist "%%f.%%r.snap.bin" move /y "%%f.%%r.snap.bin" "%%f.%%r.snap.prev.bin" >nul
-            del /q "%%f.%%r.snap.run1.bin" "%%f.%%r.snapdiff.txt" 2>nul
+            del /q "%%f.%%r.snap.run1.bin" "%%f.%%r.snapdiff.txt" "%%f.%%r.csv.run1" 2>nul
         )
         for /l %%n in (1,1,%RUNS%) do (
             del /q "%%f.30.csv" "%%f.60.csv" "%%f.30.shapes.csv" "%%f.60.shapes.csv" "%%f.report.txt" 2>nul
@@ -53,6 +54,7 @@ for %%f in (cases\*.case) do (
             >>cases\fingerprints.txt echo !LINE!
             if %%n==1 if %RUNS% GEQ 2 for %%r in (30 60) do (
                 if exist "%%f.%%r.snap.bin" move /y "%%f.%%r.snap.bin" "%%f.%%r.snap.run1.bin" >nul
+                if exist "%%f.%%r.csv" copy /y "%%f.%%r.csv" "%%f.%%r.csv.run1" >nul
             )
         )
         echo Comparing %%~nxf...
