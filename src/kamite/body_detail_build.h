@@ -138,6 +138,9 @@ namespace kamite::body_detail
     bool jiggleSpare(const uint8_t *scr, size_t size, uint32_t mdb, JiggleBind *bind);
     // A kept model's nodes re-skinned in place (Shannon's body_u1 / BY_00, Olivia's dress); the flags applied (0: none).
     int reskin(uint8_t *scr, size_t size, const char *const *names, int count, int jiggle);
+    // Olivia's thigh straps (and the buckles on them) moved out along their normals by `lift` metres in the node named:
+    // they sat 0.4-1.7 mm off her thighs and z-fought with them (K, Nov 19). Returns the vertices moved.
+    int liftStraps(uint8_t *scr, size_t size, const char *node, float lift);
 
     // A change's position in a state (detailed: + grow x its growth), as apply writes it.
     void wantedPosition(const Change &c, bool detailed, float grow, float out[3]);

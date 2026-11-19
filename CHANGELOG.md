@@ -7,6 +7,7 @@ Newest first, one line per change; the code comments say how.
 - Mods: Olivia is playable (Pre-Alpha, test builds only), made from your own disc: Gene's moves at her own height, Money and Cash on her.
 - Launcher: a Costume row under Character for characters with costumes (Olivia: Dress, Bunny Suit).
 - Money / Cash: Olivia's bunny suit jiggles too (in cutscenes and as her costume).
+- Olivia's thigh straps no longer flicker through her thighs (in play and in cutscenes).
 - Performance: characters are drawn by native code instead of the emulated VU1 microprogram (that part about 3x faster; half the VU1 work in crowded scenes).
 - Performance: static scenery is drawn by native code instead of the emulated VU1 microprogram (that part about 3x faster).
 - Female Models: the horned woman, the casino's bunny girl and the masked dancer get the new bodies too (the dancer keeps her own seat under her skirt).

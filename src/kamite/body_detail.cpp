@@ -65,6 +65,7 @@ namespace kamite::body_detail
         constexpr uint32_t kTransCallSite = 0x0014A4C0u; // the return address of its first call in cModel_Trans
         constexpr uint32_t kMeshHead = 0x25Cu, kNodeNext = 0x404u, kNodeInfo = 0x414u, kInfoName = 0x8u, kNodeMdb = 0x388u;
         constexpr float kOn = 1.0005f; // Money / Cash above 100% (they are stored as scales)
+        constexpr float kStrapLift = 0.004f; // Olivia's thigh straps: 4 mm out (they sat 0.4-1.7 mm off her thighs)
 
         // A rebuilt body, shared by every model whose block had the same bytes.
         struct Body
@@ -427,6 +428,10 @@ namespace kamite::body_detail
                 ++other;
                 continue;
             }
+            // Olivia's thigh straps off her thighs (they z-fought with them in play and in cutscenes; K, Nov 19).
+            const bool straps = (std::strcmp(g.file, "em/ema0.dat") == 0 || std::strcmp(g.file, "el/el0a.dat") == 0 ||
+                                 std::strcmp(g.file, "el/elf5.dat") == 0) &&
+                                liftStraps(block.data(), block.size(), "boots", kStrapLift) > 0;
             if (!growOnly(block.data(), block.size(), g.rules, nodes))
             {
                 ++other;
@@ -447,10 +452,12 @@ namespace kamite::body_detail
             for (const GrownNode &n : nodes)
                 known += isReskinned(n.name) ? 1 : 0;
             int jiggle = 0;
-            if (g.jiggle && known == named && (jiggle = reskin(block.data(), block.size(), g.reskin, named, g.jiggle)) != 0 && !isOlivia)
-                placed[g.file].push_back({g.offset, g.size, block});
-            else if (g.jiggle)
+            if (g.jiggle && known == named)
+                jiggle = reskin(block.data(), block.size(), g.reskin, named, g.jiggle);
+            if (g.jiggle && jiggle == 0)
                 KM_WARN(Boot, "body detail: " << g.file << ": no jiggle bones (" << known << " of " << named << " nodes known)");
+            if ((jiggle != 0 || straps) && !isOlivia)
+                placed[g.file].push_back({g.offset, g.size, block});
             for (GrownNode &n : nodes)
             {
                 Body body;

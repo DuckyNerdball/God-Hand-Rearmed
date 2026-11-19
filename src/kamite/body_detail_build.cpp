@@ -2107,6 +2107,112 @@ namespace kamite::body_detail
         return true;
     }
 
+    int liftStraps(uint8_t *scr, size_t size, const char *node, float lift)
+    {
+        std::vector<NodeRef> nodes;
+        if (!readNodes(scr, size, nodes))
+            return 0;
+        int moved = 0;
+        for (const NodeRef &r : nodes)
+        {
+            std::vector<VbRef> vbs;
+            if (std::strncmp(r.name, node, 8) != 0 || (r.flags & 0x01000000u) || !readVbs(scr, size, r.mdb, vbs))
+                continue;
+            // Every vertex (buffer, index), merged where the strips share a position; joined by the strips' triangles.
+            struct V
+            {
+                uint32_t at;
+                D3 p;
+            };
+            std::vector<V> verts;
+            std::vector<std::array<size_t, 3>> tris;
+            for (const VbRef &b : vbs)
+            {
+                const size_t base = verts.size();
+                for (uint32_t k = 0; k < b.count; ++k)
+                {
+                    const uint8_t *q = scr + b.at + b.pos + 16 * k;
+                    verts.push_back({b.at + b.pos + 16 * k, D3{rf(q), rf(q + 4), rf(q + 8)}});
+                    if (k >= 2 && r32(q + 12) != 0x8000u)
+                        tris.push_back({base + k - 2, base + k - 1, base + k});
+                }
+            }
+            std::vector<size_t> parent(verts.size());
+            for (size_t i = 0; i < parent.size(); ++i)
+                parent[i] = i;
+            const auto root = [&](size_t x) {
+                while (parent[x] != x)
+                    x = parent[x] = parent[parent[x]];
+                return x;
+            };
+            std::map<std::array<int64_t, 3>, size_t> at;
+            for (size_t i = 0; i < verts.size(); ++i)
+            {
+                const std::array<int64_t, 3> key{std::llround(verts[i].p.x * 1e5), std::llround(verts[i].p.y * 1e5), std::llround(verts[i].p.z * 1e5)};
+                const auto [it, added] = at.emplace(key, i);
+                if (!added)
+                    parent[root(i)] = root(it->second);
+            }
+            for (const auto &t : tris)
+                for (int e = 0; e < 2; ++e)
+                    parent[root(t[static_cast<size_t>(e)])] = root(t[static_cast<size_t>(e) + 1]);
+            std::map<size_t, std::vector<size_t>> parts;
+            for (size_t i = 0; i < verts.size(); ++i)
+                parts[root(i)].push_back(i);
+            // The straps: small pieces (16 vertices at most) below the hips that wrap the thigh (8 cm across or more);
+            // with them the buckles on them (small pieces at a strap's height).
+            struct Span
+            {
+                double lo, hi, xs;
+            };
+            const auto spanOf = [&](const std::vector<size_t> &m) {
+                Span sp{1e9, -1e9, 0};
+                double x0 = 1e9, x1 = -1e9;
+                for (const size_t i : m)
+                    sp.lo = std::min(sp.lo, verts[i].p.y), sp.hi = std::max(sp.hi, verts[i].p.y), x0 = std::min(x0, verts[i].p.x),
+                    x1 = std::max(x1, verts[i].p.x);
+                sp.xs = x1 - x0;
+                return sp;
+            };
+            std::vector<Span> straps;
+            for (const auto &[root_, m] : parts)
+                if (const Span sp = spanOf(m); m.size() <= 16 && sp.hi < 0.8 && sp.xs >= 0.06)
+                    straps.push_back(sp);
+            for (const auto &[root_, m] : parts)
+            {
+                const Span sp = spanOf(m);
+                bool lifted = m.size() <= 16 && sp.hi < 0.8 && sp.xs >= 0.06;
+                for (const Span &s : straps)
+                    lifted = lifted || (m.size() <= 16 && sp.lo < s.hi + 0.005 && sp.hi > s.lo - 0.005);
+                if (!lifted)
+                    continue;
+                for (const size_t i : m) // along the vertex's own normal
+                {
+                    const VbRef *b = nullptr;
+                    for (const VbRef &vb : vbs)
+                        if (verts[i].at >= vb.at + vb.pos && verts[i].at < vb.at + vb.pos + 16u * vb.count)
+                            b = &vb;
+                    if (!b || !b->nrm)
+                        continue;
+                    const uint32_t k = (verts[i].at - b->at - b->pos) / 16u;
+                    const int8_t *n = reinterpret_cast<const int8_t *>(scr + b->at + b->nrm + 4 * k);
+                    const double len = std::sqrt(double(n[0]) * n[0] + double(n[1]) * n[1] + double(n[2]) * n[2]);
+                    if (len < 1.0)
+                        continue;
+                    for (int c = 0; c < 3; ++c)
+                    {
+                        float v;
+                        std::memcpy(&v, scr + verts[i].at + 4 * c, 4);
+                        v += static_cast<float>(lift * n[c] / len);
+                        std::memcpy(scr + verts[i].at + 4 * c, &v, 4);
+                    }
+                    ++moved;
+                }
+            }
+        }
+        return moved;
+    }
+
     int reskin(uint8_t *scr, size_t size, const char *const *names, int count, int jiggle)
     {
         std::vector<NodeRef> nodes;

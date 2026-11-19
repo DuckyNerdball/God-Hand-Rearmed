@@ -3,6 +3,8 @@
 #include "kamite/body_detail.h"
 #include "kamite/disc_files.h"
 #include "kamite/file_layer.h"
+#include "kamite/function_hooks.h"
+#include "kamite/game_layout.h"
 #include "kamite/log.h"
 #include "kamite/olivia_player_build.h"
 #include "ps2_runtime.h"
@@ -44,6 +46,42 @@ namespace kamite::olivia_player
         {
             const auto file = disc_files::find(path);
             return file && disc_files::read(*file, out) && !out.empty();
+        }
+
+        // Gene's coat (the player's +0x68C, pl01 ...): every mesh node hidden each time it is packed for drawing. Her
+        // coat files are empty already, but a coat built from Gene's file stays (K, Nov 19: the dress run showed his coat
+        // after a save state and a memory card load), so it is hidden where it is drawn too.
+        constexpr uint32_t kGetMeshPtr = 0x0014B6F8u, kTransCallSite = 0x0014A4C0u, kCoat = 0x68Cu;
+        constexpr uint32_t kMeshHead = 0x25Cu, kNodeNext = 0x404u, kNodeFlags = 0x380u;
+        uint32_t rd32(const uint8_t *rdram, uint32_t a)
+        {
+            uint32_t v;
+            std::memcpy(&v, rdram + (a & (PS2_RAM_MASK & ~3u)), 4);
+            return v;
+        }
+        bool inRam(uint32_t a, uint32_t size)
+        {
+            a &= PS2_RAM_MASK;
+            return a >= 0x100000u && size <= PS2_RDRAM_SIZE - a;
+        }
+        void hideCoatNodes(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            if (GPR_U32(ctx, 31) != kTransCallSite)
+                return;
+            const uint32_t player = rd32(rdram, game::GameWork::address(game::GameWork::kPlayerObj));
+            if (!inRam(player, kCoat + 4u))
+                return;
+            const uint32_t coat = rd32(rdram, player + kCoat);
+            if (coat == 0u || GPR_U32(ctx, 4) != coat || !inRam(coat, 0x2E4u))
+                return;
+            uint32_t node = rd32(rdram, coat + kMeshHead);
+            for (int i = 0; i < 64 && inRam(node, 0x418u); ++i)
+            {
+                uint32_t flags = rd32(rdram, node + kNodeFlags);
+                flags |= 1u;
+                std::memcpy(rdram + ((node + kNodeFlags) & PS2_RAM_MASK), &flags, 4);
+                node = rd32(rdram, node + kNodeNext);
+            }
         }
 
         // lwc1 $f1,0x404($s1) where the camera adds its look height to Gene's feet (func_00139FF8 0x13A3E4,
@@ -106,6 +144,7 @@ namespace kamite::olivia_player
         }
         g_ratio = built.ratio;
         g_active = true;
+        FunctionHooks::instance().observeEntry(kGetMeshPtr, "olivia_coat", &hideCoatNodes);
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
         KM_INFO(Boot, "olivia: playing as Olivia (" << (in.costume == Costume::Bunny ? "bunny suit" : "dress") << "; " << built.nodes
                                                    << " nodes, " << built.body.size() << " bytes, textures " << built.textureBytes / 1024u
