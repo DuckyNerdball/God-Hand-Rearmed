@@ -13,6 +13,8 @@
 //   vu1_replay native <trace> [pc]       the native programs (src/kamite/render) against the interpreter, every field
 //   vu1_replay nativebench <trace> [n]   time in the VU call: native programs + AOT vs AOT only
 //   vu1_replay nativedump <trace> <out>  the native programs' runs as test vectors for vu1_native_check.cpp
+//   vu1_replay chain[native] <trace>     each run's end state here vs the next run's entry state recorded in the game
+//                                        (did the game's VU1 leave what this build does?)
 //   (the native modes: compile this file with -DVU1_REPLAY_NATIVE -ffp-contract=off -I<repo>/src and link
 //   src/kamite/render/*.cpp)
 //   vu1_replay synth <image dir> [n]     n random states per image from many entry points, one line per run
@@ -426,6 +428,69 @@ int main(int argc, char **argv)
         }
         std::fclose(out);
         std::printf("%llu runs written (VU1State %zu bytes)\n", static_cast<unsigned long long>(written), sizeof(VU1State));
+        return 0;
+    }
+    if (mode == "chain" || mode == "chainnative")
+    {
+        // chain <trace>: each run's end state (here) against the next run's entry state (recorded in the game): the
+        // registers carry over between runs, so a mismatch means the game's VU1 left something else than this build
+        // does. chainnative: the same with the native programs (the game's build had them on).
+        if (mode == "chainnative")
+        {
+            vu1NativeRegistry().mode = 1;
+            kamite::render::registerNativeVu1Programs();
+            g_native = true;
+        }
+        uint64_t compared = 0, differ = 0, shown = 0;
+        std::map<std::string, uint64_t> fields;
+        for (size_t i = 0; i + 1 < runs.size(); ++i)
+        {
+            std::vector<uint8_t> &code = images[runs[i].hash];
+            if (code.size() != 0x4000u)
+                continue;
+            const uint64_t before = g_nativeRuns;
+            const Outcome o = runOne(runs[i], code, true);
+            const bool wasNative = g_nativeRuns != before;
+            const VU1State &next = runs[i + 1].state.state;
+            ++compared;
+            std::vector<std::string> notes;
+            for (int r = 1; r < 32; ++r)
+                if (std::memcmp(o.state.vf[r], next.vf[r], 16) != 0)
+                    notes.push_back("vf" + std::to_string(r));
+            for (int r = 1; r < 16; ++r)
+                if (o.state.vi[r] != next.vi[r])
+                    notes.push_back("vi" + std::to_string(r));
+            if (std::memcmp(o.state.acc, next.acc, 16) != 0)
+                notes.push_back("acc");
+            if (std::memcmp(&o.state.q, &next.q, 4) != 0)
+                notes.push_back("q");
+            if (o.state.clip != next.clip)
+                notes.push_back("clip");
+            if (o.state.mac != next.mac)
+                notes.push_back("mac");
+            if (o.state.status != next.status)
+                notes.push_back("status");
+            for (const int qw : {8, 9, 20, 21, 30}) // the qwords programs keep across runs (the VIF loads batches above)
+                if (std::memcmp(&o.data[qw * 16], &runs[i + 1].data[qw * 16], 16) != 0)
+                    notes.push_back("data" + std::to_string(qw));
+            if (!notes.empty())
+            {
+                ++differ;
+                for (const std::string &n : notes)
+                    ++fields[(wasNative ? "native " : "aot ") + n];
+                if (shown++ < 15)
+                {
+                    std::printf("run %zu pc %04x -> %04x%s:", i, runs[i].state.state.pc, next.pc, wasNative ? " (native)" : "");
+                    for (const std::string &n : notes)
+                        std::printf(" %s", n.c_str());
+                    std::printf("\n");
+                }
+            }
+        }
+        std::printf("%llu compared, %llu differ (%llu native runs)\n", static_cast<unsigned long long>(compared),
+                    static_cast<unsigned long long>(differ), static_cast<unsigned long long>(g_nativeRuns));
+        for (const auto &[f, n] : fields)
+            std::printf("  %s: %llu\n", f.c_str(), static_cast<unsigned long long>(n));
         return 0;
     }
     if (mode == "native" || mode == "nativebench")

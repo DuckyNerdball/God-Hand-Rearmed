@@ -108,6 +108,15 @@ namespace
             if ((entry.checked || natives.mode == 1) && entry.codeEnd <= codeSize && vu1NativeCodeHash(vuCode, entry) == entry.codeHash)
                 for (uint32_t i = 0; i < entry.entryCount; ++i)
                     slots.push_back({entry.entryPcs[i], entry.program});
+        for (const Vu1NativeEntry &entry : natives.entries) // once per image, so a log tells what ran natively
+            for (const Vu1NativeSlot &slot : slots)
+                if (slot.program == entry.program)
+                {
+                    std::fprintf(stderr, "[vu1-native] image %016llx: %s runs natively (PS2X_VU1_NATIVE=%s)\n",
+                                 static_cast<unsigned long long>(hash), entry.name ? entry.name : "?",
+                                 natives.mode == 1 ? "1" : "unset");
+                    break;
+                }
         const auto &stored = natives.byImage.emplace(hash, std::move(slots)).first->second;
         return stored.empty() ? nullptr : &stored;
     }
