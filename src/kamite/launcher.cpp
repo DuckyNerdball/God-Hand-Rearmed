@@ -1923,6 +1923,32 @@ namespace kamite::launcher
             const Vector2 mouse{io.MousePos.x, io.MousePos.y};
             const bool moved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
             const bool overBook = home && !popup && scene.bookHit(mouse);
+            // The REARMED plate under the logo is Play as well (K, Nov 19): hovering it puts the loop on Play, a click
+            // plays (Install before there is a game).
+            bool overPlate = false;
+            if (home && !popup && state.logoPlaced)
+            {
+                const ImVec2 min = state.logoMin, max = state.logoMax;
+                const float w = max.x - min.x, h = max.y - min.y;
+                overPlate = mouse.x >= min.x + w * kRearmedRect[0] && mouse.x <= min.x + w * kRearmedRect[2] &&
+                            mouse.y >= min.y + h * kRearmedRect[1] && mouse.y <= min.y + h * kRearmedRect[3];
+            }
+            const auto playItem = [&] {
+                if (state.installed)
+                {
+                    if (state.playTime < 0.0f)
+                    {
+                        state.playTime = 0.0f;       // the plate's animation and the fade; the main loop starts the game after
+                        state.soundThisFrame = true; // Play's own sound, next frame
+                        scene.fling();               // the doors fling open into the fade
+                    }
+                }
+                else
+                {
+                    state.screen = Screen::Install;
+                    state.focusFirst = true;
+                }
+            };
             if (scene.bill(quad))
             {
                 billShown = true;
@@ -1945,8 +1971,8 @@ namespace kamite::launcher
                         ImGui::SetNavCursorVisible(true);
                         focused = true;
                     }
-                    // hovering the book is hovering Options (the book lights, the loop goes to Options)
-                    if (home && i == kBillOptions && overBook && moved && !focused)
+                    // hovering the book is hovering Options (the book lights, the loop goes to Options); the plate, Play
+                    if (home && ((i == kBillOptions && overBook) || (i == 0 && overPlate)) && moved && !focused)
                     {
                         ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
                         focused = true;
@@ -1959,20 +1985,8 @@ namespace kamite::launcher
                         tickItem(); // the tick box, the mute mark
                     if (pressed && home)
                     {
-                        if (i == 0 && state.installed)
-                        {
-                            if (state.playTime < 0.0f)
-                            {
-                                state.playTime = 0.0f; // the plate's animation and the fade; the main loop starts the game after
-                                state.soundThisFrame = true; // Play's own sound, next frame
-                                scene.fling();               // the doors fling open into the fade
-                            }
-                        }
-                        else if (i == 0)
-                        {
-                            state.screen = Screen::Install;
-                            state.focusFirst = true;
-                        }
+                        if (i == 0)
+                            playItem();
                         else if (i == kBillOptions)
                             openOptions(state);
                         else if (i == kBillQuit)
@@ -2047,17 +2061,19 @@ namespace kamite::launcher
             }
             if (home && billShown)
                 state.focusOptions = false;
-            // A click on the book opens Options; on a snack, it is eaten (an egg: no hover hint, K).
+            // A click on the book opens Options; on the plate, plays; on a snack, it is eaten (an egg: no hover hint, K).
             if (home && !popup && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsAnyItemHovered())
             {
                 if (overBook)
                     openOptions(state);
+                else if (overPlate && billShown)
+                    playItem();
                 else if (const saloon::Scene::Bite bite = scene.snackClick(mouse); bite != saloon::Scene::Bite::None)
                     eatSound(state, bite == saloon::Scene::Bite::Drink);
             }
             // The mouse moved off everything (the bill's lines, the book, the slip's controls): nothing stays focused, so
             // no loop lingers and the book goes dark (K, Nov 18). The next key or button focuses the first item.
-            if (home && billShown && !popup && moved && !overTarget && !overBook && !ImGui::IsAnyItemHovered())
+            if (home && billShown && !popup && moved && !overTarget && !overBook && !overPlate && !ImGui::IsAnyItemHovered())
             {
                 ImGuiContext &g = *GImGui;
                 if (g.NavId != 0 && g.NavWindow == ImGui::GetCurrentWindow())

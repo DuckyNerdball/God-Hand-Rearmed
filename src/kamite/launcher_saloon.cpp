@@ -1087,10 +1087,13 @@ float soft(vec2 p)
                                        "God Hand: Rearmed is an unofficial fan-made project, not affiliated with or endorsed by Capcom or "
                                        "Clover Studio. It contains no game data: play your own damn copy!";
         constexpr float kHeadingScale = 1.3f; // Wendyville is narrow (as in the Options book)
-        constexpr float kItemSize = 84.0f, kItemTop = 372.0f, kItemStep = 116.0f;
+        // (K, Nov 19: the writing a little lower, clear of the clip; the fine print bigger, nearer the foot)
+        constexpr float kTitleY = 146.0f, kRuleY = 214.0f, kSplashY = 278.0f;
+        constexpr float kItemSize = 84.0f, kItemTop = 398.0f, kItemStep = 116.0f;
         // (the text keeps clear of the volume ruler down the right edge: as wide as it can be, centred, without reaching it)
-        constexpr float kSkipSize = 34.0f, kSkipY = 704.0f, kBox = 29.0f, kBoxGap = 12.0f, kPaperRoom = 560.0f;
-        constexpr float kLegalSize = 21.0f, kLegalStep = 24.0f, kLegalRoom = 590.0f; // (below the ruler's end: a little wider; Dominican runs wide)
+        constexpr float kSkipSize = 34.0f, kSkipY = 730.0f, kBox = 29.0f, kBoxGap = 12.0f, kPaperRoom = 560.0f;
+        // the fine print: below the ruler's end, so a little wider; its last line kLegalFoot above the bill's foot
+        constexpr float kLegalSize = 24.0f, kLegalStep = 26.0f, kLegalRoom = 620.0f, kLegalFoot = 46.0f;
         constexpr Vector2 kSteamAt{70.0f, 76.0f}; // the upper left corner, clear of the title
         constexpr float kSteamR = 32.0f;
         // steam_mark.png's ring against the picture's width (tools/launcher/steam_mark.py: the small wheel pokes out)
@@ -1599,14 +1602,14 @@ float soft(vec2 p)
     {
         beginInk();
         // the head: the title and a hand-ruled line under it
-        inkText(fonts.heading, "BILL OF FARE", Vector2{kPaperW * 0.5f, 120.0f}, 80.0f * kHeadingScale, kInk, paper); // (as on the posters)
-        const Vector2 rule[4] = {{140.0f, 189.0f}, {280.0f, 187.5f}, {420.0f, 188.6f}, {560.0f, 187.0f}};
+        inkText(fonts.heading, "BILL OF FARE", Vector2{kPaperW * 0.5f, kTitleY}, 80.0f * kHeadingScale, kInk, paper); // (as on the posters)
+        const Vector2 rule[4] = {{140.0f, kRuleY + 1.0f}, {280.0f, kRuleY - 0.5f}, {420.0f, kRuleY + 0.6f}, {560.0f, kRuleY - 1.0f}};
         inkLine(rule, 4, 4.0f, kInk, paper, 0.04f);
         // this start's splash line
         const SplashFit splash = fitSplash(fonts.text, bill.splash);
         for (int i = 0; i < splash.count; ++i)
         {
-            const float y = splash.count == 1 ? 252.0f : 236.0f + i * splash.size * 1.08f;
+            const float y = splash.count == 1 ? kSplashY : kSplashY - 16.0f + i * splash.size * 1.08f;
             inkText(fonts.text, splash.lines[i].c_str(), Vector2{kPaperW * 0.5f, y}, splash.size, kInk, paper);
         }
         // the menu
@@ -1624,13 +1627,9 @@ float soft(vec2 p)
             inkText(fonts.text, kSkip, Vector2{left + kBox + kBoxGap + w * 0.5f, kSkipY}, size, kInk, paper);
             tickBox = Rectangle{left + kBox * 0.5f - box * 0.5f - 6.0f, kSkipY - box * 0.5f - 6.0f, box + 12.0f, box + 12.0f};
         }
-        // the fine print at the foot, as far from the bottom as from the sides (K, Nov 18)
+        // the fine print at the foot
         const std::vector<std::string> &legal = legalLines(fonts.text);
-        float widest = 0.0f;
-        for (const std::string &line : legal)
-            widest = std::max(widest, inkWidth(fonts.text, line.c_str(), kLegalSize));
-        const float margin = (kPaperW - widest) * 0.5f;
-        const float first = kPaperH - margin - kLegalSize * 0.5f - kLegalStep * static_cast<float>(legal.empty() ? 0 : legal.size() - 1);
+        const float first = kPaperH - kLegalFoot - kLegalStep * static_cast<float>(legal.empty() ? 0 : legal.size() - 1);
         for (size_t i = 0; i < legal.size(); ++i)
             inkText(fonts.text, legal[i].c_str(), Vector2{kPaperW * 0.5f, first + kLegalStep * static_cast<float>(i)}, kLegalSize, kInk, paper);
         const std::vector<Rectangle> targets = billTargets(fonts, bill);
