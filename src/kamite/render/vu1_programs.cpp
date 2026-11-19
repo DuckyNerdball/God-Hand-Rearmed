@@ -53,7 +53,7 @@ namespace kamite::render
         clip.entryPcs[1] = 0x0358u; // MSCNT ("b 0x00C8")
         clip.entryCount = 2u;
         clip.program = clipSceneryProgram();
-        clip.checked = false; // on with PS2X_VU1_NATIVE=1 until K's in-game check
+        clip.checked = true; // bit-exact on every traced run, K's in-game check and all test cases (Nov 19)
         registerVu1NativeProgram(clip);
     }
 }

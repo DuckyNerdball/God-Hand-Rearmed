@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 19, 2026
 
+- Performance: scenery the game cuts at the screen edges is drawn by native code instead of the emulated VU1 microprogram (that part about 4x faster).
 - Mods: Olivia is playable (Pre-Alpha, test builds only), made from your own disc: Gene's moves at her own height, Money and Cash on her.
 - Launcher: a Costume row under Character for characters with costumes (Olivia: Dress, Bunny Suit).
 - Money / Cash: Olivia's bunny suit jiggles too (in cutscenes and as her costume).
