@@ -11,11 +11,24 @@
 #include <filesystem>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace kamite::launcher::update
 {
     // "v0.6.9 Beta", or with the commit for a dev build.
     std::string versionLabel();
+    // The newspaper's date line (claude/newspaper.md): "BETA EDITION" (KAMITE_VERSION_LABEL) or, in a dev build,
+    // "DEV EDITION"; the dev build's commit ("" in a release build).
+    std::string editionName();
+    std::string devCommit();
+
+    // One release as the newspaper prints it.
+    struct Edition
+    {
+        std::string tag;  // "v0.7.0"
+        std::string date; // "NOV. 24, 2026": when it went up on GitHub ("" unknown)
+        std::string body; // its notes (the release's description)
+    };
 
     struct Release
     {
@@ -23,6 +36,7 @@ namespace kamite::launcher::update
         std::string notes; // every newer release's notes, newest first: "# v0.7.0" then its body's lines
         std::string zipUrl;
         uint64_t zipSize = 0;
+        std::vector<Edition> editions; // every release newer than ours, newest first
     };
 
     enum class CheckState : int
@@ -37,9 +51,14 @@ namespace kamite::launcher::update
     {
         std::atomic<int> state{static_cast<int>(CheckState::Off)};
         Release release; // valid once state is Available
+        // This version's release (a dev build without its own: the newest), valid once the state is UpToDate or
+        // Available and `hasCurrent`.
+        Edition current;
+        bool hasCurrent = false;
         std::thread worker;
     };
-    // test: a dev build's [Launcher] UpdateTest (any release counts as newer).
+    // test: a dev build's [Launcher] UpdateTest (any release counts as newer). Dev builds read the releases too (the
+    // newspaper's notes), but only offer an update with `test`.
     void startCheck(Checker &checker, bool test);
 
     enum class Stage : int

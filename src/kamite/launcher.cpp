@@ -1,6 +1,7 @@
 #include "kamite/launcher.h"
 #include "kamite/launcher_bark.h"
 #include "kamite/launcher_book.h"
+#include "kamite/launcher_paper.h"
 #include "kamite/launcher_saloon.h"
 
 #include "kamite/character_mods.h"
@@ -16,6 +17,7 @@
 #include "kamite/log.h"
 #include "kamite/presets.h"
 #include "kamite/settings_table.h"
+#include "kamite/version.h"
 #include "ps2_host_gamepads.h"
 #include "ps2_host_input.h"
 #include "runtime/ps2_display_options.h"
@@ -357,6 +359,17 @@ namespace kamite::launcher
             };
             UpdatePopup updatePopup = UpdatePopup::None;
             bool updateOpenPopup = false;
+            // The newspaper (launcher_paper.h, claude/newspaper.md; the saloon's version / update element).
+            paper::Paper paper;
+            bool paperOn = false;      // its fonts loaded (else the old slip)
+            bool paperOpen = false;    // opened (sliding up, or up)
+            float paperT = 0.0f;       // 0 in the corner .. 1 open
+            int paperFocus = 0;        // 0 BACK, 1 UPDATE NOW
+            bool paperFocusSet = false;
+            float paperScroll = 0.0f;  // page units
+            bool paperPrinting = false; // the update runs (shown on the paper)
+            std::string paperStop;     // a failed update's reason
+            ImGuiID paperCornerId = 0; // the corner's item (last frame), for the bill's pad routes
             fs::path exePath; // read at start: the update renames the running file aside
 #if KAMITE_LAUNCHER_STEAM
             // Add to Steam (launcher_steam.h): the lower left corner's button and its popup.
@@ -1012,6 +1025,7 @@ namespace kamite::launcher
             kSlipNone,
             kSlipNotes,
             kSlipUpdate,
+            kSlipPaper, // the newspaper's corner (claude/newspaper.md)
         };
         constexpr float kSlipH = 240.0f, kSlipShown = 168.0f;
         constexpr Color kSlipInk{40, 28, 20, 238};
@@ -1236,7 +1250,177 @@ namespace kamite::launcher
                 state.hasAmbience = false;
             }
             update::startInstall(g_updater, g_updateCheck.release, state.context->exeDir);
-            state.updatePopup = State::UpdatePopup::Working;
+            state.updatePopup = state.paperOn ? State::UpdatePopup::None : State::UpdatePopup::Working; // (the paper shows it)
+        }
+
+        // ---- the newspaper (launcher_paper.h; claude/newspaper.md) --------------------------------------------------
+        paper::Content paperContent(const State &state)
+        {
+            paper::Content c;
+            c.edition = update::editionName();
+            c.volume = KAMITE_VERSION;
+            const auto check = static_cast<update::CheckState>(g_updateCheck.state.load());
+            const std::string commit = update::devCommit();
+            if (!commit.empty())
+                c.date = commit; // a dev build: its commit where the date goes
+            else if ((check == update::CheckState::UpToDate || check == update::CheckState::Available) && g_updateCheck.hasCurrent)
+                c.date = g_updateCheck.current.date;
+            if (check == update::CheckState::Available)
+            {
+                const update::Release &release = g_updateCheck.release;
+                c.outNow = release.tag;
+                c.updateAd = true;
+                for (const update::Edition &e : release.editions)
+                    c.stories.push_back(paper::story(e.tag, e.date, e.body));
+            }
+            else if (check == update::CheckState::UpToDate)
+            {
+                c.latest = true;
+                if (g_updateCheck.hasCurrent)
+                    c.stories.push_back(paper::story(g_updateCheck.current.tag, g_updateCheck.current.date, g_updateCheck.current.body));
+                else
+                    c.notice = "No news about this edition yet.";
+            }
+            else if (check == update::CheckState::Checking)
+                c.notice = "Checking the wire\xE2\x80\xA6";
+            else
+                c.notice = "The wire's down. No news today.";
+            if (state.paperPrinting)
+            {
+                const uint64_t got = g_updater.received.load(), total = g_updater.total;
+                const bool installing = static_cast<update::Stage>(g_updater.stage.load()) != update::Stage::Downloading;
+                c.printingKnown = installing || total > 0;
+                c.printing = installing ? 1.0f : total > 0 ? std::min(1.0f, static_cast<float>(got) / static_cast<float>(total)) : 0.0f;
+            }
+            c.stop = state.paperStop;
+            c.focus = state.paperT >= 1.0f ? state.paperFocus : -1;
+            c.scroll = state.paperScroll;
+            return c;
+        }
+
+        void openPaper(State &state)
+        {
+            state.paperOpen = true;
+            state.paperFocusSet = false;
+            state.paperScroll = 0.0f;
+            bookSound(state, true); // the whoosh and the book's paper (K: never the closing one, it thumps)
+        }
+
+        // Home's newspaper: the corner is a button; open, a modal over everything holds the ads (B / Esc / BACK / a click
+        // off the page close it; up / down, the sticks and the wheel scroll it). Its update runs on the paper.
+        void drawPaper(State &state)
+        {
+            const paper::Content c = paperContent(state);
+            const bool update = !c.outNow.empty();
+            if (state.paperPrinting)
+            {
+                const auto stage = static_cast<update::Stage>(g_updater.stage.load());
+                if (stage == update::Stage::Failed)
+                {
+                    if (g_updater.worker.joinable())
+                        g_updater.worker.join();
+                    state.paperPrinting = false;
+                    state.paperStop = g_updater.error.empty() ? std::string("The update could not be installed.") : g_updater.error;
+                }
+                else if (stage == update::Stage::Done)
+                {
+                    if (g_updater.worker.joinable())
+                        g_updater.worker.join();
+                    KM_INFO(Boot, "launcher: restarting after the update");
+                    platform::relaunch(state.exePath);
+                    state.result = Result::Quit;
+                    state.done = true;
+                }
+            }
+            state.paperCornerId = 0;
+            if (!state.paperOpen && state.paperT <= 0.0f && state.screen == Screen::Home)
+            {
+                const paper::View v = state.paper.view(0.0f, update);
+                bool focused = false;
+                if (paperButton("##paper", state.paper.cornerBox(update), v.map, true, &focused))
+                    openPaper(state);
+                state.paperCornerId = ImGui::GetItemID();
+                ownSoundItem(); // the paper's own sound
+                if (focused)
+                    state.slipFocus = kSlipPaper;
+            }
+            if (state.paperOpen && !ImGui::IsPopupOpen("##paper"))
+                ImGui::OpenPopup("##paper");
+            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+            ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+            ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f)); // the paper dims itself
+            const bool shown = ImGui::BeginPopupModal("##paper", nullptr,
+                                                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove |
+                                                          ImGuiWindowFlags_NoSavedSettings);
+            ImGui::PopStyleColor();
+            if (!shown)
+                return;
+            if (!state.paperOpen)
+            {
+                ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
+                return;
+            }
+            const paper::View v = state.paper.view(1.0f, update);
+            const bool ready = state.paperT >= 1.0f, printing = state.paperPrinting;
+            bool backFocused = false, updateFocused = false;
+            if (printing)
+                ImGui::BeginDisabled();
+            const bool back = paperButton("##paperback", state.paper.adBox(c, 0), v.map, true, &backFocused);
+            const ImGuiID backId = ImGui::GetItemID();
+            ownSoundItem();
+            if (printing)
+                ImGui::EndDisabled();
+            bool go = false;
+            ImGuiID updateId = 0;
+            if (c.updateAd)
+            {
+                go = paperButton("##paperupdate", state.paper.adBox(c, 1), v.map, true, &updateFocused);
+                updateId = ImGui::GetItemID();
+                ownSoundItem();
+            }
+            if (!state.paperFocusSet)
+            {
+                // UPDATE NOW first when there is one, else BACK; set until it holds (the modal's own first-item focus
+                // lands on BACK in its first frame)
+                const bool toUpdate = c.updateAd && !printing;
+                ImGui::SetFocusID(toUpdate ? updateId : backId, ImGui::GetCurrentWindow());
+                ImGui::SetNavCursorVisible(true);
+                state.paperFocus = toUpdate ? 1 : 0;
+                state.paperFocusSet = toUpdate ? updateFocused : backFocused;
+                backFocused = updateFocused = false;
+            }
+            const int focus = updateFocused ? 1 : backFocused ? 0 : state.paperFocus;
+            if (focus != state.paperFocus && ready)
+                penSound(state); // the loop moves
+            state.paperFocus = focus;
+            // scrolling: the arrows, the d-pad, either stick, the wheel
+            {
+                float scroll = 0.0f;
+                for (const ImGuiKey key : {ImGuiKey_UpArrow, ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp, ImGuiKey_GamepadRStickUp})
+                    scroll -= ImGui::GetKeyData(key)->AnalogValue > 0.0f ? ImGui::GetKeyData(key)->AnalogValue : (ImGui::IsKeyDown(key) ? 1.0f : 0.0f);
+                for (const ImGuiKey key : {ImGuiKey_DownArrow, ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown, ImGuiKey_GamepadRStickDown})
+                    scroll += ImGui::GetKeyData(key)->AnalogValue > 0.0f ? ImGui::GetKeyData(key)->AnalogValue : (ImGui::IsKeyDown(key) ? 1.0f : 0.0f);
+                state.paperScroll += scroll * 650.0f * ImGui::GetIO().DeltaTime - ImGui::GetIO().MouseWheel * 70.0f;
+                state.paperScroll = std::clamp(state.paperScroll, 0.0f, state.paper.maxScroll());
+            }
+            const ImVec2 mouse = ImGui::GetIO().MousePos;
+            const bool cancelKey = ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+            const bool clickOff = ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !saloon::inside(v.quad, Vector2{mouse.x, mouse.y});
+            if (ready && !printing && (back || cancelKey || clickOff))
+            {
+                state.paperOpen = false;
+                menuSound(state, kCancel); // the whoosh (BACK's cancel)
+                ImGui::CloseCurrentPopup();
+            }
+            else if (ready && go && !printing)
+            {
+                menuSound(state, kConfirm);
+                state.paperStop.clear();
+                state.paperPrinting = true;
+                startUpdate(state);
+            }
+            ImGui::EndPopup();
         }
 
         // Home's lower right corner, over the volume (claude/release.md; K restyles it later): the version, and when a
@@ -1249,7 +1433,9 @@ namespace kamite::launcher
             const float right = ImGui::GetWindowWidth() - margin;
             float y = ImGui::GetWindowHeight() - margin - size - gap;
             const update::Release &release = g_updateCheck.release;
-            if (state.saloonOn) // on the right slip (its ink is drawn before ImGui)
+            if (state.saloonOn && state.paperOn) // the newspaper (claude/newspaper.md)
+                drawPaper(state);
+            else if (state.saloonOn) // on the right slip (its ink is drawn before ImGui)
             {
                 if (available)
                 {
@@ -2063,7 +2249,8 @@ namespace kamite::launcher
                 }
                 // The pad's (and arrow keys') routes on the bill (K, Nov 19), over ImGui's own by position: Steam's mark
                 // down / right to Play, Play right to the mute mark, left to Steam's mark and up round to the Skip
-                // line, the mute mark left to Play; on the mute mark (or
+                // line, the mute mark left to Play; right from Options, Quit, the Skip line and the mute mark to the
+                // newspaper's corner, and left from it to Quit; on the mute mark (or
                 // the ruler, focused by the mouse) up / down turn the volume 5% a step (held: repeats), A mutes.
                 ImGuiContext &g = *GImGui;
                 if (home && !popup && g.NavMoveSubmitted && g.NavWindow == ImGui::GetCurrentWindow() && !ids.empty())
@@ -2091,6 +2278,11 @@ namespace kamite::launcher
                     }
                     else if (onMute && dir == ImGuiDir_Left)
                         to = ids[0];
+                    else if (state.paperCornerId != 0u && dir == ImGuiDir_Right &&
+                             (onMute || at == ids[kBillOptions] || at == ids[kBillQuit] || (skipItem < ids.size() && at == ids[skipItem])))
+                        to = state.paperCornerId; // the newspaper's corner (K, Nov 19)
+                    else if (state.paperCornerId != 0u && at == state.paperCornerId && dir == ImGuiDir_Left)
+                        to = ids[kBillQuit];
                     else if (onSteam && (dir == ImGuiDir_Down || dir == ImGuiDir_Right))
                         to = ids[0];
                     else if (at == ids[0] && dir == ImGuiDir_Right && muteItem < ids.size())
@@ -2167,6 +2359,26 @@ namespace kamite::launcher
             if (state.screen == Screen::Options)
                 return;
             const float alpha = scene.overlays();
+            if (state.paperOn)
+            {
+                // the newspaper's corner (open, it is drawn over everything after the logo); its pencil loop when focused
+                if (state.paperT <= 0.0f)
+                {
+                    const paper::Content c = paperContent(state);
+                    const bool update = !c.outNow.empty();
+                    state.paper.draw(c, 0.0f, alpha);
+                    if (state.slipFocus == kSlipPaper && state.screen == Screen::Home)
+                    {
+                        Color pencil = kSlipPencil;
+                        pencil.a = alphaOf(pencil.a / 255.0f * alpha);
+                        const Rectangle box{24.0f, 18.0f, 690.0f, update ? 178.0f : 146.0f};
+                        saloon::beginInk();
+                        saloon::inkLoop(box, 1.0f, 41u, pencil, state.paper.view(0.0f, update).map, 10.0f, 4.0f);
+                        saloon::endInk();
+                    }
+                }
+                return;
+            }
             const Slip right = slipAt(state, true);
             drawSlipPaper(state, right, alpha);
             drawSlipInk(state, right, true, alpha);
@@ -5382,6 +5594,8 @@ namespace kamite::launcher
                 state.scene.close();
                 state.saloonOn = false;
             }
+            else if (!(state.paperOn = state.paper.load(context.exeDir / "resources" / "fonts", &state.billFonts.text)))
+                KM_WARN(Boot, "launcher: the newspaper's fonts are missing from resources/fonts, the corner slip instead");
         }
         InitAudioDevice();
         state.audio = IsAudioDeviceReady();
@@ -5567,6 +5781,15 @@ namespace kamite::launcher
                 }
             }
             const bool playing = state.playTime >= 0.0f;
+            // The newspaper slides up when opened and back down when closed (0.45 s); away from Home it is put away.
+            if (state.screen != Screen::Home)
+                state.paperOpen = false;
+            {
+                const float step = std::min(GetFrameTime(), 0.1f) / 0.45f;
+                state.paperT = state.paperOpen ? std::min(1.0f, state.paperT + step) : std::max(0.0f, state.paperT - step);
+                if (state.screen != Screen::Home)
+                    state.paperT = 0.0f;
+            }
             BeginDrawing();
             if (state.saloonOn)
             {
@@ -5692,6 +5915,8 @@ namespace kamite::launcher
                     drawSplash(state);
             }
             drawPosters(state);
+            if (state.paperOn && state.paperT > 0.0f)
+                state.paper.draw(paperContent(state), state.paperT, 1.0f); // sliding up or open: over the logo too
             if (playing)
             {
                 DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(),
@@ -5726,6 +5951,7 @@ namespace kamite::launcher
             if (art.id != 0u)
                 UnloadTexture(art);
         saloon::unloadBillFonts(state.billFonts);
+        state.paper.unload();
         if (state.bill.steamMark.id != 0u)
             UnloadTexture(state.bill.steamMark);
         state.scene.close(); // its threads and textures, before the game has the window

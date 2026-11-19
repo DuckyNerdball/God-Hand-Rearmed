@@ -389,12 +389,12 @@ if(KAMITE_SALOON AND KAMITE_DEBUG_UI AND TARGET rlImGui)
         GIT_TAG ee829431ceaed31a34b7e1420f7f18180e7eae23) # v1.1.1-SDL
     FetchContent_MakeAvailable(kamite_libavif)
     set(BUILD_SHARED_LIBS ${KAMITE_SHARED_LIBS_SAVED})
-    target_sources(kamite PRIVATE kamite/launcher_saloon.cpp kamite/saloon_image.cpp)
+    target_sources(kamite PRIVATE kamite/launcher_saloon.cpp kamite/launcher_paper.cpp kamite/saloon_image.cpp)
     target_link_libraries(kamite PRIVATE avif)
     target_compile_definitions(kamite PRIVATE KAMITE_HAS_AVIF=1)
 elseif(KAMITE_DEBUG_UI AND TARGET rlImGui)
     # without the decoder the saloon reports itself unavailable (saloon_image.cpp) and the launcher stays plain
-    target_sources(kamite PRIVATE kamite/launcher_saloon.cpp kamite/saloon_image.cpp)
+    target_sources(kamite PRIVATE kamite/launcher_saloon.cpp kamite/launcher_paper.cpp kamite/saloon_image.cpp)
 endif()
 
 if(KAMITE_DEBUG_UI AND TARGET rlImGui)

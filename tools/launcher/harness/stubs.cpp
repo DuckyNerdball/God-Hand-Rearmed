@@ -97,8 +97,34 @@ bool traceEnabled(Category) { return false; }
 }
 namespace launcher::update {
 std::string versionLabel() { return "v0.6.9 Beta (dev abc1234)"; }
-void startCheck(Checker &c, bool) { c.state.store(std::getenv("LH_UPDATE") ? (int)CheckState::Available : (int)CheckState::Off); if (std::getenv("LH_UPDATE")) c.release.tag = "v0.7.0"; }
-void startInstall(Installer &, const Release &, const std::filesystem::path &) {}
+std::string editionName() { return "DEV EDITION"; }
+std::string devCommit() { return std::getenv("LH_RELEASE") ? "" : "abc1234"; }
+// LH_UPDATE: v0.7.0 is out; LH_OFFLINE: the list could not be read; else up to date (this version's notes).
+void startCheck(Checker &c, bool) {
+  const char *notes = "- Restored the alpha's Hold to Brawl control scheme: Control Style Modern: Hold (hold L1 to brawl, double-tap for a 180\xC2\xB0 turn); the old Modern is now Modern: Toggle.\n"
+                      "- Modern: Hold: Auto's brawl mode ends by itself once no enemy is near.\n"
+                      "- Button Mapping: with Modern: Hold, R3 can take a single-press 180\xC2\xB0 turn (off by default).\n"
+                      "- Rearmed and Sleazy Mode presets use Modern: Hold (installs already on them show Custom until you pick the preset again).\n"
+                      "- With several controllers connected, the one that pressed a button last controls Gene (and its button prompts show).\n"
+                      "- Launcher: with a controller, Y / triangle eats a piece of fruit and X / square takes from the smoothie.\n"
+                      "- 128 MB of extra RAM above the game's own 32 MB, for mods and bigger models; older save states and test cases still load.";
+  c.current = Edition{"v0.6.9.1", "NOV. 19, 2026", notes};
+  c.hasCurrent = true;
+  if (std::getenv("LH_OFFLINE")) { c.state.store((int)CheckState::Failed); return; }
+  if (std::getenv("LH_UPDATE")) {
+    c.release.tag = "v0.7.0";
+    c.release.editions.push_back(Edition{"v0.7.0", "NOV. 24, 2026", "- Mods: any game file can be replaced by a loose file in a mod folder.\n- Olivia (pre-alpha) in the Mods tab.\n- The newspaper in the launcher's corner."});
+    c.release.editions.push_back(Edition{"v0.6.9.1", "NOV. 19, 2026", notes});
+    c.state.store((int)CheckState::Available);
+    return;
+  }
+  c.state.store((int)CheckState::UpToDate);
+}
+// LH_FAIL: the download fails; else it sits at 45%.
+void startInstall(Installer &i, const Release &, const std::filesystem::path &) {
+  if (std::getenv("LH_FAIL")) { i.error = "The download did not finish. Check your connection and try again."; i.stage = (int)Stage::Failed; return; }
+  i.total = 100; i.received = 45;
+}
 void cleanup(const std::filesystem::path &) {}
 }
 namespace launcher::platform {

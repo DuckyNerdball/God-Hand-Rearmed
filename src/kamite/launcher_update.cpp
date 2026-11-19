@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -83,9 +84,25 @@ namespace kamite::launcher::update
             return std::lexicographical_compare(b.begin(), b.end(), a.begin(), a.end());
         }
 
+        // GitHub's "2026-11-19T10:12:00Z" as the newspaper's date: "NOV. 19, 2026".
+        std::string paperDate(const std::string &iso)
+        {
+            static const char *const kMonths[] = {"JAN.", "FEB.", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUG.", "SEPT.", "OCT.", "NOV.", "DEC."};
+            int year = 0, month = 0, day = 0;
+            if (std::sscanf(iso.c_str(), "%d-%d-%d", &year, &month, &day) != 3 || month < 1 || month > 12 || day < 1)
+                return {};
+            return std::string(kMonths[month - 1]) + " " + std::to_string(day) + ", " + std::to_string(year);
+        }
+
         void check(Checker &checker, bool test)
         {
-            const std::vector<int> current = test ? std::vector<int>{0} : parseVersion(KAMITE_VERSION);
+#if KAMITE_RELEASE
+            constexpr bool kRelease = true;
+#else
+            constexpr bool kRelease = false;
+#endif
+            const std::vector<int> ours = parseVersion(KAMITE_VERSION);
+            const std::vector<int> current = test ? std::vector<int>{0} : ours;
             std::vector<uint8_t> bytes;
             Json list;
             if (!platform::httpGet(kReleasesApi, bytes, 8u << 20, "application/vnd.github+json") ||
@@ -98,10 +115,11 @@ namespace kamite::launcher::update
             struct Found
             {
                 std::vector<int> version;
-                std::string tag, body, url;
+                std::string tag, body, url, date;
                 uint64_t size = 0;
             };
             std::vector<Found> found;
+            Found newest; // the newest release of all (a dev build's paper when it has none of its own)
             for (const Json &item : list.items)
             {
                 if (flag(item["draft"]))
@@ -109,9 +127,19 @@ namespace kamite::launcher::update
                 Found f;
                 f.tag = text(item["tag_name"]);
                 f.version = parseVersion(f.tag);
-                if (f.version.empty() || !newer(f.version, current))
+                if (f.version.empty())
                     continue;
                 f.body = text(item["body"]);
+                f.date = paperDate(text(item["published_at"]));
+                if (f.version == ours && !checker.hasCurrent)
+                {
+                    checker.current = Edition{f.tag, f.date, f.body};
+                    checker.hasCurrent = true;
+                }
+                if (newest.version.empty() || newer(f.version, newest.version))
+                    newest = f;
+                if (!newer(f.version, current))
+                    continue;
                 if (const Json *assets = item["assets"]; assets && assets->kind == Json::Kind::Array)
                     for (const Json &asset : assets->items)
                     {
@@ -126,10 +154,16 @@ namespace kamite::launcher::update
                     }
                 found.push_back(std::move(f));
             }
+            if (!checker.hasCurrent && !kRelease && !newest.version.empty())
+            {
+                checker.current = Edition{newest.tag, newest.date, newest.body};
+                checker.hasCurrent = true;
+            }
             std::sort(found.begin(), found.end(), [](const Found &a, const Found &b) { return newer(a.version, b.version); });
-            // The newest release with a zip is the one installed; the notes cover every release newer than ours.
+            // The newest release with a zip is the one installed; the notes cover every release newer than ours. A dev
+            // build only reads (testers build main), unless it is UpdateTest's.
             const auto target = std::find_if(found.begin(), found.end(), [](const Found &f) { return !f.url.empty(); });
-            if (target == found.end())
+            if (target == found.end() || (!kRelease && !test))
             {
                 KM_INFO(Boot, "update: up to date (v" << KAMITE_VERSION << ")");
                 checker.state.store(static_cast<int>(CheckState::UpToDate));
@@ -144,6 +178,7 @@ namespace kamite::launcher::update
                 std::string body = it->body;
                 body.erase(std::remove(body.begin(), body.end(), '\r'), body.end());
                 release.notes += "# " + it->tag + "\n" + body + "\n\n";
+                release.editions.push_back(Edition{it->tag, it->date, body});
             }
             KM_INFO(Boot, "update: " << release.tag << " is out (" << release.zipSize / (1024 * 1024) << " MB)");
             checker.state.store(static_cast<int>(CheckState::Available));
@@ -443,12 +478,29 @@ namespace kamite::launcher::update
 #endif
     }
 
+    std::string editionName()
+    {
+#if KAMITE_RELEASE
+        std::string name = KAMITE_VERSION_LABEL;
+        for (char &c : name)
+            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        return name + " EDITION";
+#else
+        return "DEV EDITION";
+#endif
+    }
+
+    std::string devCommit()
+    {
+#if KAMITE_RELEASE
+        return {};
+#else
+        return KAMITE_GIT_COMMIT;
+#endif
+    }
+
     void startCheck(Checker &checker, bool test)
     {
-#if !KAMITE_RELEASE
-        if (!test)
-            return;
-#endif
         checker.state.store(static_cast<int>(CheckState::Checking));
         checker.worker = std::thread([&checker, test] { check(checker, test); });
     }
