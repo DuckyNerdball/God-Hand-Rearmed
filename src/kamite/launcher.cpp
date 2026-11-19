@@ -5299,7 +5299,7 @@ namespace kamite::launcher
         loadImage(state.rearmed, "rearmed.png");
         loadImage(state.rearmedText, "rearmed_text.png");
         loadImage(state.rearmedGlow, "rearmed_glow.png");
-        loadImage(state.bill.steamMark, "steam_mark.png"); // the bill's Add to Steam mark (K's sketch, ringed)
+        loadImage(state.bill.steamMark, "steam_mark.png"); // the bill's Add to Steam mark (Flaticon's sketch, ringed)
         if (state.kana.id != 0u && state.logo.id != 0u)
             state.scene.setKana(state.kana, kLogoContent, static_cast<float>(state.logo.height) / static_cast<float>(state.logo.width));
         const fs::path burstPath = context.exeDir / "resources" / "images" / "burst.png";

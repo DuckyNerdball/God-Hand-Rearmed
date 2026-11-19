@@ -1,5 +1,5 @@
-"""The bill's Add to Steam mark (K, Nov 18): his sketched Steam arm (a 512 px black-on-transparent PNG) inside a
-hand-inked ring, the whole logo. Writes resources/images/steam_mark.png (256 px, white, the ink in alpha).
+"""The bill's Add to Steam mark (K, Nov 18): a sketched Steam arm from Flaticon (a 512 px black-on-transparent PNG;
+free with attribution, README credits) inside a hand-inked ring, the whole logo. Writes resources/images/steam_mark.png (256 px, white, the ink in alpha).
 
 python3 -I tools/launcher/steam_mark.py <sketch.png> resources/images/steam_mark.png [a|b]
 

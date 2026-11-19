@@ -1376,25 +1376,25 @@ float soft(vec2 p)
         }
 
         // The paperclip on the ruler (K: a red one, with some weight to it): a plastic-coated wire clip clipped over
-        // the bill's edge at the level, two nested loops lying across the edge. A soft shadow on the paper (ink),
-        // then the wire painted over it (not inked): its body, a darker underside and a light glint along the top.
+        // the bill's edge at the level. This side of the paper shows one loop (K, Nov 19, from a photo): from the wire's
+        // free end, a little short of the edge, back along the top, round the far end, along the bottom and round the
+        // bend over the edge, where it goes behind the paper. A soft shadow on the paper (ink), then the wire painted
+        // over it (not inked): its body, a darker underside and a light glint along the top.
         void paintClip(float level, const Homography &paper)
         {
+            constexpr float kW = 15.0f, kLeft = kRulerX - 70.0f, kRight = 716.0f; // the loop's half height and its ends
+            constexpr float kFreeEnd = kPaperW - 14.0f;                          // the wire's end, short of the edge
             const float y = kRulerBottom + (kRulerTop - kRulerBottom) * std::clamp(level, 0.0f, 1.0f);
-            const auto wire = [&](float w, float left, float right, Vector2 off, Vector2 *out) {
+            const auto loops = [&](Vector2 off, float width, Color color) {
+                Vector2 points[25];
+                points[0] = Vector2{kFreeEnd + off.x, y - kW + off.y};
                 for (int i = 0; i < 12; ++i)
                 {
                     const float a = kPi * static_cast<float>(i) / 11.0f;
-                    out[i] = Vector2{left - std::sin(a) * w + w + off.x, y - std::cos(a) * w + off.y};
-                    out[12 + i] = Vector2{right + std::sin(a) * w - w + off.x, y + std::cos(a) * w + off.y};
+                    points[1 + i] = Vector2{kLeft - std::sin(a) * kW + kW + off.x, y - std::cos(a) * kW + off.y};
+                    points[13 + i] = Vector2{kRight + std::sin(a) * kW - kW + off.x, y + std::cos(a) * kW + off.y};
                 }
-            };
-            const auto loops = [&](Vector2 off, float width, Color color) {
-                Vector2 points[24];
-                wire(15.0f, kRulerX - 70.0f, 716.0f, off, points);
-                inkLine(points, 24, width, color, paper);
-                wire(9.5f, kRulerX - 53.0f, 706.0f, off, points);
-                inkLine(points, 24, width, color, paper);
+                inkLine(points, 25, width, color, paper);
             };
             beginInk(); // the shadow, on the paper
             loops(Vector2{3.0f, 5.0f}, 9.5f, Color{60, 40, 30, 75});
@@ -1639,7 +1639,7 @@ float soft(vec2 p)
         if (bill.steam)
         {
             if (bill.steamMark.id != 0u)
-                inkPicture(bill.steamMark, kSteamAt, kSteamR * 2.0f / kSteamMarkRing, kInk, paper); // K's sketch in its ring
+                inkPicture(bill.steamMark, kSteamAt, kSteamR * 2.0f / kSteamMarkRing, kInk, paper); // the sketch in its ring
             else
                 inkSteamMark(kSteamAt, kSteamR, kInk, paper);
             if (static_cast<size_t>(bill.focus) == steamIndex)

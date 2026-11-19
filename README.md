@@ -414,6 +414,7 @@ and testing from the boys.
   folded-arms idle.
 - [Denys Almaral](https://denysalmaral.com): the Free Animation Pack for City People, two of the NPCs' idles.
 - masterlynx: the Steam library cover art, used with the artist's permission.
+- [Flaticon](https://www.flaticon.com): the sketched Steam icon on the launcher's bill of fare (inked into a ring by us).
 - Harold Lohner ([haroldsfonts.com](http://www.haroldsfonts.com)): the Dominican font, the launcher's writing (the bill of
   fare, the Options book, the splash text).
 - Dennis Ludlow / Sharkshock ([sharkshock.net](http://www.sharkshock.net)): the Wendyville font of the wanted posters and
