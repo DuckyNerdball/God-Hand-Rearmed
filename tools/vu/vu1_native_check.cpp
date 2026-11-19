@@ -3,7 +3,7 @@
 // every field. Plain C++ and the program sources only, so it builds for any target, e.g. AArch64 for the NEON path:
 //
 //   aarch64-linux-gnu-g++ -std=c++20 -O2 -ffp-contract=off -static -I<repo>/src -I<repo>/runtime/ps2xRuntime/include \
-//       tools/vu/vu1_native_check.cpp src/kamite/render/scenery_strip.cpp -o check
+//       tools/vu/vu1_native_check.cpp src/kamite/render/*.cpp -o check
 //   qemu-aarch64 ./check vectors.bin
 //
 // (KAMITE_VU_SCALAR: the plain C++ path.) Programs are found by their code, as the runtime does (vu1_programs.cpp).
@@ -15,11 +15,6 @@
 #include <map>
 #include <string>
 #include <vector>
-
-namespace kamite::render
-{
-    Vu1NativeProgram sceneryStripProgram();
-}
 
 static std::vector<Vu1NativeEntry> g_entries;
 void registerVu1NativeProgram(const Vu1NativeEntry &entry) { g_entries.push_back(entry); }

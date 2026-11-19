@@ -68,6 +68,7 @@ set(KAMITE_HOST_SOURCES
     kamite/menu_buttons.cpp
     kamite/modern_controls.cpp
     kamite/near_geometry.cpp
+    kamite/render/character_skin.cpp
     kamite/render/scenery_strip.cpp
     kamite/render/vu1_programs.cpp
     kamite/crash_history.cpp
@@ -310,7 +311,8 @@ add_executable(kamite ${KAMITE_HOST_SOURCES} "${KAMITE_MODULE_INDEX}")
 # The native VU1 programs (kamite/render) round every float operation on its own, as the VU does: no contraction into
 # FMA (MSVC's /fp:precise below does not contract).
 if(NOT MSVC)
-    set_source_files_properties(kamite/render/scenery_strip.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+    set_source_files_properties(kamite/render/character_skin.cpp kamite/render/scenery_strip.cpp PROPERTIES COMPILE_OPTIONS
+                                "-ffp-contract=off")
 endif()
 if(KAMITE_RELEASE) # CMakeLists.txt: GHR.exe's own code and the runtime, not the generated game code
     target_compile_definitions(kamite PRIVATE KAMITE_RELEASE=1)
