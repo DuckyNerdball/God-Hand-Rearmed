@@ -2062,7 +2062,8 @@ namespace kamite::launcher
                     overTarget = overTarget || ImGui::IsItemHovered();
                 }
                 // The pad's (and arrow keys') routes on the bill (K, Nov 19), over ImGui's own by position: Steam's mark
-                // down / right to Play, Play right to the mute mark, the mute mark left to Play; on the mute mark (or
+                // down / right to Play, Play right to the mute mark, left to Steam's mark and up round to the Skip
+                // line, the mute mark left to Play; on the mute mark (or
                 // the ruler, focused by the mouse) up / down turn the volume 5% a step (held: repeats), A mutes.
                 ImGuiContext &g = *GImGui;
                 if (home && !popup && g.NavMoveSubmitted && g.NavWindow == ImGui::GetCurrentWindow() && !ids.empty())
@@ -2094,6 +2095,10 @@ namespace kamite::launcher
                         to = ids[0];
                     else if (at == ids[0] && dir == ImGuiDir_Right && muteItem < ids.size())
                         to = ids[muteItem];
+                    else if (at == ids[0] && dir == ImGuiDir_Left && steamItem < ids.size())
+                        to = ids[steamItem];
+                    else if (at == ids[0] && dir == ImGuiDir_Up && skipItem < ids.size())
+                        to = ids[skipItem]; // wraps to the Skip Launcher line at the bill's foot
                     if (to != 0u)
                     {
                         ImGui::NavMoveRequestCancel();
