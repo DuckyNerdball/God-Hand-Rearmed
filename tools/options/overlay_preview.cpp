@@ -247,7 +247,7 @@ int main(int argc, char **argv)
         v.titleDir = atoi(all.substr(a + 1, b - a - 1).c_str());
         v.titleT = static_cast<float>(atof(all.substr(b + 1).c_str()));
     }
-    // BUTTON MAPPING: KAMITE_PREVIEW_MAPPING="root|art|setFolder|cursor|readOnly|swaps|extras|drum|armed|paddles"
+    // BUTTON MAPPING: KAMITE_PREVIEW_MAPPING="root|art|setFolder|cursor|readOnly|swaps|extras|drum|armed|paddles|r3turn"
     // (overlay_preview.py): swaps "south:west,..." exchange two places' PS2 buttons, extras "select=saveload;l4=west;..."
     // (none / quicksave / quickload / saveload, or a place: a copy of the action whose default place that is), drum the
     // open drum's turn ("" closed; items from the one it opens on: 1.5 = half-way from the next to the one after),
@@ -265,7 +265,7 @@ int main(int argc, char **argv)
                 break;
             at = bar + 1;
         }
-        f.resize(10);
+        f.resize(11);
         using namespace kamite::mapping_page;
         static PadArt art;
         std::string error;
@@ -313,6 +313,7 @@ int main(int argc, char **argv)
         }
         const int paddles = atoi(f[9].c_str());
         state.paddles = paddles >= 4 ? 0x1E : paddles >= 2 ? 0x06 : 0x00; // bits 1 L4, 2 R4, 3 L5, 4 R5
+        state.r3QuickTurn = f[10] == "1"; // Modern: Hold's R3 turns
         const std::string artDir = f[1].substr(0, f[1].find_last_of('/'));
         const uint8_t cursor = f[3].empty() ? kNone : place(f[3]);
         Edit edit;

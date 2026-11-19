@@ -37,6 +37,21 @@ namespace kamite::mapping_page
             {{"DASH", nullptr}, false},          // L3: with Click-Stick Dash
             {{"BRAWL / FREECAM", nullptr}, false}, // R3: with Modern
         };
+        // Modern: Hold (K, Nov 19): L1 is brawling while held and the turn on a double tap; R3 the single-press turn when
+        // its drum gave it one (State::r3QuickTurn), else nothing.
+        constexpr Words kHoldL1 = {{"BRAWL (HOLD)", "180\xC2\xB0 TURN (2X)"}, false};
+        constexpr Words kHoldR3 = {{"180\xC2\xB0 TURN", nullptr}, false};
+        constexpr const char *kHoldL1Drum = "BRAWL / TURN", *kHoldR3Drum = "180\xC2\xB0 TURN";
+        const Words &wordsOf(const Options &options, uint8_t input)
+        {
+            return options.hold && input == L1 ? kHoldL1 : options.hold && input == R3 ? kHoldR3 : kActions[input];
+        }
+        // An input does something in play (the stick presses' actions come with their options).
+        bool acts(const State &state, const Options &options, uint8_t input)
+        {
+            return input < kRemappable && !(input == L3 && !options.clickStickDash) &&
+                   !(input == R3 && (!options.modern || (options.hold && !state.r3QuickTurn)));
+        }
         constexpr const char *kEmpty = "\xE2\x80\x94"; // an em dash: nothing on this button
         // The drum's short names (K, Nov 14, second pass: short enough to turn round the pad on the left too); an arrow
         // after the two ATTACKs tells them apart by their button's place (K: the game's own arrow shape,
@@ -195,7 +210,11 @@ namespace kamite::mapping_page
         o.clickStickDash = on("L3Dash");
         o.presets = on("StyleSwitching");
         if (const settings::Setting *s = settings::find("ControlStyle"))
-            o.modern = settings::value(ini, *s) == "modern";
+        {
+            const std::string style = settings::value(ini, *s);
+            o.hold = style == "hold";
+            o.modern = style == "modern" || o.hold;
+        }
         if (const settings::Setting *s = settings::find("MenuButtons"))
         {
             const std::string v = settings::value(ini, *s);
@@ -237,8 +256,16 @@ namespace kamite::mapping_page
             if (placeOfInput(state, input) == kNone)
                 continue; // not on a button the page edits
             // An extra button copies only what does something (the stick presses' actions come with their options).
-            if (extra >= 0 && ((input == L3 && !options.clickStickDash) || (input == R3 && !options.modern)))
+            if (extra >= 0 && !acts(state, options, input))
                 continue;
+            if (extra < 0 && input == own && input == R3 && options.hold)
+            {
+                // Hold: R3's own line chooses whether it turns (nothing first, the default).
+                start = static_cast<int>(out.size()) + (state.r3QuickTurn ? 1 : 0);
+                out.push_back(DrumEntry{input, Command::None, 0});
+                out.push_back(DrumEntry{input, Command::None, 1});
+                continue;
+            }
             if (input == own)
                 start = static_cast<int>(out.size());
             out.push_back(DrumEntry{input, Command::None});
@@ -297,9 +324,7 @@ namespace kamite::mapping_page
                 line.ends = static_cast<uint8_t>(line.ends | (1u << line.count));
             line.text[line.count++] = text;
         };
-        const auto shown = [&](uint8_t input) {
-            return input < kRemappable && !(input == L3 && !options.clickStickDash) && !(input == R3 && !options.modern);
-        };
+        const auto shown = [&](uint8_t input) { return acts(state, options, input); };
         // An extra button's label (K, Nov 14): a copy reads as its action, a command by name; SAVE / LOAD two lines,
         // the second with the Start button in it; nothing an em dash.
         const std::string startIcon = icons + set.file[Start] + ".png";
@@ -316,7 +341,7 @@ namespace kamite::mapping_page
             default:
                 if (shown(e.copy))
                 {
-                    const Words &w = kActions[e.copy];
+                    const Words &w = wordsOf(options, e.copy);
                     addTo(line, w.line[0], !w.wrapped || !w.line[1]);
                     addTo(line, w.line[1], true);
                 }
@@ -350,7 +375,7 @@ namespace kamite::mapping_page
                     const uint8_t input = state.onPlace[place];
                     if (shown(input))
                     {
-                        const Words &w = kActions[input];
+                        const Words &w = wordsOf(options, input);
                         add(w.line[0], !w.wrapped || !w.line[1]);
                         add(w.line[1], true);
                     }
@@ -457,8 +482,12 @@ namespace kamite::mapping_page
                 {
                     const uint8_t input = entry.input, at = placeOfInput(state, input);
                     item.icon = at < kRemappable ? d.keep(icons + set.file[at] + ".png") : "";
-                    item.text = shown(input) ? kDrumNames[input] : kEmpty;
-                    if (shown(input) && kDrumArrows[input])
+                    const bool does = entry.r3Turn >= 0 ? entry.r3Turn == 1 : shown(input);
+                    item.text = !does                               ? kEmpty
+                                : options.hold && input == L1 ? kHoldL1Drum
+                                : options.hold && input == R3 ? kHoldR3Drum
+                                                              : kDrumNames[input];
+                    if (does && kDrumArrows[input])
                     {
                         item.arrow = d.keep(artDir + "/" + kDrumArrows[input] + ".png");
                         item.arrowLit = d.keep(artDir + "/" + kDrumArrows[input] + "_lit.png");

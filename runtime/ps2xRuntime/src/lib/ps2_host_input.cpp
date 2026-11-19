@@ -283,6 +283,9 @@ namespace ps2_host_input
             // The extra buttons' commands ([PadN] SelectCommand ...; extra:: in the header): Select's save / load
             // unless the file says otherwise.
             std::array<extra::Command, extra::Count> commands{extra::Command::SaveLoad};
+            // [PadN] R3QuickTurn: Modern: Hold's R3 (the PS2 R3 input, wherever it is mapped) turns 180 degrees on a
+            // press (K, Nov 19: off by default; the Button Mapping page's drum on that line sets it).
+            bool r3QuickTurn = false;
         };
 
         // The extra buttons: their controller button, their [PadN] command key; the commands' names in the file.
@@ -293,6 +296,7 @@ namespace ps2_host_input
                                                                          "L5Command", "R5Command"};
         constexpr std::array<std::string_view, static_cast<size_t>(extra::Command::Count)> kCommandNames{
             "None", "QuickSave", "QuickLoad", "SaveLoad"};
+        constexpr std::string_view kR3QuickTurnKey = "R3QuickTurn";
 
         // Fills `config` from one [PadN] key (PCSX2's name, any case) and its bindings separated by ';'.
         void applyPadSetting(PadConfig &config, uint32_t pad, std::string_view key, std::string_view value)
@@ -362,6 +366,8 @@ namespace ps2_host_input
                 config.invertL = static_cast<uint32_t>(number(0.0f)) & 3u;
             else if (name == "invertr")
                 config.invertR = static_cast<uint32_t>(number(0.0f)) & 3u;
+            else if (name == lowerName(kR3QuickTurnKey))
+                config.r3QuickTurn = number(0.0f) != 0.0f;
             else
                 for (size_t b = 0; b < kExtraKeys.size(); ++b)
                     if (name == lowerName(kExtraKeys[b]))
@@ -821,6 +827,7 @@ namespace ps2_host_input
             g_extraDevice = firstControllerDevice(config);
             extra::State next;
             next.command = config.commands;
+            next.r3QuickTurn = config.r3QuickTurn;
             next.copy.fill(extra::kNoCopy);
             for (size_t input = 0; input < kRemappableKeys.size(); ++input)
             {
@@ -837,7 +844,7 @@ namespace ps2_host_input
             }
             std::lock_guard<std::mutex> lock(g_extraMutex);
             if (g_extraState.generation != 0u && next.command == g_extraState.command && next.copy == g_extraState.copy &&
-                next.copies == g_extraState.copies)
+                next.copies == g_extraState.copies && next.r3QuickTurn == g_extraState.r3QuickTurn)
                 return;
             next.generation = g_extraState.generation + 1u == 0u ? 1u : g_extraState.generation + 1u;
             g_extraState = next;
@@ -1169,6 +1176,7 @@ namespace ps2_host_input
                    "#   (left stick), RUp RRight RDown RLeft (right stick); settings Type Deadzone AxisScale ButtonDeadzone InvertL InvertR\n"
                    "#   LargeMotor SmallMotor LargeMotorScale SmallMotorScale; Select's and the back paddles' commands SelectCommand\n"
                    "#   L4Command R4Command L5Command R5Command = None QuickSave QuickLoad SaveLoad (Select: SaveLoad by default);\n"
+                   "#   R3QuickTurn = 1: with Modern: Hold, R3 turns 180 degrees (off by default);\n"
                    "#   DodgeModifier (player 1: held, the keys on the left stick move the right stick, the dodges; Shift by default).\n"
                    "# Changes saved here are picked up while the game runs. Delete this file to get the default layout back.\n";
             for (uint32_t pad = 0; pad < kMaxPlayers; ++pad)
@@ -2717,6 +2725,7 @@ namespace ps2_host_input
                 fresh.comments = g_model.pads[pad].comments;
                 for (const std::string_view key : kExtraKeys)
                     setSectionSetting(fresh, key, {}); // the extra buttons' commands are bindings: back to theirs
+                setSectionSetting(fresh, kR3QuickTurnKey, {});
             }
             g_model.pads[pad] = std::move(fresh);
             g_controlsDirty = true;
@@ -2903,6 +2912,7 @@ namespace ps2_host_input
                     Swap,
                     Reset,
                     Assign,       // an extra button: b = the button, a = the copied input (extra::kNoCopy: command)
+                    R3QuickTurn,  // Modern: Hold's R3 turns (a = 1) or does nothing (a = 0)
                     KeyBind,      // the keyboard page: `key`'s first key / mouse binding becomes `binding`
                     KeyboardReset // every key / mouse binding back to the defaults'
                 };
@@ -3086,6 +3096,13 @@ namespace ps2_host_input
             g_requested.store(true, std::memory_order_release);
         }
 
+        void requestR3QuickTurn(uint32_t pad, bool on)
+        {
+            std::lock_guard<std::mutex> lock(g_requestMutex);
+            g_requests.push_back(Request{Request::Kind::R3QuickTurn, pad, static_cast<uint8_t>(on ? 1u : 0u)});
+            g_requested.store(true, std::memory_order_release);
+        }
+
         // Window thread (sample()): the queued edits, applied and saved at once.
         void applyRequests()
         {
@@ -3104,7 +3121,12 @@ namespace ps2_host_input
                 PadSection &section = g_model.pads[r.pad];
                 if (!section.present)
                     section = defaultSection(r.pad);
-                if (r.kind == Request::Kind::Assign)
+                if (r.kind == Request::Kind::R3QuickTurn)
+                {
+                    setSectionSetting(section, kR3QuickTurnKey, r.a ? std::string_view("1") : std::string_view{});
+                    std::cerr << "[controls] player " << r.pad + 1u << ": R3QuickTurn = " << (r.a ? 1 : 0) << std::endl;
+                }
+                else if (r.kind == Request::Kind::Assign)
                 {
                     // The button's copies go (wherever they were), then the new copy or the command.
                     const auto button = static_cast<extra::Button>(r.b);
@@ -3135,6 +3157,7 @@ namespace ps2_host_input
                 {
                     for (const std::string_view key : kExtraKeys)
                         setSectionSetting(section, key, {}); // the extra buttons back to theirs (Select: save / load)
+                    setSectionSetting(section, kR3QuickTurnKey, {}); // R3's turn back to off
                     const PadSection defaults = defaultSection(r.pad);
                     for (size_t i = 0; i < kBindingKeyCount; ++i)
                     {
@@ -3251,6 +3274,11 @@ namespace ps2_host_input
         void requestAssign(uint32_t pad, Button button, Command command, uint8_t copyOf)
         {
             controls::requestExtraAssign(pad, button, command, copyOf);
+        }
+
+        void requestR3QuickTurn(uint32_t pad, bool on)
+        {
+            controls::requestR3QuickTurn(pad, on);
         }
 
         Command takeFired()

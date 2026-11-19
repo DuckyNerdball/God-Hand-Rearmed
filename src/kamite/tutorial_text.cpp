@@ -63,6 +63,7 @@ namespace kamite::tutorial_text
 
         constexpr uint16_t kSpace = 0x35u, kNewline = 0xA001u, kEnd = 0x8001u, kClose = 0xA301u, kScale = 0xB002u;
         constexpr uint16_t kStickIcon = 11u, kSwitchIcon = 9u; // RS (the right stick), R3 (Modern's switch)
+        constexpr uint16_t kHoldIcon = 4u;                     // L1 (Modern: Hold's brawl button)
         constexpr uint16_t kGapCode = 0xA802u, kGapNever = 0xFFFFu; // see indent()
         // The popup centres the whole block on the original's place, so a line much wider than the original's
         // (26 letters at 100%) pushes the block over the stick sprite on the left (K's screenshot, Nov 3): lines are
@@ -146,12 +147,30 @@ namespace kamite::tutorial_text
         // both lines starting where the text after the icon does. The stick icons are the prompt set's side views
         // (prompt_hd: RS without the click arrow, R3 with it); the layout's big stick picture is hidden with Modern
         // (button_prompts updateSticks). Lines up to ~36 letters: without the picture the centred block may be wider.
-        std::vector<uint16_t> modernText(bool autoOn)
+        // Modern: Hold (K, Nov 19; the font has no degree sign, so "180-degree"): "Hold [L1] to brawl, double-tap / it for a
+        // quick 180-degree turn.", the Auto block "AUTO: Brawling starts on any hit / and stops when no enemy is near."
+        std::vector<uint16_t> modernText(bool autoOn, bool hold)
         {
             std::vector<uint16_t> out{kScale, kTextScale};
             iconLine(out, kStickIcon, "Use the right analog stick to evade");
             indentedLine(out, "enemy attacks while brawling.");
             gap(out);
+            if (hold)
+            {
+                indent(out);
+                add(out, "Hold");
+                out.insert(out.end(), {kScale, kIconScale, kHoldIcon, kScale, kTextScale});
+                add(out, "to brawl, double-tap\n");
+                indentedLine(out, "it for a quick 180-degree turn.", !autoOn);
+                if (autoOn)
+                {
+                    gap(out);
+                    indentedLine(out, "AUTO: Brawling starts on any hit");
+                    indentedLine(out, "and stops when no enemy is near.", true);
+                }
+                out.insert(out.end(), {kClose, kEnd});
+                return out;
+            }
             indent(out); // K (Nov 4): the switch's icon in the text, so a remapped switch reads right
             add(out, "Press");
             out.insert(out.end(), {kScale, kIconScale, kSwitchIcon, kScale, kTextScale});
@@ -433,7 +452,8 @@ namespace kamite::tutorial_text
                 pointEntry(header, 0, kEntry0Offset, kText, true, keyboardText(modern, modern::autoEnabled(), modifier),
                            "Tutorial 1 for the keyboard (the Dodge Modifier)");
             else
-                pointEntry(header, 0, kEntry0Offset, kText, modern, modern ? modernText(modern::autoEnabled()) : std::vector<uint16_t>{},
+                pointEntry(header, 0, kEntry0Offset, kText, modern,
+                           modern ? modernText(modern::autoEnabled(), modern::holdEnabled()) : std::vector<uint16_t>{},
                            "Tutorial 1 explains Modern's switch");
             const menu_buttons::Style style = menu_buttons::style();
             if (const int leftClick = keyboardLeftClickIcon(); leftClick != -2)

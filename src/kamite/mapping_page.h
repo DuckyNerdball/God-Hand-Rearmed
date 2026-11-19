@@ -68,7 +68,9 @@ namespace kamite::mapping_page
     struct Options
     {
         bool clickStickDash = false; // [Game] L3Dash: L3 dashes
-        bool modern = false;         // [Game] ControlStyle=modern: R3 switches brawling / free camera, the right stick
+        bool modern = false;         // [Game] ControlStyle=modern or hold: the right stick turns the free camera; Toggle:
+                                     // R3 switches brawling / free camera
+        bool hold = false;           // ControlStyle=hold: L1 held = brawling, double tap = the turn; R3 = State::r3QuickTurn
         bool presets = false;        // [Game] StyleSwitching: the d-pad switches styles
         int menuStyle = 1;           // 0 Classic, 1 Western, 2 Japanese (menu_buttons::Style)
     };
@@ -94,6 +96,7 @@ namespace kamite::mapping_page
         std::array<uint8_t, kRemappable> onPlace{};
         std::array<Extra, kExtraCount> extras{}; // kExtraPlaces' order; Select holds SaveLoad by default
         uint8_t paddles = 0;   // the back paddles the controller has (bit = extraIndex: 1 L4, 2 R4, 3 L5, 4 R5)
+        bool r3QuickTurn = false; // [PadN] R3QuickTurn: with Hold, the PS2 R3 input turns 180 degrees (else nothing)
         bool readOnly = false; // a layout the page cannot edit (set in the launcher)
     };
     State defaultState();
@@ -117,11 +120,13 @@ namespace kamite::mapping_page
     };
     // The drum's items on `place`, in order: an action (input < kRemappable: a swap on a standard button, a copy on an
     // extra one) or, on an extra button, a command (input kNone; Command::None = nothing). `start`: the item it opens on
-    // (what the button holds now).
+    // (what the button holds now). With Hold, the line that has R3 lists R3 twice, as nothing and as the single-press
+    // turn (r3Turn 0 / 1: picking one sets State::r3QuickTurn, no swap; K, Nov 19).
     struct DrumEntry
     {
         uint8_t input = kNone;
         Command command = Command::None;
+        int8_t r3Turn = -1;
     };
     std::vector<DrumEntry> drumEntries(const State &state, const Options &options, uint8_t place, int &start);
     // The place that has a PS2 button now (kNone: none).

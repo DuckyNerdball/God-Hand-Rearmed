@@ -960,8 +960,11 @@ namespace kamite::options_screen
             else if (id == "L3Dash")
                 setL3Dash(on);
             else if (id == "ControlStyle")
-                modern::setModern(value == "modern");
-            else if (id == "ModernAuto")
+            {
+                modern::setHold(value == "hold");
+                modern::setModern(value == "modern" || value == "hold");
+            }
+            else if (id == "ModernAuto" || id == "ModernAutoHold")
                 modern::setAuto(on);
             else if (id == "KbmControlStyle")
                 modern::setKbmModern(value == "modern");
@@ -1440,6 +1443,7 @@ namespace kamite::options_screen
                                                                 : mapping_page::kNone;
             }
             state.paddles = extra::paddles();
+            state.r3QuickTurn = extras.r3QuickTurn;
             return state;
         }
 
@@ -1629,7 +1633,9 @@ namespace kamite::options_screen
                 else if (pressed & kOk)
                 {
                     const mapping_page::DrumEntry picked = entries[static_cast<size_t>(((e.target % n) + n) % n)];
-                    if (const int extra = mapping_page::extraIndex(s.mapCursor); extra >= 0)
+                    if (picked.r3Turn >= 0)
+                        ps2_host_input::extra::requestR3QuickTurn(0, picked.r3Turn == 1); // Hold: R3's own line
+                    else if (const int extra = mapping_page::extraIndex(s.mapCursor); extra >= 0)
                         ps2_host_input::extra::requestAssign(0, static_cast<ps2_host_input::extra::Button>(extra),
                                                              static_cast<ps2_host_input::extra::Command>(picked.command),
                                                              picked.input < mapping_page::kRemappable ? picked.input

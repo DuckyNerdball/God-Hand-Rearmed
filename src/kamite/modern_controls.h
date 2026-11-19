@@ -2,9 +2,10 @@
 
 #include <cstdint>
 
-// Control Style (modern_controls.cpp): Classic, or Modern (a free camera on the right stick; R3 switches to the
-// original controls and back, the choice kept across rooms; with Auto a fight's battle camera switches to them; L1 is
-// always the game's quick turn). The input side runs on the window thread (a pad filter), the camera side in the camera hooks
+// Control Style (modern_controls.cpp): Classic, or Modern (a free camera on the right stick): Toggle (R3 switches to
+// the original controls and back, the choice kept across rooms; with Auto contact switches to them; L1 is always the
+// game's quick turn) or, the controller only, Hold (the original controls while L1 is held, a double tap the quick
+// turn; Auto's brawl mode ends with the fight). The input side runs on the window thread (a pad filter), the camera side in the camera hooks
 // (camera.cpp, game thread); they meet in the atomics behind these calls.
 namespace kamite::modern
 {
@@ -39,6 +40,10 @@ namespace kamite::modern
     bool autoEnabled();
     // The in-game OPTIONS (any thread): Control Style, Modern: Auto and Modern: Mouse Camera, as F2 > Controls sets them.
     void setModern(bool on);
+    // The controller's Modern is Hold ([Game] ControlStyle=hold; setModern(true) too). Any thread.
+    void setHold(bool on);
+    // Modern: Hold is in effect now (the controller is the device in use). Any thread.
+    bool holdEnabled();
     void setAuto(bool on);
     void setMouseCamera(bool on);
     // The keyboard & mouse's own Control Style and Auto ([Game] KbmControlStyle / KbmModernAuto; K, Nov 16). enabled()
@@ -50,12 +55,13 @@ namespace kamite::modern
     {
         bool modern = false;
         bool autoOn = false;
+        bool hold = false; // the controller's Modern: Hold (recorded as KAMITE_CONTROL_STYLE=hold)
     };
     CaseStyle caseStyle();
     // A hit between Gene and an enemy landed (either way; game thread, the damage steps): with Auto, brawl mode.
     void noteContact();
 
-    // Modern is on and the free camera is in effect now (not the original controls by Select / Auto, and the game not
+    // Modern is on and the free camera is in effect now (not the original controls by R3 / L1 / Auto, and the game not
     // holding the camera). For the radar's glow (radar_glow.h). Any thread.
     bool freeCameraNow();
 }

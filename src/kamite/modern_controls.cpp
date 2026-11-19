@@ -1,4 +1,4 @@
-// Control Style: Classic (the PS2's) or Modern.
+// Control Style: Classic (the PS2's) or Modern, which is Toggle or (the controller only) Hold.
 //
 // Modern: the right stick turns a free camera round Gene instead of dodging, and the left stick moves him relative to
 // the camera (he faces where he walks). The right stick press (R3) switches between that and the original controls
@@ -14,6 +14,14 @@
 // behind Gene with him. Whenever
 // the game takes the camera (a close-up for a grab or a special move, a cutscene, a menu: no player camera update for
 // a moment), everything is Classic for that moment and the choice comes back after it.
+//
+// Modern: Hold (K, Nov 19: the alpha's Hold to Brawl scheme back, [Game] ControlStyle=hold; the controller only, the
+// keyboard has its Dodge Modifier): brawl mode while L1 is held; a second L1 press within 300 ms is the game's quick
+// turn (L1 reaches the game only then, for 90 ms) and the camera stays behind Gene through it. R3 does nothing unless
+// the Button Mapping page gave it the single-press turn ([PadN] R3QuickTurn, off by default: it travels with the PS2
+// R3 input, so the turn is wherever R3's slot is mapped); not while the stick is pushed out (a flick that clicked).
+// Auto starts brawl mode on contact as in Toggle, and with no switch to leave it, it also ends it: once the battle
+// camera is off and no live enemy has been within 3 m for 1.5 s (the alpha's fight rule).
 //
 // Input side (window thread, the pad filter ps2_host_input calls for player 1): L1 and the right stick are taken from
 // what the game sees; the left stick is turned into the stick the original controls would need for the same
@@ -80,11 +88,17 @@ namespace kamite::modern
         constexpr float kSwitchMaxStick = 0.5f; // an R3 press with the right stick further out than this: a flick, no switch
         constexpr float kPitchMin = -1.2f, kPitchMax = 0.9f; // extra pitch, radians (the floor is camera.cpp's: above the ground)
         constexpr int64_t kQuickTurnFollowMs = 650;            // the camera stays behind Gene this long after one
+        constexpr int64_t kDoubleTapMs = 300;                  // Hold: a second L1 press within this is the quick turn
+        constexpr int64_t kQuickTurnMs = 90;                   // ... and L1 is held this long for the game
+        constexpr float kFightRange = 3.0f;                    // Hold's Auto: still in the fight while an enemy is this close
+        constexpr int64_t kFightLingerMs = 1500;               // ... or was, this long ago
+        constexpr uint32_t kEnemyList = 0x5864F0u + 0x500u;    // cEmManage D_005864F0: the first used slot
         constexpr float kTurnRate = 900.0f * (3.14159265f / 180.0f); // Gene turned toward the stick, radians a second
         constexpr uint32_t kPlayerPointer = game::GameWork::address(game::GameWork::kPlayerObj); // GameWork.playerObj (Getplayer)
 
         // Settings (F2 menu on the GS thread, read by the window and game threads): the controller's, the keyboard's.
         std::atomic<bool> g_modern{false};
+        std::atomic<bool> g_hold{false};        // the controller's Modern is Hold (with g_modern)
         std::atomic<bool> g_auto{true};
         std::atomic<bool> g_kbmModern{true};
         std::atomic<bool> g_kbmAuto{false};
@@ -105,7 +119,8 @@ namespace kamite::modern
 
         // Input side -> camera side. Per device: [0] the controller, [1] the keyboard and mouse.
         std::atomic<bool> g_classic[2]{};       // the player's choice (R3, or Auto at a fight's start): original controls
-        std::atomic<bool> g_classicByAuto[2]{}; // ... set by Auto (for the F2 status line)
+        std::atomic<bool> g_classicByAuto[2]{}; // ... set by Auto (for the F2 status line; Hold's Auto ends it)
+        std::atomic<bool> g_holdL1{false};      // Hold: L1 is held (brawl mode while it is)
         std::atomic<float> g_stickX{0.0f}, g_stickY{0.0f};
         std::atomic<bool> g_moving{false};      // the left stick asks for a direction (Modern movement)
         // The game has Gene's controls off (0x747A78: 0x02000000 KeyStop, 0x80000000 / 0x40000000 player off): menus
@@ -121,6 +136,8 @@ namespace kamite::modern
 
         // Input side only (window thread).
         bool g_l1Was = false;
+        int64_t g_l1PressMs = -100000;   // Hold: the last L1 press that was not the second of a double tap
+        int64_t g_quickTurnUntilMs = 0;  // Hold: L1 reaches the game until then (the quick turn)
         bool g_r3Was = false;
         bool g_r3Stray = false; // the right stick left the centre during this press: not a switch
 
@@ -136,6 +153,11 @@ namespace kamite::modern
             return ps2_host_input::prompts::lastDevice() == ps2_host_input::prompts::Device::Keys ? 1 : 0;
         }
         bool modernNow() { return (device() ? g_kbmModern : g_modern).load(std::memory_order_relaxed); }
+        // Modern: Hold is in effect (the controller's style; the keyboard has no Hold).
+        bool holdNow()
+        {
+            return device() == 0 && g_modern.load(std::memory_order_relaxed) && g_hold.load(std::memory_order_relaxed);
+        }
         bool autoNow() { return (device() ? g_kbmAuto : g_auto).load(std::memory_order_relaxed); }
 
         bool gameHasCamera()
@@ -147,7 +169,8 @@ namespace kamite::modern
         // The original controls are in effect (besides the game having the camera).
         bool classicByChoice()
         {
-            return g_classic[device()].load(std::memory_order_relaxed);
+            return g_classic[device()].load(std::memory_order_relaxed) ||
+                   (holdNow() && g_holdL1.load(std::memory_order_relaxed));
         }
 
         float stickAxis(uint8_t value)
@@ -196,6 +219,42 @@ namespace kamite::modern
             ps2x::menu::notify(key.empty() ? std::string("KBM: Modern") : "KBM: [" + key + "] Brawl/Freecam", 3.0f);
         }
 
+        // Modern: Hold's buttons (the pad filter, window thread, outside the game's camera moments): L1 held = brawl
+        // mode, a second press within kDoubleTapMs = the game's quick turn; R3 the single-press turn when its slot has
+        // it (not when the stick was out: a flick that clicked). L1 reaches the game only as the quick turn.
+        void holdInput(ps2x::iop::PadInputState &state, bool l1, bool r3, bool stickOut)
+        {
+            // Toggle's R3 latch has no way out in Hold: only Auto's brawl mode stays (it ends by itself).
+            if (g_classic[0].load(std::memory_order_relaxed) && !g_classicByAuto[0].load(std::memory_order_relaxed))
+                g_classic[0] = false;
+            const int64_t now = nowMs();
+            if (l1 && !g_l1Was)
+            {
+                if (now - g_l1PressMs <= kDoubleTapMs)
+                {
+                    g_quickTurnUntilMs = now + kQuickTurnMs;
+                    g_recenter.fetch_add(1u, std::memory_order_relaxed);
+                    g_l1PressMs = -100000;
+                }
+                else
+                    g_l1PressMs = now;
+            }
+            g_l1Was = l1;
+            g_holdL1 = l1;
+            if (r3 && !g_r3Was && !stickOut && ps2_host_input::extra::state().r3QuickTurn)
+            {
+                g_quickTurnUntilMs = now + kQuickTurnMs;
+                g_recenter.fetch_add(1u, std::memory_order_relaxed);
+            }
+            g_r3Was = r3;
+            g_r3Stray = false;
+            constexpr size_t kL1Pressure = static_cast<size_t>(ps2x::iop::PadPressure::L1);
+            const bool turn = now < g_quickTurnUntilMs;
+            state.buttons = static_cast<uint16_t>((state.buttons & ~ps2x::iop::PadButton::L1) |
+                                                  (turn ? ps2x::iop::PadButton::L1 : 0u));
+            state.pressure[kL1Pressure] = turn ? 0xFFu : 0u;
+        }
+
         // ps2_host_input's pad filter (window thread), player 1 only.
         void padFilter(uint32_t player, ps2x::iop::PadInputState &state)
         {
@@ -213,34 +272,44 @@ namespace kamite::modern
             const float rx = (static_cast<float>(state.rightX) - 128.0f) / 127.0f;
             const float ry = (static_cast<float>(state.rightY) - 128.0f) / 127.0f;
             const bool l1 = (state.buttons & ps2x::iop::PadButton::L1) != 0u;
+            const bool hold = holdNow();
             if (gameHasCamera())
             {
-                // The game's own moment: everything as on the PS2; an R3 held through it does not switch after.
+                // The game's own moment: everything as on the PS2 (L1 included, with Hold too); an R3 held through it
+                // does not switch after, and an L1 press here pairs with none after it.
                 g_l1Was = l1;
+                g_l1PressMs = -100000;
+                g_holdL1 = hold && l1;
                 g_r3Was = r3;
                 g_r3Stray = r3;
                 g_stickX = 0.0f;
                 g_stickY = 0.0f;
                 return;
             }
-            // R3 switches on its release, unless the stick was pushed out during the press (a dodge flick that clicked).
-            if (r3 && std::fmax(std::fabs(rx), std::fabs(ry)) > kSwitchMaxStick)
-                g_r3Stray = true;
-            if (!r3 && g_r3Was)
+            if (hold)
+                holdInput(state, l1, r3, std::fmax(std::fabs(rx), std::fabs(ry)) > kSwitchMaxStick);
+            else
             {
-                if (!g_r3Stray)
+                // R3 switches on its release, unless the stick was pushed out during the press (a dodge flick that
+                // clicked).
+                if (r3 && std::fmax(std::fabs(rx), std::fabs(ry)) > kSwitchMaxStick)
+                    g_r3Stray = true;
+                if (!r3 && g_r3Was)
                 {
-                    const int d = device();
-                    g_classic[d] = !g_classic[d].load(std::memory_order_relaxed);
-                    g_classicByAuto[d] = false;
+                    if (!g_r3Stray)
+                    {
+                        const int d = device();
+                        g_classic[d] = !g_classic[d].load(std::memory_order_relaxed);
+                        g_classicByAuto[d] = false;
+                    }
+                    g_r3Stray = false;
                 }
-                g_r3Stray = false;
+                g_r3Was = r3;
+                // L1 is the game's quick turn; in the free camera the camera swings back behind Gene with him.
+                if (l1 && !g_l1Was && !classicByChoice())
+                    g_recenter.fetch_add(1u, std::memory_order_relaxed);
+                g_l1Was = l1;
             }
-            g_r3Was = r3;
-            // L1 is the game's quick turn; in the free camera the camera swings back behind Gene with him.
-            if (l1 && !g_l1Was && !classicByChoice())
-                g_recenter.fetch_add(1u, std::memory_order_relaxed);
-            g_l1Was = l1;
 
             if (classicByChoice() || !g_free.load(std::memory_order_relaxed))
             {
@@ -342,6 +411,40 @@ namespace kamite::modern
             return major == 0u && (sub == 0u || sub == 1u || sub == 2u || sub == 10u);
         }
 
+        // Metres from Gene to the nearest live enemy (cEmManage's list; enemies are kinds 0x200..0x27F, alive while
+        // +0x54A > 0 and +0x250 has no release bit). Hold's Auto (the alpha's fight rule, 599e045^).
+        float nearestEnemy(const uint8_t *rdram)
+        {
+            const uint32_t player = ram32(rdram, kPlayerPointer);
+            if (!validPointer(player) || !validPointer(ram32(rdram, player + 0xF0u)))
+                return 1e9f;
+            const uint32_t at = ram32(rdram, player + 0xF0u);
+            const float px = ramFloat(rdram, at), pz = ramFloat(rdram, at + 8u);
+            float best = 1e18f;
+            uint32_t slot = ram32(rdram, kEnemyList);
+            for (int guard = 0; guard < 64 && validPointer(slot); ++guard)
+            {
+                const uint32_t em = ram32(rdram, slot + 8u);
+                slot = ram32(rdram, slot + 4u);
+                if (!validPointer(em))
+                    continue;
+                uint16_t kind;
+                int16_t hp;
+                std::memcpy(&kind, rdram + ((em + 0x2FEu) & PS2_RAM_MASK), sizeof(kind));
+                std::memcpy(&hp, rdram + ((em + 0x54Au) & PS2_RAM_MASK), sizeof(hp));
+                const int32_t flags = static_cast<int32_t>(ram32(rdram, em + 0x250u));
+                if (kind < 0x200u || kind >= 0x280u || hp <= 0 || flags < 0)
+                    continue;
+                const uint32_t pos = ram32(rdram, em + 0xF0u);
+                if (!validPointer(pos))
+                    continue;
+                const float dx = ramFloat(rdram, pos) - px, dz = ramFloat(rdram, pos + 8u) - pz;
+                best = std::fmin(best, dx * dx + dz * dz);
+            }
+            return best < 1e17f ? std::sqrt(best) : 1e9f;
+        }
+        int64_t g_lastNearMs = -100000; // game thread: an enemy was within kFightRange (or a hit landed) then
+
         std::filesystem::path g_iniPath;
         std::mutex g_statusMutex;
         std::string g_status;
@@ -374,7 +477,7 @@ namespace kamite::modern
                 setStatus("Could not read GHR.ini.");
                 return;
             }
-            ini.set("Game", "ControlStyle", g_modern.load() ? "modern" : "classic");
+            ini.set("Game", "ControlStyle", !g_modern.load() ? "classic" : g_hold.load() ? "hold" : "modern");
             ini.setBool("Game", "ModernAuto", g_auto.load());
             ini.set("Game", "KbmControlStyle", g_kbmModern.load() ? "modern" : "classic");
             ini.setBool("Game", "KbmModernAuto", g_kbmAuto.load());
@@ -413,15 +516,21 @@ namespace kamite::modern
                 return;
             }
             ui->separator_text("Control style");
-            static const char *const kStyles[] = {"Classic: as on the PS2", "Modern: free camera on the right stick"};
-            int style = g_modern.load() ? 1 : 0;
+            static const char *const kStyles[] = {"Classic: as on the PS2", "Modern: Toggle (the right stick press switches)",
+                                                  "Modern: Hold (brawl mode while L1 is held)"};
+            int style = !g_modern.load() ? 0 : g_hold.load() ? 2 : 1;
             ui->text("Controller");
             ui->set_next_width(340.0f);
-            if (ui->combo("##style", &style, kStyles, 2))
-                g_modern = style == 1;
+            if (ui->combo("##style", &style, kStyles, 3))
+            {
+                g_modern = style >= 1;
+                g_hold = style == 2;
+            }
             if (style == 1)
                 checkbox(ui, "Auto: fighting starts brawl mode (the right stick press switches back)##auto", g_auto);
-            static const char *const kKbmStyles[] = {"Classic: as on the PS2", "Modern: free camera on the mouse"};
+            else if (style == 2)
+                checkbox(ui, "Auto: fighting starts brawl mode, the fight's end ends it##autohold", g_auto);
+            static const char *const kKbmStyles[] = {"Classic: as on the PS2", "Modern: Toggle (free camera on the mouse)"};
             int kbmStyle = g_kbmModern.load() ? 1 : 0;
             ui->text("Keyboard & mouse");
             ui->set_next_width(340.0f);
@@ -431,10 +540,13 @@ namespace kamite::modern
                 checkbox(ui, "Auto: fighting starts brawl mode (the middle click switches back)##kbmauto", g_kbmAuto);
             ui->text_disabled("The style in effect is the device used last.");
             // The Modern settings show only with Modern selected (K, Oct 27).
-            if (style == 1 || kbmStyle == 1)
+            if (style >= 1 || kbmStyle == 1)
             {
-                ui->text_wrapped("The stick press (middle click) switches between the free camera and brawl mode (classic "
-                                 "controls); each device keeps its choice across rooms. L1 is the game's quick turn.");
+                ui->text_wrapped(style == 2 ? "Hold: brawl mode (classic controls) while L1 is held; double-tap L1 for the "
+                                              "quick turn. R3 turns too if the Button Mapping page gave it the turn."
+                                            : "Toggle: the stick press (middle click) switches between the free camera and "
+                                              "brawl mode (classic controls); each device keeps its choice across rooms. L1 "
+                                              "is the game's quick turn.");
                 ui->separator_text("Free camera");
                 slider(ui, "Turn speed##yaw", g_yawSpeed, 40.0f, 400.0f, "%.0f deg/s");
                 slider(ui, "Up/down speed##pitch", g_pitchSpeed, 20.0f, 250.0f, "%.0f deg/s");
@@ -456,7 +568,8 @@ namespace kamite::modern
             const char *now = !modernNow()        ? (d ? "Keyboard & mouse: Classic" : "Controller: Classic")
                               : gameHasCamera()   ? "The game has the camera: brawl mode"
                               : classicByChoice() ? (g_classicByAuto[d].load() ? "Brawl mode (Auto: a hit landed)"
-                                                                               : "Brawl mode (stick press / middle click)")
+                                                     : holdNow()                ? "Brawl mode (L1 held)"
+                                                                                : "Brawl mode (stick press / middle click)")
                                                   : "Free camera, camera-relative movement";
             ui->text(now);
 
@@ -538,6 +651,18 @@ namespace kamite::modern
         g_gameCamera.store(gameCamera || jukebox::open(rdram) || rouletteUp(), std::memory_order_relaxed);
         g_controlsOff.store((ram32(rdram, kControlWord) & kControlsOffBits) != 0u, std::memory_order_relaxed);
         g_lastCameraMs.store(now, std::memory_order_relaxed);
+        // Hold's Auto ends its brawl mode by itself (Hold has no switch): the fight is over once the battle camera is
+        // off and no live enemy has been within kFightRange for kFightLingerMs.
+        if (g_hold.load(std::memory_order_relaxed) && g_classicByAuto[0].load(std::memory_order_relaxed))
+        {
+            if (nearestEnemy(rdram) <= kFightRange)
+                g_lastNearMs = now;
+            if (!battle && now - g_lastNearMs > kFightLingerMs)
+            {
+                g_classic[0] = false;
+                g_classicByAuto[0] = false;
+            }
+        }
     }
 
     namespace
@@ -685,6 +810,8 @@ namespace kamite::modern
     }
 
     void setModern(bool on) { g_modern = on; }
+    void setHold(bool on) { g_hold = on; }
+    bool holdEnabled() { return modernNow() && holdNow(); }
     void setAuto(bool on) { g_auto = on; }
     void setKbmModern(bool on) { g_kbmModern = on; }
     void setKbmAuto(bool on) { g_kbmAuto = on; }
@@ -694,12 +821,14 @@ namespace kamite::modern
 
     CaseStyle caseStyle()
     {
-        return CaseStyle{modernNow(), autoNow()};
+        return CaseStyle{modernNow(), autoNow(), holdNow()};
     }
 
     void noteContact()
     {
         const int d = device();
+        if (d == 0)
+            g_lastNearMs = nowMs(); // Hold's Auto: a hit is a moment of the fight (a throw that hit from afar too)
         if (autoNow() && modernNow() && !g_classic[d].load(std::memory_order_relaxed))
         {
             g_classic[d] = true;
@@ -714,7 +843,8 @@ namespace kamite::modern
 
     void install()
     {
-        g_modern = envIs("KAMITE_CONTROL_STYLE", "modern");
+        g_hold = envIs("KAMITE_CONTROL_STYLE", "hold");
+        g_modern = envIs("KAMITE_CONTROL_STYLE", "modern") || g_hold.load();
         g_auto = envBool("KAMITE_MODERN_AUTO", true);
         g_kbmModern = !envIs("KAMITE_KBM_CONTROL_STYLE", "classic"); // keyboard & mouse: Modern unless set (K, Nov 16)
         g_kbmAuto = envBool("KAMITE_KBM_MODERN_AUTO", false);
@@ -726,7 +856,9 @@ namespace kamite::modern
         g_mouseSensitivity = envFloat("KAMITE_MOUSE_SENSITIVITY", 0.1f, 0.01f, 1.0f);
         g_iniPath = cameraIniPath();
         ps2_host_input::setPadFilter(&padFilter);
-        KM_INFO(Game, "control style: controller " << (g_modern.load() ? (g_auto.load() ? "modern, auto" : "modern") : "classic")
+        KM_INFO(Game, "control style: controller " << (g_modern.load() ? (g_hold.load() ? (g_auto.load() ? "hold, auto" : "hold")
+                                                                                         : (g_auto.load() ? "modern, auto" : "modern"))
+                                                                       : "classic")
                                                     << "; keyboard & mouse "
                                                     << (g_kbmModern.load() ? (g_kbmAuto.load() ? "modern, auto" : "modern") : "classic"));
 #if defined(KAMITE_HAS_GS_MENU)

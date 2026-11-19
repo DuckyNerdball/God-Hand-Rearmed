@@ -1444,7 +1444,7 @@ namespace kamite::test_mode
                 }
                 // The control style in effect (the device used last: K, Nov 16, one per device), not the controller's.
                 if (std::strcmp(name, "KAMITE_CONTROL_STYLE") == 0)
-                    value = modern::caseStyle().modern ? "modern" : "classic";
+                    value = !modern::caseStyle().modern ? "classic" : modern::caseStyle().hold ? "hold" : "modern";
                 else if (std::strcmp(name, "KAMITE_MODERN_AUTO") == 0)
                     value = modern::caseStyle().autoOn ? "1" : "0";
                 if (value)

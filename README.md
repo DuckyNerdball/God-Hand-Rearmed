@@ -66,6 +66,8 @@ Switch between classic tank controls and modern third-person freecam on the fly.
 
 Includes a toggle to automatically enter Brawl Mode (tank controls) in combat.
 
+Prefer the alpha's Hold to Brawl? Hold L1 for tank controls, double-tap it to spin around. `Rearmed+`
+
 ---
 
 ### Smokin' S | E | X | Y Style Switching!
@@ -102,7 +104,7 @@ Too many choices? How about just one? Pick a preset and get to playing right awa
 | --- | --- | --- |
 | **Classic** | Clover's Vanilla Thrilla | Cinetastic 30FPS, 4:3, Classic Camera & Controls, as handed by God. |
 | **Remastered** | Spitshine Edition | Smooth Sexy Silky 60FPS, Fills your screen - edge to edge, Modern Controls, etc. |
-| **Rearmed** | That's the Spice! | Adds: New Cam Angle, Roulette Refinements, Moveset Presets, Buck Breaker, Busta-Chan Jive, and Misqué & Risqué. |
+| **Rearmed** | That's the Spice! | Adds: Hold-to-Brawl, New Cam Angle, Roulette Refinements, Moveset Presets, Buck Breaker, Busta-Chan Jive, and Misqué & Risqué. |
 | **Sleazy Mode** | ...is Now Selectable! For the girl who just wants to have fun. | Adds: Cunt Punter, Tension - Off the Cuff, and Wild Curry Funk. |
 <!-- END GENERATED: presets -->
 
@@ -173,7 +175,8 @@ Defaults for new installs. Everything is rebindable in **Options > Controls** in
 | Roulette | RB / R1 | R |
 | Taunt | LT / L2 | F |
 | Unleash the God Hand | RT / R2 | G |
-| Brawl mode / freecam *(Modern Control Style)* | Right stick click | Middle click |
+| Brawl mode / freecam *(Modern: Toggle)* | Right stick click | Middle click |
+| Brawl mode while held, double-tap for the 180° turn *(Modern: Hold)* | LB / L1 | — |
 | Dash *(Click-Stick Dash on the controller)* | Left stick click | Double-tap a direction |
 | Styles S / E / X / Y *(Moveset Presets)* | D-pad up / right / down / left | 1 2 3 4 |
 | Pause | Start / Options | Esc |
@@ -268,9 +271,10 @@ Every option, with the same help text you'll see in the launcher and in game.
 
 **Move & Groove**
 
-- **Control Style: Pad:** Classic: PS2's OG fixed facing brawling. Modern: Toggle third-person freecam. *Classic / Modern* (F2 > Controls changes it while playing) `Remastered+`
+- **Control Style: Pad:** Classic: PS2's OG fixed facing brawling. Modern (rebindable): Toggle Brawl (R3) | Hold to Brawl (L1). *Classic / Modern: Toggle / Modern: Hold* (F2 > Controls changes it while playing) `Remastered+`
   - **Modern: Auto:** Brawling starts when dealing or taking damage. Press the stick (rebindable) to go back to freecam. `Remastered+`
-- **Control Style: KBM:** Keyboard & mouse. Classic: PS2's OG brawling. Modern: mouse freecam. *Classic / Modern* `Remastered+`
+  - **Modern: Auto:** Brawling starts when dealing or taking damage. It stops once no enemy is near. `Rearmed+`
+- **Control Style: KBM:** Keyboard & mouse. Classic: PS2's OG brawling. Modern: mouse freecam. *Classic / Modern: Toggle* `Remastered+`
   - **Modern: Auto:** Brawling starts when dealing or taking damage. Middle-click (rebindable) to go back to freecam.
   - **Modern: Mouse Look:** Freak... (F2 > Controls sets the sensitivity)
 - **Click-Stick Dash:** Press and hold the stick to dash. Rebindable in Controls. `Remastered+`

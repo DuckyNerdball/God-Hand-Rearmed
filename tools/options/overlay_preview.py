@@ -3,7 +3,8 @@
 python tools/options/overlay_preview.py out.png [--size 1920x1080] [--title] [--cursor N] [--confirm N]
     [--page controls|display|graphics|interface|gameplay|sound] [--open] [--row N] [--scroll N] [--set Section.Key=Value ...]
     [--menu western|japanese|classic] [--prompts xbox|playstation|nintendo|steam|keys] [--switch FROM:DIR:T]
-    [--page mapping [--line PLACE] [--swap A:B ...] [--extra PLACE=VALUE ...] [--paddles 0|2|4] [--readonly] [--drum TURN] [--armed reset]]
+    [--page mapping [--line PLACE] [--swap A:B ...] [--extra PLACE=VALUE ...] [--paddles 0|2|4] [--readonly] [--drum TURN] [--armed reset]
+                    [--r3-turn]]
 
 Builds tools/options/overlay_preview.cpp (g++, the repo's ImGui) with the DLL's own drawing code cut from HostStubs.cpp,
 crops resources/options/wall.jpg to the size's shape and draws options_overlay.cpp's list over it. The pages are the
@@ -12,7 +13,8 @@ game's own (options_pages.cpp from the shared settings list over the repo's GHR.
 hints' buttons (the default bindings: cross / circle / triangle on the bottom / right / top buttons, keys K / L / I).
 --page mapping: CONTROLS > BUTTON MAPPING (mapping_page.cpp) for the --prompts set's pad over the repo's GHR.ini;
 --line the selected button (south, east, l1, select, l4 ...), --swap exchanges two buttons' actions, --extra sets what
-Select or a paddle holds, --paddles the paddles the controller reports, --readonly shows a launcher layout.
+Select or a paddle holds, --paddles the paddles the controller reports, --readonly shows a launcher layout, --r3-turn
+gives Modern: Hold's R3 the single-press turn (with --set Game.ControlStyle=hold).
 --page keys: the keyboard's BUTTON MAPPING (keys_page.cpp) with the default layout's keys; --keys-row the selected row,
 --keys-mode capture / reset, --keys-label Key=Label (Cross=J) over the defaults; use --prompts keys for its hints.
 PRESETS (the list's cursor on it, its carousel beside / instead of the list): set KAMITE_PREVIEW_PRESETS="N[:inuse[:ask[:dir[:t]]]]"
@@ -103,6 +105,7 @@ def main():
     ap.add_argument('--extra', action='append', default=[], help='mapping: PLACE=none|quicksave|quickload|saveload|PLACE '
                     '(Select or a paddle: l4 r4 l5 r5; a place = a copy of the action that sits there by default)')
     ap.add_argument('--paddles', type=int, default=0, choices=[0, 2, 4], help='mapping: the back paddles the controller has')
+    ap.add_argument('--r3-turn', action='store_true', help="mapping: Modern: Hold's R3 turns ([Pad1] R3QuickTurn=1)")
     ap.add_argument('--readonly', action='store_true', help='mapping: a layout set in the launcher')
     ap.add_argument('--drum', default='', help='mapping: the drum open on --line, turned this far (0 = on its own action, 1.5 ...)')
     ap.add_argument('--armed', choices=['', 'reset'], default='', help='mapping: a second press waited for')
@@ -158,7 +161,7 @@ def main():
             open(os.path.join(icons, name) + '.rgba', 'wb').write(struct.pack('<II', *im.size) + im.tobytes())
         env['KAMITE_PREVIEW_MAPPING'] = '|'.join([work, os.path.join(art_dir, 'pad_%s.txt' % pad), folder, a.line,
                                                   '1' if a.readonly else '0', ','.join(a.swap), ';'.join(a.extra), a.drum, a.armed,
-                                                  str(a.paddles)])
+                                                  str(a.paddles), '1' if a.r3_turn else '0'])
     if a.page == 'keys':
         art_dir = os.path.join(work, 'resources/options/mapping')
         os.makedirs(art_dir, exist_ok=True)

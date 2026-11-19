@@ -65,7 +65,12 @@ namespace kamite::settings
         // Brightness: 5 % steps round the game's own 100 %.
         constexpr int kBrightnesses[] = {50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110,
                                          115, 120, 125, 130, 135, 140, 145, 150};
-        constexpr Choice kControlStyles[] = {{"classic", "Classic", "CLASSIC"}, {"modern", "Modern", "MODERN"}};
+        // The controller's: Modern is Toggle (R3) or Hold (L1; K, Nov 19: the alpha's Hold to Brawl back); the keyboard &
+        // mouse's Modern is Toggle only (its Dodge Modifier is its hold).
+        constexpr Choice kControlStyles[] = {{"classic", "Classic", "CLASSIC"},
+                                             {"modern", "Modern: Toggle", "MODERN: TOGGLE"},
+                                             {"hold", "Modern: Hold", "MODERN: HOLD"}};
+        constexpr Choice kKbmControlStyles[] = {{"classic", "Classic", "CLASSIC"}, {"modern", "Modern: Toggle", "MODERN: TOGGLE"}};
         constexpr Choice kRouletteTimers[] = {{"normal", "Normal", "NORMAL"}, {"double", "Double time", "DOUBLE"}};
         constexpr Choice kSoundModes[] = {{"mono", "Mono", "MONO"}, {"stereo", "Stereo", "STEREO"},
                                           {"prologic2", "Dolby Pro Logic II", "PRO LOGIC II"}};
@@ -131,6 +136,8 @@ namespace kamite::settings
         // Modifiers.
         constexpr Setting live(Setting s) { return s.live = true, s; }
         constexpr Setting gameList(Setting s) { return s.gameList = true, s; }
+        // A second row for one key (its own id), e.g. a sub-option whose text differs by its parent's value.
+        constexpr Setting withId(Setting s, const char *id) { return s.id = id, s; }
         constexpr Setting note(Setting s, const char *text) { return s.note = text, s; }
         constexpr Setting gameNote(Setting s, const char *text) { return s.gameNote = text, s; }
         constexpr Setting sub(Setting s, const char *parent, const char *value = nullptr)
@@ -278,9 +285,10 @@ namespace kamite::settings
                     "Fps60", false)),
         // One Control Style per device (K, Nov 16): the one in effect is the device used last.
         // In game one Control Style: the device in use's (K, Nov 16); the launcher lists both.
-        live(onDevice(note(choice(Tab::Gameplay, "Move & Groove", "Control Style: Pad",
-                                  "Classic: PS2's OG fixed facing brawling.\nModern: Toggle third-person freecam.",
-                                  "Game", "ControlStyle", "classic", kControlStyles),
+        live(onDevice(note(gameList(choice(Tab::Gameplay, "Move & Groove", "Control Style: Pad",
+                                           "Classic: PS2's OG fixed facing brawling.\n"
+                                           "Modern (rebindable): Toggle Brawl (R3) | Hold to Brawl (L1).",
+                                           "Game", "ControlStyle", "classic", kControlStyles)),
                            "F2 > Controls changes it while playing."),
                       kPad, "Control Style")),
         live(onDevice(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Auto",
@@ -288,9 +296,16 @@ namespace kamite::settings
                                  "Game", "ModernAuto", true),
                           "ControlStyle", "modern"),
                       kPad)),
-        live(onDevice(choice(Tab::Gameplay, "Move & Groove", "Control Style: KBM",
-                             "Keyboard & mouse.\nClassic: PS2's OG brawling. Modern: mouse freecam.",
-                             "Game", "KbmControlStyle", "modern", kControlStyles),
+        // The same [Game] ModernAuto under Hold, where Auto also ends brawl mode (no switch to leave it; K, Nov 19).
+        live(onDevice(sub(withId(toggle(Tab::Gameplay, "Move & Groove", "Modern: Auto",
+                                        "Brawling starts when dealing or taking damage.\nIt stops once no enemy is near.",
+                                        "Game", "ModernAuto", true),
+                                 "ModernAutoHold"),
+                          "ControlStyle", "hold"),
+                      kPad)),
+        live(onDevice(gameList(choice(Tab::Gameplay, "Move & Groove", "Control Style: KBM",
+                                      "Keyboard & mouse.\nClassic: PS2's OG brawling. Modern: mouse freecam.",
+                                      "Game", "KbmControlStyle", "modern", kKbmControlStyles)),
                       kKeyboard, "Control Style")),
         live(onDevice(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Auto",
                                  "Brawling starts when dealing or taking damage.\nMiddle-click (rebindable) to go back to freecam.",

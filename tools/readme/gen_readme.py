@@ -64,6 +64,11 @@ def tags(data):
         # The same in every preset: a sub-option on in all goes with its parent; off in all is a toggle.
         parent = by_id.get(s["parent"])
         if parent and values[0] not in ("", "0"):
+            # A sub-option of one value of its parent (Modern: Hold's Auto): the first preset with that value.
+            if s.get("parentValue") and parent["controlled"]:
+                for p, value in enumerate(parent["preset"]):
+                    if value.lower() == s["parentValue"].lower():
+                        return names[p] + ("" if p == len(names) - 1 else "+")
             return tag(parent)
         return "Toggle"
 
@@ -109,7 +114,7 @@ def option_lines(data, tag_of):
 
 
 PAD_NAMES = {
-    "FaceSouth": "A / ✕", "FaceEast": "B / ○", "FaceWest": "X / □", "FaceNorth": "Y / △",
+    "FaceSouth": "A / ✕", "FaceEast": "B / ○", "FaceWest": "X / ▢", "FaceNorth": "Y / △",
     "LeftShoulder": "LB / L1", "RightShoulder": "RB / R1", "+LeftTrigger": "LT / L2", "+RightTrigger": "RT / R2",
     "LeftStick": "Left stick click", "RightStick": "Right stick click", "Start": "Start / Options", "Back": "Back / Select",
     "DPadUp": "D-pad up", "DPadRight": "D-pad right", "DPadDown": "D-pad down", "DPadLeft": "D-pad left",
@@ -128,7 +133,8 @@ ROWS = [
     ("Roulette", ["R1"], ""),
     ("Taunt", ["L2"], ""),
     ("Unleash the God Hand", ["R2"], ""),
-    ("Brawl mode / freecam", ["R3"], "Modern Control Style"),
+    ("Brawl mode / freecam", ["R3"], "Modern: Toggle"),
+    ("Brawl mode while held, double-tap for the 180° turn", ["L1HOLD"], "Modern: Hold"),
     ("Dash", ["L3"], "Click-Stick Dash on the controller"),
     ("Styles S / E / X / Y", ["Up", "Right", "Down", "Left"], "Moveset Presets"),
     ("Pause", ["Start"], ""),
@@ -152,6 +158,8 @@ def control_lines():
             return f"{dodge.group(1)} + {' '.join(keyboard[k] for k in ['LUp', 'LLeft', 'LDown', 'LRight'])}"
         if keys == ["L3"]:
             return "Double-tap a direction"
+        if keys == ["L1HOLD"]:
+            return "—"  # the controller's only (the keyboard's Dodge Modifier is its hold)
         names = [keyboard.get(k) for k in keys]
         return " ".join(n for n in names if n) or "—"
 
@@ -162,6 +170,8 @@ def control_lines():
             return "Left stick"
         if keys[0] == "Up":
             return "D-pad up / right / down / left"
+        if keys == ["L1HOLD"]:
+            keys = ["L1"]
         return PAD_NAMES.get(pad.get(keys[0], ""), pad.get(keys[0], "—"))
 
     out = ["| Action | Controller | Keyboard & mouse |", "| --- | --- | --- |"]

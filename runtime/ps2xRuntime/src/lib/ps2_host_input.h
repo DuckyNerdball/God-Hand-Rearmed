@@ -153,6 +153,7 @@ namespace ps2_host_input
             std::array<Command, Count> command{};
             std::array<uint8_t, Count> copy{};       // the prompts::Input (0..9) a copy of, kNoCopy: none
             std::array<uint8_t, 10> copies{};        // per remappable input: its controller bindings that are copies
+            bool r3QuickTurn = false;                // [PadN] R3QuickTurn: Modern: Hold's R3 turns 180 degrees
         };
         [[nodiscard]] State state(); // any thread
         // The paddles player 1's controller reports (bit per Button; Select never counted): from the hardware, any
@@ -161,6 +162,8 @@ namespace ps2_host_input
         // Any thread: queued for the window thread's next sample(), applied and saved at once. copyOf: a
         // prompts::Input 0..9 (command ignored), or kNoCopy for the command (None clears the button).
         void requestAssign(uint32_t pad, Button button, Command command, uint8_t copyOf = kNoCopy);
+        // Any thread, queued like requestAssign: Modern: Hold's R3 (the PS2 R3 input) turns 180 degrees, or does nothing.
+        void requestR3QuickTurn(uint32_t pad, bool on);
         // Window thread, after sample(): a save-state command an extra button fired (QuickSave / QuickLoad; None:
         // nothing), once.
         [[nodiscard]] Command takeFired();
