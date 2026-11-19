@@ -5,7 +5,10 @@
 #include <atomic>
 #include <cctype>
 #include <cstring>
+#include <fstream>
+#include <memory>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <vector>
 
@@ -247,103 +250,18 @@ bool PS2CdImage::readUnlocked(uint64_t offset, void *destination, size_t size) c
     {
         return true;
     }
-    const size_t got = PS2DiscOverlay::read(offset, destination, size, [this](uint64_t at, void *out, size_t count) -> size_t {
-        if (!seekFile(m_file, at))
-        {
-            return 0u;
-        }
-        return std::fread(out, 1u, count, m_file);
-    });
-    return got == size;
+    if (!seekFile(m_file, offset) || std::fread(destination, 1u, size, m_file) != size)
+    {
+        return false;
+    }
+    PS2DiscOverlay::apply(offset, destination, size);
+    return true;
 }
 
 namespace
 {
     std::vector<PS2DiscOverlay::Patch> g_overlay;
     std::atomic<bool> g_overlayActive{false};
-    struct Insertion
-    {
-        uint64_t at = 0; // original offset
-        std::vector<uint8_t> bytes;
-    };
-    std::vector<Insertion> g_insertions; // sorted by original offset
-    uint64_t g_insertedBytes = 0;
-}
-
-void PS2DiscOverlay::insert(uint64_t originalOffset, std::vector<uint8_t> bytes)
-{
-    if (bytes.empty())
-    {
-        return;
-    }
-    g_insertedBytes += bytes.size();
-    auto it = std::find_if(g_insertions.begin(), g_insertions.end(), [&](const Insertion &i) { return i.at > originalOffset; });
-    g_insertions.insert(it, Insertion{originalOffset, std::move(bytes)});
-}
-
-uint64_t PS2DiscOverlay::insertedBytes()
-{
-    return g_insertedBytes;
-}
-
-uint64_t PS2DiscOverlay::toVirtual(uint64_t originalOffset)
-{
-    uint64_t shift = 0;
-    for (const Insertion &i : g_insertions)
-    {
-        if (i.at > originalOffset)
-        {
-            break;
-        }
-        shift += i.bytes.size();
-    }
-    return originalOffset + shift;
-}
-
-size_t PS2DiscOverlay::read(uint64_t offset, void *destination, size_t size,
-                            const std::function<size_t(uint64_t, void *, size_t)> &readOriginal)
-{
-    uint8_t *out = static_cast<uint8_t *>(destination);
-    size_t done = 0;
-    while (done < size)
-    {
-        const uint64_t v = offset + done;
-        uint64_t shift = 0;
-        bool insertedHere = false;
-        uint64_t limit = UINT64_MAX; // bytes until the next region boundary
-        for (const Insertion &i : g_insertions)
-        {
-            const uint64_t start = i.at + shift; // where the insertion sits in the image the game sees
-            if (v < start)
-            {
-                limit = start - v;
-                break;
-            }
-            if (v < start + i.bytes.size())
-            {
-                const size_t n = static_cast<size_t>(std::min<uint64_t>(size - done, start + i.bytes.size() - v));
-                std::memcpy(out + done, i.bytes.data() + (v - start), n);
-                done += n;
-                insertedHere = true;
-                break;
-            }
-            shift += i.bytes.size();
-        }
-        if (insertedHere)
-        {
-            continue;
-        }
-        const uint64_t original = v - shift;
-        const size_t want = static_cast<size_t>(std::min<uint64_t>(size - done, limit));
-        const size_t got = readOriginal(original, out + done, want);
-        apply(original, out + done, got);
-        done += got;
-        if (got < want)
-        {
-            break; // the end of the image
-        }
-    }
-    return done;
 }
 
 void PS2DiscOverlay::set(std::vector<Patch> patches)
@@ -407,11 +325,128 @@ bool PS2CdImage::readSectors(uint32_t lba, uint32_t count, void *destination) co
 uint64_t PS2CdImage::sizeBytes() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_size + PS2DiscOverlay::insertedBytes();
+    return m_size;
 }
 
 std::filesystem::path PS2CdImage::path() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_path;
+}
+
+namespace
+{
+    struct ServedFile
+    {
+        uint32_t lba = 0, sectors = 0;
+        uint64_t size = 0;
+        std::filesystem::path host; // empty: bytes
+        std::vector<uint8_t> bytes;
+        std::unique_ptr<std::ifstream> stream; // the host file, opened at the first read
+    };
+    std::mutex g_servedMutex;
+    std::vector<ServedFile> g_served; // by LBA
+    uint32_t g_nextServedLba = PS2ServedFiles::kFirstLba;
+
+    uint32_t addServed(ServedFile file)
+    {
+        if (file.size == 0u)
+        {
+            return 0u;
+        }
+        std::lock_guard<std::mutex> lock(g_servedMutex);
+        const uint64_t sectors = (file.size + PS2CdImage::kSectorSize - 1u) / PS2CdImage::kSectorSize;
+        if (sectors > 0x7FFFFFFFu - 1u - g_nextServedLba)
+        {
+            return 0u;
+        }
+        file.lba = g_nextServedLba;
+        file.sectors = static_cast<uint32_t>(sectors);
+        g_nextServedLba += file.sectors + 1u; // a free sector after each, so a read past its end is not the next file
+        g_served.push_back(std::move(file));
+        return g_served.back().lba;
+    }
+}
+
+uint32_t PS2ServedFiles::serve(const std::filesystem::path &hostFile)
+{
+    std::error_code error;
+    const uint64_t size = std::filesystem::file_size(hostFile, error);
+    if (error)
+    {
+        return 0u;
+    }
+    ServedFile file;
+    file.size = size;
+    file.host = hostFile;
+    return addServed(std::move(file));
+}
+
+uint32_t PS2ServedFiles::serve(std::vector<uint8_t> bytes)
+{
+    ServedFile file;
+    file.size = bytes.size();
+    file.bytes = std::move(bytes);
+    return addServed(std::move(file));
+}
+
+bool PS2ServedFiles::any()
+{
+    std::lock_guard<std::mutex> lock(g_servedMutex);
+    return !g_served.empty();
+}
+
+bool PS2ServedFiles::isServed(uint32_t lba)
+{
+    if (lba < kFirstLba)
+    {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(g_servedMutex);
+    const auto it = std::upper_bound(g_served.begin(), g_served.end(), lba, [](uint32_t l, const ServedFile &f) { return l < f.lba; });
+    return it != g_served.begin() && lba < std::prev(it)->lba + std::prev(it)->sectors;
+}
+
+bool PS2ServedFiles::read(uint32_t lba, uint32_t sectors, void *destination, size_t size)
+{
+    if (lba < kFirstLba)
+    {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(g_servedMutex);
+    const auto it = std::upper_bound(g_served.begin(), g_served.end(), lba, [](uint32_t l, const ServedFile &f) { return l < f.lba; });
+    if (it == g_served.begin())
+    {
+        return false;
+    }
+    ServedFile &file = *std::prev(it);
+    if (lba >= file.lba + file.sectors)
+    {
+        return false;
+    }
+    uint8_t *out = static_cast<uint8_t *>(destination);
+    size = static_cast<size_t>(std::min<uint64_t>(size, static_cast<uint64_t>(sectors) * PS2CdImage::kSectorSize));
+    std::memset(out, 0, size);
+    const uint64_t offset = static_cast<uint64_t>(lba - file.lba) * PS2CdImage::kSectorSize;
+    const size_t count = static_cast<size_t>(std::min<uint64_t>(size, file.size - offset));
+    if (file.host.empty())
+    {
+        std::memcpy(out, file.bytes.data() + offset, count);
+        return true;
+    }
+    if (!file.stream)
+    {
+        file.stream = std::make_unique<std::ifstream>(file.host, std::ios::binary);
+    }
+    std::ifstream &in = *file.stream;
+    in.clear();
+    in.seekg(static_cast<std::streamoff>(offset));
+    in.read(reinterpret_cast<char *>(out), static_cast<std::streamsize>(count));
+    const bool ok = static_cast<size_t>(in.gcount()) == count;
+    if (!ok)
+    {
+        std::cerr << "[CDIMAGE] served file " << file.host.string() << ": read failed at 0x" << std::hex << offset << std::dec << std::endl;
+        file.stream.reset();
+    }
+    return ok;
 }

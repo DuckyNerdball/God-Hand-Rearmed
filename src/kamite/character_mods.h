@@ -21,16 +21,12 @@ namespace kamite::characters
     // Gene first, then every folder under mods/characters that holds files.
     std::vector<Character> list(const std::filesystem::path &exeDir);
 
-    // After PS2Runtime::setIoPaths, before the game runs: [Mods] Character (KAMITE_CHARACTER). Each replacement is
-    // written over the game's file in _DATA.AFS through PS2DiscOverlay, zero-padded to its size (sizes and offsets in
-    // the archive never change); a file larger than the game's is left out (logged). A textures/ folder (PCSX2
-    // replacement images named after the character's in-game textures) becomes an extra replacement folder of the
-    // hardware renderer (PS2X_PCSX2_TEXTURE_EXTRA), so the character draws at full resolution.
+    // After PS2Runtime::setIoPaths, before the game runs: [Mods] Character (KAMITE_CHARACTER). Every file in the
+    // character's folder under a game file's disc path replaces that file through the file layer (file_layer.h: any
+    // size, served at the read). A textures/ folder (PCSX2 replacement images named after the character's in-game
+    // textures) becomes an extra replacement folder of the hardware renderer (PS2X_PCSX2_TEXTURE_EXTRA), so the
+    // character draws at full resolution.
     void install(const std::filesystem::path &exeDir);
-
-    // The disc files the chosen character replaces: path (lower case, as in the archive's path table) -> (the game's
-    // size, the replacement's). A replacement larger than the game's file grows the image the game sees.
-    const std::map<std::string, std::pair<uint32_t, uint32_t>> &replacedFiles();
 
     // character.ini [Hair]: strands on spare head bones that the port swings (bone_tweaks). bone < 0: none.
     struct HairStrand
@@ -49,7 +45,7 @@ namespace kamite::characters
     const Hair &hair();
 
     // Gives a replaced player file (pl/pl00.dat, pl/pl01.dat) a buffer large enough for it where the game allocates
-    // the player's buffers (0x30EE08 called from 0x30D7A8 / 0x30D7C8), logging heap A's room; cuts a read of a replaced
-    // file into a buffer too small for it (cDvd_ReadToBuffer; a save state from another build) to the buffer.
+    // the player's buffers (0x30EE08 called from 0x30D7A8 / 0x30D7C8), logging heap A's room. (A read into a buffer too
+    // small for a replacement is cut by the file layer.)
     void installLoadWatch();
 }

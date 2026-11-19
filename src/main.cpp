@@ -53,6 +53,7 @@
 #include "kamite/game_options.h"
 #include "kamite/body_detail.h"
 #include "kamite/character_mods.h"
+#include "kamite/file_layer.h"
 #include "kamite/widescreen.h"
 #include "kamite/near_geometry.h"
 #include "kamite/crash_history.h"
@@ -1044,6 +1045,7 @@ int main(int argc, char *argv[])
             KM_INFO(Ee, "EE FPU host mode: round toward zero, denormals flushed");
         });
         kamite::installHleBindings(runtime); // port_prep/hle-bindings owns the game's table
+        kamite::file_layer::install(runtime); // replaced game files (characters::install's) served at the read
 #if KAMITE_HAS_VU1_PROGRAMS
         registerGeneratedVu1Programs();
 #endif

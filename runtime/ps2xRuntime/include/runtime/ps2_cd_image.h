@@ -55,8 +55,8 @@ private:
 };
 
 // Byte patches over the disc image, applied to every read of it (PS2CdImage, the EE sceCdRead stub, the IOP's image
-// reads). Set once before the game starts (file replacement mods: a replacement written over its own slot in an
-// archive, plus the archive's size fields); empty = the disc as it is.
+// reads). Set once before the game starts (load-time patches of a file's own bytes, same size: menu buttons, body
+// detail); empty = the disc as it is. The image never changes shape: a file replaced whole is served (PS2ServedFiles).
 class PS2DiscOverlay
 {
 public:
@@ -68,17 +68,23 @@ public:
     static bool active();
     // Overlays the patches on [offset, offset + size) of the image, already read into destination.
     static void apply(uint64_t offset, void *destination, size_t size);
-
-    // Bytes inserted into the image at an offset of the original image (whole sectors; a file replacement larger than
-    // its slot): every original byte at or after it is read that much later, so the image the game sees grows. Patches
-    // stay in original offsets (they apply to the original bytes wherever those now sit). Before the game runs.
-    static void insert(uint64_t originalOffset, std::vector<uint8_t> bytes);
-    static uint64_t insertedBytes();
-    // Where an original byte now sits in the image the game sees.
-    static uint64_t toVirtual(uint64_t originalOffset);
-    // Reads [offset, offset + size) of the image the game sees: original bytes through readOriginal(original offset,
-    // destination, size) -> bytes read, with the patches applied, and the inserted bytes. Returns the bytes read.
-    static size_t read(uint64_t offset, void *destination, size_t size,
-                       const std::function<size_t(uint64_t, void *, size_t)> &readOriginal);
 };
 
+// Files served past the end of the disc (whole-file replacements of any size; src/kamite/file_layer.cpp): each a run
+// of whole sectors from an LBA no disc reaches (kFirstLba up, one free sector between files), read from a host file
+// or from bytes in memory. Only the EE sceCdRead stub sees them, at those LBAs; the image, its directory and every
+// table in it stay as they are. The game reaches them through the file layer's hooks. Before the game runs.
+class PS2ServedFiles
+{
+public:
+    static constexpr uint32_t kFirstLba = 0x00400000u; // 8 GB in: past any DVD-9
+
+    // The new file's first LBA; 0 when the file can't be read (or is empty).
+    static uint32_t serve(const std::filesystem::path &hostFile);
+    static uint32_t serve(std::vector<uint8_t> bytes);
+    static bool any();
+    // Reads [lba, lba + sectors) into destination (size bytes) when lba lies in a served file: true, bytes past the
+    // file's end zero. False: lba is not served (or the host file can't be read).
+    static bool read(uint32_t lba, uint32_t sectors, void *destination, size_t size);
+    static bool isServed(uint32_t lba);
+};

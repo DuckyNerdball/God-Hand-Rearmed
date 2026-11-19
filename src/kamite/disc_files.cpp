@@ -151,14 +151,14 @@ namespace kamite::disc_files
 
     bool read(const File &file, std::vector<uint8_t> &out)
     {
-        return readImage(PS2DiscOverlay::toVirtual(file.imageOffset), out, file.size);
+        return readImage(file.imageOffset, out, file.size);
     }
 
     bool readRange(const File &file, uint32_t offset, uint32_t size, std::vector<uint8_t> &out)
     {
         if (offset > file.size || size > file.size - offset)
             return false;
-        return readImage(PS2DiscOverlay::toVirtual(file.imageOffset + offset), out, size);
+        return readImage(file.imageOffset + offset, out, size);
     }
 
     uint64_t archiveBase() { return g_afsBase; }

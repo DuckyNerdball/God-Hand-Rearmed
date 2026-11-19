@@ -209,7 +209,7 @@ namespace
             return false;
         }
 
-        totalSectorsOut = (g_cdImageSizeBytes + PS2DiscOverlay::insertedBytes()) / static_cast<uint64_t>(kCdSectorSize);
+        totalSectorsOut = g_cdImageSizeBytes / static_cast<uint64_t>(kCdSectorSize);
         return true;
     }
 
@@ -477,6 +477,12 @@ namespace
 
     bool readCdSectors(uint32_t lbn, uint32_t sectors, uint8_t *dst, size_t byteCount)
     {
+        // A file replaced whole (PS2ServedFiles, past the end of any disc).
+        if (PS2ServedFiles::read(lbn, sectors, dst, byteCount))
+        {
+            g_lastCdError = 0;
+            return true;
+        }
         for (const auto &[key, entry] : g_cdFilesByKey)
         {
             const uint32_t endLbn = entry.baseLbn + entry.sectors;
@@ -506,8 +512,7 @@ namespace
             }
 
             const uint64_t offset = static_cast<uint64_t>(lbn) * kCdSectorSize;
-            // The image as the game sees it (PS2CdImage: the overlay's patches and inserted bytes, which move every
-            // later byte; a raw read here missed the insertion and every file after a grown one read as garbage).
+            // The image as the game sees it (PS2CdImage: the overlay's patches).
             if (PS2CdImage::instance().ensureOpenFromIoPaths())
             {
                 std::memset(dst, 0, byteCount);
@@ -536,6 +541,10 @@ namespace
 
     bool isResolvableCdLbn(uint32_t lbn)
     {
+        if (PS2ServedFiles::isServed(lbn))
+        {
+            return true;
+        }
         for (const auto &[key, entry] : g_cdFilesByKey)
         {
             const uint32_t endLbn = entry.baseLbn + entry.sectors;

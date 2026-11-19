@@ -42,6 +42,7 @@ set(KAMITE_HOST_SOURCES
     kamite/game_options.cpp
     kamite/character_mods.cpp
     kamite/disc_files.cpp
+    kamite/file_layer.cpp
     kamite/hd_textures.cpp
     kamite/prompt_hd.cpp
     kamite/style_presets.cpp

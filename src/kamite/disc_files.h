@@ -10,8 +10,8 @@
 
 // The game's files on the disc image: _DATA.AFS ("AFS\0", u32 count, count x (u32 offset, u32 size) relative to the
 // archive start, then CRI's attribute table) and the path table that names them (the .FST in the disc root: lower-case
-// path -> archive index; tools/snr2/snr2disc.py has the layout). Shared by the file replacements (character mods)
-// and the load-time text patches (menu buttons): both end as PS2DiscOverlay patches, set before the game runs.
+// path -> archive index; tools/snr2/snr2disc.py has the layout). Shared by the file layer (whole files replaced) and
+// the load-time patches of a file's own bytes (menu buttons, body detail: PS2DiscOverlay), set before the game runs.
 namespace kamite::disc_files
 {
     struct File
@@ -32,8 +32,8 @@ namespace kamite::disc_files
     // The archive's table entry of an index.
     std::optional<File> byIndex(uint32_t index);
 
-    // The file's bytes as on the disc (patches already set are applied, as for every read of the image; a file after
-    // an insertion is read where it now sits). imageOffset stays the original offset, which is what patches use.
+    // The file's bytes as on the disc (patches already set are applied, as for every read of the image). A file the
+    // file layer replaces still reads as the disc's own here.
     bool read(const File &file, std::vector<uint8_t> &out);
     // [offset, offset + size) of the file only (false when it runs past the file's end).
     bool readRange(const File &file, uint32_t offset, uint32_t size, std::vector<uint8_t> &out);
