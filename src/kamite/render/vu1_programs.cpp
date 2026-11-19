@@ -22,7 +22,7 @@ namespace kamite::render
         strip.entryPcs[2] = 0x2378u; // MSCNT after a batch whose last vertex had ADC
         strip.entryCount = 3u;
         strip.program = sceneryStripProgram();
-        strip.checked = false; // bit-exact on every traced run; waits for K's check in the game (PS2X_VU1_NATIVE=1)
+        strip.checked = true; // bit-exact on every traced run, K's in-game check and all test cases (Nov 19)
         registerVu1NativeProgram(strip);
     }
 }
