@@ -85,15 +85,12 @@ For the Buck Breakers out there, you can also pick your pummel per style. <!-- t
 Customizable controls with button prompts for Xbox, PlayStation, Nintendo, Steam, and keyboard and mouse (for the
 freaks who want to play God Hand at their desks).
 
-<!-- MEDIA: assets/readme/controls-collage.png — the controls screens as a collage -->
-
+![God Hand: Rearmed](assets/controls-collage.webp)
 ---
 
 ### Just Liek... Play Game!
 
 Too many choices? How about just one? Pick a preset and get to playing right away.
-
-<!-- MEDIA: assets/readme/presets.png — the first-run wanted posters -->
 
 > **NOTE:** Everything that changes Clover's original gameplay is opt-in, so no bitchin!
 
