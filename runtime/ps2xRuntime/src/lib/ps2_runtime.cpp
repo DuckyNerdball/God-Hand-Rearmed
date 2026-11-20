@@ -3545,8 +3545,16 @@ void PS2Runtime::run()
             lastSource = source;
             lastSwap = now;
         }
-        // The shortcuts are off while the F2 menu waits for a key to bind (the key pressed is the binding, not a command).
-        const bool shortcutsOff = ps2x::menu::capturing();
+        // The shortcuts are off while the F2 menu waits for a key to bind (the key pressed is the binding, not a command),
+        // and in a hidden run (--headless: Replay-Cases): nobody plays it, so a key or controller button pressed for the
+        // game in another window is not its command (Nov 20: K's quick load while playing beside Replay-Cases loaded his
+        // state into a case's replay, and its quick save went to his slot too).
+        static const bool s_hiddenRun = []
+        {
+            const char *value = std::getenv("KAMITE_HEADLESS");
+            return value && *value && *value != '0';
+        }();
+        const bool shortcutsOff = s_hiddenRun || ps2x::menu::capturing();
 #if !defined(PLATFORM_VITA)
         const bool fullscreenKey = !shortcutsOff && ps2x::hotkeys::pressed(ps2x::hotkeys::Action::Fullscreen);
         const bool fullscreenAsked = ps2x::hotkeys::take(ps2x::hotkeys::Action::Fullscreen); // the F2 menu's button

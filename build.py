@@ -65,10 +65,11 @@ LOW_PRIORITY = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0) if os.envir
 
 
 def recomp_env():
-    """The recompiler's environment: register-locals code (ps2xRecomp function_emitter.cpp, runtime ps2_cg.h) unless
-    KAMITE_CODEGEN=classic; static JAL/JALR through PS2Runtime::callGuestFunction unless PS2X_STATIC_CALLS=dispatch."""
+    """The recompiler's environment: classic code unless KAMITE_CODEGEN=locals (register locals: ps2xRecomp
+    function_emitter.cpp, runtime ps2_cg.h; correct, but ~20% more game-thread CPU in K's replays on MSVC, Nov 20:
+    claude/perf-enemies.md); static JAL/JALR through PS2Runtime::callGuestFunction unless PS2X_STATIC_CALLS=dispatch."""
     env = dict(os.environ)
-    env["PS2X_CODEGEN"] = "classic" if os.environ.get("KAMITE_CODEGEN") == "classic" else "locals"
+    env["PS2X_CODEGEN"] = "locals" if os.environ.get("KAMITE_CODEGEN") == "locals" else "classic"
     return env
 
 
