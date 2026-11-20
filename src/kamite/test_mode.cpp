@@ -112,7 +112,7 @@ namespace kamite::test_mode
                                                  "KAMITE_SPRINT_TRAVERSAL", "KAMITE_CHARACTER", "KAMITE_LIFT_CHAIRS",
                                                  "KAMITE_TENSION_PLACABLE", "KAMITE_OFF_THE_CUFF",
                                                  "KAMITE_BALL_BUSTER_WOMEN", "KAMITE_ROULETTE_CYCLE",
-                                                 "KAMITE_BUCK_BREAKER", "KAMITE_CASE_DEVICE"};
+                                                 "KAMITE_BUCK_BREAKER", "KAMITE_CASE_DEVICE", "KAMITE_HOLD_MODE"};
         // The game's own value of the gameplay settings above when nothing sets them (GHR.ini's defaults). A case
         // without one (the recorder's GHR.ini had no such line, or the option is newer than the case) ran with this
         // value, so its replay does too instead of taking the replaying machine's (Nov 6: T1's Elvis case replayed
@@ -130,7 +130,9 @@ namespace kamite::test_mode
             {"KAMITE_BUCK_BREAKER", "0"},
             // The device in effect (menus and HUD hints follow it; K, Nov 16). Older cases replayed as keyboard & mouse
             // whenever no controller was awake at the start, which is what their fingerprints hold (Nov 19).
-            {"KAMITE_CASE_DEVICE", "keys"}};
+            {"KAMITE_CASE_DEVICE", "keys"},
+            // Hold's mode (K, Nov 20): cases before it ran Hold to Brawl.
+            {"KAMITE_HOLD_MODE", "brawl"}};
         const char *caseDefault(const std::string &name)
         {
             for (const CaseDefault &d : kCaseDefaults)
@@ -1453,6 +1455,8 @@ namespace kamite::test_mode
                     value = !modern::caseStyle().modern ? "classic" : modern::caseStyle().hold ? "hold" : "modern";
                 else if (std::strcmp(name, "KAMITE_MODERN_AUTO") == 0)
                     value = modern::caseStyle().autoOn ? "1" : "0";
+                else if (std::strcmp(name, "KAMITE_HOLD_MODE") == 0)
+                    value = modern::caseStyle().holdCam ? "cam" : "brawl";
                 if (value)
                     rec.settings += std::string("env.") + name + "=" + value + "\n";
             }

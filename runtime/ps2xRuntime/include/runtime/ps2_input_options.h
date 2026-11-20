@@ -18,6 +18,10 @@ namespace ps2_host_input
     };
 
     void setRightStickInvertDefault(uint32_t axes);
+    // The sticks' deadzone for every controller, in percent of the stick's reach (0 = none; stick drift): stick 0 the
+    // left, 1 the right. Until set, PS2X_LEFT_STICK_DEADZONE / PS2X_RIGHT_STICK_DEADZONE (GHR.ini [Game]
+    // LeftStickDeadzone / RightStickDeadzone). A controls.ini [PadN] Deadzone above it wins. Any thread.
+    void setStickDeadzone(int stick, int percent);
     void setMouseCameraEnabled(bool enabled);
     void setMouseStickEnabled(bool enabled);
     [[nodiscard]] MouseCameraInput consumeMouseCameraInput();

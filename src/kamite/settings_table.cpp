@@ -71,6 +71,8 @@ namespace kamite::settings
                                              {"modern", "Modern: Toggle", "MODERN: TOGGLE"},
                                              {"hold", "Modern: Hold", "MODERN: HOLD"}};
         constexpr Choice kKbmControlStyles[] = {{"classic", "Classic", "CLASSIC"}, {"modern", "Modern: Toggle", "MODERN: TOGGLE"}};
+        // Modern: Hold's two ways round (K, Nov 20): L1 held brawls (the alpha's), or L1 held is the free camera.
+        constexpr Choice kHoldModes[] = {{"brawl", "Hold to Brawl", "HOLD TO BRAWL"}, {"cam", "Hold to Cam", "HOLD TO CAM"}};
         constexpr Choice kRouletteTimers[] = {{"normal", "Normal", "NORMAL"}, {"double", "Double time", "DOUBLE"}};
         constexpr Choice kSoundModes[] = {{"mono", "Mono", "MONO"}, {"stereo", "Stereo", "STEREO"},
                                           {"prologic2", "Dolby Pro Logic II", "PRO LOGIC II"}};
@@ -80,6 +82,8 @@ namespace kamite::settings
         constexpr int kCashes[] = {100, 105, 110, 115, 120, 125, 130};
         // The volumes: 5 % steps, except 65 -> 69 -> 70 (K).
         constexpr int kVolumes[] = {0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 69, 70, 75, 80, 85, 90, 95, 100};
+        // Stick deadzones (K, Nov 20: stick drift): 0-50% of the stick's reach in 5s.
+        constexpr int kDeadzones[] = {0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50};
 
         // ---- builders -------------------------------------------------------------------------------------------
         constexpr Setting base(const char *id, Tab tab, const char *category, const char *name, const char *description,
@@ -107,6 +111,12 @@ namespace kamite::settings
         {
             Setting s = base(key, Tab::Sound, "Volume", name, description, "Sound", key, "100", Kind::Slider);
             s.values = kVolumes, s.valueCount = static_cast<int>(std::size(kVolumes)), s.unit = "%";
+            return s;
+        }
+        constexpr Setting deadzone(const char *name, const char *description, const char *key)
+        {
+            Setting s = base(key, Tab::Controls, "Controller", name, description, "Game", key, "0", Kind::Slider);
+            s.values = kDeadzones, s.valueCount = static_cast<int>(std::size(kDeadzones)), s.unit = "%";
             return s;
         }
         constexpr Setting brightness(const char *description)
@@ -204,6 +214,11 @@ namespace kamite::settings
                   "F2 > Camera sizes it while playing.")),
         live(toggle(Tab::Controls, "Controller", "Vibration", "Controller rumble.\nGirls know what it's for.", "Game",
                     "Vibration", true)),
+        live(deadzone("Left Stick Deadzone", "How far the left stick must move before it counts.\nRaise it if Gene walks on his own.",
+                      "LeftStickDeadzone")),
+        live(deadzone("Right Stick Deadzone",
+                      "How far the right stick must move before it counts.\nRaise it if the camera drifts or Gene dodges on his own.",
+                      "RightStickDeadzone")),
         live(choice(Tab::Controls, "Controller", "Menu Controls",
                     "Western: bottom button confirms; right cancels.\nJapanese: right button confirms; bottom cancels.",
                     "Game", "MenuButtons", "western", kMenuButtons)),
@@ -295,6 +310,14 @@ namespace kamite::settings
                                  "Brawling starts when dealing or taking damage.\nPress the stick (rebindable) to go back to freecam.",
                                  "Game", "ModernAuto", true),
                           "ControlStyle", "modern"),
+                      kPad)),
+        // Hold to Brawl / Hold to Cam (K, Nov 20); Hold to Cam rests in brawl mode, so its Auto row is hidden
+        // (parentAllows).
+        live(onDevice(sub(gameList(choice(Tab::Gameplay, "Move & Groove", "Modern: Hold Mode",
+                                          "Hold to Brawl: hold L1 to brawl, double-tap it to turn.\n"
+                                          "Hold to Cam: hold L1 for freecam, tap it to turn.",
+                                          "Game", "HoldMode", "brawl", kHoldModes)),
+                          "ControlStyle", "hold"),
                       kPad)),
         // The same [Game] ModernAuto under Hold, where Auto also ends brawl mode (no switch to leave it; K, Nov 19).
         live(onDevice(sub(withId(toggle(Tab::Gameplay, "Move & Groove", "Modern: Auto",
@@ -478,6 +501,10 @@ namespace kamite::settings
             return true;
         if (std::strcmp(setting.parent, "DisplayMode") == 0) // two keys in GHR.ini (StartFullscreen, StartMaximized)
             return !ini.getBool("Video", "StartFullscreen", true) && !ini.getBool("Video", "StartMaximized", false);
+        // Hold's Auto: not under Hold to Cam (brawl mode is its rest state; K, Nov 20).
+        if (std::strcmp(setting.id, "ModernAutoHold") == 0)
+            if (const Setting *mode = find("HoldMode"); mode && same(value(ini, *mode), "cam"))
+                return false;
         const Setting *parent = find(setting.parent);
         if (!parent)
             return true;

@@ -62,6 +62,7 @@
 #include "runtime/ee_scheduler.h"
 #include "runtime/gs/gs_pcsx2_backend.h"
 #include "runtime/ps2_game_menu.h"
+#include "runtime/ps2_input_options.h"
 
 // raylib's image functions (CPU only): the wall's JPEG, cropping and resampling. Its ::Image is not hd_textures::Image.
 #include "raylib.h"
@@ -964,6 +965,10 @@ namespace kamite::options_screen
                 modern::setHold(value == "hold");
                 modern::setModern(value == "modern" || value == "hold");
             }
+            else if (id == "LeftStickDeadzone" || id == "RightStickDeadzone")
+                ps2_host_input::setStickDeadzone(id == "LeftStickDeadzone" ? 0 : 1, std::atoi(value.c_str()));
+            else if (id == "HoldMode")
+                modern::setHoldCam(value == "cam");
             else if (id == "ModernAuto" || id == "ModernAutoHold")
                 modern::setAuto(on);
             else if (id == "KbmControlStyle")

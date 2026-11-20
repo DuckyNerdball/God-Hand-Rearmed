@@ -1687,6 +1687,7 @@ namespace ps2_host_input
 
         std::atomic<const std::atomic<uint64_t> *> g_fieldCounter{nullptr};
         std::atomic<uint32_t> g_invertRightDefault{0u};
+        std::array<std::atomic<int>, 2> g_stickDeadzone{-1, -1}; // setStickDeadzone (percent); -1 = the environment's
         std::atomic<bool> g_mouseCameraEnabled{false};
         std::atomic<bool> g_mouseStickEnabled{true};
         bool g_mouseLocked = false;
@@ -1949,17 +1950,31 @@ namespace ps2_host_input
                 state.pressure[static_cast<size_t>(pressure)] = (state.buttons & button) != 0u ? 0xFFu : 0x00u;
         }
 
-        // A stick from its four directions: radial deadzone, then PCSX2's axis scale (1.33 reaches the corners).
+        // The Options' deadzone of a stick (0 left, 1 right) as a fraction: set live, else the environment (GHR.ini).
+        float optionsDeadzone(int which)
+        {
+            int percent = g_stickDeadzone[static_cast<size_t>(which)].load(std::memory_order_relaxed);
+            if (percent < 0)
+            {
+                const char *value = std::getenv(which == 0 ? "PS2X_LEFT_STICK_DEADZONE" : "PS2X_RIGHT_STICK_DEADZONE");
+                percent = value ? std::atoi(value) : 0;
+            }
+            return static_cast<float>(std::clamp(percent, 0, 95)) / 100.0f;
+        }
+
+        // A stick from its four directions: radial deadzone (the larger of controls.ini's and the Options' for this
+        // stick, K Nov 20: stick drift), then PCSX2's axis scale (1.33 reaches the corners).
         std::pair<float, float> stick(const PadConfig &config, const std::array<float, StickHalfCount> &halves, size_t up, uint32_t invert)
         {
             float x = halves[up + 1u] - halves[up + 3u]; // right - left
             float y = halves[up + 2u] - halves[up];      // down - up
             const float magnitude = std::hypot(x, y);
-            if (magnitude <= config.deadzone || magnitude <= 0.0f)
+            const float deadzone = std::max(config.deadzone, optionsDeadzone(up == LUp ? 0 : 1));
+            if (magnitude <= deadzone || magnitude <= 0.0f)
                 return {0.0f, 0.0f};
-            if (config.deadzone > 0.0f)
+            if (deadzone > 0.0f)
             {
-                const float scale = (magnitude - config.deadzone) / (1.0f - config.deadzone) / magnitude;
+                const float scale = (magnitude - deadzone) / (1.0f - deadzone) / magnitude;
                 x *= scale;
                 y *= scale;
             }
@@ -2310,6 +2325,12 @@ namespace ps2_host_input
     void setRightStickInvertDefault(uint32_t axes)
     {
         g_invertRightDefault.store(axes, std::memory_order_relaxed);
+    }
+
+    void setStickDeadzone(int stick, int percent)
+    {
+        if (stick == 0 || stick == 1)
+            g_stickDeadzone[static_cast<size_t>(stick)].store(std::clamp(percent, 0, 95), std::memory_order_relaxed);
     }
 
     void setMouseCameraEnabled(bool enabled)

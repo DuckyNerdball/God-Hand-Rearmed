@@ -45,6 +45,7 @@ namespace kamite::presets
             {"ControlStyle", {"classic", "hold", "hold", "hold"}}, // Remastered up: Modern: Hold (K, Nov 19; Toggle optional)
             {"ModernAuto", {"1", "1", "1", "1"}},     // Toggle's Auto: no preset uses Toggle, so never counted
             {"ModernAutoHold", {"1", "1", "1", "1"}}, // the same [Game] ModernAuto key under Hold
+            {"HoldMode", {"brawl", "brawl", "brawl", "brawl"}}, // Hold with Auto = Hold to Brawl (K, Nov 20)
             {"KbmControlStyle", {"classic", "modern", "modern", "modern"}},
             {"KbmModernAuto", {"0", "0", "0", "0"}},
             {"AspectRatio", {"4:3", "auto", "auto", "auto"}},

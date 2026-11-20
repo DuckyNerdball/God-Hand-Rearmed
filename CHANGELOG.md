@@ -4,6 +4,8 @@ Newest first, one line per change; the code comments say how.
 
 ## November 20, 2026
 
+- Modern: Hold has a mode: Hold to Brawl (as before) or Hold to Cam (brawl mode unless L1 is held: holding L1 is the free camera, a tap of L1 the 180° turn).
+- Controls: Left / Right Stick Deadzone sliders (launcher and in game) for drifting sticks.
 - Music no longer skips every ~15 s on variable-refresh (G-Sync / FreeSync) displays: the game stops following such a display's refresh (issue #1).
 - Mods: a mod is a folder in mods\ (a mod.ini, game files under their disc paths, textures\ ahead of your texture pack, patches\*.pnach), loaded in the Mods tab's order: the lower mod wins a file both replace.
 - Launcher: the Mods tab lists your mods: tick them on or off, move them up or down (the marks by the number, LT / RT, Z / C), see what each one overrides; a new mod comes in on, at the bottom; Install from Zip and Open Mods Folder.
