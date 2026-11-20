@@ -76,7 +76,7 @@ Set up Moveset Presets in the Techniques screen, switch with the d-pad in gamepl
 
 For the Buck Breakers out there, you can also pick your pummel per style. <!-- tag:BuckBreaker --> `Rearmed+`
 
-<!-- MEDIA: assets/readme/styles.gif — switching styles mid-fight -->
+![God Hand: Rearmed](assets/moveset_presets.webp)
 
 ---
 
