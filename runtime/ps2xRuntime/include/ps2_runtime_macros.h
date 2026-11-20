@@ -13,6 +13,7 @@
 #endif
 
 #include "ps2_runtime.h"
+#include "ps2_ee_float.h"
 
 static PS2_FORCEINLINE int32_t Ps2ExtractEpi32(__m128i v, int index)
 {
@@ -140,64 +141,75 @@ static inline uint32_t ps2_plzcw32(uint32_t x)
 #define PS2_PXOR(a, b) _mm_xor_si128((__m128i)(a), (__m128i)(b))
 #define PS2_PNOR(a, b) _mm_xor_si128(_mm_or_si128((__m128i)(a), (__m128i)(b)), _mm_set1_epi32(0xFFFFFFFF))
 
-PS2_FORCEINLINE __m128 ps2VuClampVector(__m128 value)
+// EE FPU and VU0 macro arithmetic: the PS2's own rules, bit for bit (ps2_ee_float.h, from GT3 Revisited): add / sub
+// chop after the adder's one-guard-bit alignment, the multiplier's and divider's last-place quirks, no denormals,
+// exponent 255 an ordinary exponent (+-0x7FFFFFFF the largest values). The registers keep floats; these work on their
+// bits, in integer code (the same results on every host, whatever the MXCSR). VU1 keeps its own maths (rendering only).
+PS2_FORCEINLINE float ps2FpuAdd(float a, float b) { return ps2ee::fl(ps2ee::add(ps2ee::bits(a), ps2ee::bits(b))); }
+PS2_FORCEINLINE float ps2FpuSub(float a, float b) { return ps2ee::fl(ps2ee::sub(ps2ee::bits(a), ps2ee::bits(b))); }
+// a = fs, b = ft: the multiplier's quirk is not commutative.
+PS2_FORCEINLINE float ps2FpuMul(float a, float b) { return ps2ee::fl(ps2ee::mul(ps2ee::bits(a), ps2ee::bits(b))); }
+PS2_FORCEINLINE float ps2FpuMadd(float acc, float a, float b)
 {
-    const __m128i bits = _mm_castps_si128(value);
-    const __m128i exponentMask = _mm_set1_epi32(0x7F800000);
-    const __m128i special = _mm_cmpeq_epi32(_mm_and_si128(bits, exponentMask), exponentMask);
-    const __m128i saturated = _mm_or_si128(_mm_and_si128(bits, _mm_set1_epi32(static_cast<int>(0x80000000u))), _mm_set1_epi32(0x7F7FFFFF));
-    return _mm_castsi128_ps(_mm_or_si128(_mm_and_si128(special, saturated), _mm_andnot_si128(special, bits)));
+    return ps2ee::fl(ps2ee::madd(ps2ee::bits(acc), ps2ee::bits(a), ps2ee::bits(b)));
 }
-
-PS2_FORCEINLINE float ps2FpuClamp(float value)
+PS2_FORCEINLINE float ps2FpuMsub(float acc, float a, float b)
 {
-    uint32_t bits;
-    std::memcpy(&bits, &value, sizeof(bits));
-    if ((bits & 0x7F800000u) == 0x7F800000u)
-    {
-        bits = (bits & 0x80000000u) | 0x7F7FFFFFu;
-        std::memcpy(&value, &bits, sizeof(value));
-    }
-    return value;
+    return ps2ee::fl(ps2ee::msub(ps2ee::bits(acc), ps2ee::bits(a), ps2ee::bits(b)));
 }
+PS2_FORCEINLINE float ps2FpuMax(float a, float b) { return ps2ee::fl(ps2ee::maxOf(ps2ee::bits(a), ps2ee::bits(b))); }
+PS2_FORCEINLINE float ps2FpuMin(float a, float b) { return ps2ee::fl(ps2ee::minOf(ps2ee::bits(a), ps2ee::bits(b))); }
+PS2_FORCEINLINE float ps2FpuFromWord(int32_t v) { return ps2ee::fl(ps2ee::fromInt(v)); }
 
-PS2_FORCEINLINE void ps2FpuAlignOperands(float &a, float &b)
+// VU0 macro ops: the same rules on each lane.
+template <class Op>
+PS2_FORCEINLINE __m128 ps2VuLanes(__m128 a, __m128 b, Op op)
 {
-    uint32_t ua;
-    uint32_t ub;
-    std::memcpy(&ua, &a, sizeof(ua));
-    std::memcpy(&ub, &b, sizeof(ub));
-    const int32_t diff = static_cast<int32_t>((ua >> 23) & 0xFFu) - static_cast<int32_t>((ub >> 23) & 0xFFu);
-    if (diff >= 25)
-        ub &= 0x80000000u;
-    else if (diff > 0)
-        ub &= 0xFFFFFFFFu << (diff - 1);
-    else if (diff <= -25)
-        ua &= 0x80000000u;
-    else if (diff < 0)
-        ua &= 0xFFFFFFFFu << (-diff - 1);
-    std::memcpy(&a, &ua, sizeof(a));
-    std::memcpy(&b, &ub, sizeof(b));
+    alignas(16) uint32_t x[4], y[4], r[4];
+    _mm_store_si128(reinterpret_cast<__m128i *>(x), _mm_castps_si128(a));
+    _mm_store_si128(reinterpret_cast<__m128i *>(y), _mm_castps_si128(b));
+    for (int i = 0; i < 4; ++i)
+        r[i] = op(x[i], y[i]);
+    return _mm_castsi128_ps(_mm_load_si128(reinterpret_cast<const __m128i *>(r)));
 }
-
-PS2_FORCEINLINE float ps2FpuAdd(float a, float b)
+template <class Op>
+PS2_FORCEINLINE __m128 ps2VuLanes3(__m128 acc, __m128 a, __m128 b, Op op)
 {
-    ps2FpuAlignOperands(a, b);
-    return ps2FpuClamp(a + b);
+    alignas(16) uint32_t z[4], x[4], y[4], r[4];
+    _mm_store_si128(reinterpret_cast<__m128i *>(z), _mm_castps_si128(acc));
+    _mm_store_si128(reinterpret_cast<__m128i *>(x), _mm_castps_si128(a));
+    _mm_store_si128(reinterpret_cast<__m128i *>(y), _mm_castps_si128(b));
+    for (int i = 0; i < 4; ++i)
+        r[i] = op(z[i], x[i], y[i]);
+    return _mm_castsi128_ps(_mm_load_si128(reinterpret_cast<const __m128i *>(r)));
 }
-
-PS2_FORCEINLINE float ps2FpuSub(float a, float b)
+PS2_FORCEINLINE __m128 ps2VuAdd(__m128 a, __m128 b)
 {
-    ps2FpuAlignOperands(a, b);
-    return ps2FpuClamp(a - b);
+    return ps2VuLanes(a, b, [](uint32_t x, uint32_t y) { return ps2ee::add(x, y); });
 }
-
-inline float ps2SignedFloatMax(uint32_t signSource)
+PS2_FORCEINLINE __m128 ps2VuSub(__m128 a, __m128 b)
 {
-    const uint32_t bits = (signSource & 0x80000000u) | 0x7F7FFFFFu;
-    float out;
-    std::memcpy(&out, &bits, sizeof(out));
-    return out;
+    return ps2VuLanes(a, b, [](uint32_t x, uint32_t y) { return ps2ee::sub(x, y); });
+}
+PS2_FORCEINLINE __m128 ps2VuMul(__m128 a, __m128 b)
+{
+    return ps2VuLanes(a, b, [](uint32_t x, uint32_t y) { return ps2ee::mul(x, y); });
+}
+PS2_FORCEINLINE __m128 ps2VuMax(__m128 a, __m128 b)
+{
+    return ps2VuLanes(a, b, [](uint32_t x, uint32_t y) { return ps2ee::maxOf(x, y); });
+}
+PS2_FORCEINLINE __m128 ps2VuMin(__m128 a, __m128 b)
+{
+    return ps2VuLanes(a, b, [](uint32_t x, uint32_t y) { return ps2ee::minOf(x, y); });
+}
+PS2_FORCEINLINE __m128 ps2VuMadd(__m128 acc, __m128 a, __m128 b)
+{
+    return ps2VuLanes3(acc, a, b, [](uint32_t z, uint32_t x, uint32_t y) { return ps2ee::madd(z, x, y); });
+}
+PS2_FORCEINLINE __m128 ps2VuMsub(__m128 acc, __m128 a, __m128 b)
+{
+    return ps2VuLanes3(acc, a, b, [](uint32_t z, uint32_t x, uint32_t y) { return ps2ee::msub(z, x, y); });
 }
 
 PS2_FORCEINLINE uint32_t ps2FloatBits(float value)
@@ -225,54 +237,31 @@ constexpr uint32_t PS2_FCR31_D = 0x00010000u;
 constexpr uint32_t PS2_FCR31_SI = 0x00000040u;
 constexpr uint32_t PS2_FCR31_SD = 0x00000020u;
 
-inline float ps2FpuDivideNearest(float dividend, float divisor)
-{
-    const uint32_t csr = _mm_getcsr();
-    _mm_setcsr(csr & ~0x6000u);
-    const float result = _mm_cvtss_f32(_mm_div_ss(_mm_set_ss(dividend), _mm_set_ss(divisor)));
-    _mm_setcsr(csr);
-    return result;
-}
-
-inline float ps2FpuSqrtNearest(float value)
-{
-    const uint32_t csr = _mm_getcsr();
-    _mm_setcsr(csr & ~0x6000u);
-    const float result = _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(value)));
-    _mm_setcsr(csr);
-    return result;
-}
-
+// Divide / square root (div.s, sqrt.s, rsqrt.s): the EE divider's results; the flags as before.
 inline float ps2FpuDivide(uint32_t &fcr31, float dividend, float divisor)
 {
-    if (ps2FloatIsZero(divisor))
-    {
-        if (ps2FloatIsZero(dividend))
-            fcr31 |= PS2_FCR31_I | PS2_FCR31_SI;
-        else
-            fcr31 |= PS2_FCR31_D | PS2_FCR31_SD;
-        return ps2SignedFloatMax(ps2FloatBits(dividend) ^ ps2FloatBits(divisor));
-    }
-    return ps2FpuClamp(ps2FpuDivideNearest(dividend, divisor));
+    const uint32_t a = ps2ee::bits(dividend), b = ps2ee::bits(divisor);
+    if (ps2ee::isZero(b))
+        fcr31 |= ps2ee::isZero(a) ? (PS2_FCR31_I | PS2_FCR31_SI) : (PS2_FCR31_D | PS2_FCR31_SD);
+    return ps2ee::fl(ps2ee::div(a, b));
 }
 
 inline float ps2FpuSqrt(uint32_t &fcr31, float value)
 {
-    if ((ps2FloatBits(value) & 0x80000000u) != 0u && !ps2FloatIsZero(value))
+    const uint32_t a = ps2ee::bits(value);
+    if ((a & ps2ee::kSign) != 0u && !ps2ee::isZero(a))
         fcr31 |= PS2_FCR31_I | PS2_FCR31_SI;
-    return ps2FpuClamp(ps2FpuSqrtNearest(std::fabs(value)));
+    return ps2ee::fl(ps2ee::sqrt(a));
 }
 
 inline float ps2FpuRsqrt(uint32_t &fcr31, float numerator, float value)
 {
-    if (ps2FloatIsZero(value))
-    {
+    const uint32_t a = ps2ee::bits(numerator), b = ps2ee::bits(value);
+    if (ps2ee::isZero(b))
         fcr31 |= PS2_FCR31_D | PS2_FCR31_SD;
-        return ps2SignedFloatMax(ps2FloatBits(numerator) ^ ps2FloatBits(value));
-    }
-    if ((ps2FloatBits(value) & 0x80000000u) != 0u)
+    else if ((b & ps2ee::kSign) != 0u)
         fcr31 |= PS2_FCR31_I | PS2_FCR31_SI;
-    return ps2FpuClamp(ps2FpuDivideNearest(numerator, ps2FpuSqrtNearest(std::fabs(value))));
+    return ps2ee::fl(ps2ee::rsqrt(a, b));
 }
 
 inline int32_t ps2FpuConvertToWord(float value)
@@ -288,50 +277,44 @@ constexpr uint16_t PS2_VU_STATUS_D = 0x0020u;
 constexpr uint16_t PS2_VU_STATUS_IS = 0x0400u;
 constexpr uint16_t PS2_VU_STATUS_DS = 0x0800u;
 
+// VU0's divide unit (vdiv, vsqrt, vrsqrt into Q): the same divider's results; the status flags as before.
 inline float ps2VuDivide(uint16_t &status, float dividend, float divisor)
 {
     status &= static_cast<uint16_t>(~(PS2_VU_STATUS_I | PS2_VU_STATUS_D));
-    if (ps2FloatIsZero(divisor))
-    {
-        if (ps2FloatIsZero(dividend))
-            status |= PS2_VU_STATUS_I | PS2_VU_STATUS_IS;
-        else
-            status |= PS2_VU_STATUS_D | PS2_VU_STATUS_DS;
-        return ps2SignedFloatMax(ps2FloatBits(dividend) ^ ps2FloatBits(divisor));
-    }
-    return ps2FpuClamp(dividend / divisor);
+    const uint32_t a = ps2ee::bits(dividend), b = ps2ee::bits(divisor);
+    if (ps2ee::isZero(b))
+        status |= ps2ee::isZero(a) ? (PS2_VU_STATUS_I | PS2_VU_STATUS_IS) : (PS2_VU_STATUS_D | PS2_VU_STATUS_DS);
+    return ps2ee::fl(ps2ee::div(a, b));
 }
 
 inline float ps2VuSqrt(uint16_t &status, float value)
 {
     status &= static_cast<uint16_t>(~(PS2_VU_STATUS_I | PS2_VU_STATUS_D));
-    if ((ps2FloatBits(value) & 0x80000000u) != 0u && !ps2FloatIsZero(value))
+    const uint32_t a = ps2ee::bits(value);
+    if ((a & ps2ee::kSign) != 0u && !ps2ee::isZero(a))
         status |= PS2_VU_STATUS_I | PS2_VU_STATUS_IS;
-    return ps2FpuClamp(std::sqrt(std::fabs(value)));
+    return ps2ee::fl(ps2ee::sqrt(a));
 }
 
 inline float ps2VuRsqrt(uint16_t &status, float numerator, float value)
 {
     status &= static_cast<uint16_t>(~(PS2_VU_STATUS_I | PS2_VU_STATUS_D));
-    if (ps2FloatIsZero(value))
-    {
-        if (ps2FloatIsZero(numerator))
-            status |= PS2_VU_STATUS_I | PS2_VU_STATUS_IS;
-        else
-            status |= PS2_VU_STATUS_D | PS2_VU_STATUS_DS;
-        return ps2SignedFloatMax(ps2FloatBits(numerator) ^ ps2FloatBits(value));
-    }
-    if ((ps2FloatBits(value) & 0x80000000u) != 0u)
+    const uint32_t a = ps2ee::bits(numerator), b = ps2ee::bits(value);
+    if (ps2ee::isZero(b))
+        status |= ps2ee::isZero(a) ? (PS2_VU_STATUS_I | PS2_VU_STATUS_IS) : (PS2_VU_STATUS_D | PS2_VU_STATUS_DS);
+    else if ((b & ps2ee::kSign) != 0u)
         status |= PS2_VU_STATUS_I | PS2_VU_STATUS_IS;
-    return ps2FpuClamp(numerator / std::sqrt(std::fabs(value)));
+    return ps2ee::fl(ps2ee::rsqrt(a, b));
 }
 
 // PS2 VU (Vector Unit) operations
-#define PS2_VADD(a, b) ps2VuClampVector(_mm_add_ps((__m128)(a), (__m128)(b)))
-#define PS2_VSUB(a, b) ps2VuClampVector(_mm_sub_ps((__m128)(a), (__m128)(b)))
-#define PS2_VMUL(a, b) ps2VuClampVector(_mm_mul_ps((__m128)(a), (__m128)(b)))
-#define PS2_VDIV(a, b) _mm_div_ps((__m128)(a), (__m128)(b))
-#define PS2_VMULQ(a, q) ps2VuClampVector(_mm_mul_ps((__m128)(a), _mm_set1_ps(q)))
+#define PS2_VADD(a, b) ps2VuAdd((__m128)(a), (__m128)(b))
+#define PS2_VSUB(a, b) ps2VuSub((__m128)(a), (__m128)(b))
+#define PS2_VMUL(a, b) ps2VuMul((__m128)(a), (__m128)(b))
+#define PS2_VMADD(acc, a, b) ps2VuMadd((__m128)(acc), (__m128)(a), (__m128)(b))
+#define PS2_VMSUB(acc, a, b) ps2VuMsub((__m128)(acc), (__m128)(a), (__m128)(b))
+#define PS2_VMAX(a, b) ps2VuMax((__m128)(a), (__m128)(b))
+#define PS2_VMIN(a, b) ps2VuMin((__m128)(a), (__m128)(b))
 #define PS2_VBLEND(a, b, mask) PS2_BLENDV_PS((__m128)(a), (__m128)(b), (__m128)(mask))
 
 // Memory access helpers - Hybrid Fast/Slow Path
@@ -793,9 +776,13 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
 #define FPU_SET_ACC(ctx, res) (ctx->f_acc = res)
 #define FPU_ADD_S(a, b) ps2FpuAdd((float)(a), (float)(b))
 #define FPU_SUB_S(a, b) ps2FpuSub((float)(a), (float)(b))
-#define FPU_MUL_S(a, b) ps2FpuClamp((float)(a) * (float)(b))
-#define FPU_DIV_S(a, b) ps2FpuClamp((float)(a) / (float)(b))
-#define FPU_SQRT_S(a) ps2FpuClamp(std::sqrt(std::fabs((float)(a))))
+#define FPU_MUL_S(a, b) ps2FpuMul((float)(a), (float)(b))
+#define FPU_MADD_S(acc, a, b) ps2FpuMadd((float)(acc), (float)(a), (float)(b))
+#define FPU_MSUB_S(acc, a, b) ps2FpuMsub((float)(acc), (float)(a), (float)(b))
+#define FPU_MAX_S(a, b) ps2FpuMax((float)(a), (float)(b))
+#define FPU_MIN_S(a, b) ps2FpuMin((float)(a), (float)(b))
+#define FPU_DIV_S(a, b) ps2ee::fl(ps2ee::div(ps2ee::bits((float)(a)), ps2ee::bits((float)(b))))
+#define FPU_SQRT_S(a) ps2ee::fl(ps2ee::sqrt(ps2ee::bits((float)(a))))
 #define FPU_ABS_S(a) fabsf((float)(a))
 #define FPU_MOV_S(a) ((float)(a))
 #define FPU_NEG_S(a) (-(float)(a))
@@ -807,7 +794,7 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
 #define FPU_TRUNC_W_S(a) ((int32_t)(float)(a))
 #define FPU_CEIL_W_S(a) ((int32_t)ceilf((float)(a)))
 #define FPU_FLOOR_W_S(a) ((int32_t)floorf((float)(a)))
-#define FPU_CVT_S_W(a) ((float)(int32_t)(a))
+#define FPU_CVT_S_W(a) ps2FpuFromWord((int32_t)(a))
 #define FPU_CVT_S_L(a) ((float)(int64_t)(a))
 #define FPU_CVT_W_S(a) ps2FpuConvertToWord((float)(a))
 #define FPU_CVT_L_S(a) ((int64_t)(float)(a))
