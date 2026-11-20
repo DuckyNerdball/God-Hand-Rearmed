@@ -21,6 +21,7 @@ Newest first, one line per change; the code comments say how.
 - Cash: Olivia's waistband no longer flickers against her dress above 120% (in play and in cutscenes).
 - Performance: the game no longer keeps the CPU busy while it waits for the next frame.
 - Performance: the game's recompiled code calls its functions more directly.
+- Performance: busy scenes take less CPU on the way to the renderer (the graphics data is no longer read twice).
 - Test cases: a replay running in the background no longer reacts to save-state and other shortcut keys pressed while playing.
 - Performance: the native drawing of characters and scenery works from the first 3D frame (it used to start only after a while).
 
