@@ -42,6 +42,9 @@ namespace ps2ee
     bool mulOverflows(uint32_t a, uint32_t b); // whether mul(a, b) clamped to +-max
     uint32_t div(uint32_t a, uint32_t b);
     uint32_t sqrt(uint32_t a); // sqrt(|a|)
+    // Four lanes at once (the VU0 macro ops' exact path when the host's SSE floats can't give the PS2's bits).
+    void addLanes(const uint32_t *a, const uint32_t *b, uint32_t *r);
+    void mulLanes(const uint32_t *a, const uint32_t *b, uint32_t *r);
 
     PS2EE_INLINE uint32_t neg(uint32_t a) { return a ^ kSign; }
     PS2EE_INLINE uint32_t abs(uint32_t a) { return a & ~kSign; }
@@ -87,7 +90,8 @@ namespace ps2ee
             return sign;
         const uint64_t p = uint64_t((a & 0x7FFFFFu) | 0x800000u) * uint64_t((b & 0x7FFFFFu) | 0x800000u); // exact
         const uint32_t hi = uint32_t(p >> 47);
-        if ((p & ((uint64_t(1) << (23 + hi)) - 1)) < (uint64_t(1) << 16))
+        // (A round b, its low 16 bits 0, loses nothing: x * 1.0, x * 2.0 ... are the chopped product.)
+        if ((p & ((uint64_t(1) << (23 + hi)) - 1)) < (uint64_t(1) << 16) && (b & 0xFFFFu) != 0u)
             return mulTree(a, b);
         const int32_t e = int32_t(ea + eb) - 127 + int32_t(hi);
         const uint32_t m = uint32_t(p >> (23 + hi)) & 0x7FFFFFu; // chopped

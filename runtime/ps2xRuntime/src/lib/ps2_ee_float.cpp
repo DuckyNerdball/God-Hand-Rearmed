@@ -25,30 +25,72 @@ namespace ps2ee
             fullAdd(b, c, d, s1, c1);
             fullAdd(s1, a, c1, s, k);
         }
-        uint64_t boothTreeProduct(uint64_t x, uint64_t y)
+        // Row i of the radix-4 Booth recoding (digit -2*b1 + b0 + lo from y's bits 2i+1, 2i, 2i-1), low 32 bits: x
+        // times the digit's size, complemented when the digit is negative (its +1 noted in plusOne at the row's
+        // column).
+        PS2EE_INLINE void boothRow(uint32_t x, uint32_t y, int i, uint32_t &row, uint32_t &plusOne)
         {
-            uint64_t r[13];
-            uint64_t plusOne = 0;
-            for (int i = 0; i < 13; ++i)
-            {
-                const int lo = i ? int((y >> (2 * i - 1)) & 1) : 0;
-                const int d = -2 * int((y >> (2 * i + 1)) & 1) + int((y >> (2 * i)) & 1) + lo;
-                const uint64_t m = x * uint64_t(d < 0 ? -d : d);
-                r[i] = (d < 0 ? ~m : m) << (2 * i);
-                if (d < 0)
-                    plusOne |= uint64_t(1) << (2 * i);
-            }
-            for (int i = 0; i < 12; ++i)
-                r[i + 1] |= plusOne & (uint64_t(1) << (2 * i));
+            const uint32_t lo = i ? (y >> (2 * i - 1)) & 1 : 0;
+            const uint32_t b0 = (y >> (2 * i)) & 1, b1 = (y >> (2 * i + 1)) & 1;
+            const uint32_t neg = b1 & ~(b0 & lo) & 1;
+            const uint32_t mag = b1 ? 2 - b0 - lo : b0 + lo; // 0, 1 or 2 (-0 when b1, b0 and lo are all 1)
+            const uint32_t m = (x << (mag >> 1)) & (0u - uint32_t(mag != 0));
+            row = (m ^ (0u - neg)) << (2 * i);
+            plusOne |= neg << (2 * i);
+        }
+        uint32_t lowCarry(uint32_t x32, uint32_t y32)
+        {
+            // The tree's two vectors s, c sum to the exact product; dropping their low 16 columns loses the product's
+            // low 16 bits and k, the carry out of those columns. Carries only move up, so k needs the low 16 columns
+            // of rows 0-7 (row 8 holds row 7's +1 at column 14; later rows start at column 16): 32-bit words, no
+            // branches (the digits are random). Same result as the full 13-row, 48-bit tree, about three times faster.
+            uint32_t r[9];
+            uint32_t plusOne = 0;
+            // Written out row by row (unrolled on every compiler: the shifts become constants).
+            boothRow(x32, y32, 0, r[0], plusOne);
+            boothRow(x32, y32, 1, r[1], plusOne);
+            boothRow(x32, y32, 2, r[2], plusOne);
+            boothRow(x32, y32, 3, r[3], plusOne);
+            boothRow(x32, y32, 4, r[4], plusOne);
+            boothRow(x32, y32, 5, r[5], plusOne);
+            boothRow(x32, y32, 6, r[6], plusOne);
+            boothRow(x32, y32, 7, r[7], plusOne);
+            r[8] = 0;
+            for (int i = 0; i < 8; ++i)
+                r[i + 1] |= plusOne & (1u << (2 * i));
             uint64_t s0, c0, s1, c1, s2, c2, s3, c3, s4, c4, s, c;
             compress42(r[0], r[1], r[2], r[3], s0, c0);
             compress42(r[4], r[5], r[6], r[7], s1, c1);
-            compress42(r[8], r[9], r[10], r[11], s2, c2);
+            compress42(r[8], 0, 0, 0, s2, c2);
             compress42(s0, c0, s1, c1, s3, c3);
-            fullAdd(s2, c2, r[12], s4, c4);
+            fullAdd(s2, c2, 0, s4, c4);
             compress42(s3, c3, s4, c4, s, c);
+            return uint32_t(((s & 0xFFFF) + (c & 0xFFFF)) >> 16);
+        }
+
+        // When x's low 16 bits are 0 (a multiplicand with at most 8 significant bits: 1.0, 0.5, 3.0, 100.0 ...) the
+        // carry depends on y's low 16 bits alone: one table of 65536 bits, built at start (~2 ms).
+        struct RoundMultiplicandCarries
+        {
+            uint64_t bits[65536 / 64] = {};
+            RoundMultiplicandCarries()
+            {
+                for (uint32_t y = 0; y < 65536; ++y)
+                    bits[y >> 6] |= uint64_t(lowCarry(0x800000u, 0x800000u | y)) << (y & 63);
+            }
+            uint32_t operator[](uint32_t y) const { return uint32_t(bits[y >> 6] >> (y & 63)) & 1; }
+        };
+        const RoundMultiplicandCarries g_roundCarries;
+
+        uint64_t boothTreeProduct(uint64_t x, uint64_t y)
+        {
+            const uint32_t x32 = uint32_t(x), y32 = uint32_t(y);
+            // y's low 16 bits 0 (a round multiplier): every low row is 0, nothing is lost.
+            const uint32_t k = (y32 & 0xFFFF) == 0 ? 0u
+                               : (x32 & 0xFFFF) == 0 ? g_roundCarries[y32 & 0xFFFF]
+                                                     : lowCarry(x32, y32);
             constexpr uint64_t kMask = (uint64_t(1) << 48) - 1;
-            return ((((s & kMask) >> 16) + ((c & kMask) >> 16)) << 16) & kMask;
+            return (((x * y) & ~uint64_t(0xFFFF)) - (uint64_t(k) << 16)) & kMask;
         }
 
         // The EE's divider as measured: radix-2 SRT on a carry-save remainder of 25 fraction bits; 25 digits, never
@@ -213,5 +255,17 @@ namespace ps2ee
         if (!e)
             return 0u;
         return ((e + 127) >> 1) << 23 | (root((a & 0x7FFFFFu) | 0x800000u, !(e & 1)) & 0x7FFFFFu);
+    }
+
+    void addLanes(const uint32_t *a, const uint32_t *b, uint32_t *r)
+    {
+        for (int i = 0; i < 4; ++i)
+            r[i] = add(a[i], b[i]);
+    }
+
+    void mulLanes(const uint32_t *a, const uint32_t *b, uint32_t *r)
+    {
+        for (int i = 0; i < 4; ++i)
+            r[i] = mul(a[i], b[i]);
     }
 } // namespace ps2ee
