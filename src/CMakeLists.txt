@@ -71,6 +71,8 @@ set(KAMITE_HOST_SOURCES
     kamite/npc_tools.cpp
     kamite/hitbox_overlay.cpp
     kamite/menu_buttons.cpp
+    kamite/mod_list.cpp
+    kamite/mods.cpp
     kamite/modern_controls.cpp
     kamite/near_geometry.cpp
     kamite/render/character_skin.cpp
@@ -430,7 +432,7 @@ if(KAMITE_DEBUG_UI AND TARGET rlImGui)
     target_compile_definitions(kamite PRIVATE PS2X_ENABLE_DEBUG_UI=1)
     # The launcher (src/kamite/launcher.cpp) draws with the same Dear ImGui.
     target_sources(kamite PRIVATE kamite/launcher.cpp kamite/launcher_bark.cpp kamite/launcher_book.cpp kamite/launcher_platform.cpp
-                                  kamite/launcher_update.cpp)
+                                  kamite/launcher_update.cpp kamite/mod_zip.cpp)
     target_compile_definitions(kamite PRIVATE KAMITE_HAS_LAUNCHER=1)
     if(WIN32)
         target_link_libraries(kamite PRIVATE winhttp) # downloads: updates, Add to Steam's art

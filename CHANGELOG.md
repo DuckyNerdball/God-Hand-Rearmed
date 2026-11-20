@@ -4,6 +4,9 @@ Newest first, one line per change; the code comments say how.
 
 ## November 20, 2026
 
+- Mods: a mod is a folder in mods\ (a mod.ini, game files under their disc paths, textures\ ahead of your texture pack, patches\*.pnach), loaded in the Mods tab's order: the lower mod wins a file both replace.
+- Launcher: the Mods tab lists your mods: tick them on or off, move them up or down (the marks by the number, LT / RT, Z / C), see what each one overrides; a new mod comes in on, at the bottom; Install from Zip and Open Mods Folder.
+- Save states remember the mods they were made with: loading one with other mods on says what differs, then loads.
 - Disc images: GHR also plays from a .chd (chdman's compressed format, createdvd or createcd), not only an .iso.
 - Updates keep your GHR.ini: a release ships none, and new options are added to yours when the game starts.
 - A disc image that can't be used says why (the European, Japanese or Korean release, another game, a patched copy).

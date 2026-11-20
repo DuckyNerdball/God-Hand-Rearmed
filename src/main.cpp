@@ -55,6 +55,7 @@
 #include "kamite/game_options.h"
 #include "kamite/body_detail.h"
 #include "kamite/builtin_characters.h"
+#include "kamite/mods.h"
 #include "kamite/character_mods.h"
 #include "kamite/file_layer.h"
 #include "kamite/widescreen.h"
@@ -429,6 +430,8 @@ namespace
         {"game", "cash", "KAMITE_CASH"},
         {"mods", "character", "KAMITE_CHARACTER"},
         {"mods", "costume", "KAMITE_COSTUME"},
+        {"mods", "loadorder", "KAMITE_MOD_ORDER"},
+        {"mods", "disabled", "KAMITE_MODS_DISABLED"},
         {"run", "headless", "KAMITE_HEADLESS"},
         {"run", "timelimitseconds", "KAMITE_TIME_LIMIT_SECONDS"},
         {"run", "dumpontimelimit", "KAMITE_DUMP_ON_TIME_LIMIT"},
@@ -1106,9 +1109,13 @@ int main(int argc, char *argv[])
         }
         KM_INFO(Boot, "ELF loaded, entry 0x" << std::hex << runtime.cpu().pc);
         // PS2X_PNACH=<file>[;<file>...]: PCSX2 patches, patch=0 lines now (patch=1 lines at every vblank). Off by default.
-        if (ps2x::pnach::loadFromEnvironment() != 0u)
+        // The mods (mods/<name>, GHR.ini [Mods] LoadOrder / Disabled): their patches/*.pnach after these, textures/ ahead
+        // of the texture pack.
+        const size_t patchLines = ps2x::pnach::loadFromEnvironment();
+        if (patchLines + kamite::mods::prepare(exeDir) != 0u)
             ps2x::pnach::applyOnce(runtime.memory().getRDRAM());
         PS2Runtime::setIoPaths(paths);
+        kamite::mods::installFiles(); // the mods' game files (before the characters: the Character row's pick wins its files)
         kamite::characters::install(exeDir); // [Mods] Character: a replacement model for Gene
         kamite::hd_textures::install(exeDir); // the texture pack's names, and the port's own full-resolution images
         kamite::builtin_characters::install(exeDir); // Xavier: built from the disc into cache/characters when stale

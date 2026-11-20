@@ -19,8 +19,19 @@
 
 namespace kamite::launcher::platform
 {
-    std::filesystem::path pick(void *window, bool folder)
+    namespace
     {
+        enum class PickKind
+        {
+            Disc,
+            Folder,
+            Zip,
+        };
+    }
+
+    static std::filesystem::path pickWith(void *window, PickKind kind)
+    {
+        const bool folder = kind == PickKind::Folder;
 #if defined(_WIN32)
         const HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         std::filesystem::path result;
@@ -32,6 +43,12 @@ namespace kamite::launcher::platform
             dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | (folder ? FOS_PICKFOLDERS : FOS_FILEMUSTEXIST));
             if (folder)
                 dialog->SetTitle(L"Choose the texture pack folder (the one holding replacements)");
+            else if (kind == PickKind::Zip)
+            {
+                const COMDLG_FILTERSPEC filters[] = {{L"Mod (*.zip)", L"*.zip"}, {L"All files", L"*.*"}};
+                dialog->SetFileTypes(2, filters);
+                dialog->SetTitle(L"Choose a mod's zip to install");
+            }
             else
             {
                 const COMDLG_FILTERSPEC filters[] = {{L"PS2 disc image (*.iso, *.chd)", L"*.iso;*.chd"}, {L"All files", L"*.*"}};
@@ -86,6 +103,10 @@ namespace kamite::launcher::platform
         return {};
 #endif
     }
+
+    std::filesystem::path pick(void *window, bool folder) { return pickWith(window, folder ? PickKind::Folder : PickKind::Disc); }
+
+    std::filesystem::path pickZip(void *window) { return pickWith(window, PickKind::Zip); }
 
     void open(const std::filesystem::path &path)
     {
