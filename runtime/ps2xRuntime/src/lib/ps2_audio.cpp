@@ -566,6 +566,16 @@ void PS2AudioBackend::submitPcm(std::span<const int16_t> samples)
         m_impl->read = (m_impl->read + drop) % Impl::kRingSamples;
         m_impl->queued -= drop;
         m_impl->droppedFrames += drop / 2u;
+        // Always logged (the first few): the game made sound faster than the card played it for long enough that the
+        // rate control (0.5%) could not keep up, and a piece of sound was skipped (issue #1: the vsync lock running the
+        // game 1.5% fast on a variable-refresh display, EeScheduler.cpp lockToHostVsync).
+        static int s_dropsLogged = 0;
+        if (s_dropsLogged < 5 && drop >= 2048u)
+        {
+            ++s_dropsLogged;
+            std::fprintf(stderr, "[audio] the sound queue overflowed: %.0f ms skipped (the game made sound faster than the sound card "
+                                 "played it)%s\n", static_cast<double>(drop) / 96.0, s_dropsLogged == 5 ? "; not logged again" : "");
+        }
         m_impl->fadePosition = 0;
         m_impl->fadeSource = m_impl->lastOutput;
     }

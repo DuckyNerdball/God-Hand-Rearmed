@@ -84,6 +84,18 @@ namespace
     // present 1-3 ms after it raced that pickup (~5 images/s held twice and ~5 never shown); at 6-8 ms each image is
     // shown exactly once (tools/present_stats.py).
     // PS2X_VSYNC_LOCK_STATS=1 logs the phase error every ~5 s.
+    // A lock that keeps pulling the same way never finds the display's phase: the display's refresh follows the game's
+    // own frames (a variable-refresh display, G-Sync / FreeSync, with VSync on: each present moves the next vblank with
+    // it) or it is too far from 59.94 Hz to follow. Every field's step then moved the game's clock, up to 1.5% (0.25 ms a
+    // field), past the 0.5% the sound's rate control absorbs (ps2_audio.cpp): the sound queue ran dry or overflowed about
+    // every 15 s, a 43-128 ms skip in the music (issue #1, a 120 Hz display on an RTX 4070). A lock in step keeps the
+    // phase error near 0 (the steady step is error / 8: a 60.000 Hz display's 0.1% is 0.13 ms of error); a re-anchor
+    // after a hitch is pulled back within ~1 s. So a window of kReleaseFields judged fields (2 s; the first is
+    // convergence) with under 10% of them within kReleaseErrorNs (0.53 ms = a steady 0.4% correction) releases the lock
+    // until the display is measured afresh (another monitor: host_vsync.cpp starts over); the game then runs at 59.94 Hz,
+    // which a VRR display follows. Released after ~4 s: the sound queue's margin (~85 ms) outlasts that much drift. The
+    // kSettleFields after a re-anchor (a vblank later than the catch-up allows: a hitch, a PC below full speed) are not
+    // judged: the lock is still pulling the phase back then.
     std::chrono::steady_clock::time_point lockToHostVsync(std::chrono::steady_clock::time_point target) noexcept
     {
         static int s_lock = -1;
@@ -102,7 +114,13 @@ namespace
             return target;
         std::chrono::steady_clock::time_point lastVblank;
         std::chrono::nanoseconds period{};
+        static bool s_released = false;
         if (!ps2xHostVsync(lastVblank, period))
+        {
+            s_released = false; // measured afresh next (a monitor switch, the measurement starting): lock again
+            return target;
+        }
+        if (s_released)
             return target;
         constexpr int64_t kEmulatedFieldNs = 16683400; // NTSC field (1001/60000 s)
         const int64_t periodNs = period.count();
@@ -114,6 +132,25 @@ namespace
             if (periodNs * n >= kEmulatedFieldNs * 98 / 100 && periodNs * n <= kEmulatedFieldNs * 102 / 100)
                 multiple = n;
         static int64_t s_reportedMultiple = -1;
+        constexpr int kReleaseFields = 120, kSettleFields = 40;
+        constexpr int64_t kReleaseErrorNs = 8 * (kEmulatedFieldNs * 4 / 1000); // the error of a steady 0.4% step: 0.53 ms
+        static int64_t s_windowStepNs = 0, s_lastDeadlineNs = 0; // the deadline returned last (a re-anchor moves off it)
+        static int s_windowFields = 0, s_windowInStep = 0, s_windows = 0, s_settle = 0;
+        static bool s_wasReleased = false;
+        const int64_t targetNs = std::chrono::duration_cast<std::chrono::nanoseconds>(target.time_since_epoch()).count();
+        if (s_lastDeadlineNs != 0 && std::abs(targetNs - s_lastDeadlineNs - kEmulatedFieldNs) > 1000000)
+            s_settle = kSettleFields;
+        if (s_wasReleased)
+        {
+            // measured afresh after a release: judge from the start again, and report the display again
+            s_wasReleased = false;
+            s_reportedMultiple = -1;
+            s_windowStepNs = 0;
+            s_windowFields = 0;
+            s_windowInStep = 0;
+            s_windows = 0;
+            s_settle = 0;
+        }
         if (multiple != s_reportedMultiple)
         {
             s_reportedMultiple = multiple;
@@ -145,6 +182,32 @@ namespace
         else if (error < -periodNs / 2)
             error += periodNs;
         const int64_t step = std::clamp<int64_t>(-error / 8, -kMaxStepNs, kMaxStepNs);
+        if (s_settle > 0)
+            --s_settle;
+        else
+        {
+            s_windowStepNs += step;
+            s_windowInStep += std::abs(error) <= kReleaseErrorNs ? 1 : 0;
+            ++s_windowFields;
+        }
+        if (s_windowFields == kReleaseFields)
+        {
+            const int64_t meanNs = s_windowStepNs / kReleaseFields;
+            if (++s_windows > 1 && s_windowInStep * 10 < kReleaseFields)
+            {
+                s_released = true;
+                s_wasReleased = true;
+                std::fprintf(stderr, "[vsync-lock] released: it kept moving the game's clock %s by %.2f%% (the display %.3f Hz follows "
+                                     "the game's frames, VRR / G-Sync with VSync on, or is too far from 59.94 Hz); free-running at "
+                                     "59.94 Hz\n",
+                             meanNs > 0 ? "later" : "earlier", 100.0 * std::abs(static_cast<double>(meanNs)) / static_cast<double>(kEmulatedFieldNs),
+                             1e9 / static_cast<double>(periodNs));
+            }
+            s_windowStepNs = 0;
+            s_windowFields = 0;
+            s_windowInStep = 0;
+        }
+        s_lastDeadlineNs = targetNs + step;
         if (s_stats)
         {
             static uint64_t fields = 0u;
