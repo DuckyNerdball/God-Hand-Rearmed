@@ -132,8 +132,15 @@ options were on (60 FPS, aspect ratio, character).
   limit) and turns on the update check. It applies to GHR.exe's own code and the runtime only, so switching it doesn't
   rebuild the generated game code. Dev builds check for updates only with `[Launcher] UpdateTest=1`, and then treat any
   release as newer (to test the updater on a copy of a play folder).
-- **The zip:** a `God Hand Rearmed` folder holding GHR.exe, its DLLs, `resources/`, a fresh `GHR.ini` (the players'
-  values, no disc image set), `README.txt`, `LICENSE` and `docs/licenses/`; never saves, logs, caches, `mods/`, tools,
-  symbols or dumps. Characters are built from the player's disc, so none ship. The maintainer's builder packs it and
-  publishes it as a GitHub pre-release named after the tag, with the CHANGELOG lines since the last release as its
-  notes and the zip as its one asset (the updater installs the newest release's `.zip`).
+- **The zip:** `GHR-v<version>-Windows-x64.zip` (RecompLauncher picks a release's file by its system and CPU words), a
+  `God Hand Rearmed` folder holding GHR.exe, its DLLs, `resources/`, `recomplauncher.json`, `README.txt`, `LICENSE` and
+  `docs/licenses/`; never `GHR.ini` or `controls.ini` (an update unpacked over the folder must not replace the player's:
+  GHR.exe writes its built-in defaults on the first start and adds new settings to an existing GHR.ini at every start
+  of a release build), saves, logs, caches, `mods/`, tools, symbols or dumps. Characters are built from the player's
+  disc, so none ship. The maintainer's builder packs it and publishes it as a GitHub release named after the tag (a full
+  release, not a pre-release: RecompLauncher installs only full releases), with the CHANGELOG lines since the last
+  release as its notes and the zip as its one asset (the updater installs the newest release's `.zip`).
+- **RecompLauncher:** `recomplauncher.json` (top level, copied next to GHR.exe by the build) is generated from the
+  settings table and the presets: after changing either, run `python -I tools/recomplauncher/gen_manifest.py`
+  (`--check` says when it's stale). Its setup step is `GHR.exe --prepare --iso <image>` (no window); started by
+  RecompLauncher, the launcher's own update offer stands down.

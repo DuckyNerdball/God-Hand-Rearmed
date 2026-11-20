@@ -581,6 +581,18 @@ namespace
             std::ofstream(iniPath, std::ios::binary) << kamite::kDefaultIni;
             notes.push_back("wrote the default " + iniPath.string());
         }
+#if defined(KAMITE_RELEASE)
+        // A release zip carries no GHR.ini, so an update unpacked over the folder (RecompLauncher's, or by hand) never
+        // replaces the player's: the settings added since theirs was written come from the built-in defaults instead.
+        // Release builds only: a developer build's built-in GHR.ini has the hidden test runs' values (Headless=1).
+        else
+        {
+            kamite::IniFile ini;
+            if (const int added = ini.load(iniPath) ? ini.addMissing(kamite::kDefaultIni) : 0; added > 0)
+                notes.push_back(ini.save() ? std::to_string(added) + " new setting(s) added to " + iniPath.filename().string()
+                                           : "could not add the new settings to " + iniPath.string());
+        }
+#endif
         std::ifstream file(iniPath);
         if (!file)
         {
@@ -646,12 +658,33 @@ namespace
     }
 
     // KAMITE_LOG_FILE=<file>: stdout and stderr appended to that file (one handle, so the lines stay in order).
+#if defined(_WIN32)
+    // One log per run (K, Nov 20; the Recomp Standards): the last run's log becomes <name>.1.log, older ones move up
+    // to <name>.4.log and the oldest goes, so a log holds one session and the last five are kept. Hidden runs (test-case
+    // replays, scripted tests) append as before: a replay batch stays in one file (Replay-Cases.cmd reads it after).
+    void rotateLog(const fs::path &path)
+    {
+        constexpr int kKept = 4;
+        std::error_code error;
+        if (!fs::exists(path, error))
+            return;
+        const auto older = [&](int n)
+        { return path.parent_path() / (path.stem().string() + "." + std::to_string(n) + path.extension().string()); };
+        fs::remove(older(kKept), error);
+        for (int n = kKept - 1; n >= 1; --n)
+            fs::rename(older(n), older(n + 1), error); // a missing one fails quietly
+        fs::rename(path, older(1), error);             // still open elsewhere: this run appends to it instead
+    }
+#endif
+
     void redirectOutput()
     {
 #if defined(_WIN32)
         const char *path = std::getenv("KAMITE_LOG_FILE");
         if (!path || !*path)
             return;
+        if (!envFlag("KAMITE_HEADLESS", false))
+            rotateLog(fs::path(path));
         if (!std::freopen(path, "a", stdout))
             return;
         _dup2(_fileno(stdout), _fileno(stderr));
@@ -735,7 +768,7 @@ namespace
 
     void printUsage()
     {
-        std::cout << "usage: kamite [--iso <path-to-" << kamite::kSerial << ".iso>] [--headless|--window] [--time-limit <seconds>]\n"
+        std::cout << "usage: kamite [--iso|--game <path-to-" << kamite::kSerial << ".iso>] [--headless|--window] [--time-limit <seconds>]\n"
                   << "               [--replay-case <file.case> [--fps60 0|1]] [--test <script>] [--write-settings]\n"
                   << "       kamite --prepare --iso <path>   check the disc image and get it ready, no window (RecompLauncher)\n"
                   << "settings: GHR.ini next to GHR.exe (environment variables of the same name win)\n"
@@ -801,7 +834,7 @@ int main(int argc, char *argv[])
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
-        if ((arg == "--iso" || arg == "-iso") && i + 1 < argc)
+        if ((arg == "--iso" || arg == "-iso" || arg == "--game") && i + 1 < argc)
             iso = argv[++i];
         else if (arg == "--headless")
             setEnv("KAMITE_HEADLESS", "1");

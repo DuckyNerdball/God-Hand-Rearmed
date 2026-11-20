@@ -4,6 +4,11 @@ Newest first, one line per change; the code comments say how.
 
 ## November 20, 2026
 
+- Updates keep your GHR.ini: a release ships none, and new options are added to yours when the game starts.
+- A disc image that can't be used says why (the European, Japanese or Korean release, another game, a patched copy).
+- Logs: one per session (logs\kamite.log), the last five kept.
+- GHR.exe --game <path> works like --iso.
+- RecompLauncher: setup checks for Redump's verified USA disc; started from it, the launcher leaves updates to it.
 - Mods: Xavier comes with the game: GHR makes him from your own disc the first time it starts (again after an update), in every one of Gene's costumes.
 - RecompLauncher support: a recomplauncher.json for its one-click setup, Play and settings page, and GHR.exe --prepare (a windowless disc check).
 - Moveset Presets: with a keyboard at 4:3 the style letters sit over the level meter again (they jumped to the right edge).
