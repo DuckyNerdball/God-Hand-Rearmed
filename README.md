@@ -326,6 +326,10 @@ Every option, with the same help text you'll see in the launcher and in game.
 <details>
 <summary><b>Mods</b></summary>
 
+**Character**
+
+- **Character:** Who you play as. Currently, other characters use Gene's moves and his God Hand.
+
 **Texture Packs**
 
 - **Replacement Textures:** HD texture packs in PCSX2's format.

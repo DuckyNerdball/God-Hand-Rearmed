@@ -9,9 +9,11 @@
     python -I build.py configure [-DOPTION=...]       CMake configure (Ninja, RelWithDebInfo, no LTCG)
     python -I build.py build [target]                 compile GHR.exe (configures first if needed)
     python -I build.py all [--iso X]                  generate -> configure -> build
-    python -I build.py characters [--iso X] [--texture-pack D] [id ...]  playable characters (assets/characters) built
-                                                      from your disc into build/port/bin/mods/characters (D: the HD
-                                                      pack folder, for the painted textures' full-resolution versions)
+    python -I build.py characters [--iso X] [--texture-pack D] [id ...]  the Python build of the playable characters
+                                                      (assets/characters) into build/port/bin/mods/characters (D: the HD
+                                                      pack folder). Not needed to play: GHR makes them from your disc at
+                                                      boot (src/kamite/builtin_characters.h) and ignores that folder; a
+                                                      check of the C++ build (the same bytes)
     python -I build.py boot [--seconds N] [--iso X]   one hidden, time-capped run; output in build/port/bin/logs
     python -I build.py run [args]                     a normal run in a window (arguments go to GHR.exe)
     python -I build.py status                         what exists so far

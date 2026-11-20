@@ -3497,7 +3497,7 @@ namespace kamite::launcher
                 const bool allowed = settings::parentAllows(state.ini, s);
                 if (!allowed && !s.greyed)
                     continue;
-                // Character only with a character besides Gene (built from the disc; none in a release yet), Costume only
+                // Character only with a character besides Gene (Xavier, built from the disc at boot, ships), Costume only
                 // for a character with costumes.
                 if (std::strcmp(s.id, "Character") == 0 && !otherCharacters(state))
                     continue;

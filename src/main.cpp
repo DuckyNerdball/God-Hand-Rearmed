@@ -54,6 +54,7 @@
 #include "kamite/test_mode.h"
 #include "kamite/game_options.h"
 #include "kamite/body_detail.h"
+#include "kamite/builtin_characters.h"
 #include "kamite/character_mods.h"
 #include "kamite/file_layer.h"
 #include "kamite/widescreen.h"
@@ -1038,6 +1039,7 @@ int main(int argc, char *argv[])
         PS2Runtime::setIoPaths(paths);
         kamite::characters::install(exeDir); // [Mods] Character: a replacement model for Gene
         kamite::hd_textures::install(exeDir); // the texture pack's names, and the port's own full-resolution images
+        kamite::builtin_characters::install(exeDir); // Xavier: built from the disc into cache/characters when stale
 
         runtime.setMissingFunctionPolicy(missingFunctionPolicy());
         KM_INFO(Boot, "missing-function policy: " << (std::getenv("KAMITE_MISSING_FUNCTION") ? std::getenv("KAMITE_MISSING_FUNCTION") : "stop")

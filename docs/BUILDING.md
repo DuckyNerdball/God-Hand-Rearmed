@@ -27,11 +27,10 @@ python -I build.py modules
 python -I build.py vu
 python -I build.py configure -DKAMITE_PCSX2_GS=ON -DKAMITE_SDL_INPUT=ON
 python -I build.py build
-python -I build.py characters
 ```
 
 - `generate` and the SNR2 steps turn the code from your disc into C++ and take a while; `vu` compiles the PS2's VU1
-  microcode ahead of time; `characters` builds the playable characters from your disc.
+  microcode ahead of time. The playable characters need no step: the game makes them from your disc when it starts.
 - `build` downloads a few libraries the first time and then compiles everything (expect 10+ minutes).
 
 ### Play
@@ -63,9 +62,13 @@ In game: **F1** controls, **F2** the dev menu (display, graphics, gameplay, came
 
 A character is a folder `mods/characters/<id>/` next to the game with the disc files it replaces (`pl/pl00.dat` is
 Gene's model) and, optionally, `textures/` with full-resolution replacements in PCSX2's format. The port writes them
-over the game's files as the disc is read, so the game itself is never patched. Xavier is the example mod:
-`assets/characters/xavier/` is its source; `tools/models/` has the model and texture writers for the game's formats and the Blender pipeline
-that put Xavier onto Gene's skeleton (`tools/models/xavier/README.md`).
+over the game's files as the disc is read, so the game itself is never patched.
+
+Xavier is built in: `assets/characters/xavier/` (his own nodes, textures and painted layers, no game data) ships as
+`resources/characters/xavier/`, and the game merges it into Gene's files from your disc when it starts, keeping the
+result in `cache/characters/xavier/` until something changes (`src/kamite/builtin_characters.h`; `python -I build.py
+characters` is the same merge in Python). `tools/models/` has the model and texture writers for the game's formats and
+the Blender pipeline that put Xavier onto Gene's skeleton (`tools/models/xavier/README.md`).
 
 ### HD textures
 

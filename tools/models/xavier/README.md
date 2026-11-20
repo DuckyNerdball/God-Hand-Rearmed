@@ -51,5 +51,6 @@ environment variable, for trying variants.
 
 `arm/pl0004_fur.png` and `arm/pl0004a_fur.png` are K's fur, painted where the gauntlet arm leaves the stump; the build
 lays them over Gene's arm skin (character.json `overlay`). The game's skeleton, motions, gauntlet arm and the merge
-into pl00.dat happen at build time from your disc (`tools/models/build_characters.py`), so nothing of the game is in
-the repository.
+into pl00.dat happen when GHR starts, from your disc (`src/kamite/builtin_characters.h`: the folder ships as
+resources/characters/xavier; `tools/models/build_characters.py` is the same merge in Python), so nothing of the game
+is in the repository or a release.
