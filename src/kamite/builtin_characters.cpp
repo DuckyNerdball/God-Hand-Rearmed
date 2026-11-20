@@ -139,6 +139,10 @@ namespace kamite::builtin_characters
         // changes, its own files, the pack images its painted textures start from (by name, size and date).
         bool gather(Character &c, std::string &error)
         {
+            // The disc's path table and archive (nothing else has opened them this early: disc_files::find is empty
+            // until open() has run; K, Nov 20: "pl/pl00.dat could not be read from the disc", Gene instead).
+            if (!disc_files::open())
+                return error = "the disc image has no file archive / path table", false;
             Bytes json;
             if (!readFile(c.folder / "character.json", json))
                 return error = "no character.json", false;
