@@ -2,6 +2,10 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 20, 2026
+
+- Performance: the native drawing of characters and scenery works from the first 3D frame (it used to start only after a while).
+
 ## November 19, 2026
 
 - 60 FPS: the title screen runs at the PS2's speed (Press Start's blink, the menus' glows, slides and fades, the boot logos).
