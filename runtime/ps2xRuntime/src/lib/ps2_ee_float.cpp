@@ -129,12 +129,14 @@ namespace ps2ee
         }
 
         // The last quotients and roots by mantissa (direct-mapped; one word per entry, relaxed atomics). 2^kMemoBits
-        // entries each: 1024 (GT3's) hit 56% of God Hand's quotients and 46% of its roots in K's replays of 5d766f0
-        // (~3,300 divisions a frame at 60 reach the memo; a miss costs ~100 ns). A quotient's slot holds x's low
+        // entries each: 1024 (GT3's) hit 56% of God Hand's quotients and 46% of its roots in K's replays of 5d766f0;
+        // 16K raised that to 62% / 54% but the game thread came out busier (2ce7d39, L2 pressure), so 1024 again.
+        // Since the default rules use the host's divider (ps2_runtime_macros.h), only special operands and
+        // PS2_EXACT_EE_FLOAT builds get here. A quotient's slot holds x's low
         // kMemoBits bits (slot ^ hash(y) gives them back), its key the rest of x, y and a valid bit: 1 + (23 -
         // kMemoBits) + 23 bits, shifted past the 23-bit result, so kMemoBits >= 6. A root's key is the whole 24-bit
         // input + the valid bit at 40 (the slot is only a hash).
-        constexpr uint32_t kMemoBits = 14, kMemoSlots = 1u << kMemoBits;
+        constexpr uint32_t kMemoBits = 10, kMemoSlots = 1u << kMemoBits;
         static_assert(kMemoBits >= 6 && kMemoBits <= 22);
         class Memo
         {
@@ -154,10 +156,6 @@ namespace ps2ee
             alignas(64) std::atomic<uint64_t> m_entries[kMemoSlots] = {};
         };
         constinit Memo g_quotients, g_roots;
-        // Counts for memoStats (diagnostic): a relaxed load and store, not a locked increment (a lost count between
-        // threads is fine; a lock would double a hit's cost).
-        std::atomic<uint64_t> g_quotientLookups{0}, g_quotientHits{0}, g_rootLookups{0}, g_rootHits{0};
-        inline void bump(std::atomic<uint64_t> &n) { n.store(n.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed); }
 
         uint32_t quotient(uint32_t x, uint32_t y) // 24-bit mantissas
         {
@@ -165,9 +163,8 @@ namespace ps2ee
             const uint32_t slot = (x23 ^ (y23 * 0x9E3779B1u >> (32 - kMemoBits))) & (kMemoSlots - 1);
             const uint64_t key = uint64_t(1) << (46 - kMemoBits) | uint64_t(x23 >> kMemoBits) << 23 | y23;
             uint32_t r;
-            bump(g_quotientLookups);
             if (g_quotients.find(slot, key, r))
-                return bump(g_quotientHits), r | 0x800000u;
+                return r | 0x800000u;
             // The recurrence is the chopped quotient where it cannot end above it: an exact one, and for x >= y one
             // whose dropped half (the 25th digit) is under 1/2.
             const bool big = x >= y;
@@ -182,9 +179,8 @@ namespace ps2ee
             const uint32_t k = (x & 0x7FFFFFu) | uint32_t(odd) << 23, slot = (k * 0x9E3779B1u) >> (32 - kMemoBits);
             const uint64_t key = uint64_t(1) << 40 | k;
             uint32_t r;
-            bump(g_rootLookups);
             if (g_roots.find(slot, key, r))
-                return bump(g_rootHits), r | 0x800000u;
+                return r | 0x800000u;
             // The chopped root wherever the exact root's 25th bit is 0.
             const uint64_t n = uint64_t(x) << (27 + int(odd));
             uint64_t g = uint64_t(std::sqrt(double(n)));
@@ -253,12 +249,6 @@ namespace ps2ee
         if (e > 255)
             return sign | kMax;
         return sign | (uint32_t(e) << 23) | (quotient(x, y) & 0x7FFFFFu);
-    }
-
-    MemoStats memoStats()
-    {
-        return {g_quotientLookups.load(std::memory_order_relaxed), g_quotientHits.load(std::memory_order_relaxed),
-                g_rootLookups.load(std::memory_order_relaxed), g_rootHits.load(std::memory_order_relaxed)};
     }
 
     uint32_t sqrt(uint32_t a)
