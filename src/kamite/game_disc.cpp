@@ -21,12 +21,6 @@ namespace kamite
             return image.read(static_cast<uint64_t>(entry.lba) * PS2CdImage::kSectorSize, out.data(), out.size());
         }
 
-        std::string lower(std::string s)
-        {
-            std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            return s;
-        }
-
         bool cnfBootsGame(const std::vector<uint8_t> &cnf)
         {
             const std::string text(cnf.begin(), cnf.end());
@@ -132,7 +126,7 @@ namespace kamite
                 continue;
             for (const auto &entry : std::filesystem::directory_iterator(root, error))
             {
-                if (entry.is_regular_file(error) && lower(entry.path().extension().string()) == ".iso" && bootsGame(entry.path()))
+                if (entry.is_regular_file(error) && PS2DiscImageFile::hasImageExtension(entry.path()) && bootsGame(entry.path()))
                     return entry.path();
             }
         }
@@ -145,8 +139,8 @@ namespace kamite
         PS2CdImage &image = PS2CdImage::instance();
         if (!image.open(imagePath))
         {
-            result.error = "This file can't be read as a disc image (.iso).";
-            KM_ERROR(Boot, "cannot mount " << imagePath.string() << " as an ISO9660 disc image");
+            result.error = "This file can't be read as a disc image (.iso or .chd).";
+            KM_ERROR(Boot, "cannot mount " << imagePath.string() << " as an ISO9660 disc image (.iso or .chd)");
             return result;
         }
 

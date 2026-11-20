@@ -768,7 +768,7 @@ namespace
 
     void printUsage()
     {
-        std::cout << "usage: kamite [--iso|--game <path-to-" << kamite::kSerial << ".iso>] [--headless|--window] [--time-limit <seconds>]\n"
+        std::cout << "usage: kamite [--iso|--game <path-to-" << kamite::kSerial << ".iso|.chd>] [--headless|--window] [--time-limit <seconds>]\n"
                   << "               [--replay-case <file.case> [--fps60 0|1]] [--test <script>] [--write-settings]\n"
                   << "       kamite --prepare --iso <path>   check the disc image and get it ready, no window (RecompLauncher)\n"
                   << "settings: GHR.ini next to GHR.exe (environment variables of the same name win)\n"

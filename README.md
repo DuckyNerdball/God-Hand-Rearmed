@@ -22,7 +22,7 @@ screen, with as much or as little of our own nonsense as you want.
     * The launcher updates the game in place and Windows won't let it write there.
 3. Run **GHR.exe**. 
     * Windows SmartScreen may complain about an unknown publisher: **More info > Run anyway**.
-4. Point the launcher at your disc image (.iso) once, and it checks it for you.
+4. Point the launcher at your disc image (.iso or .chd) once, and it checks it for you.
 5. Pick a preset and hit "**Play**"! 
     * Beat thugs™, demons™, women™!
 

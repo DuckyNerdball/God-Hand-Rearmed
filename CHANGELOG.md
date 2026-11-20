@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 20, 2026
 
+- Disc images: GHR also plays from a .chd (chdman's compressed format, createdvd or createcd), not only an .iso.
 - Updates keep your GHR.ini: a release ships none, and new options are added to yours when the game starts.
 - A disc image that can't be used says why (the European, Japanese or Korean release, another game, a patched copy).
 - Logs: one per session (logs\kamite.log), the last five kept.

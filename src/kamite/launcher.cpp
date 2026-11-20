@@ -2520,7 +2520,7 @@ namespace kamite::launcher
             pushSize(state, 22.0f);
             ImGui::BeginChild("install", ImVec2(width, 0.0f), ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_Borders |
                                                                   ImGuiChildFlags_AlwaysUseWindowPadding);
-            ImGui::TextWrapped("The port plays from your own disc image (USA, SLUS-21503, the .iso of the disc). "
+            ImGui::TextWrapped("The port plays from your own disc image (USA, SLUS-21503: an .iso, or a .chd of it). "
                                "Nothing is copied: the game reads it while you play, so keep it where it is.");
             ImGui::Spacing();
             if (ImGui::Button("Choose disc image..."))

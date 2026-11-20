@@ -34,7 +34,7 @@ namespace kamite::launcher::platform
                 dialog->SetTitle(L"Choose the texture pack folder (the one holding replacements)");
             else
             {
-                const COMDLG_FILTERSPEC filters[] = {{L"PS2 disc image (*.iso)", L"*.iso"}, {L"All files", L"*.*"}};
+                const COMDLG_FILTERSPEC filters[] = {{L"PS2 disc image (*.iso, *.chd)", L"*.iso;*.chd"}, {L"All files", L"*.*"}};
                 dialog->SetFileTypes(2, filters);
                 dialog->SetTitle(L"Choose your disc image (USA, SLUS-21503)");
             }
