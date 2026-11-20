@@ -8,6 +8,12 @@
 
 namespace ps2ee
 {
+    // When a's mantissa's low 16 bits are 0 (a multiplicand with at most 8 significant bits: 1.0, 0.5, 3.0, 100.0 ...)
+    // the lost carry depends on b's low 16 bits alone: 65536 bits, constant data.
+    const uint64_t kRoundCarryBits[1024] = {
+#include "ps2_ee_float_carries.inc"
+    };
+
     namespace
     {
         // The EE's multiplier as measured: radix-4 Booth rows of a's mantissa by b's (a digit of -0 is a zero row; a
@@ -68,26 +74,12 @@ namespace ps2ee
             return uint32_t(((s & 0xFFFF) + (c & 0xFFFF)) >> 16);
         }
 
-        // When x's low 16 bits are 0 (a multiplicand with at most 8 significant bits: 1.0, 0.5, 3.0, 100.0 ...) the
-        // carry depends on y's low 16 bits alone: one table of 65536 bits, built at start (~2 ms).
-        struct RoundMultiplicandCarries
-        {
-            uint64_t bits[65536 / 64] = {};
-            RoundMultiplicandCarries()
-            {
-                for (uint32_t y = 0; y < 65536; ++y)
-                    bits[y >> 6] |= uint64_t(lowCarry(0x800000u, 0x800000u | y)) << (y & 63);
-            }
-            uint32_t operator[](uint32_t y) const { return uint32_t(bits[y >> 6] >> (y & 63)) & 1; }
-        };
-        const RoundMultiplicandCarries g_roundCarries;
-
         uint64_t boothTreeProduct(uint64_t x, uint64_t y)
         {
             const uint32_t x32 = uint32_t(x), y32 = uint32_t(y);
             // y's low 16 bits 0 (a round multiplier): every low row is 0, nothing is lost.
             const uint32_t k = (y32 & 0xFFFF) == 0 ? 0u
-                               : (x32 & 0xFFFF) == 0 ? g_roundCarries[y32 & 0xFFFF]
+                               : (x32 & 0xFFFF) == 0 ? roundCarry(y32)
                                                      : lowCarry(x32, y32);
             constexpr uint64_t kMask = (uint64_t(1) << 48) - 1;
             return (((x * y) & ~uint64_t(0xFFFF)) - (uint64_t(k) << 16)) & kMask;
@@ -255,17 +247,5 @@ namespace ps2ee
         if (!e)
             return 0u;
         return ((e + 127) >> 1) << 23 | (root((a & 0x7FFFFFu) | 0x800000u, !(e & 1)) & 0x7FFFFFu);
-    }
-
-    void addLanes(const uint32_t *a, const uint32_t *b, uint32_t *r)
-    {
-        for (int i = 0; i < 4; ++i)
-            r[i] = add(a[i], b[i]);
-    }
-
-    void mulLanes(const uint32_t *a, const uint32_t *b, uint32_t *r)
-    {
-        for (int i = 0; i < 4; ++i)
-            r[i] = mul(a[i], b[i]);
     }
 } // namespace ps2ee

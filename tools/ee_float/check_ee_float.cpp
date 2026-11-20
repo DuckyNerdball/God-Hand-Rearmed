@@ -1,6 +1,7 @@
 // Checks runtime/ps2xRuntime's exact EE float maths (ps2_ee_float.h) against GT3 Revisited's pinned results: their
 // platform hash over 200,000 random operand triples (tests/test_ee_float.cpp, ee_float_platform_hash h[0..2]) and their
-// known PS2 results (the multiplier one below the chopped product, the divider one above). Any host, any compiler,
+// known PS2 results (the multiplier one below the chopped product, the divider one above), and the multiplier against
+// their full 13-row tree (every mantissa for round multiplicands: the carry table). Any host, any compiler,
 // from the repo root (one line):
 //   g++ -std=c++20 -O2 -Iruntime/ps2xRuntime/include tools/ee_float/check_ee_float.cpp
 //       runtime/ps2xRuntime/src/lib/ps2_ee_float.cpp -o check_ee_float && ./check_ee_float
@@ -31,6 +32,59 @@ namespace
             return (r & 0x80000000u) | (near & 0x7FFFFFFFu) | (rng() & 1);
         }
     }
+    // GT3 Revisited's multiplier as they wrote it: all 13 radix-4 Booth rows, 48 bits, four 4:2 compressors and a 3:2,
+    // the carry out of the low 16 columns lost. The port's faster tree and its carry table must agree with it.
+    void fullAdd(uint64_t a, uint64_t b, uint64_t c, uint64_t &s, uint64_t &k)
+    {
+        s = a ^ b ^ c;
+        k = ((a & b) | (a & c) | (b & c)) << 1;
+    }
+    void compress42(uint64_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t &s, uint64_t &k)
+    {
+        uint64_t s1, c1;
+        fullAdd(b, c, d, s1, c1);
+        fullAdd(s1, a, c1, s, k);
+    }
+    uint32_t referenceMul(uint32_t a, uint32_t b)
+    {
+        const uint32_t sign = (a ^ b) & 0x80000000u, ea = (a >> 23) & 0xFFu, eb = (b >> 23) & 0xFFu;
+        if (!ea || !eb)
+            return sign;
+        const uint64_t x = (a & 0x7FFFFFu) | 0x800000u, y = (b & 0x7FFFFFu) | 0x800000u;
+        uint64_t p = x * y;
+        if ((p & ((uint64_t(1) << (23 + (p >> 47))) - 1)) < (uint64_t(1) << 16))
+        {
+            uint64_t r[13], plusOne = 0;
+            for (int i = 0; i < 13; ++i)
+            {
+                const int lo = i ? int((y >> (2 * i - 1)) & 1) : 0;
+                const int d = -2 * int((y >> (2 * i + 1)) & 1) + int((y >> (2 * i)) & 1) + lo;
+                const uint64_t m = x * uint64_t(d < 0 ? -d : d);
+                r[i] = (d < 0 ? ~m : m) << (2 * i);
+                if (d < 0)
+                    plusOne |= uint64_t(1) << (2 * i);
+            }
+            for (int i = 0; i < 12; ++i)
+                r[i + 1] |= plusOne & (uint64_t(1) << (2 * i));
+            uint64_t s0, c0, s1, c1, s2, c2, s3, c3, s4, c4, s, c;
+            compress42(r[0], r[1], r[2], r[3], s0, c0);
+            compress42(r[4], r[5], r[6], r[7], s1, c1);
+            compress42(r[8], r[9], r[10], r[11], s2, c2);
+            compress42(s0, c0, s1, c1, s3, c3);
+            fullAdd(s2, c2, r[12], s4, c4);
+            compress42(s3, c3, s4, c4, s, c);
+            constexpr uint64_t kMask = (uint64_t(1) << 48) - 1;
+            p = ((((s & kMask) >> 16) + ((c & kMask) >> 16)) << 16) & kMask;
+        }
+        const uint32_t top = uint32_t(p >> 47) & 1;
+        const int32_t e = int32_t(ea + eb) - 127 + int32_t(top);
+        if (e <= 0)
+            return sign;
+        if (e > 255)
+            return sign | 0x7FFFFFFFu;
+        return sign | (uint32_t(e) << 23) | (uint32_t(p >> (23 + top)) & 0x7FFFFFu);
+    }
+
     int g_failures = 0;
     void check(bool ok, const char *what)
     {
@@ -80,6 +134,18 @@ int main()
         check(ps2ee::sqrt(t[0]) == t[1] && ps2ee::sqrt(t[0] | kSign) == t[1] &&
                   rsqrt(0x3F800000u, t[0]) == div(0x3F800000u, t[1]),
               "known PS2 root");
+    // The multiplier against the reference tree: every b mantissa for round a's (the carry table), random pairs.
+    long long mulMismatches = 0;
+    for (uint32_t a : {0x3F800000u, 0x3FC00000u, 0x40400000u, 0x42C80000u, 0xBF400000u, 0x3F810000u})
+        for (uint32_t m = 0; m < 0x800000u; ++m)
+            mulMismatches += mul(a, 0x3F800000u | m) != referenceMul(a, 0x3F800000u | m);
+    for (int i = 0; i < 4000000; ++i)
+    {
+        const uint32_t a = operand(rng, rng()), b = operand(rng, a);
+        mulMismatches += mul(a, b) != referenceMul(a, b);
+    }
+    check(mulMismatches == 0, "the multiplier vs the full 13-row tree");
+
     check(div(0xC0000000u, 0u) == 0xFFFFFFFFu && div(0u, kSign) == 0xFFFFFFFFu && div(kSign, 0x3F800000u) == kSign,
           "division by zero / of zero");
 

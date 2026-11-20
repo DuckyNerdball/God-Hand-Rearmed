@@ -143,38 +143,112 @@ static inline uint32_t ps2_plzcw32(uint32_t x)
 
 // EE FPU and VU0 macro arithmetic: the PS2's own rules, bit for bit (ps2_ee_float.h, from GT3 Revisited): add / sub
 // chop after the adder's one-guard-bit alignment, the multiplier's and divider's last-place quirks, no denormals,
-// exponent 255 an ordinary exponent (+-0x7FFFFFFF the largest values). The registers keep floats; these work on their
-// bits, in integer code (the same results on every host, whatever the MXCSR). VU1 keeps its own maths (rendering only).
-PS2_FORCEINLINE float ps2FpuAdd(float a, float b) { return ps2ee::fl(ps2ee::add(ps2ee::bits(a), ps2ee::bits(b))); }
-PS2_FORCEINLINE float ps2FpuSub(float a, float b) { return ps2ee::fl(ps2ee::sub(ps2ee::bits(a), ps2ee::bits(b))); }
+// exponent 255 an ordinary exponent (+-0x7FFFFFFF the largest values). The registers keep floats. VU1 keeps its own
+// maths (rendering only). add / sub / mul (+ madd / msub, VU0's too) run on the host's floats under the game thread's
+// chop + DAZ / FTZ (main.cpp applyEeFloatingPointMode: guest code runs on that thread only), bit for bit ps2ee's, and
+// fall back to ps2ee (integer code, the same on every host) where the host can't be exact: add aligns the smaller
+// operand to the larger's half ulp first ((y + S) - S, S = +-2^(ex-1)); mul is the chopped host product unless its
+// bits 16-22 are 0 (the multiplier's lost carry may show; a round a's is taken from a table).
+PS2_FORCEINLINE float ps2FpuAddHost(float a, float b, bool &inexact)
+{
+    const uint32_t ia = ps2ee::bits(a), ib = ps2ee::bits(b);
+    const uint32_t ma = ia & 0x7FFFFFFFu, mb = ib & 0x7FFFFFFFu;
+    const bool swap = mb > ma;
+    const uint32_t x = swap ? ib : ia, y = swap ? ia : ib; // |x| >= |y|
+    const uint32_t ex = (swap ? mb : ma) >> 23, ey = (swap ? ma : mb) >> 23;
+    float yf = ps2ee::fl(y);
+    if (ex - ey >= 2u)
+    {
+        const float half = ps2ee::fl((y & 0x80000000u) | ((ex - 1u) << 23));
+        yf = (yf + half) - half;
+    }
+    const float r = ps2ee::fl(x) + yf;
+    inexact = (ps2ee::bits(r) & 0x7FFFFFFFu) > 0x7F7FFFFEu; // past FLT_MAX: an overflow or an exponent-255 operand
+    return r;
+}
+PS2_FORCEINLINE float ps2FpuMulHost(float a, float b, bool &inexact)
+{
+    const float r = a * b;
+    const uint32_t ia = ps2ee::bits(a), ib = ps2ee::bits(b), rb = ps2ee::bits(r);
+    const uint32_t low = ((ia & 0x7FFFFFu) | 0x800000u) * ((ib & 0x7FFFFFu) | 0x800000u); // product's low 32 bits
+    const bool carry = (low & 0x7F0000u) == 0u && (ia & 0x7F800000u) != 0u && (ib & 0x7F800000u) != 0u &&
+                       (ib & 0xFFFFu) != 0u; // (not with a 0 operand, nor a round b: x * 1.0 is the chopped product)
+    inexact = (rb & 0x7FFFFFFFu) > 0x7F7FFFFEu;
+    if (carry && !inexact)
+    {
+        // A round a (1.0 * x, 0.5 * x, 3.0 * x ...): the lost carry by table, the product one lower in its last place
+        // where its bits 16-22 (23 with the top bit) are 0. Anything else, or a result near the smallest normal, goes
+        // to ps2ee.
+        if ((ia & 0xFFFFu) == 0u && (rb & 0x7F000000u) != 0u)
+        {
+            const uint64_t p = uint64_t((ia & 0x7FFFFFu) | 0x800000u) * uint64_t((ib & 0x7FFFFFu) | 0x800000u);
+            const uint32_t hi = uint32_t(p >> 47);
+            if ((p & ((uint64_t(1) << (23 + hi)) - 1)) < (uint64_t(1) << 16))
+                return ps2ee::fl(rb - ps2ee::roundCarry(ib));
+        }
+        else
+            inexact = true;
+    }
+    return r;
+}
+PS2_FORCEINLINE float ps2FpuAdd(float a, float b)
+{
+    bool inexact;
+    const float r = ps2FpuAddHost(a, b, inexact);
+    return inexact ? ps2ee::fl(ps2ee::add(ps2ee::bits(a), ps2ee::bits(b))) : r;
+}
+PS2_FORCEINLINE float ps2FpuSub(float a, float b) { return ps2FpuAdd(a, -b); }
 // a = fs, b = ft: the multiplier's quirk is not commutative.
-PS2_FORCEINLINE float ps2FpuMul(float a, float b) { return ps2ee::fl(ps2ee::mul(ps2ee::bits(a), ps2ee::bits(b))); }
+PS2_FORCEINLINE float ps2FpuMul(float a, float b)
+{
+    bool inexact;
+    const float r = ps2FpuMulHost(a, b, inexact);
+    return inexact ? ps2ee::fl(ps2ee::mul(ps2ee::bits(a), ps2ee::bits(b))) : r;
+}
 PS2_FORCEINLINE float ps2FpuMadd(float acc, float a, float b)
 {
-    return ps2ee::fl(ps2ee::madd(ps2ee::bits(acc), ps2ee::bits(a), ps2ee::bits(b)));
+    bool mulInexact, addInexact;
+    const float r = ps2FpuAddHost(acc, ps2FpuMulHost(a, b, mulInexact), addInexact);
+    return (mulInexact || addInexact) ? ps2ee::fl(ps2ee::madd(ps2ee::bits(acc), ps2ee::bits(a), ps2ee::bits(b))) : r;
 }
 PS2_FORCEINLINE float ps2FpuMsub(float acc, float a, float b)
 {
-    return ps2ee::fl(ps2ee::msub(ps2ee::bits(acc), ps2ee::bits(a), ps2ee::bits(b)));
+    bool mulInexact, addInexact;
+    const float r = ps2FpuAddHost(acc, -ps2FpuMulHost(a, b, mulInexact), addInexact);
+    return (mulInexact || addInexact) ? ps2ee::fl(ps2ee::msub(ps2ee::bits(acc), ps2ee::bits(a), ps2ee::bits(b))) : r;
 }
 PS2_FORCEINLINE float ps2FpuMax(float a, float b) { return ps2ee::fl(ps2ee::maxOf(ps2ee::bits(a), ps2ee::bits(b))); }
 PS2_FORCEINLINE float ps2FpuMin(float a, float b) { return ps2ee::fl(ps2ee::minOf(ps2ee::bits(a), ps2ee::bits(b))); }
 PS2_FORCEINLINE float ps2FpuFromWord(int32_t v) { return ps2ee::fl(ps2ee::fromInt(v)); }
 
 // VU0 macro ops: the same rules on each lane. Fast path on the host's SSE floats under the game thread's chop +
-// DAZ / FTZ (main.cpp applyEeFloatingPointMode), bit for bit the same as ps2ee: add / sub align the smaller operand to
-// the larger's half ulp first ((y + S) - S with S = +-2^(ex-1), exact under chop), mul is the chopped host product.
-// Lanes the host can't do exactly go to ps2ee out of line: an exponent-255 operand, a result at or past FLT_MAX, and
-// a product whose bits below its last place are < 2^16 (the multiplier's lost carry may show; ~1 in 128 products,
-// most products of round numbers such as 1.0 * x).
-PS2_FORCEINLINE __m128 ps2VuExactLanes(__m128 a, __m128 b,
-                                       void (*lanes)(const uint32_t *, const uint32_t *, uint32_t *))
+// DAZ / FTZ, bit for bit the same as ps2ee: add / sub align the smaller operand to the larger's half ulp first
+// ((y + S) - S with S = +-2^(ex-1), exact under chop), mul is the chopped host product. A vector with a lane the host
+// can't do exactly (an exponent-255 operand, a result at or past FLT_MAX, a product whose bits below its last place
+// are < 2^16: the multiplier's lost carry may show; most products of round numbers such as 1.0 * x) is redone lane by
+// lane with the scalar ops above (each exact, ps2ee only for the lanes that need it), out of line.
+#if defined(_MSC_VER)
+#define PS2_NOINLINE __declspec(noinline)
+#else
+#define PS2_NOINLINE __attribute__((noinline))
+#endif
+enum class Ps2VuLaneOp
 {
-    alignas(16) uint32_t x[4], y[4], r[4];
-    _mm_store_si128(reinterpret_cast<__m128i *>(x), _mm_castps_si128(a));
-    _mm_store_si128(reinterpret_cast<__m128i *>(y), _mm_castps_si128(b));
-    lanes(x, y, r);
-    return _mm_castsi128_ps(_mm_load_si128(reinterpret_cast<const __m128i *>(r)));
+    Add,
+    Madd,
+    Msub
+};
+PS2_NOINLINE inline __m128 ps2VuExactLanes(Ps2VuLaneOp op, __m128 acc, __m128 a, __m128 b)
+{
+    alignas(16) float z[4], x[4], y[4], r[4];
+    _mm_store_ps(z, acc);
+    _mm_store_ps(x, a);
+    _mm_store_ps(y, b);
+    for (int i = 0; i < 4; ++i)
+        r[i] = op == Ps2VuLaneOp::Add    ? ps2FpuAdd(x[i], y[i])
+               : op == Ps2VuLaneOp::Madd ? ps2FpuMadd(z[i], x[i], y[i])
+                                         : ps2FpuMsub(z[i], x[i], y[i]);
+    return _mm_load_ps(r);
 }
 
 // The host result r is exact unless a lane's magnitude is at or past FLT_MAX (an overflow chopped to FLT_MAX, or an
@@ -185,7 +259,9 @@ PS2_FORCEINLINE bool ps2VuPastMax(__m128 r)
     return _mm_movemask_ps(_mm_castsi128_ps(_mm_cmpgt_epi32(magnitude, _mm_set1_epi32(0x7F7FFFFE)))) != 0;
 }
 
-PS2_FORCEINLINE __m128 ps2VuAdd(__m128 a, __m128 b)
+// The host sum, exact unless a lane comes out at or past FLT_MAX (*inexact set): an overflow chopped to FLT_MAX, or
+// an exponent-255 operand (the host's Inf / NaN carries through to the result).
+PS2_FORCEINLINE __m128 ps2VuAddHost(__m128 a, __m128 b, bool &inexact)
 {
     const __m128i ia = _mm_castps_si128(a), ib = _mm_castps_si128(b), magMask = _mm_set1_epi32(0x7FFFFFFF);
     const __m128i ma = _mm_and_si128(ia, magMask), mb = _mm_and_si128(ib, magMask);
@@ -193,14 +269,21 @@ PS2_FORCEINLINE __m128 ps2VuAdd(__m128 a, __m128 b)
     const __m128i x = _mm_blendv_epi8(ia, ib, swap), y = _mm_blendv_epi8(ib, ia, swap); // |x| >= |y|
     const __m128i ex = _mm_srli_epi32(_mm_max_epi32(ma, mb), 23), ey = _mm_srli_epi32(_mm_min_epi32(ma, mb), 23);
     const __m128i align = _mm_cmpgt_epi32(_mm_sub_epi32(ex, ey), _mm_set1_epi32(1));
-    const __m128i halfExp = _mm_max_epi32(_mm_sub_epi32(ex, _mm_set1_epi32(1)), _mm_set1_epi32(1));
-    const __m128i half = _mm_or_si128(_mm_and_si128(y, _mm_set1_epi32(int(0x80000000u))), _mm_slli_epi32(halfExp, 23));
+    // +-2^(ex-1) with y's sign (unused where align is off, so ex <= 1 needs no care)
+    const __m128i half = _mm_or_si128(_mm_and_si128(y, _mm_set1_epi32(int(0x80000000u))),
+                                      _mm_slli_epi32(_mm_sub_epi32(ex, _mm_set1_epi32(1)), 23));
     const __m128 yf = _mm_castsi128_ps(y), hf = _mm_castsi128_ps(half);
     const __m128 yAligned = _mm_blendv_ps(yf, _mm_sub_ps(_mm_add_ps(yf, hf), hf), _mm_castsi128_ps(align));
     const __m128 r = _mm_add_ps(_mm_castsi128_ps(x), yAligned);
-    if (ps2VuPastMax(r) || _mm_movemask_ps(_mm_castsi128_ps(_mm_cmpeq_epi32(ex, _mm_set1_epi32(255)))))
-        return ps2VuExactLanes(a, b, ps2ee::addLanes);
+    inexact = ps2VuPastMax(r);
     return r;
+}
+
+PS2_FORCEINLINE __m128 ps2VuAdd(__m128 a, __m128 b)
+{
+    bool inexact;
+    const __m128 r = ps2VuAddHost(a, b, inexact);
+    return inexact ? ps2VuExactLanes(Ps2VuLaneOp::Add, a, a, b) : r;
 }
 
 PS2_FORCEINLINE __m128 ps2VuSub(__m128 a, __m128 b)
@@ -208,56 +291,70 @@ PS2_FORCEINLINE __m128 ps2VuSub(__m128 a, __m128 b)
     return ps2VuAdd(a, _mm_xor_ps(b, _mm_castsi128_ps(_mm_set1_epi32(int(0x80000000u)))));
 }
 
-// a = fs, b = ft (the multiplier's quirk is not commutative).
-PS2_FORCEINLINE __m128 ps2VuMul(__m128 a, __m128 b)
+// The chopped host product, exact except in the lanes set in check: a lane past FLT_MAX (an overflow, or an
+// exponent-255 operand's Inf / NaN), or a lane whose product's bits 16-22 are 0, so the multiplier's lost carry may
+// show (not when the product is 0, an operand 0 or tiny, nor when b is round, its low 16 bits 0: x * 1.0, x * 2.0 ...
+// are the chopped product).
+PS2_FORCEINLINE __m128 ps2VuMulHost(__m128 a, __m128 b, int &check)
 {
     const __m128 r = _mm_mul_ps(a, b);
-    const __m128i ia = _mm_castps_si128(a), ib = _mm_castps_si128(b);
+    const __m128i ia = _mm_castps_si128(a), ib = _mm_castps_si128(b), ir = _mm_castps_si128(r);
+    const __m128i zero = _mm_setzero_si128();
     const __m128i mantissa = _mm_set1_epi32(0x7FFFFF), hidden = _mm_set1_epi32(0x800000);
-    const __m128i expMask = _mm_set1_epi32(0x7F800000);
-    const __m128i xa = _mm_or_si128(_mm_and_si128(ia, mantissa), hidden);
-    const __m128i xb = _mm_or_si128(_mm_and_si128(ib, mantissa), hidden);
-    const __m128i p02 = _mm_mul_epu32(xa, xb), p13 = _mm_mul_epu32(_mm_srli_epi64(xa, 32), _mm_srli_epi64(xb, 32));
-    const __m128i low = _mm_blend_epi16(p02, _mm_slli_epi64(p13, 32), 0xCC); // each product's low 32 bits
-    const __m128i ea = _mm_and_si128(ia, expMask), eb = _mm_and_si128(ib, expMask), zero = _mm_setzero_si128();
-    const __m128i normal = _mm_andnot_si128(_mm_or_si128(_mm_cmpeq_epi32(ea, zero), _mm_cmpeq_epi32(eb, zero)),
-                                            _mm_set1_epi32(-1));
-    // The carry can only be lost when the product's bits 16-22 are 0, and never when b's low 16 bits are 0 (a round
-    // multiplier: x * 1.0, x * 2.0 ... are the chopped product).
-    const __m128i lowBitsSmall = _mm_cmpeq_epi32(_mm_and_si128(low, _mm_set1_epi32(0x7F0000)), zero);
-    const __m128i roundB = _mm_cmpeq_epi32(_mm_and_si128(ib, _mm_set1_epi32(0xFFFF)), zero);
-    const __m128i e255 = _mm_or_si128(_mm_cmpeq_epi32(ea, expMask), _mm_cmpeq_epi32(eb, expMask));
-    const __m128i exact = _mm_or_si128(_mm_andnot_si128(roundB, _mm_and_si128(normal, lowBitsSmall)), e255);
-    if (_mm_movemask_ps(_mm_castsi128_ps(exact)) || ps2VuPastMax(r))
-        return ps2VuExactLanes(a, b, ps2ee::mulLanes);
+    const __m128i low = _mm_mullo_epi32(_mm_or_si128(_mm_and_si128(ia, mantissa), hidden),
+                                        _mm_or_si128(_mm_and_si128(ib, mantissa), hidden)); // product's low 32 bits
+    const __m128i carry = _mm_cmpeq_epi32(_mm_and_si128(low, _mm_set1_epi32(0x7F0000)), zero);
+    const __m128i skip = _mm_or_si128(_mm_cmpeq_epi32(_mm_and_si128(ir, _mm_set1_epi32(0x7F800000)), zero),
+                                      _mm_cmpeq_epi32(_mm_and_si128(ib, _mm_set1_epi32(0xFFFF)), zero));
+    const __m128i past = _mm_cmpgt_epi32(_mm_and_si128(ir, _mm_set1_epi32(0x7FFFFFFF)), _mm_set1_epi32(0x7F7FFFFE));
+    check = _mm_movemask_ps(_mm_castsi128_ps(_mm_or_si128(_mm_andnot_si128(skip, carry), past)));
     return r;
 }
 
-// acc + a * b / acc - a * b: the product rounded first; a product that overflowed (+-max) is the result.
-PS2_FORCEINLINE bool ps2VuAtMax(__m128 p)
+// The exact products of the lanes the host flagged (ps2FpuMul: the host's product, a round a's carry by table, ps2ee
+// for the rest); a lane that overflowed is +-0x7FFFFFFF, which the add after it sees as past FLT_MAX.
+PS2_NOINLINE inline __m128 ps2VuMulCheck(__m128 r, __m128 a, __m128 b, int lanes)
 {
-    const __m128i magnitude = _mm_and_si128(_mm_castps_si128(p), _mm_set1_epi32(0x7FFFFFFF));
-    return _mm_movemask_ps(_mm_castsi128_ps(_mm_cmpeq_epi32(magnitude, _mm_set1_epi32(0x7FFFFFFF)))) != 0;
-}
-inline __m128 ps2VuMaddExact(__m128 acc, __m128 a, __m128 b, bool subtract)
-{
-    alignas(16) uint32_t z[4], x[4], y[4], r[4];
-    _mm_store_si128(reinterpret_cast<__m128i *>(z), _mm_castps_si128(acc));
-    _mm_store_si128(reinterpret_cast<__m128i *>(x), _mm_castps_si128(a));
-    _mm_store_si128(reinterpret_cast<__m128i *>(y), _mm_castps_si128(b));
+    alignas(16) float x[4], y[4], p[4];
+    _mm_store_ps(x, a);
+    _mm_store_ps(y, b);
+    _mm_store_ps(p, r);
     for (int i = 0; i < 4; ++i)
-        r[i] = subtract ? ps2ee::msub(z[i], x[i], y[i]) : ps2ee::madd(z[i], x[i], y[i]);
-    return _mm_castsi128_ps(_mm_load_si128(reinterpret_cast<const __m128i *>(r)));
+        if (lanes & (1 << i))
+            p[i] = ps2FpuMul(x[i], y[i]);
+    return _mm_load_ps(p);
 }
+
+// a = fs, b = ft (the multiplier's quirk is not commutative).
+PS2_FORCEINLINE __m128 ps2VuMul(__m128 a, __m128 b)
+{
+    int check;
+    const __m128 r = ps2VuMulHost(a, b, check);
+    return check ? ps2VuMulCheck(r, a, b, check) : r;
+}
+
+// acc + a * b / acc - a * b: the product rounded first; a product that overflowed (+-max) is the result. Any lane
+// the host can't do exactly sends the vector lane by lane (an overflowed product reaches the add past FLT_MAX, so the
+// add's own check catches it).
 PS2_FORCEINLINE __m128 ps2VuMadd(__m128 acc, __m128 a, __m128 b)
 {
-    const __m128 p = ps2VuMul(a, b);
-    return ps2VuAtMax(p) ? ps2VuMaddExact(acc, a, b, false) : ps2VuAdd(acc, p);
+    int check;
+    bool addInexact;
+    __m128 p = ps2VuMulHost(a, b, check);
+    if (check)
+        p = ps2VuMulCheck(p, a, b, check);
+    const __m128 r = ps2VuAddHost(acc, p, addInexact);
+    return addInexact ? ps2VuExactLanes(Ps2VuLaneOp::Madd, acc, a, b) : r;
 }
 PS2_FORCEINLINE __m128 ps2VuMsub(__m128 acc, __m128 a, __m128 b)
 {
-    const __m128 p = ps2VuMul(a, b);
-    return ps2VuAtMax(p) ? ps2VuMaddExact(acc, a, b, true) : ps2VuSub(acc, p);
+    int check;
+    bool addInexact;
+    __m128 p = ps2VuMulHost(a, b, check);
+    if (check)
+        p = ps2VuMulCheck(p, a, b, check);
+    const __m128 r = ps2VuAddHost(acc, _mm_xor_ps(p, _mm_castsi128_ps(_mm_set1_epi32(int(0x80000000u)))), addInexact);
+    return addInexact ? ps2VuExactLanes(Ps2VuLaneOp::Msub, acc, a, b) : r;
 }
 
 // max / min: sign-magnitude order with exponent-0 values as zero (+0 == -0: the first operand wins a tie).

@@ -42,9 +42,15 @@ namespace ps2ee
     bool mulOverflows(uint32_t a, uint32_t b); // whether mul(a, b) clamped to +-max
     uint32_t div(uint32_t a, uint32_t b);
     uint32_t sqrt(uint32_t a); // sqrt(|a|)
-    // Four lanes at once (the VU0 macro ops' exact path when the host's SSE floats can't give the PS2's bits).
-    void addLanes(const uint32_t *a, const uint32_t *b, uint32_t *r);
-    void mulLanes(const uint32_t *a, const uint32_t *b, uint32_t *r);
+
+    // The multiplier's lost carry (0 / 1) for a round a (its mantissa's low 16 bits 0: 1.0, 0.5, 3.0 ...), by b's low
+    // 16 bits: the product is then the chopped one minus k in its last place, where its bits 16-22 (23 with the top
+    // bit) are 0 (ps2_ee_float.cpp).
+    extern const uint64_t kRoundCarryBits[1024];
+    PS2EE_INLINE uint32_t roundCarry(uint32_t b)
+    {
+        return uint32_t(kRoundCarryBits[(b & 0xFFFFu) >> 6] >> (b & 63u)) & 1u;
+    }
 
     PS2EE_INLINE uint32_t neg(uint32_t a) { return a ^ kSign; }
     PS2EE_INLINE uint32_t abs(uint32_t a) { return a & ~kSign; }
