@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 20, 2026
 
+- Performance: the game no longer keeps the CPU busy while it waits for the next frame.
 - Performance: the native drawing of characters and scenery works from the first 3D frame (it used to start only after a while).
 
 ## November 19, 2026

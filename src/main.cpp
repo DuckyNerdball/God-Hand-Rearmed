@@ -49,6 +49,7 @@
 #include "kamite/host_window.h"
 #include "kamite/log.h"
 #include "kamite/movie_watchdog.h"
+#include "kamite/frame_wait.h"
 #include "kamite/frame_patches.h"
 #include "kamite/test_mode.h"
 #include "kamite/game_options.h"
@@ -1071,6 +1072,7 @@ int main(int argc, char *argv[])
         kamite::debug_tools::install(runtime); // F2: Debug (the game's display switches, room jump; dev-only)
         kamite::hitbox_overlay::install();     // F2: Debug > Hitboxes (dev-only)
         kamite::installMovieWatchdog(runtime); // sweep R3: ending/movie-list movie polls cannot spin forever
+        kamite::installFrameWait(); // the main loop waits for the next frame without spinning (KAMITE_FRAME_WAIT=0: spins)
         // 60 FPS mode, L3 dash, and the game-frame count for the F3 overlay (a hook at the top of the main loop).
         kamite::installFramePatches(runtime);
         kamite::test_mode::install(runtime, exeDir); // the case recorder (R3), --replay-case and --test runs (dev-only)

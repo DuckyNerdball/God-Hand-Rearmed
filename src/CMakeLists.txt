@@ -39,6 +39,7 @@ set(KAMITE_HOST_SOURCES
     kamite/call_trace.cpp
     kamite/movie_watchdog.cpp
     kamite/frame_patches.cpp
+    kamite/frame_wait.cpp
     kamite/game_options.cpp
     kamite/character_mods.cpp
     kamite/disc_files.cpp
