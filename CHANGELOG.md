@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 20, 2026
 
+- Mods: a mod can replace one entry of the game's sound archives (a music track in bgm\bgm00.afs, a cutscene's audio in se\ev, a room's sounds in se) by its name or number, as ADX, WAV, OGG or MP3: GHR converts it once and keeps the copy; loop tags (LOOPSTART / LOOPLENGTH) set the loop, else the track loops as the game's did.
 - Floating-point maths now works out exactly as on a PS2, down to the last digit (the PS2 multiplier's and divider's quirks included), in the game's vector maths too.
 - Widescreen: Blackjack's Win / Lose and the slots' pay table no longer turn the picture 4:3 (and keep it so until you leave the game).
 - Modern: Hold has a mode: Hold to Brawl (as before) or Hold to Cam (brawl mode unless L1 is held: holding L1 is the free camera, a tap of L1 the 180° turn).

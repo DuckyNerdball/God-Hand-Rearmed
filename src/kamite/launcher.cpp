@@ -4762,8 +4762,12 @@ namespace kamite::launcher
             if (!m.description.empty())
                 text += (text.empty() ? "" : "\n") + m.description;
             std::vector<std::string> parts;
-            if (!m.files.empty())
-                parts.push_back(countOf(m.files.size(), "game file"));
+            const size_t entries = static_cast<size_t>(
+                std::count_if(m.files.begin(), m.files.end(), [](const std::string &f) { return !mod_list::archiveOf(f).empty(); }));
+            if (m.files.size() > entries)
+                parts.push_back(countOf(m.files.size() - entries, "game file"));
+            if (entries != 0)
+                parts.push_back(entries == 1 ? std::string("1 archive entry") : std::to_string(entries) + " archive entries");
             if (m.textureCount != 0)
                 parts.push_back(countOf(m.textureCount, "texture"));
             if (!m.patches.empty())

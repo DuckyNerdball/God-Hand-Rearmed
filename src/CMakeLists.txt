@@ -72,6 +72,9 @@ set(KAMITE_HOST_SOURCES
     kamite/hitbox_overlay.cpp
     kamite/menu_buttons.cpp
     kamite/mod_list.cpp
+    kamite/adx_codec.cpp
+    kamite/afs_archive.cpp
+    kamite/mod_audio.cpp
     kamite/mods.cpp
     kamite/modern_controls.cpp
     kamite/near_geometry.cpp
