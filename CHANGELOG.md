@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 20, 2026
 
+- Mods: Xavier's snake head is back at full detail and his back hair has no holes from behind (he no longer has to fit the size of Gene's file).
 - Money: playable Olivia's bust moves less the smaller it is (it moved as at 130% at every size).
 - Cash: Olivia's waistband no longer flickers against her dress above 120% (in play and in cutscenes).
 - Performance: the game no longer keeps the CPU busy while it waits for the next frame.
