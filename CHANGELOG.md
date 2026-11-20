@@ -5,6 +5,7 @@ Newest first, one line per change; the code comments say how.
 ## November 20, 2026
 
 - Mods: Xavier comes with the game: GHR makes him from your own disc the first time it starts (again after an update), in every one of Gene's costumes.
+- RecompLauncher support: a recomplauncher.json for its one-click setup, Play and settings page, and GHR.exe --prepare (a windowless disc check).
 - Moveset Presets: with a keyboard at 4:3 the style letters sit over the level meter again (they jumped to the right edge).
 - Mods: Xavier's snake head is back at full detail and his back hair has no holes from behind (he no longer has to fit the size of Gene's file).
 - Money: playable Olivia's bust moves less the smaller it is (it moved as at 130% at every size).

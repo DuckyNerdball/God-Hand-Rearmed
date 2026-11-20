@@ -354,9 +354,12 @@ endif()
 # linked again, so a change to resources/ alone never reached the build (Oct 26: the counter idle takes).
 # The built-in characters' own work (assets/characters/<id>: their nodes, textures, painted layers, character.ini) goes
 # to resources/characters: GHR makes their player files from the player's disc at boot (builtin_characters.h).
+# recomplauncher.json (tools/recomplauncher/gen_manifest.py) goes next to GHR.exe: a release zip carries it at the top,
+# where RecompLauncher looks for it.
 add_custom_target(kamite_resources
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:kamite>/resources"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets/characters" "$<TARGET_FILE_DIR:kamite>/resources/characters"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/recomplauncher.json" "$<TARGET_FILE_DIR:kamite>/recomplauncher.json"
     COMMENT "Copying the port's resources")
 add_dependencies(kamite kamite_resources)
 target_include_directories(kamite PRIVATE
