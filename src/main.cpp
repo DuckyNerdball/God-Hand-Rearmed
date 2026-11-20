@@ -737,9 +737,43 @@ namespace
     {
         std::cout << "usage: kamite [--iso <path-to-" << kamite::kSerial << ".iso>] [--headless|--window] [--time-limit <seconds>]\n"
                   << "               [--replay-case <file.case> [--fps60 0|1]] [--test <script>] [--write-settings]\n"
+                  << "       kamite --prepare --iso <path>   check the disc image and get it ready, no window (RecompLauncher)\n"
                   << "settings: GHR.ini next to GHR.exe (environment variables of the same name win)\n"
                   << "exit codes: 0 ok, 1 init failed, 2 no disc, 3 wrong disc, 4 CPU, 5 missing function (stop), 6 crash, 7 test failed,\n"
                   << "            124 time limit\n";
+    }
+
+    // --prepare (RecompLauncher's setup step, recomplauncher.json "prepare"): no window, nothing else started. GHR.ini
+    // has been written if it was missing (as --write-settings); the disc image is checked as at boot and its boot ELF
+    // written to game_data, so a wrong image is reported on the setup screen instead of at Play. Progress goes to
+    // stdout as "progress <0..1> <text>" lines. Exit 0, 2 (no image) or 3 (not the USA disc). Without --prepare nothing
+    // here runs.
+    int prepareOnly(const fs::path &exeDir, fs::path iso)
+    {
+        const auto line = [](const std::string &text)
+        {
+            std::fputs((text + "\n").c_str(), stdout);
+            std::fflush(stdout);
+        };
+        line("progress 0.1 Settings ready");
+        if (iso.empty())
+            if (const char *env = std::getenv("KAMITE_ISO"); env && *env)
+                iso = env;
+        if (iso.empty())
+        {
+            line(std::string("error: no disc image given. Pass --iso <path> to your ") + kamite::kGameTitle + " (" +
+                 kamite::kSerial + ") disc image.");
+            return kExitNoDisc;
+        }
+        line("progress 0.3 Checking your disc");
+        const kamite::DiscCheckResult disc = kamite::verifyDiscAndPrepare(iso, exeDir / "game_data");
+        if (!disc.ok)
+        {
+            line("error: " + disc.error);
+            return kExitBadDisc;
+        }
+        line("progress 1 Ready to play");
+        return kExitOk;
     }
 }
 
@@ -763,6 +797,7 @@ int main(int argc, char *argv[])
     // Command line first: it wins over the environment, which wins over GHR.ini.
     fs::path iso;
     bool writeSettingsOnly = false;
+    bool prepare = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
@@ -782,6 +817,8 @@ int main(int argc, char *argv[])
             setEnv("KAMITE_REPLAY_FPS60", argv[++i]);
         else if (arg == "--write-settings")
             writeSettingsOnly = true;
+        else if (arg == "--prepare")
+            prepare = true;
         else if (arg == "--help" || arg == "-h")
         {
             printUsage();
@@ -801,6 +838,8 @@ int main(int argc, char *argv[])
     kamite::setCameraIniPath(exeDir / "GHR.ini"); // the F2 menu's Camera tab saves there
     if (writeSettingsOnly)
         return kExitOk;
+    if (prepare)
+        return prepareOnly(exeDir, iso);
     redirectOutput();
     const bool headless = envFlag("KAMITE_HEADLESS", false);
 
