@@ -48,7 +48,7 @@ True 60FPS (fists punching swiftly) game logic, that by a thousand fixes was ach
 <!-- MEDIA: assets/readme/60fps.gif — 30 vs 60 side by side -->
 ---
 
-### Wider Than Yo Momma!
+### Wider Than Yo Momma's!
 
 I'll kick up your goddamn Aspect Ratio, boy! 
 
