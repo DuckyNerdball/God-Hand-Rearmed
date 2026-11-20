@@ -64,6 +64,14 @@ EXIT_CODES = {
 LOW_PRIORITY = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0) if os.environ.get("KAMITE_LOW_PRIORITY") == "1" else 0
 
 
+def recomp_env():
+    """The recompiler's environment: register-locals code (ps2xRecomp function_emitter.cpp, runtime ps2_cg.h) unless
+    KAMITE_CODEGEN=classic; static JAL/JALR through PS2Runtime::callGuestFunction unless PS2X_STATIC_CALLS=dispatch."""
+    env = dict(os.environ)
+    env["PS2X_CODEGEN"] = "classic" if os.environ.get("KAMITE_CODEGEN") == "classic" else "locals"
+    return env
+
+
 def run(cmd, **kwargs):
     print("+", " ".join(str(c) for c in cmd), flush=True)
     kwargs["creationflags"] = kwargs.get("creationflags", 0) | LOW_PRIORITY
@@ -283,7 +291,7 @@ def generate(args=()):
     print(f"+ {recompiler} {staged}  (output in {log})", flush=True)
     with open(log, "w", encoding="utf-8") as out:
         code = subprocess.run([str(recompiler), str(staged)], cwd=ROOT / "build", stdout=out, stderr=subprocess.STDOUT,
-                              creationflags=LOW_PRIORITY).returncode
+                              creationflags=LOW_PRIORITY, env=recomp_env()).returncode
     if code:
         print(f"ps2_recomp failed ({code}); see {log}")
         return code
@@ -366,6 +374,8 @@ INCLUDE_STUBS = "#include <ps2_recompiled_stubs.h>"
 def module_stamp(mod, toml_path, recompiler):
     """Inputs of one module pack: the toml, snr2's outputs, the recompiler binary and this post-processing version."""
     h = hashlib.sha256(MODULE_PIPELINE.encode())
+    env = recomp_env()
+    h.update(f"{env['PS2X_CODEGEN']}:{env.get('PS2X_STATIC_CALLS', '')}".encode())
     for path in (toml_path, SNR2_OUT / mod / f"{mod}_link.json", SNR2_OUT / mod / f"{mod}_linked.bin",
                  SNR2_OUT / mod / f"{mod}_functions.csv", SNR2_OUT / mod / f"{mod}.elf",
                  SNR2_OUT / mod / f"{mod}_runtime_relocations.csv"):
@@ -518,7 +528,7 @@ def modules(args=()):
         print(f"+ {recompiler} {staged}  (output in {log})", flush=True)
         with open(log, "w", encoding="utf-8") as out:
             code = subprocess.run([str(recompiler), str(staged)], cwd=ROOT / "build", stdout=out, stderr=subprocess.STDOUT,
-                                  creationflags=LOW_PRIORITY).returncode
+                                  creationflags=LOW_PRIORITY, env=recomp_env()).returncode
         if code or not (staging / "register_functions.cpp").exists():
             print(f"{mod}: ps2_recomp failed ({code}); see {log}")
             return code or 1

@@ -400,6 +400,9 @@ and testing from the boys.
   the [Urban Reign port](https://github.com/thiagordsfx/urban-reign-recomp) by thiagordsfx (runtime, VU1 compiler,
   sound, PCSX2 graphics bridge).
 - [PCSX2](https://github.com/PCSX2/pcsx2): the hardware renderer and the game's GameIndex fixes.
+- [gow-native-pc](https://github.com/Vnnc1/gow-native-pc) by Vnnc1, after the
+  [Killzone port](https://github.com/drakolordx7/KillzoneRecomp) by drakolordx7: the recompiler's register-locals code
+  and the lean guest calls (GPL-3.0).
 - [Ace Combat 5 static recompilation](https://github.com/sal063/Ace-Combat-5-Static-recompilation): the movie decoder
   (Apache-2.0).
 

@@ -2126,6 +2126,55 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
     return ctx->pc == fallthroughPc;
 }
 
+// The generated code's JAL and JALR (ps2xRecomp control_flow_emitter.cpp; after Vnnc1/gow-native-pc's patches 28 / 29,
+// GPL-3.0): the same result as dispatchGuestBranch(..., DirectCall / IndirectCall) (same checkpoint charge, function
+// table entry, so replaced functions still apply, and return checks) without its per-call diagnostics: the dispatch
+// history, the branch trace and the setting checks. The full dispatch still takes a target that is not a recompiled
+// function (it reports it and applies the missing-function policy), every call while the branch trace is on
+// (PS2X_BRANCH_TRACE) and every call with PS2X_FULL_CALL_DISPATCH=1.
+namespace
+{
+    const bool g_fullCallDispatch = []
+    {
+        const char *value = std::getenv("PS2X_FULL_CALL_DISPATCH");
+        return value && *value && *value != '0';
+    }();
+}
+
+static PS2_FORCEINLINE bool callGuestFunctionAs(PS2Runtime &runtime, EeScheduler *scheduler, uint8_t *rdram,
+                                                R5900Context *ctx, uint32_t targetPc, uint32_t sourcePc,
+                                                uint32_t fallthroughPc, PS2Runtime::GuestBranchKind kind)
+{
+    PS2Runtime::RecompiledFunction fn = anyFunction(targetPc);
+    if (fn == nullptr || g_branchTraceSize != 0u || g_fullCallDispatch) [[unlikely]]
+        return runtime.dispatchGuestBranch(rdram, ctx, targetPc, sourcePc, fallthroughPc, kind,
+                                           kind == PS2Runtime::GuestBranchKind::IndirectCall ? "JALR" : "JAL");
+    ctx->pc = targetPc;
+    if (scheduler && runtime.eeCheckpointDue(EeScheduler::kGuestDispatchCycles))
+        return false;
+    const uint64_t jumpSerial = g_guestJumpSerial;
+    fn(rdram, ctx, &runtime);
+    if (scheduler->transferPending() || scheduler->unwinding() || runtime.isStopRequested() || ctx->pc == 0u)
+        return false;
+    if (ctx->pc == targetPc && jumpSerial == g_guestJumpSerial)
+        ctx->pc = fallthroughPc;
+    return ctx->pc == fallthroughPc;
+}
+
+bool PS2Runtime::callGuestFunction(uint8_t *rdram, R5900Context *ctx, uint32_t targetPc, uint32_t sourcePc,
+                                   uint32_t fallthroughPc)
+{
+    return callGuestFunctionAs(*this, m_eeScheduler.get(), rdram, ctx, targetPc, sourcePc, fallthroughPc,
+                               GuestBranchKind::DirectCall);
+}
+
+bool PS2Runtime::callGuestFunctionIndirect(uint8_t *rdram, R5900Context *ctx, uint32_t targetPc, uint32_t sourcePc,
+                                           uint32_t fallthroughPc)
+{
+    return callGuestFunctionAs(*this, m_eeScheduler.get(), rdram, ctx, targetPc, sourcePc, fallthroughPc,
+                               GuestBranchKind::IndirectCall);
+}
+
 void PS2Runtime::SignalException(R5900Context *ctx, PS2Exception exception)
 {
     if (exception == EXCEPTION_INTEGER_OVERFLOW)
@@ -3019,12 +3068,23 @@ extern uint32_t g_ps2xEeLoopCycles;
 
 bool PS2Runtime::eeCheckpointDue(uint32_t cycles) noexcept
 {
+    return !eeCheckpointQuiet(cycles) && eeCheckpointFull(cycles);
+}
+
+// True when the checkpoint's cycles only had to be deferred (nothing due, nothing read from ctx).
+bool PS2Runtime::eeCheckpointQuiet(uint32_t cycles) noexcept
+{
     const uint64_t deferred = g_ps2xEeDeferred + (cycles == 32u ? g_ps2xEeLoopCycles : cycles);
     if (deferred < g_ps2xEeDeferBudget.load(std::memory_order_relaxed))
     {
         g_ps2xEeDeferred = deferred;
-        return false;
+        return true;
     }
+    return false;
+}
+
+bool PS2Runtime::eeCheckpointFull(uint32_t cycles) noexcept
+{
     // PS2X_EE_LOOP_CYCLES=<n>: EE cycles charged per backward branch of generated code (default 32). A plain global
     // read once: a function-local static costs a thread-local guard check on every backward branch.
     static uint32_t s_loopCycles = 0u;

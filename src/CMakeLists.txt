@@ -235,6 +235,7 @@ else()
         "${KAMITE_GENERATED_DIR}/ps2_recompiled_stubs.h"
         "${KAMITE_RUNTIME_INCLUDE}/ps2_syscalls.h"
         "${KAMITE_RUNTIME_INCLUDE}/ps2_stubs.h"
+        "${KAMITE_RUNTIME_INCLUDE}/ps2_cg.h" # register-locals generated code (build.py recomp_env)
     )
     if(MSVC)
         # No /GL here, ever: whole-program optimization over ~10k generated files blew up link time and memory (Urban
@@ -289,6 +290,7 @@ if(KAMITE_MODULE_SOURCES)
         "${KAMITE_RUNTIME_INCLUDE}/ps2_runtime.h"
         "${KAMITE_RUNTIME_INCLUDE}/ps2_syscalls.h"
         "${KAMITE_RUNTIME_INCLUDE}/ps2_stubs.h"
+        "${KAMITE_RUNTIME_INCLUDE}/ps2_cg.h" # register-locals generated code (build.py recomp_env)
     )
     if(MSVC)
         # Same flags as kamite_game_code (no /GL).
