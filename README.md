@@ -57,7 +57,7 @@ invited to kick your ass, too! <!-- tag:AspectRatio --> `Remastered+`
 
 No UI stretching in gameplay; menus at 4:3 unless you like 'em on the thicker side!
 
-<!-- MEDIA: assets/readme/ultrawide.jpg — a fight at 21:9 or 32:9 -->
+![God Hand: Rearmed](assets/wide_ass.webp)
 ---
 
 ### Modern Controls, Tank Me Later!
