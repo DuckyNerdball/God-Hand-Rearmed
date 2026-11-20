@@ -1676,6 +1676,19 @@ namespace
         const ModuleSlot *moduleSlot = moduleFunctionSlot(address);
         return moduleSlot ? moduleSlot->load(std::memory_order_relaxed) : nullptr;
     }
+
+    // anyFunction for the generated code's calls and jumps (callGuestFunctionAs, dispatchGuestBranch), inline: an
+    // aligned target inside the generated table's [base, end) is its slot, exactly as generatedFunctionTableSlot finds
+    // it (end - base is a multiple of 4, so offset < 4 x slots <=> address < end; an address below base wraps past the
+    // count); anything else (room DLLs' modules, misaligned) goes to anyFunction. anyFunction itself was a call and
+    // ~5% of the EE samples in K's replays of bb97dcb (claude/gt3-revisited.md "Audit").
+    PS2_FORCEINLINE PS2Runtime::RecompiledFunction branchTarget(uint32_t address)
+    {
+        const uint32_t offset = address - g_ps2RecompiledFunctionTableBase;
+        if ((offset >> 2) < g_ps2RecompiledFunctionTableSlotCount && (address & 3u) == 0u)
+            return g_ps2RecompiledFunctionTable[offset >> 2];
+        return anyFunction(address);
+    }
 }
 
 std::atomic<uint32_t> g_ps2xPatchFlags{0u};
@@ -2079,7 +2092,7 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
     RecompiledFunction targetFn = nullptr;
     if (singleLookup)
     {
-        targetFn = anyFunction(targetPc);
+        targetFn = branchTarget(targetPc);
     }
     else if (hasFunction(targetPc))
         targetFn = lookupFunction(targetPc);
@@ -2145,7 +2158,7 @@ static PS2_FORCEINLINE bool callGuestFunctionAs(PS2Runtime &runtime, EeScheduler
                                                 R5900Context *ctx, uint32_t targetPc, uint32_t sourcePc,
                                                 uint32_t fallthroughPc, PS2Runtime::GuestBranchKind kind)
 {
-    PS2Runtime::RecompiledFunction fn = anyFunction(targetPc);
+    PS2Runtime::RecompiledFunction fn = branchTarget(targetPc);
     if (fn == nullptr || g_branchTraceSize != 0u || g_fullCallDispatch) [[unlikely]]
         return runtime.dispatchGuestBranch(rdram, ctx, targetPc, sourcePc, fallthroughPc, kind,
                                            kind == PS2Runtime::GuestBranchKind::IndirectCall ? "JALR" : "JAL");

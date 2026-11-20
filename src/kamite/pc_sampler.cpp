@@ -2,6 +2,7 @@
 #include "kamite/guest_symbols.h"
 #include "kamite/log.h"
 #include "ps2_runtime.h"
+#include "ps2_ee_float.h"
 
 #include <algorithm>
 #include <atomic>
@@ -365,6 +366,17 @@ namespace kamite::pcsampler
                         host << "\n    " << (1000 * hostTop[i].second / std::max(1u, hostSamples)) / 10.0 << "%  " << hostTop[i].first;
                     KM_INFO(Game, host.str());
                     hostRips.clear();
+                }
+                {
+                    // Diagnostic (claude/strip-list.md, Nov 20): the exact divider's memo this window (a hit ~10 ns,
+                    // a miss ~100 ns: the SRT recurrence); decides whether a bigger memo pays.
+                    static ps2ee::MemoStats last{};
+                    const ps2ee::MemoStats now = ps2ee::memoStats();
+                    const uint64_t q = now.quotientLookups - last.quotientLookups, qh = now.quotientHits - last.quotientHits;
+                    const uint64_t r = now.rootLookups - last.rootLookups, rh = now.rootHits - last.rootHits;
+                    last = now;
+                    KM_INFO(Game, "[pc-sample] divider memo: quotients " << q << " (" << (q ? 100.0 * qh / q : 0.0)
+                                  << "% hit), roots " << r << " (" << (r ? 100.0 * rh / r : 0.0) << "% hit)");
                 }
 #endif
                 pcs.clear();

@@ -147,14 +147,19 @@ namespace ps2ee
             alignas(64) std::atomic<uint64_t> m_entries[1024] = {};
         };
         constinit Memo g_quotients, g_roots;
+        // Counts for memoStats (diagnostic): a relaxed load and store, not a locked increment (a lost count between
+        // threads is fine; a lock would double a hit's cost).
+        std::atomic<uint64_t> g_quotientLookups{0}, g_quotientHits{0}, g_rootLookups{0}, g_rootHits{0};
+        inline void bump(std::atomic<uint64_t> &n) { n.store(n.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed); }
 
         uint32_t quotient(uint32_t x, uint32_t y) // 24-bit mantissas
         {
             const uint32_t x23 = x & 0x7FFFFFu, y23 = y & 0x7FFFFFu, slot = (x23 ^ (y23 * 0x9E3779B1u >> 22)) & 1023;
             const uint64_t key = uint64_t(1) << 40 | uint64_t(x23 >> 10) << 23 | y23;
             uint32_t r;
+            bump(g_quotientLookups);
             if (g_quotients.find(slot, key, r))
-                return r | 0x800000u;
+                return bump(g_quotientHits), r | 0x800000u;
             // The recurrence is the chopped quotient where it cannot end above it: an exact one, and for x >= y one
             // whose dropped half (the 25th digit) is under 1/2.
             const bool big = x >= y;
@@ -169,8 +174,9 @@ namespace ps2ee
             const uint32_t k = (x & 0x7FFFFFu) | uint32_t(odd) << 23, slot = (k * 0x9E3779B1u) >> 22;
             const uint64_t key = uint64_t(1) << 40 | k;
             uint32_t r;
+            bump(g_rootLookups);
             if (g_roots.find(slot, key, r))
-                return r | 0x800000u;
+                return bump(g_rootHits), r | 0x800000u;
             // The chopped root wherever the exact root's 25th bit is 0.
             const uint64_t n = uint64_t(x) << (27 + int(odd));
             uint64_t g = uint64_t(std::sqrt(double(n)));
@@ -239,6 +245,12 @@ namespace ps2ee
         if (e > 255)
             return sign | kMax;
         return sign | (uint32_t(e) << 23) | (quotient(x, y) & 0x7FFFFFu);
+    }
+
+    MemoStats memoStats()
+    {
+        return {g_quotientLookups.load(std::memory_order_relaxed), g_quotientHits.load(std::memory_order_relaxed),
+                g_rootLookups.load(std::memory_order_relaxed), g_rootHits.load(std::memory_order_relaxed)};
     }
 
     uint32_t sqrt(uint32_t a)

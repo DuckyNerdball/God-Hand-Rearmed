@@ -42,6 +42,13 @@ namespace ps2ee
     bool mulOverflows(uint32_t a, uint32_t b); // whether mul(a, b) clamped to +-max
     uint32_t div(uint32_t a, uint32_t b);
     uint32_t sqrt(uint32_t a); // sqrt(|a|)
+    // Diagnostic (claude/strip-list.md, Nov 20): the divider's and root's memo lookups and hits so far, for the pc
+    // sampler's report (src/kamite/pc_sampler.cpp): whether a bigger memo would pay.
+    struct MemoStats
+    {
+        uint64_t quotientLookups, quotientHits, rootLookups, rootHits;
+    };
+    MemoStats memoStats();
 
     // The multiplier's lost carry (0 / 1) for a round a (its mantissa's low 16 bits 0: 1.0, 0.5, 3.0 ...), by b's low
     // 16 bits: the product is then the chopped one minus k in its last place, where its bits 16-22 (23 with the top
