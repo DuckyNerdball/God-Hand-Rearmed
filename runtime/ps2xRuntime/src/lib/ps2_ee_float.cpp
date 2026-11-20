@@ -128,7 +128,14 @@ namespace ps2ee
             return uint32_t(root >> 2) & 0xFFFFFFu;
         }
 
-        // The last quotients and roots by mantissa (direct-mapped; one word per entry, relaxed atomics).
+        // The last quotients and roots by mantissa (direct-mapped; one word per entry, relaxed atomics). 2^kMemoBits
+        // entries each: 1024 (GT3's) hit 56% of God Hand's quotients and 46% of its roots in K's replays of 5d766f0
+        // (~3,300 divisions a frame at 60 reach the memo; a miss costs ~100 ns). A quotient's slot holds x's low
+        // kMemoBits bits (slot ^ hash(y) gives them back), its key the rest of x, y and a valid bit: 1 + (23 -
+        // kMemoBits) + 23 bits, shifted past the 23-bit result, so kMemoBits >= 6. A root's key is the whole 24-bit
+        // input + the valid bit at 40 (the slot is only a hash).
+        constexpr uint32_t kMemoBits = 14, kMemoSlots = 1u << kMemoBits;
+        static_assert(kMemoBits >= 6 && kMemoBits <= 22);
         class Memo
         {
         public:
@@ -144,7 +151,7 @@ namespace ps2ee
             }
 
         private:
-            alignas(64) std::atomic<uint64_t> m_entries[1024] = {};
+            alignas(64) std::atomic<uint64_t> m_entries[kMemoSlots] = {};
         };
         constinit Memo g_quotients, g_roots;
         // Counts for memoStats (diagnostic): a relaxed load and store, not a locked increment (a lost count between
@@ -154,8 +161,9 @@ namespace ps2ee
 
         uint32_t quotient(uint32_t x, uint32_t y) // 24-bit mantissas
         {
-            const uint32_t x23 = x & 0x7FFFFFu, y23 = y & 0x7FFFFFu, slot = (x23 ^ (y23 * 0x9E3779B1u >> 22)) & 1023;
-            const uint64_t key = uint64_t(1) << 40 | uint64_t(x23 >> 10) << 23 | y23;
+            const uint32_t x23 = x & 0x7FFFFFu, y23 = y & 0x7FFFFFu;
+            const uint32_t slot = (x23 ^ (y23 * 0x9E3779B1u >> (32 - kMemoBits))) & (kMemoSlots - 1);
+            const uint64_t key = uint64_t(1) << (46 - kMemoBits) | uint64_t(x23 >> kMemoBits) << 23 | y23;
             uint32_t r;
             bump(g_quotientLookups);
             if (g_quotients.find(slot, key, r))
@@ -171,7 +179,7 @@ namespace ps2ee
 
         uint32_t root(uint32_t x, bool odd)
         {
-            const uint32_t k = (x & 0x7FFFFFu) | uint32_t(odd) << 23, slot = (k * 0x9E3779B1u) >> 22;
+            const uint32_t k = (x & 0x7FFFFFu) | uint32_t(odd) << 23, slot = (k * 0x9E3779B1u) >> (32 - kMemoBits);
             const uint64_t key = uint64_t(1) << 40 | k;
             uint32_t r;
             bump(g_rootLookups);
