@@ -8,7 +8,14 @@
     "label": "Your disc image (.iso) of God Hand for PlayStation 2, the USA release (serial SLUS-21503).",
     "check": {
       "iso9660": "SLUS_215.03"
-    }
+    },
+    "dumps": [
+      {
+        "name": "USA",
+        "size": 1567686656,
+        "crc32": "07220ad2"
+      }
+    ]
   },
   "start": {
     "program": [

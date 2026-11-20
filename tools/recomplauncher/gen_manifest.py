@@ -142,6 +142,8 @@ def manifest(data):
             "kind": "iso",
             "label": "Your disc image (.iso) of God Hand for PlayStation 2, the USA release (serial SLUS-21503).",
             "check": {"iso9660": "SLUS_215.03"},
+            # Redump's verified dump (redump.org/disc/4176; its size, MD5 and SHA-1 are DISC_HASHES.md's).
+            "dumps": [{"name": "USA", "size": 1567686656, "crc32": "07220ad2"}],
         },
         "start": {"program": ["GHR.exe"], "args": []},
         "prepare": {
