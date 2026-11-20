@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 20, 2026
 
+- Widescreen: Blackjack's Win / Lose and the slots' pay table no longer turn the picture 4:3 (and keep it so until you leave the game).
 - Modern: Hold has a mode: Hold to Brawl (as before) or Hold to Cam (brawl mode unless L1 is held: holding L1 is the free camera, a tap of L1 the 180° turn).
 - Controls: Left / Right Stick Deadzone sliders (launcher and in game) for drifting sticks.
 - Music no longer skips every ~15 s on variable-refresh (G-Sync / FreeSync) displays: the game stops following such a display's refresh (issue #1).
