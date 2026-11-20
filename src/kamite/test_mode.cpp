@@ -1444,7 +1444,7 @@ namespace kamite::test_mode
                 if (std::strcmp(name, "KAMITE_ASPECT") == 0)
                 {
                     char number[32];
-                    std::snprintf(number, sizeof(number), "%.6f", aspectRatio());
+                    std::snprintf(number, sizeof(number), "%.9g", static_cast<double>(aspectRatio())); // exact float
                     resolved = number;
                     value = resolved.c_str();
                 }
@@ -1717,9 +1717,24 @@ namespace kamite::test_mode
             const size_t equals = line.find('=');
             if (equals == std::string::npos)
                 continue;
-            const std::string name = line.substr(4, equals - 4), setting = trim(line.substr(equals + 1));
+            const std::string name = line.substr(4, equals - 4);
+            std::string setting = trim(line.substr(equals + 1));
             if (std::find(std::begin(kCaseSettings), std::end(kCaseSettings), name) == std::end(kCaseSettings))
                 continue; // only the settings a case may carry
+            // An older case kept the aspect as written ("16:9"), which the game snaps to the primary screen's own
+            // shape when within 3%: the replay then depended on the replaying machine's monitor (and its DPI scaling:
+            // 1.77813 on K's 2560x1440, 1.77778 on his 3440x1440, Nov 20). Pinned to the ratio's exact float, what an
+            // unsnapped "16:9" gives (widescreen.cpp parseAspect).
+            if (name == "KAMITE_ASPECT")
+            {
+                float w = 0.0f, h = 0.0f;
+                if (std::sscanf(setting.c_str(), "%f:%f", &w, &h) == 2 && w > 0.0f && h > 0.0f)
+                {
+                    char number[32];
+                    std::snprintf(number, sizeof(number), "%.9g", static_cast<double>(w / h));
+                    setting = number;
+                }
+            }
 #if defined(_WIN32)
             _putenv_s(name.c_str(), setting.c_str());
 #else
