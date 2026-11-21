@@ -254,4 +254,8 @@ namespace ps2x::dma
     // started the DMA, before it is queued. Unset (nullptr) in play and releases.
     using ChainObserver = void (*)(uint32_t channelBase, const uint8_t *data, size_t size);
     void setChainObserver(ChainObserver observer);
+    // The same chain as its source pieces (where each run of bytes came from: rdram = the RAM backing), for the dev
+    // dump of early frames (chain_digest.h, KAMITE_CHAIN_DUMP). Unset in play and releases.
+    using ChainPiecesObserver = void (*)(uint32_t channelBase, const ChainPiece *pieces, size_t count, const uint8_t *rdram);
+    void setChainPiecesObserver(ChainPiecesObserver observer);
 }

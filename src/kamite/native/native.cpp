@@ -163,8 +163,22 @@ namespace kamite::native
         if (replaying)
             chain_digest::begin(shadowOutput().c_str());
 #endif
+#if !defined(KAMITE_RELEASE)
+        // KAMITE_NATIVE_OFF=<names, 0x addresses, subsystems> (dev probe, claude/strip-list.md): those natives are
+        // neither installed nor shadowed (the recompiled code runs as in a build without them), to compare a build
+        // with and without some natives at full speed.
+        const char *offValue = std::getenv("KAMITE_NATIVE_OFF");
+        const std::string offList = offValue && *offValue ? lower(offValue) : "";
+#endif
         for (const NativeFunction &fn : registry())
         {
+#if !defined(KAMITE_RELEASE)
+            if (!offList.empty() && listed(offList, fn))
+            {
+                std::fprintf(stderr, "[native] %s 0x%08X: off (KAMITE_NATIVE_OFF)\n", fn.name, fn.address);
+                continue;
+            }
+#endif
             std::string how;
             const bool on = switchedOn(fn, how);
             bool shadowed = false;

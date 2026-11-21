@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 
@@ -21,6 +22,43 @@ namespace kamite::native::chain_digest
         std::string g_path;
         std::FILE *g_file = nullptr;
         bool g_failed = false;
+
+        // KAMITE_CHAIN_DUMP=<last frame> (dev probe, claude/strip-list.md): the replay's chains up to that test frame as
+        // their source pieces, into <case>.<rate>.chain.dump: "GHRCDMP1", then per chain u32 frame, u32 channel base,
+        // u32 piece count, and per piece u32 RAM offset (0xFFFFFFFF outside the RAM backing), u32 bytes, u64 XXH3, and
+        // the bytes themselves when there are at most 4096 of them (EE-built packets; big pieces are model data).
+        // tools/dma/chain_dump_compare.py compares two dumps.
+        std::string g_dumpPath;
+        std::FILE *g_dump = nullptr;
+        uint32_t g_dumpLast = 0;
+
+        void observePieces(uint32_t channelBase, const ps2x::dma::ChainPiece *pieces, size_t count, const uint8_t *rdram)
+        {
+            const uint32_t frame = test_mode::replayFrame();
+            if (frame == test_mode::kReplayIdle || frame > g_dumpLast)
+                return;
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (!g_dump)
+            {
+                g_dump = std::fopen(g_dumpPath.c_str(), "wb");
+                if (!g_dump)
+                    return;
+                std::fwrite("GHRCDMP1", 1, 8, g_dump);
+            }
+            const uint32_t head[3] = {frame, channelBase, static_cast<uint32_t>(count)};
+            std::fwrite(head, sizeof(head), 1, g_dump);
+            for (size_t i = 0; i < count; ++i)
+            {
+                const ps2x::dma::ChainPiece &p = pieces[i];
+                const uintptr_t at = reinterpret_cast<uintptr_t>(p.src) - reinterpret_cast<uintptr_t>(rdram);
+                const uint32_t offset = p.src >= rdram && at < PS2_RDRAM_SIZE ? static_cast<uint32_t>(at) : 0xFFFFFFFFu;
+                const uint64_t hash = XXH3_64bits(p.src, p.len);
+                const uint32_t rec[4] = {offset, p.len, static_cast<uint32_t>(hash), static_cast<uint32_t>(hash >> 32)};
+                std::fwrite(rec, sizeof(rec), 1, g_dump);
+                if (p.len <= 4096u)
+                    std::fwrite(p.src, 1, p.len, g_dump);
+            }
+        }
 
         void observe(uint32_t channelBase, const uint8_t *data, size_t size)
         {
@@ -56,16 +94,30 @@ namespace kamite::native::chain_digest
         std::remove(g_path.c_str()); // a previous run's (Replay-Cases.cmd deletes it too)
         ps2x::dma::setChainObserver(&observe);
         std::fprintf(stderr, "[native] chain digest: %s\n", g_path.c_str());
+        if (const char *dump = std::getenv("KAMITE_CHAIN_DUMP"); dump && *dump)
+        {
+            g_dumpLast = static_cast<uint32_t>(std::strtoul(dump, nullptr, 10));
+            g_dumpPath = std::string(outputBase) + ".chain.dump";
+            std::remove(g_dumpPath.c_str());
+            ps2x::dma::setChainPiecesObserver(&observePieces);
+            std::fprintf(stderr, "[native] chain dump up to frame %u: %s\n", g_dumpLast, g_dumpPath.c_str());
+        }
     }
 
     void end()
     {
         ps2x::dma::setChainObserver(nullptr);
+        ps2x::dma::setChainPiecesObserver(nullptr);
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_file)
         {
             std::fclose(g_file);
             g_file = nullptr;
+        }
+        if (g_dump)
+        {
+            std::fclose(g_dump);
+            g_dump = nullptr;
         }
     }
 }

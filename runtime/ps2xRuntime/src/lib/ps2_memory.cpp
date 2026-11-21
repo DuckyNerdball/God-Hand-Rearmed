@@ -64,6 +64,7 @@ namespace
     // the pages to the OS every time (RtlFreeHeap -> ZwFreeVirtualMemory): ~4% of the game thread in fights.
     thread_local std::vector<ps2x::ByteBuffer> t_chainPool;
     std::atomic<ps2x::dma::ChainObserver> g_chainObserver{nullptr};
+    std::atomic<ps2x::dma::ChainPiecesObserver> g_chainPiecesObserver{nullptr};
 
     ps2x::ByteBuffer takeChainBuffer()
     {
@@ -2297,6 +2298,8 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
                         ps2x::dma::gatherChain(chainPieces, chainBytes, pt.chainData);
                         if (const ps2x::dma::ChainObserver observer = g_chainObserver.load(std::memory_order_relaxed))
                             observer(channelBase, pt.chainData.data(), pt.chainData.size());
+                        if (const ps2x::dma::ChainPiecesObserver observer = g_chainPiecesObserver.load(std::memory_order_relaxed))
+                            observer(channelBase, chainPieces.data(), chainPieces.size(), m_rdram);
                         if (channelBase == 0x1000A000)
                         {
                             m_pendingGifTransfers.push_back(std::move(pt));
@@ -3720,4 +3723,9 @@ const std::atomic<uint32_t> *ps2xGsFinishSerialAddress() noexcept
 void ps2x::dma::setChainObserver(ChainObserver observer)
 {
     g_chainObserver.store(observer, std::memory_order_relaxed);
+}
+
+void ps2x::dma::setChainPiecesObserver(ChainPiecesObserver observer)
+{
+    g_chainPiecesObserver.store(observer, std::memory_order_relaxed);
 }
