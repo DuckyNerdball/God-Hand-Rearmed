@@ -2,6 +2,11 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 21, 2026
+
+- Fixed the remaining music skips on G-Sync / FreeSync displays (#1).
+- Fixed music cutting out on PCs that can't hold full speed at 60 FPS: the sound is time-stretched while the game runs slow (#5).
+
 ## November 20, 2026
 
 - Mods: a mod can replace one entry of the game's sound archives (a music track in bgm\bgm00.afs, a cutscene's audio in se\ev, a room's sounds in se) by its name or number, as ADX, WAV, OGG or MP3: GHR converts it once and keeps the copy; loop tags (LOOPSTART / LOOPLENGTH) set the loop, else the track loops as the game's did.
