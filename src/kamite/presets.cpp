@@ -25,7 +25,7 @@ namespace kamite::presets
         {"SLEAZY MODE", "Sleazy Mode", "...is Now Selectable! For the girl who just wants to have fun.",
          "Adds: Cunt Punter, Tension - Off the Cuff, and Wild Curry Funk.", 15},
     };
-    const Text kCustomText = {"CUSTOM", "Custom", "Your own mix.", "Pick a preset to replace it.", 1};
+    const Text kCustomText = {"CUSTOM", "Custom", "You know what you like.", "Resets with a preset.", 1};
 
     const Text &text(int preset) { return preset >= 0 && preset < kCount ? kText[preset] : kCustomText; }
 

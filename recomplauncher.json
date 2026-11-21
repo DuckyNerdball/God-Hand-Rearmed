@@ -626,6 +626,29 @@
       }
     },
     {
+      "id": "SwapSticks",
+      "label": "Swap Sticks",
+      "help": "For lefties: the right stick moves Gene, the left one dodges and aims. Stick presses: swap them in Button Mapping.",
+      "group": "Controller",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "Game/SwapSticks": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "Game/SwapSticks": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/SwapSticks": "0"
+      }
+    },
+    {
       "id": "MenuButtons",
       "label": "Menu Controls",
       "help": "Western: bottom button confirms; right cancels. Japanese: right button confirms; bottom cancels.",

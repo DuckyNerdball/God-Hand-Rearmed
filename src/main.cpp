@@ -465,6 +465,7 @@ namespace
         {"game", "holdmode", "KAMITE_HOLD_MODE"},
         {"game", "leftstickdeadzone", "PS2X_LEFT_STICK_DEADZONE"},
         {"game", "rightstickdeadzone", "PS2X_RIGHT_STICK_DEADZONE"},
+        {"game", "swapsticks", "PS2X_SWAP_STICKS"},
         {"game", "kbmcontrolstyle", "KAMITE_KBM_CONTROL_STYLE"},
         {"game", "kbmmodernauto", "KAMITE_KBM_MODERN_AUTO"},
         {"game", "cameraspeed", "KAMITE_CAMERA_SPEED"},

@@ -967,6 +967,8 @@ namespace kamite::options_screen
             }
             else if (id == "LeftStickDeadzone" || id == "RightStickDeadzone")
                 ps2_host_input::setStickDeadzone(id == "LeftStickDeadzone" ? 0 : 1, std::atoi(value.c_str()));
+            else if (id == "SwapSticks")
+                ps2_host_input::setSwapSticks(on);
             else if (id == "HoldMode")
                 modern::setHoldCam(value == "cam");
             else if (id == "ModernAuto" || id == "ModernAutoHold")

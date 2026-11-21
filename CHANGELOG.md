@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 21, 2026
 
+- Controls: Swap Sticks (Controls > Controller) for left-handed play.
 - Launcher: the window follows Display Mode at once and switches on F11, as the game does.
 - Controller: Select's SAVE / LOAD (and the paddles' save-state commands) no longer fire in the pause menu, its pages or on the title screen.
 - Options: Invert Camera Y-Axis (Controls > Camera, under Modern) for the free camera's stick and mouse.
