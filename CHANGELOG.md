@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 21, 2026
 
+- Performance: the game's matrix-multiply helpers (sceVu0MulMatrix, sceVu0ApplyMatrix) run as native code.
 - Controls: Swap Sticks (Controls > Controller) for left-handed play.
 - Launcher: the window follows Display Mode at once and switches on F11, as the game does.
 - Controller: Select's SAVE / LOAD (and the paddles' save-state commands) no longer fire in the pause menu, its pages or on the title screen.

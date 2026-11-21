@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 
@@ -77,6 +78,8 @@ namespace kamite::native
     // Lanes of b where Mask has the bit (bit 0 = x ... bit 3 = w), else a.
     template <int Mask>
     inline Vec4 blend(Vec4 a, Vec4 b) { return {_mm_blend_ps(a.v, b.v, Mask)}; }
+    // VMR32: every lane takes the next one's value (x <- y, y <- z, z <- w, w <- x).
+    inline Vec4 rotateLanes(Vec4 a) { return {_mm_shuffle_ps(a.v, a.v, _MM_SHUFFLE(0, 3, 2, 1))}; }
     // A VU operand: exponent 0 -> signed zero, exponent 255 -> signed FLT_MAX.
     inline Vec4 norm(Vec4 a)
     {
@@ -134,6 +137,7 @@ namespace kamite::native
         const uint32_t m[4] = {(Mask & 1) ? ~0u : 0u, (Mask & 2) ? ~0u : 0u, (Mask & 4) ? ~0u : 0u, (Mask & 8) ? ~0u : 0u};
         return {vbslq_f32(vld1q_u32(m), b.v, a.v)};
     }
+    inline Vec4 rotateLanes(Vec4 a) { return {vextq_f32(a.v, a.v, 1)}; }
     inline Vec4 norm(Vec4 a)
     {
         const uint32x4_t bits = vreinterpretq_u32_f32(a.v);
@@ -240,6 +244,7 @@ namespace kamite::native
                 r.v[i] = b.v[i];
         return r;
     }
+    inline Vec4 rotateLanes(Vec4 a) { return {{a.v[1], a.v[2], a.v[3], a.v[0]}}; }
     inline Vec4 norm(Vec4 a)
     {
         Vec4 r;
@@ -295,6 +300,15 @@ namespace kamite::native
         float f;
         std::memcpy(&f, &b, 4);
         return f;
+    }
+
+    // A scalar square root in the float environment (round toward zero: sqrtss / fsqrt honour MXCSR / FPCR, and so does
+    // a correctly rounded std::sqrt); one rounding, no contraction. For FPU / VU0 divide-unit code (rung 0's scalar
+    // helpers).
+    inline float sqrtScalar(float x)
+    {
+        volatile float r = std::sqrt(x);
+        return r;
     }
 
     // The VU's float environment for the duration of a native program: round toward zero, denormals flushed (inputs

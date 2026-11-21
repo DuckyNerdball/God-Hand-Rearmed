@@ -128,13 +128,152 @@ namespace kamite::native::libvu0
             fp.add(gpr32(ctx, 6) & ~0xFu, 16u);
             fp.add(gpr32(ctx, 4) & ~0xFu, 16u);
         }
+
+        // ---- _sceVu0ecossin 0x30A5D0 and sceVu0RotMatrixX / Y / Z 0x30A700 / 0x30A7B8 / 0x30A650 -----------------
+        // RotMatrix*(a0 = out, a1 = matrix, f12 = angle): f12 = pi/2 -+ angle (r7 = which), vf6 = all of r8 (its low
+        // word the angle's bits), ra kept in a2 and the call to ecossin (a guest call: 8 cycles, may come due with
+        // ctx->pc = 0x30A5D0), then the rotation rows vf6-vf9 and out = matrix x rotation row by row (a1 stepped, the
+        // backward-branch checkpoints as MulMatrix's).
+        constexpr uint32_t kEcossin = 0x30A5D0u, kCoefficients = 0x3C3C90u;
+        constexpr uint32_t kPiOver2 = 0x3FC90FDBu;
+
+        void setGprLow64(R5900Context *ctx, int reg, uint64_t value) { std::memcpy(&ctx->r[reg], &value, sizeof(value)); }
+        uint64_t gpr64(const R5900Context *ctx, int reg)
+        {
+            uint64_t value;
+            std::memcpy(&value, &ctx->r[reg], sizeof(value));
+            return value;
+        }
+        Vec4 vf(const R5900Context *ctx, int reg) { return load(&ctx->vu0_vf[reg]); }
+
+        // A garbage lane multiplied by 0 (vf4.yzw in ecossin) must not be the host's Inf / NaN (the original redoes such
+        // a lane exactly).
+        bool noExponent255(Vec4 v) { return magnitudesBelow(v, 0x7F800000u); }
+
+        // ecossin on the context: what the original leaves (vf4-vf8, Q, the status flags, r8, pc = ra).
+        void ecossinOn(R5900Context *ctx, const uint8_t *ram, uint32_t coefficients)
+        {
+            VuRegs v{vf(ctx, 4), vf(ctx, 5), vf(ctx, 6), vf(ctx, 7), vf(ctx, 8), ctx->vu0_q, ctx->vu0_status};
+            ecossin(vf(ctx, 0), load(ram + coefficients), gpr64(ctx, 7) != 0u, v);
+            setVf(ctx, 4, v.vf4);
+            setVf(ctx, 5, v.vf5);
+            setVf(ctx, 6, v.vf6);
+            setVf(ctx, 7, v.vf7);
+            setVf(ctx, 8, v.vf8);
+            ctx->vu0_q = v.q;
+            ctx->vu0_status = v.status;
+            setGprS32(ctx, 8, kCoefficients); // lui / addiu
+            ctx->pc = gpr32(ctx, 31);
+        }
+
+        template <class Env>
+        bool ecossinNative(Env &env, R5900Context *ctx)
+        {
+            uint32_t coefficients;
+            if (!plainRam(kCoefficients, 16u, coefficients))
+                return false;
+            // |angle| < 32: the polynomial's powers stay far below FLT_MAX.
+            if ((laneBits<0>(vf(ctx, 6)) & 0x7FFFFFFFu) >= 0x42000000u || !noExponent255(vf(ctx, 4)) ||
+                !finiteInputs(load(env.ram + coefficients)))
+                return false;
+            ecossinOn(ctx, env.ram, coefficients);
+            return true;
+        }
+
+        void ecossinFootprint(const R5900Context *, Footprint &fp) { fp.add(kCoefficients, 16u); }
+
+        struct RotEntry
+        {
+            uint32_t entry, back, loop; // the function, the return from ecossin, the loop head (resume entries)
+        };
+        constexpr RotEntry kRot[3] = {{0x30A700u, 0x30A74Cu, 0x30A780u}, {0x30A7B8u, 0x30A804u, 0x30A838u},
+                                      {0x30A650u, 0x30A69Cu, 0x30A6CCu}};
+
+        template <int Axis, class Env>
+        bool rotMatrix(Env &env, R5900Context *ctx)
+        {
+            const uint32_t a0 = gpr32(ctx, 4), a1 = gpr32(ctx, 5);
+            uint32_t out, in, coefficients;
+            if (!plainRam(a0 & ~0xFu, 64u, out) || !plainRam(a1 & ~0xFu, 64u, in) || !plainRam(kCoefficients, 16u, coefficients))
+                return false;
+            if (overlapsUnequal(out, in, 64u) || addiOverflows(a0, 64u) || addiOverflows(a1, 64u))
+                return false;
+            uint8_t *const ram = env.ram;
+            const float angle = ctx->f[12];
+            // |angle| < 16 (pi/2 -+ it is ecossin's input), a plain-sized matrix, a vf4 that * 0 stays 0.
+            if ((floatBits(angle) & 0x7FFFFFFFu) >= 0x41800000u || !noExponent255(vf(ctx, 4)) ||
+                !finiteInputs(load(ram + coefficients)) || !finiteInputs(load(ram + in)) || !finiteInputs(load(ram + in + 16)) ||
+                !finiteInputs(load(ram + in + 32)) || !finiteInputs(load(ram + in + 48)))
+                return false;
+            const RotEntry &at = kRot[Axis];
+
+            // c.olt.s f12, f0 (f0 = 0): a negative angle with a non-zero exponent sets C.
+            const uint32_t angleBits = floatBits(angle);
+            const bool negativeAngle = (angleBits & 0x80000000u) && (angleBits & 0x7F800000u);
+            ctx->fcr31 = negativeAngle ? (ctx->fcr31 | 0x800000u) : (ctx->fcr31 & ~0x800000u);
+            setGprLow64(ctx, 1, kPiOver2);
+            const float piOver2 = bitsFloat(kPiOver2);
+            ctx->f[0] = piOver2;
+            ctx->f[12] = negativeAngle ? piOver2 + angle : piOver2 - angle;
+            setGprLow64(ctx, 7, negativeAngle ? 1u : 0u);
+            setGprS32(ctx, 8, floatBits(ctx->f[12]));
+            std::memcpy(&ctx->vu0_vf[6], &ctx->r[8], 16); // qmtc2: the whole register, its upper half included
+            setGprLow64(ctx, 6, gpr64(ctx, 31));
+            setGprS32(ctx, 31, at.back);
+            ctx->pc = kEcossin;
+            if (env.call())
+                return true; // the scheduler resumes at ecossin, which returns to the original's resume entry
+            ecossinOn(ctx, ram, coefficients);
+            setGprLow64(ctx, 31, gpr64(ctx, 6));
+
+            Vec4 vf4 = vf(ctx, 4);
+            const RotationRows m = rotationRows<Axis>(vf(ctx, 0), vf(ctx, 5), vf4);
+            setVf(ctx, 6, m.r0);
+            setVf(ctx, 7, m.r1);
+            setVf(ctx, 8, m.r2);
+            setVf(ctx, 9, m.r3);
+            for (uint32_t k = 0;; ++k)
+            {
+                const Vec4 row = load(ram + in + 16u * k); // out == in: row k is still the input's
+                const RowResult r = mulRow(m.r0, m.r1, m.r2, m.r3, row);
+                store(ram + out + 16u * k, r.r);
+                if (k == 3u || env.checkpoint(32u))
+                {
+                    setVf(ctx, 4, row);
+                    store(&ctx->vu0_acc, r.acc);
+                    setVf(ctx, 5, r.r);
+                    setGprS32(ctx, 7, 3u - k);
+                    setGprS32(ctx, 5, a1 + 16u * (k + 1u));
+                    setGprS32(ctx, 4, a0 + 16u * (k + 1u));
+                    ctx->pc = k == 3u ? gpr32(ctx, 31) : at.loop;
+                    return true;
+                }
+            }
+        }
+
+        void rotMatrixFootprint(const R5900Context *ctx, Footprint &fp)
+        {
+            fp.add(gpr32(ctx, 5) & ~0xFu, 64u);
+            fp.add(gpr32(ctx, 4) & ~0xFu, 64u);
+            fp.add(kCoefficients, 16u);
+        }
     }
 
     void registerFunctions()
     {
-        registerFunction(NativeFunction{"sceVu0MulMatrix", kMulMatrix, "libvu0", false, &mulMatrix<RealEnv>,
+        // Checked (on by default): 0 mismatches over ~75M shadowed calls in K's replays of f733c30, every .ram.bin
+        // identical (claude/native-next.md "Rung 2 as built").
+        registerFunction(NativeFunction{"sceVu0MulMatrix", kMulMatrix, "libvu0", true, &mulMatrix<RealEnv>,
                                         &mulMatrix<ShadowEnv>, &mulMatrixFootprint});
-        registerFunction(NativeFunction{"sceVu0ApplyMatrix", kApplyMatrix, "libvu0", false, &applyMatrix<RealEnv>,
+        registerFunction(NativeFunction{"sceVu0ApplyMatrix", kApplyMatrix, "libvu0", true, &applyMatrix<RealEnv>,
                                         &applyMatrix<ShadowEnv>, &applyMatrixFootprint});
+        registerFunction(NativeFunction{"_sceVu0ecossin", kEcossin, "libvu0", false, &ecossinNative<RealEnv>,
+                                        &ecossinNative<ShadowEnv>, &ecossinFootprint});
+        registerFunction(NativeFunction{"sceVu0RotMatrixX", kRot[0].entry, "libvu0", false, &rotMatrix<0, RealEnv>,
+                                        &rotMatrix<0, ShadowEnv>, &rotMatrixFootprint});
+        registerFunction(NativeFunction{"sceVu0RotMatrixY", kRot[1].entry, "libvu0", false, &rotMatrix<1, RealEnv>,
+                                        &rotMatrix<1, ShadowEnv>, &rotMatrixFootprint});
+        registerFunction(NativeFunction{"sceVu0RotMatrixZ", kRot[2].entry, "libvu0", false, &rotMatrix<2, RealEnv>,
+                                        &rotMatrix<2, ShadowEnv>, &rotMatrixFootprint});
     }
 }

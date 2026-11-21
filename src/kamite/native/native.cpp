@@ -117,7 +117,14 @@ namespace kamite::native
             const char *replay = std::getenv("KAMITE_REPLAY_CASE");
             return replay && *replay ? replay : nullptr;
         }
-        int rate() { return kamite::fps60() ? 60 : 30; }
+        // A replay's rate as test_mode decides it (--fps60 0|1, else the setting): known at boot, unlike fps60(), which
+        // follows the case only once it loads.
+        int rate()
+        {
+            if (const char *fps = std::getenv("KAMITE_REPLAY_FPS60"); replayCase() && fps && *fps)
+                return *fps == '1' ? 60 : 30;
+            return kamite::fps60() ? 60 : 30;
+        }
         // Beside the case during a replay, like the sampler's stacks (<case>.<30|60>.native.txt).
         std::string shadowOutput()
         {

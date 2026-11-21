@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 int main(int argc, char **argv)
 {
@@ -40,6 +41,62 @@ int main(int argc, char **argv)
         }
     }
     std::fclose(f);
+
+    // RotMatrixX / Y / Z (<vectors>.rot): ecossin, the rotation rows and the four rows of the product.
+    int rotCount = 0, rotBad = 0;
+    if (std::FILE *r = std::fopen((std::string(argv[1]) + ".rot").c_str(), "rb"))
+    {
+        unsigned char in[4 + 16 * 7 + 12 + 64], out[64 + 96 + 16 + 8];
+        while (std::fread(in, 1, sizeof(in), r) == sizeof(in) && std::fread(out, 1, sizeof(out), r) == sizeof(out))
+        {
+            uint32_t axis, status, negative;
+            float q;
+            std::memcpy(&axis, in, 4);
+            const unsigned char *p = in + 4;
+            const Vec4 vf0 = load(p), coefficients = load(p + 16);
+            libvu0::VuRegs v{load(p + 32), load(p + 48), load(p + 64), load(p + 80), load(p + 96), 0.0f, 0};
+            std::memcpy(&q, p + 112, 4), std::memcpy(&status, p + 116, 4), std::memcpy(&negative, p + 120, 4);
+            v.q = q;
+            v.status = static_cast<uint16_t>(status);
+            const unsigned char *matrix = p + 124;
+            libvu0::ecossin(vf0, coefficients, negative != 0u, v);
+            Vec4 vf4 = v.vf4;
+            const libvu0::RotationRows m = axis == 0   ? libvu0::rotationRows<0>(vf0, v.vf5, vf4)
+                                           : axis == 1 ? libvu0::rotationRows<1>(vf0, v.vf5, vf4)
+                                                       : libvu0::rotationRows<2>(vf0, v.vf5, vf4);
+            unsigned char got[sizeof(out)] = {};
+            libvu0::RowResult row{};
+            Vec4 last{};
+            for (int k = 0; k < 4; ++k)
+            {
+                last = load(matrix + 16 * k);
+                row = libvu0::mulRow(m.r0, m.r1, m.r2, m.r3, last);
+                store(got + 16 * k, row.r);
+            }
+            store(got + 64, last);    // vf4
+            store(got + 80, row.r);   // vf5
+            store(got + 96, m.r0);    // vf6-vf9
+            store(got + 112, m.r1);
+            store(got + 128, m.r2);
+            store(got + 144, m.r3);
+            store(got + 160, row.acc);
+            const uint32_t statusOut = v.status;
+            std::memcpy(got + 176, &v.q, 4);
+            std::memcpy(got + 180, &statusOut, 4);
+            ++rotCount;
+            if (std::memcmp(got, out, sizeof(out)) != 0 && ++rotBad <= 5)
+            {
+                for (size_t i = 0; i < sizeof(out); ++i)
+                    if (got[i] != out[i])
+                    {
+                        std::printf("rot vector %d (axis %u) differs at byte %zu\n", rotCount, axis, i);
+                        break;
+                    }
+            }
+        }
+        std::fclose(r);
+    }
+    bad += rotBad;
 #if defined(KAMITE_VU_SSE)
     const char *path = "SSE";
 #elif defined(KAMITE_VU_NEON)
@@ -47,6 +104,6 @@ int main(int argc, char **argv)
 #else
     const char *path = "plain C++";
 #endif
-    std::printf("%s: %d vectors, %d differ\n", path, count, bad);
+    std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ\n", path, count, bad - rotBad, rotCount, rotBad);
     return bad ? 1 : 0;
 }
