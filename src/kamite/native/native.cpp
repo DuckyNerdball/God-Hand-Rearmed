@@ -55,7 +55,7 @@ namespace kamite::native
         {
             const Installed &slot = g_installed[I];
             RealEnv env{rdram, runtime};
-            if (ctx->pc != slot.fn.address || !slot.fn.runReal(env, ctx))
+            if (ctx->pc != slot.fn.address || !runNative(slot.fn, slot.fn.runReal, env, ctx))
                 slot.held(rdram, ctx, runtime); // declined: the slot's previous function
         }
         template <size_t... I>

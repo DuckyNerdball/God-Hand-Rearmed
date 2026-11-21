@@ -715,6 +715,29 @@ namespace
                a.checkpointCalls == b.checkpointCalls && ramEqual(g_ramA, g_ramB);
     }
 
+    // K's answer 2 (the relaxed bar): a kRenderPath native is held to what lasts (lastingContextByte, the RAM outside
+    // the call's dead stack, the cycles); kChargeAtEnd ones charge fewer, larger checkpoints (their count isn't compared).
+    bool sameOutcomeFor(const NativeFunction &fn, const Call &call, const Outcome &a, const Outcome &b)
+    {
+        if (fn.flags == 0u)
+            return sameOutcome(a, b);
+        if (a.charged != b.charged)
+            return false;
+        if (!(fn.flags & NativeFunction::kChargeAtEnd) && a.checkpointCalls != b.checkpointCalls)
+            return false;
+        const bool renderPath = (fn.flags & NativeFunction::kRenderPath) != 0u;
+        const auto *x = reinterpret_cast<const uint8_t *>(&a.ctx), *y = reinterpret_cast<const uint8_t *>(&b.ctx);
+        for (size_t at = 0; at < sizeof(R5900Context); ++at)
+            if (x[at] != y[at] && (!renderPath || kamite::native::lastingContextByte(at)))
+                return false;
+        for (const Region &r : kRegions)
+            for (uint32_t i = 0; i < r.size; ++i)
+                if (g_ramA[r.begin + i] != g_ramB[r.begin + i] &&
+                    (!renderPath || !kamite::native::deadStackByte(fn, call.ctx, r.begin + i)))
+                    return false;
+        return true;
+    }
+
     void resetRam()
     {
         for (const Region &r : kRegions)
@@ -757,7 +780,7 @@ namespace
     // ---- 1 + 2: natives against the recompiled functions; footprints ---------------------------------------------
     void checkNative(const NativeFunction &fn, Recompiled recompiled, int calls)
     {
-        int ran = 0, declined = 0, declinedOrdinary = 0, early = 0;
+        int ran = 0, declined = 0, declinedOrdinary = 0, early = 0, interrupted = 0;
         std::vector<uint8_t> before;
         for (int i = 0; i < calls; ++i)
         {
@@ -777,14 +800,14 @@ namespace
                     rec.reset(g_ramB, fn.maxBytes);
                     env.record = &rec;
                     env.dueAt = call.dueAt;
-                    recordedRan = fn.runShadow(env, ctx);
+                    recordedRan = kamite::native::runNative(fn, fn.runShadow, env, ctx);
                 });
             }
             const Outcome original = runFrom(call, [&](R5900Context *ctx) { recompiled(g_ramA, ctx, g_rt); });
             bool accepted = false;
             const Outcome native = runFrom(call, [&](R5900Context *ctx) {
                 kamite::native::RealEnv env{g_ramB, g_rt};
-                accepted = fn.runReal(env, ctx);
+                accepted = kamite::native::runNative(fn, fn.runReal, env, ctx);
             });
             // footprint: everything the original changed is declared (a recorded one: every range it recorded)
             kamite::native::Footprint fp;
@@ -806,6 +829,9 @@ namespace
                     const uint32_t at = region.begin + i;
                     if (g_ramA[at] == before[savedAt])
                         continue;
+                    if ((fn.flags & NativeFunction::kRenderPath) && kamite::native::deadStackByte(fn, call.ctx, at))
+                        continue; // the dead stack: the original's frames, not compared
+
                     bool inside = false;
                     for (const auto &range : ranges)
                         inside |= at - (range.address & PS2_RAM_MASK) < range.size;
@@ -850,7 +876,17 @@ namespace
             }
             ++ran;
             early += original.ctx.pc != 0x00123450u;
-            if (!sameOutcome(original, native))
+            if ((fn.flags & NativeFunction::kChargeAtEnd) && original.ctx.pc != native.ctx.pc)
+            {
+                // the original stopped at one of its own checkpoints; the native ran through (the harness's
+                // "interrupted"): the native must still have run to the return, its whole sum charged
+                ++interrupted;
+                if (native.ctx.pc != 0x00123450u)
+                    fail("a charged-at-end native stopped before its return");
+                copyRam(g_ramB, g_ramA);
+                continue;
+            }
+            if (!sameOutcomeFor(fn, call, original, native))
             {
                 char text[160];
                 std::snprintf(text, sizeof(text), "%s call %d: native differs from the recompiled function (due at %d)",
@@ -862,8 +898,15 @@ namespace
             }
         }
         std::printf("%-20s %d calls: %d native (%d stopped at a checkpoint), %d declined (%d with ordinary values: "
-                    "aliasing, angles past the limit, Inf / NaN garbage in vf4)\n", fn.name, calls, ran, early, declined,
-                    declinedOrdinary);
+                    "aliasing, angles past the limit, Inf / NaN garbage in vf4)%s\n", fn.name, calls, ran, early, declined,
+                    declinedOrdinary, fn.flags ? (fn.flags & NativeFunction::kChargeAtEnd ? " [render path, at end]"
+                                                                                           : " [render path]") : "");
+        if (fn.flags & NativeFunction::kChargeAtEnd)
+        {
+            std::printf("%-20s   interrupted (the original stopped at its own checkpoint) %d\n", "", interrupted);
+            if (interrupted == ran)
+                fail("every call interrupted: nothing compared");
+        }
         resetRam();
     }
 
@@ -932,6 +975,8 @@ namespace
         }
         if (g_fault == 2)
             std::memset(&ctx->r[7], 0x5A, 4);
+        if (g_fault == 5)
+            std::memset(&ctx->r[16], 0x5A, 4); // s0: callee-saved, lasts
         if (g_fault == 3)
             env.checkpoint(32u);
         return true;
@@ -980,6 +1025,93 @@ namespace
             }
         }
         g_fault = 0;
+        resetRam();
+    }
+
+    // ---- 4b: the relaxed bar (K's answer 2): scratch and the dead stack don't-care, what lasts still caught ------------
+    void checkRelaxedDetection(const NativeFunction &apply)
+    {
+        struct Case
+        {
+            const char *name;
+            int fault;
+            int sp;           // 0 = random, 1 = just above the result (the result in the dead stack), 2 = below it
+            bool caught;
+        };
+        const Case cases[] = {
+            {"a3 (scratch)", 2, 0, false},       {"s0 (saved)", 5, 0, true},
+            {"result, dead stack", 1, 1, false}, {"result, live", 1, 2, true},
+            {"cycles", 3, 0, true},
+        };
+        int n = 0;
+        for (const Case &c : cases)
+        {
+            g_fault = c.fault;
+            NativeFunction wrong = apply;
+            wrong.runReal = &faultyApply<kamite::native::RealEnv>;
+            wrong.runShadow = &faultyApply<kamite::native::ShadowEnv>;
+            wrong.flags = NativeFunction::kRenderPath;
+            wrong.address = 0x00920000u + 0x10u * static_cast<uint32_t>(n++);
+            kamite::native::shadow::add(wrong, &sceVu0ApplyMatrix_0x30a2b0);
+            const kamite::native::shadow::Stats *stats = kamite::native::shadow::stats(wrong.address);
+            for (int i = 0; i < 200; ++i)
+            {
+                Call call;
+                setupCall(apply, call, false);
+                call.ctx.pc = wrong.address;
+                call.dueAt = 0;
+                uint32_t out;
+                std::memcpy(&out, &call.ctx.r[4], 4);
+                out = (out & ~0xFu) & PS2_RAM_MASK;
+                if (c.sp == 1)
+                    setGpr(call.ctx, 29, out + 0x40u);
+                else if (c.sp == 2)
+                    setGpr(call.ctx, 29, out - 0x100u);
+                runFrom(call, [&](R5900Context *ctx) { kamite::native::shadow::entry(g_ramB, ctx, g_rt); });
+            }
+            std::printf("relaxed %-20s checked %llu, mismatches %llu (context %llu ram %llu cycles %llu)\n", c.name,
+                        static_cast<unsigned long long>(stats->checked), static_cast<unsigned long long>(stats->mismatches),
+                        static_cast<unsigned long long>(stats->mismatchCtx), static_cast<unsigned long long>(stats->mismatchRam),
+                        static_cast<unsigned long long>(stats->mismatchCycles));
+            if (c.caught && stats->mismatches < stats->checked / 2)
+                fail("the relaxed bar missed what lasts");
+            if (!c.caught && stats->mismatches != 0)
+                fail("the relaxed bar reported scratch / dead stack");
+        }
+        g_fault = 0;
+        resetRam();
+    }
+
+    // The relaxed bar on real natives: twins of composites flagged kRenderPath | kChargeAtEnd (same bodies), shadowed
+    // at a spare address: no mismatches, the harness invisible, interrupted calls counted and not compared.
+    void checkTwinShadow(const NativeFunction &twin, Recompiled recompiled, int calls, uint32_t address)
+    {
+        NativeFunction slot = twin;
+        slot.address = address;
+        kamite::native::shadow::add(slot, recompiled);
+        const kamite::native::shadow::Stats *stats = kamite::native::shadow::stats(address);
+        for (int i = 0; i < calls; ++i)
+        {
+            Call call;
+            setupCall(twin, call, (i % 4) == 3);
+            call.ctx.pc = address;
+            const Outcome alone = runFrom(call, [&](R5900Context *ctx) { recompiled(g_ramA, ctx, g_rt); });
+            const Outcome shadowed = runFrom(call, [&](R5900Context *ctx) { kamite::native::shadow::entry(g_ramB, ctx, g_rt); });
+            if (!sameOutcome(alone, shadowed))
+            {
+                fail("the shadow harness changed a relaxed call's outcome");
+                copyRam(g_ramB, g_ramA);
+            }
+        }
+        std::printf("%-20s twin shadowed %d: checked %llu, matched %llu, declined %llu, skipped %llu, interrupted %llu, "
+                    "mismatches %llu\n", twin.name, calls, static_cast<unsigned long long>(stats->checked),
+                    static_cast<unsigned long long>(stats->matched), static_cast<unsigned long long>(stats->declined),
+                    static_cast<unsigned long long>(stats->skipped), static_cast<unsigned long long>(stats->interrupted),
+                    static_cast<unsigned long long>(stats->mismatches));
+        if (stats->mismatches != 0)
+            fail("mismatches reported for a relaxed twin");
+        if (stats->checked == 0)
+            fail("no relaxed twin call compared");
         resetRam();
     }
 
@@ -1428,6 +1560,21 @@ int main(int argc, char **argv)
     g_nestedCalls = false;
 
     checkDetection(apply);
+    checkRelaxedDetection(apply);
+    // Twins: the composites with loops and guest calls, run charged-at-end and compared on what lasts.
+    {
+        uint32_t spare = 0x00930000u;
+        for (const NativeFunction &fn : g_natives)
+            for (uint32_t a : {0x1F8DF8u, 0x1503B8u, 0x14D768u, 0x30A8C8u, 0x2D7E50u, 0x150F68u, 0x31A650u})
+                if (fn.address == a)
+                {
+                    NativeFunction twin = fn;
+                    twin.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
+                    checkNative(twin, recompiledOf(fn), calls / 2);
+                    checkTwinShadow(twin, recompiledOf(fn), calls / 4, spare);
+                    spare += 0x10u;
+                }
+    }
     kamite::native::shadow::writeSummary();
     std::printf("summary: %s.native.txt (%ju bytes), records: %s.native.bin (%ju bytes)\n", g_output.c_str(),
                 static_cast<uintmax_t>(std::filesystem::file_size(g_output + ".native.txt")), g_output.c_str(),

@@ -22,6 +22,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <vector>
 
 // The natives' one-instruction helpers (ee_ctx.h, plainRam) must inline: a call per guest instruction costs more than
@@ -94,12 +96,72 @@ namespace kamite::native
     // runtime's 128 MB backing: a guest address in plain RAM is ram + (address & PS2_RAM_MASK). New natives reach RAM
     // through env.at(offset, size) (the bytes of one access, offset from plainRam): the real RAM's pointer, or the
     // scratch's with a recorded footprint filled on first touch.
+    // PS2X_EE_LOOP_CYCLES, read as the runtime reads it (eeCheckpointFull): what a backward branch's 32 stands for.
+    inline uint32_t eeLoopCycles()
+    {
+        static const uint32_t cycles = [] {
+            const char *v = std::getenv("PS2X_EE_LOOP_CYCLES");
+            const int n = v && *v ? std::atoi(v) : 32;
+            return static_cast<uint32_t>(n < 1 ? 1 : n);
+        }();
+        return cycles;
+    }
+
+    // Both envs can run a native without mid-function checkpoints (NativeFunction::kChargeAtEnd; K's answer 2 on the
+    // method, Nov 21): with atEnd set, checkpoint() and call() only add up what the original would charge there (a
+    // backward branch's 32 as PS2X_EE_LOOP_CYCLES) and never come due; finish(), after the native ran to its end, charges
+    // the sum once and says whether a checkpoint came due (ctx is then the original's at its return: the scheduler resumes
+    // the caller at ra). native.cpp and the harness set atEnd and call finish() (runNative below); natives don't.
     struct RealEnv
     {
         uint8_t *ram;
         PS2Runtime *runtime;
-        bool checkpoint(uint32_t cycles) { return runtime->eeCheckpointDue(cycles); }
-        bool call() { return runtime->eeCheckpointDue(8u); } // EeScheduler::kGuestDispatchCycles
+        bool atEnd = false;
+        uint64_t owed = 0;   // atEnd: cycles summed so far (loops apart)
+        uint64_t loops = 0;  // atEnd: backward branches so far
+        bool checkpoint(uint32_t cycles)
+        {
+            if (atEnd)
+            {
+                if (cycles == 32u)
+                    ++loops;
+                else
+                    owed += cycles;
+                return false;
+            }
+            return runtime->eeCheckpointDue(cycles);
+        }
+        bool call() // EeScheduler::kGuestDispatchCycles
+        {
+            if (atEnd)
+            {
+                owed += 8u;
+                return false;
+            }
+            return runtime->eeCheckpointDue(8u);
+        }
+        bool finish()
+        {
+            uint64_t total = owed + loops * eeLoopCycles();
+            atEnd = false;
+            owed = loops = 0;
+            bool due = false;
+            while (total != 0u)
+            {
+                // eeCheckpointDue reads 32 as a loop's PS2X_EE_LOOP_CYCLES: a sum of exactly 32 goes as 31 + 1 then.
+                uint32_t part = total > 0x40000000u ? 0x40000000u : static_cast<uint32_t>(total);
+                if (part == 32u && eeLoopCycles() != 32u)
+                    part = 31u;
+                due |= runtime->eeCheckpointDue(part);
+                total -= part;
+            }
+            return due;
+        }
+        void discard()
+        {
+            atEnd = false;
+            owed = loops = 0;
+        }
         uint8_t *at(uint32_t offset, uint32_t) { return ram + offset; }
         // An observed function run inline: its observers first, on the real RAM and context (ctx at its entry).
         void observe(uint32_t address, R5900Context *ctx) { runEntryObservers(address, ram, ctx, runtime); }
@@ -113,6 +175,8 @@ namespace kamite::native
         uint64_t charged = 0;   // their EE cycles
         uint32_t loopCycles = 32u; // what a backward branch's 32 stands for (PS2X_EE_LOOP_CYCLES)
         Recording *record = nullptr; // a recorded footprint: fill on first touch
+        bool atEnd = false;     // as RealEnv's: sum, charge once at finish() (one checkpoint)
+        uint64_t owed = 0;
         uint8_t *at(uint32_t offset, uint32_t size)
         {
             if (record)
@@ -126,13 +190,36 @@ namespace kamite::native
         }
         bool checkpoint(uint32_t cycles)
         {
+            if (atEnd)
+            {
+                owed += cycles == 32u ? loopCycles : cycles;
+                return false;
+            }
             charged += cycles == 32u ? loopCycles : cycles;
             return due();
         }
         bool call()
         {
+            if (atEnd)
+            {
+                owed += 8u;
+                return false;
+            }
             charged += 8u;
             return due();
+        }
+        bool finish()
+        {
+            charged += owed;
+            const bool hadOwed = owed != 0u;
+            atEnd = false;
+            owed = 0;
+            return hadOwed && due();
+        }
+        void discard()
+        {
+            atEnd = false;
+            owed = 0;
         }
         // The shadow run leaves observers to the real call (they act on the real RAM).
         void observe(uint32_t, R5900Context *) {}
@@ -160,7 +247,85 @@ namespace kamite::native
         const DontCare *dontCare = nullptr;
         int dontCareCount = 0;
         uint32_t maxBytes = 0; // a recorded footprint's limit (0 = 64 KB); more is skipped
+        uint32_t flags = 0;    // kRenderPath, kChargeAtEnd
+        uint32_t deadStack = 0; // kRenderPath: the bytes below the entry sp that are dead after the call (0 = 64 KB)
+
+        // K's answer 2 on the method (Nov 21), for render-path natives (packets, object fields: what the game keeps):
+        //  - kRenderPath: the harness compares what lasts: guest RAM outside the call's dead stack, v0 / v1's low 64
+        //    bits (the return value), f0, the callee-saved registers (s0-s7, gp, sp, fp, ra; f20-f31), pc and the
+        //    rest of the context, and the EE cycles; the scratch registers (at, a0-a3, t0-t9, k0 / k1, v0 / v1's upper
+        //    halves, hi / lo, sa, f1-f19, the FPU accumulator and fcr31, VU0's vf1-vf31 / vi1-vi15 / ACC / Q / P / I
+        //    and its status / MAC / clip flags) and the stack below the entry sp are don't-care (lastingContextByte,
+        //    deadStackByte). A native still sets everything the original's callers can read.
+        //  - kChargeAtEnd: the native runs without mid-function checkpoints, its cycles (the original's own sum)
+        //    charged once at its end (RealEnv / ShadowEnv atEnd). A call the original stopped at one of its own
+        //    checkpoints can't be compared with a whole run: the harness counts it as interrupted.
+        //    Proven by one K build (every .ram.bin identical); else back to the original's checkpoints.
+        static constexpr uint32_t kRenderPath = 1u;
+        static constexpr uint32_t kChargeAtEnd = 2u;
+        static constexpr uint32_t kDefaultDeadStack = 64u * 1024u;
     };
+
+    // kRenderPath: is this byte of R5900Context compared (what lasts after the call), or scratch?
+    inline bool lastingContextByte(size_t offset)
+    {
+        auto in = [offset](size_t begin, size_t size) { return offset >= begin && offset < begin + size; };
+        constexpr size_t r = offsetof(R5900Context, r), q = sizeof(__m128i);
+        if (in(r, 32 * q))
+        {
+            const size_t reg = (offset - r) / q, byte = (offset - r) % q;
+            if (reg == 1u || (reg >= 4u && reg <= 15u) || (reg >= 24u && reg <= 27u)) // at, a0-a3, t0-t7, t8-t9, k0-k1
+                return false;
+            if ((reg == 2u || reg == 3u) && byte >= 8u) // v0 / v1: the return value is the low 64 bits
+                return false;
+            return true;
+        }
+        if (in(offsetof(R5900Context, hi), 8) || in(offsetof(R5900Context, lo), 8) ||
+            in(offsetof(R5900Context, hi1), 8) || in(offsetof(R5900Context, lo1), 8) ||
+            in(offsetof(R5900Context, sa), 4))
+            return false;
+        if (in(offsetof(R5900Context, vu0_vf) + sizeof(__m128), 31 * sizeof(__m128))) // vf1-vf31 (vf0 is constant)
+            return false;
+        if (in(offsetof(R5900Context, vi) + 2, 15 * 2)) // vi1-vi15
+            return false;
+        if (in(offsetof(R5900Context, vu0_q), 4) || in(offsetof(R5900Context, vu0_p), 4) ||
+            in(offsetof(R5900Context, vu0_i), 4) || in(offsetof(R5900Context, vu0_acc), sizeof(__m128)) ||
+            in(offsetof(R5900Context, vu0_status), 2) || in(offsetof(R5900Context, vu0_mac_flags), 4) ||
+            in(offsetof(R5900Context, vu0_clip_flags), 4) || in(offsetof(R5900Context, vu0_clip_flags2), 4))
+            return false;
+        if (in(offsetof(R5900Context, f) + 4, 19 * 4)) // f1-f19 (f0 = the float return value)
+            return false;
+        if (in(offsetof(R5900Context, f_acc), 4) || in(offsetof(R5900Context, fcr31), 4))
+            return false;
+        return true;
+    }
+
+    // kRenderPath: is this RAM offset in the call's dead stack, the deadStack bytes below the entry sp (sp at entry,
+    // `before`)? Its frames and its callees' lie there; nothing reads them after the return.
+    inline bool deadStackByte(const NativeFunction &fn, const R5900Context &before, uint32_t offset)
+    {
+        uint32_t sp;
+        std::memcpy(&sp, &before.r[29], 4);
+        const uint32_t window = fn.deadStack ? fn.deadStack : NativeFunction::kDefaultDeadStack;
+        const uint32_t top = sp & PS2_RAM_MASK;
+        return top >= window ? offset - (top - window) < window : offset < top;
+    }
+
+    // How native.cpp and the harness run a native: kChargeAtEnd sets the env's atEnd and charges the sum once after a
+    // run (a decline charges nothing: the native changed nothing).
+    template <class Env>
+    inline bool runNative(const NativeFunction &fn, bool (*run)(Env &, R5900Context *), Env &env, R5900Context *ctx)
+    {
+        env.atEnd = (fn.flags & NativeFunction::kChargeAtEnd) != 0u;
+        if (!run(env, ctx))
+        {
+            env.discard();
+            return false;
+        }
+        if (env.atEnd)
+            env.finish();
+        return true;
+    }
 
     // Called by each subsystem's register function before install().
     void registerFunction(const NativeFunction &function);

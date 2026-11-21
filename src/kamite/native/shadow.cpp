@@ -116,6 +116,8 @@ namespace kamite::native::shadow
 
         bool ignored(const NativeFunction &fn, size_t offset)
         {
+            if ((fn.flags & NativeFunction::kRenderPath) && !lastingContextByte(offset))
+                return true;
             for (int i = 0; i < fn.dontCareCount; ++i)
                 if (offset - fn.dontCare[i].offset < fn.dontCare[i].size)
                     return true;
@@ -135,7 +137,13 @@ namespace kamite::native::shadow
                 if (std::memcmp(a + at, b + at, n) == 0)
                     continue;
                 if (fn && ignored(*fn, at))
-                    continue;
+                {
+                    bool lastingDiff = false; // a word only partly scratch (none in R5900Context today): its other bytes
+                    for (size_t k = 1; k < n; ++k)
+                        lastingDiff |= a[at + k] != b[at + k] && !ignored(*fn, at + k);
+                    if (!lastingDiff)
+                        continue;
+                }
                 if (ulps != 0u && n == 4 && (!isFloat || isFloat(at)))
                 {
                     uint32_t x, y;
@@ -157,14 +165,28 @@ namespace kamite::native::shadow
         {
             const NativeFunction &fn = slot.fn;
             uint32_t worst = 0, kinds = 0;
-            const bool plain = fn.ulps == 0u && fn.dontCareCount == 0;
+            const bool renderPath = (fn.flags & NativeFunction::kRenderPath) != 0u;
+            const bool plain = fn.ulps == 0u && fn.dontCareCount == 0 && !renderPath;
             if (!sameWords(reinterpret_cast<const uint8_t *>(&f.native), reinterpret_cast<const uint8_t *>(real),
                            sizeof(R5900Context), fn.ulps, worst, &floatWord, plain ? nullptr : &fn))
                 kinds |= kCtx;
             for (int i = 0, at = 0; i < static_cast<int>(f.ranges.size()); at += static_cast<int>(f.ranges[i].size), ++i)
-                if (!sameWords(f.nativeBytes.data() + at, rdram + f.offsets[i], f.ranges[i].size, fn.ulps, worst,
-                               nullptr, nullptr))
-                    kinds |= kRam;
+            {
+                if (!renderPath)
+                {
+                    if (!sameWords(f.nativeBytes.data() + at, rdram + f.offsets[i], f.ranges[i].size, fn.ulps, worst,
+                                   nullptr, nullptr))
+                        kinds |= kRam;
+                    continue;
+                }
+                // kRenderPath: the dead stack below the entry sp is don't-care, byte by byte.
+                for (uint32_t b = 0; b < f.ranges[i].size; ++b)
+                    if (f.nativeBytes[at + b] != rdram[f.offsets[i] + b] && !deadStackByte(fn, f.before, f.offsets[i] + b))
+                    {
+                        kinds |= kRam;
+                        break;
+                    }
+            }
             if (f.strayed) // a rerun touched bytes the first run hadn't: its input there is unknown
                 kinds |= kRam;
             if (f.charged != realCycles)
@@ -201,7 +223,7 @@ namespace kamite::native::shadow
             env.dueAt = dueAt;
             env.loopCycles = g_settings.loopCycles;
             env.record = rec;
-            const bool ran = slot.fn.runShadow(env, &f.native);
+            const bool ran = kamite::native::runNative(slot.fn, slot.fn.runShadow, env, &f.native);
             f.charged = env.charged;
             f.checkpoints = env.checkpoints;
             f.strayed = rec && rec->strayed;
@@ -303,10 +325,17 @@ namespace kamite::native::shadow
             const auto *n = reinterpret_cast<const uint8_t *>(&f.native);
             const auto *r = reinterpret_cast<const uint8_t *>(real);
             std::vector<bool> named(sizeof(R5900Context), false);
+            const bool renderPath = (slot.fn.flags & NativeFunction::kRenderPath) != 0u;
+            auto lastingDiff = [&](size_t offset, size_t size) {
+                for (size_t k = offset; k < offset + size; ++k)
+                    if (n[k] != r[k] && (!renderPath || lastingContextByte(k)))
+                        return true;
+                return false;
+            };
             for (const Field &field : fields)
             {
                 std::fill(named.begin() + field.offset, named.begin() + field.offset + field.size, true);
-                if (std::memcmp(n + field.offset, r + field.offset, field.size) == 0)
+                if (!lastingDiff(field.offset, field.size))
                     continue;
                 out += "    ";
                 out += field.name;
@@ -317,7 +346,7 @@ namespace kamite::native::shadow
                 out += '\n';
             }
             for (size_t at = 0; at < sizeof(R5900Context); ++at)
-                if (!named[at] && n[at] != r[at])
+                if (!named[at] && lastingDiff(at, 1))
                 {
                     std::snprintf(line, sizeof(line), "    context +0x%zX native %02X / real %02X\n", at, n[at], r[at]);
                     out += line;
@@ -467,6 +496,15 @@ namespace kamite::native::shadow
             const uint64_t realCycles = (g_settings.cycles ? g_settings.cycles() : 0u) - cyclesBefore;
             ++stats.checked;
 
+            // kChargeAtEnd: the original stopped at one of its own checkpoints (a resume pc, not the native's return):
+            // a whole run can't be compared with half of one.
+            if ((slot.fn.flags & NativeFunction::kChargeAtEnd) && ctx->pc != f.native.pc)
+            {
+                --stats.checked;
+                ++stats.interrupted;
+                maybeWriteSummary();
+                return;
+            }
             uint32_t kinds = compare(slot, f, ctx, rdram, realCycles);
             // The original stopped at a checkpoint (it left a resume pc): find the native's checkpoint that matches.
             if (kinds != 0u && ctx->pc != f.native.pc)
@@ -563,6 +601,12 @@ namespace kamite::native::shadow
             for (int i = 0; i < slot.fn.dontCareCount; ++i)
                 std::fprintf(f, "# %s ignores context +0x%X (%u bytes): %s\n", slot.fn.name, slot.fn.dontCare[i].offset,
                              slot.fn.dontCare[i].size, slot.fn.dontCare[i].reason);
+            if (slot.fn.flags & NativeFunction::kRenderPath)
+                std::fprintf(f, "# %s render path: compares what lasts (scratch registers, the %u bytes below sp dead)\n",
+                             slot.fn.name, slot.fn.deadStack ? slot.fn.deadStack : NativeFunction::kDefaultDeadStack);
+            if (slot.fn.flags & NativeFunction::kChargeAtEnd)
+                std::fprintf(f, "# %s charged at end: interrupted %llu (the original stopped at its own checkpoint)\n",
+                             slot.fn.name, static_cast<unsigned long long>(slot.stats.interrupted));
             if (!slot.details.empty())
                 std::fprintf(f, "\n%s 0x%08X mismatches:\n%s", slot.fn.name, slot.fn.address, slot.details.c_str());
         }

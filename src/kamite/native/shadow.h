@@ -44,6 +44,7 @@ namespace kamite::native::shadow
         uint64_t declined = 0;     // the native declined (its entry checks): the original runs, nothing to compare
         uint64_t skipped = 0;      // not shadowable: a footprint outside plain RAM, too many ranges or bytes, nested
         uint64_t earlyExits = 0;   // matched with the original stopped at a checkpoint
+        uint64_t interrupted = 0;  // kChargeAtEnd: the original stopped at its own checkpoint (not compared)
         uint64_t mismatchCtx = 0, mismatchRam = 0, mismatchCycles = 0;
         uint64_t mismatches = 0;   // calls with any of the three
         uint32_t saved = 0;

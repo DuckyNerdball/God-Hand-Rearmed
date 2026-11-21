@@ -67,3 +67,14 @@ which lists asm natives whose function is now matched C (REWRITE: from the C, th
 natives whose C changed since their commit (CHANGED), functions matched since `decomp_rung4.txt`'s commit in the rung-4
 subsystems (RUNG4: motion, collision, cloth, effects, as tools/perf/subsystems.py classifies them; `--update` moves the
 baseline), and natives missing from `sources.csv` (MANIFEST). `--show 0x<address>` prints one function's C.
+
+## The relaxed bar (render path; K's answer 2 on the method, Nov 21)
+
+`NativeFunction::flags`: `kRenderPath` compares what lasts (RAM outside the dead stack below the entry sp, v0 / v1's low
+64 bits, f0, the callee-saved registers, the rest of the context, the cycles); scratch registers and the dead stack are
+don't-care (native_function.h lastingContextByte / deadStackByte). `kChargeAtEnd` runs the native without mid-function
+checkpoints: native.cpp and the harness set the env's `atEnd`, checkpoints only add up, `finish()` charges the sum once
+(runNative); a call the original stopped at its own checkpoint is counted as `interrupted` (the .native.txt's comment
+line per function), not compared. shadow_test covers both: relaxed detection cases (scratch / dead stack ignored, s0,
+a live result and cycles caught) and twins of seven composites flagged both ways (checkNative + shadowed at a spare
+address).
