@@ -755,6 +755,7 @@ namespace
 void ps2xHostVsyncSetWindow(void *window) noexcept; // Kernel/host_vsync.cpp
 #if defined(_WIN32)
 bool ps2xHostReplacesLauncherWindow() noexcept; // Kernel/host_window_win32.cpp
+void ps2xHostKeepDisplayAwake() noexcept;
 void ps2xHostHandoffCoverShow(void *window) noexcept;
 void ps2xHostHandoffCoverHide() noexcept;
 #endif
@@ -1261,6 +1262,9 @@ void ps2_host_display::openHostWindow(const char *title)
     }
     else if (!showWhenShaped)
         SetWindowTitle(title);
+#if defined(_WIN32)
+    ps2xHostKeepDisplayAwake(); // the screen timeout ignores controllers (issue #12)
+#endif
     // Window size (PS2X_WINDOW_SIZE): "auto" (default) = the internal resolution's height (448 x PS2X_GS_SCALE, at most
     // 9/10 of the monitor's) in the display's shape, centered; "<w>x<h>" = that client size, centered; "native" = HOST_WINDOW_WIDTH x HOST_WINDOW_HEIGHT as before.
     const char *sizeValue = std::getenv("PS2X_WINDOW_SIZE");
