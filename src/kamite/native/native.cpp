@@ -41,7 +41,7 @@ namespace kamite::native
         }
 
         // The installed natives: one trampoline per slot (a template instance per index), no lookup on the call.
-        constexpr size_t kMaxNatives = 64;
+        constexpr size_t kMaxNatives = 128;
         struct Installed
         {
             NativeFunction fn;
@@ -150,6 +150,7 @@ namespace kamite::native
     void installFromEnvironment(PS2Runtime &runtime)
     {
         libvu0::registerFunctions();
+        packet::registerFunctions();
 
 #if !defined(KAMITE_RELEASE)
         const bool replaying = replayCase() != nullptr;
