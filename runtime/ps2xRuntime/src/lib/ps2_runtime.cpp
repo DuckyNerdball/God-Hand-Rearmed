@@ -753,9 +753,12 @@ namespace
 }
 
 void ps2xHostVsyncSetWindow(void *window) noexcept; // Kernel/host_vsync.cpp
+// Kernel/host_window_win32.cpp; Linux: Kernel/host_keep_awake_linux.cpp (runtime/keep_awake.h). Issue #12.
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+void ps2xHostKeepDisplayAwake() noexcept;
+#endif
 #if defined(_WIN32)
 bool ps2xHostReplacesLauncherWindow() noexcept; // Kernel/host_window_win32.cpp
-void ps2xHostKeepDisplayAwake() noexcept;
 void ps2xHostHandoffCoverShow(void *window) noexcept;
 void ps2xHostHandoffCoverHide() noexcept;
 #endif
@@ -1225,6 +1228,21 @@ int ps2_host_display::toggleFullscreen() { return 2; }
 // The game window (raylib): made once, by the port's launcher or by PS2Runtime::initialize; a second call keeps the
 // window (except a launcher's borderless one on Windows, below) and applies the size and fullscreen settings again if
 // they changed.
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(PLATFORM_VITA)
+// GLFW, built into raylib (rglfw.c): started before InitWindow to tell a missing display from a working one.
+extern "C" int glfwInit(void);
+using Ps2xGlfwErrorFn = void (*)(int, const char *);
+extern "C" Ps2xGlfwErrorFn glfwSetErrorCallback(Ps2xGlfwErrorFn callback);
+// The window probe below (glfw3.h's values; raylib does not expose GLFW's header).
+struct GLFWwindow;
+extern "C" void glfwDefaultWindowHints(void);
+extern "C" void glfwWindowHint(int hint, int value);
+extern "C" GLFWwindow *glfwCreateWindow(int width, int height, const char *title, void *monitor, GLFWwindow *share);
+extern "C" void glfwDestroyWindow(GLFWwindow *window);
+constexpr int kGlfwVisible = 0x00020004, kGlfwContextMajor = 0x00022002, kGlfwContextMinor = 0x00022003,
+              kGlfwForwardCompat = 0x00022006, kGlfwProfile = 0x00022008, kGlfwCoreProfile = 0x00032001;
+#endif
+
 void ps2_host_display::openHostWindow(const char *title)
 {
 #if defined(PLATFORM_VITA)
@@ -1258,11 +1276,57 @@ void ps2_host_display::openHostWindow(const char *title)
     if (!IsWindowReady())
     {
         SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_ALWAYS_RUN | (ps2_host_display::vsyncEnabled() ? FLAG_VSYNC_HINT : 0u));
+#if !defined(_WIN32)
+        GSPcsx2Backend::BeforeHostWindow(); // Linux: GLFW on X11 for PCSX2's GS (its child window is an X11 one)
+#endif
+#if defined(__linux__) && !defined(__ANDROID__)
+        // raylib 5.5's InitWindow logs "Failed to initialize GLFW" and goes on regardless: rlglInit then calls GL
+        // through null pointers and the process dies inside InitWindow. GLFW is started here first (raylib's own
+        // glfwInit then returns at once): without a desktop session (DISPLAY / WAYLAND_DISPLAY unset) or with libX11 /
+        // libwayland missing, a plain message and exit code 1 (initialisation failed) instead of a segfault.
+        glfwSetErrorCallback([](int code, const char *description)
+                             { std::cerr << "[window] GLFW error " << code << ": " << (description ? description : "") << std::endl; });
+        if (glfwInit() == 0)
+        {
+            const char *x11 = std::getenv("DISPLAY");
+            const char *wayland = std::getenv("WAYLAND_DISPLAY");
+            std::cerr << "[window] error: could not open the game window (GLFW could not start; DISPLAY="
+                      << (x11 && *x11 ? x11 : "(unset)") << ", WAYLAND_DISPLAY=" << (wayland && *wayland ? wayland : "(unset)")
+                      << "). GHR needs a desktop session with X11 or Wayland and the system's libX11 / libwayland-client "
+                         "and an OpenGL driver."
+                      << std::endl;
+            std::fflush(stdout);
+            std::fflush(stderr);
+            std::_Exit(1);
+        }
+        // GLFW up, but can it make raylib's window? raylib 5.5 does not stop when glfwCreateWindow fails: InitPlatform
+        // goes on to GetCurrentMonitor with no window and crashes inside GLFW. A hidden window with the context raylib
+        // asks for (rcore_desktop_glfw.c: OpenGL 3.3 core, no forward compatibility) is made and dropped first; no GLX
+        // on the X server, or no OpenGL 3.3 driver, then ends in a plain message and exit code 1.
+        glfwDefaultWindowHints();
+        glfwWindowHint(kGlfwVisible, 0);
+        glfwWindowHint(kGlfwContextMajor, 3);
+        glfwWindowHint(kGlfwContextMinor, 3);
+        glfwWindowHint(kGlfwProfile, kGlfwCoreProfile);
+        glfwWindowHint(kGlfwForwardCompat, 0);
+        GLFWwindow *probe = glfwCreateWindow(64, 64, "GHR", nullptr, nullptr);
+        glfwDefaultWindowHints();
+        if (probe == nullptr)
+        {
+            std::cerr << "[window] error: could not create the game window: the system gave no OpenGL 3.3 context "
+                         "(no GLX on the X server, or no OpenGL driver installed; the GLFW error above says which)."
+                      << std::endl;
+            std::fflush(stdout);
+            std::fflush(stderr);
+            std::_Exit(1);
+        }
+        glfwDestroyWindow(probe);
+#endif
         InitWindow(HOST_WINDOW_WIDTH, HOST_WINDOW_HEIGHT, title);
     }
     else if (!showWhenShaped)
         SetWindowTitle(title);
-#if defined(_WIN32)
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     ps2xHostKeepDisplayAwake(); // the screen timeout ignores controllers (issue #12)
 #endif
     // Window size (PS2X_WINDOW_SIZE): "auto" (default) = the internal resolution's height (448 x PS2X_GS_SCALE, at most

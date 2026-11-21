@@ -8,6 +8,7 @@ Newest first, one line per change; the code comments say how.
 - Launcher: clicks in the Options book no longer land on the row above (or below) the one under the mouse.
 - Performance: the draw data sent to the PS2's vector unit each frame is gathered in one pass (about twice as fast in crowded scenes).
 - Fixed the monitor turning off mid-game when playing with a controller (Windows' screen timeout) (#12).
+- Linux and Steam Deck: the screen no longer blanks mid-game when playing with a controller either (#12). The desktop is asked not to (the freedesktop ScreenSaver inhibit, which KDE and the Deck's Desktop Mode have, else GNOME's session manager), and the X server's own screensaver timer is reset every 30 s. Not yet on a Wayland desktop that has neither (sway and the like).
 - Performance: the game's matrix, rotation and sine / cosine helpers (libvu0's MulMatrix, ApplyMatrix, RotMatrixX / Y / Z, ecossin) run as native code.
 - Controls: Swap Sticks (Controls > Controller) for left-handed play.
 - Launcher: the window follows Display Mode at once and switches on F11, as the game does.
@@ -47,6 +48,16 @@ Newest first, one line per change; the code comments say how.
 
 ## November 19, 2026
 
+- Linux and Steam Deck: God Hand: Rearmed runs natively on Linux (no Proton), as an AppImage or a tar.gz folder, on any x86-64 distro with glibc 2.31 or newer (SteamOS included).
+- Linux: PCSX2's Vulkan renderer, presenting through X11 (Xwayland on Wayland desktops and in the Deck's Game Mode); the in-game OPTIONS screen with it.
+- Linux: controllers through SDL3 like on Windows (the Deck's own controls through Steam Input).
+- Linux: the AppImage keeps settings and saves in ~/.local/share/GodHandRearmed, or in a GHR-data folder you make next to it; the tar.gz folder keeps them inside, like the Windows zip.
+- Linux: the launcher picks the disc image with your desktop's file chooser (zenity or kdialog) and also finds one in ~/Games, ~/Downloads or on an SD card.
+- Linux: Add to Steam works with Steam's native and Flatpak installs; the shortcut starts the AppImage (or the folder's GHR).
+- Linux: updates install in place (the AppImage replaces itself; the folder takes the new tar.gz); settings, saves and mods untouched.
+- Steam Deck: a fresh install starts fullscreen at the Deck's 16:10.
+- Linux: a crash writes its [crash] lines (signal, address, backtrace) to the log like on Windows; no desktop session gives a plain message instead of a crash.
+- Builds: Linux CI (nix flake check) builds everything but the game itself on every push, packs the AppImage and tar.gz, and starts them on Debian 11, Ubuntu 20.04 and 24.04, Fedora, Arch and the Steam Runtime.
 - 60 FPS: the title screen runs at the PS2's speed (Press Start's blink, the menus' glows, slides and fades, the boot logos).
 - 60 FPS: the memory-card screens run at the PS2's speed (the cursor arrows, the dimming, the progress bars and their waits).
 - 60 FPS: a stage's results slide in and count up at the PS2's speed, the gold roll's ticks too.

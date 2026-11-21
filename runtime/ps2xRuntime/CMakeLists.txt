@@ -84,11 +84,30 @@ else()
     )
     FetchContent_MakeAvailable(raylib)
 
+    # Linux desktop: GLFW opens libGL / libEGL itself at run time (dlopen) and rlgl reaches every GL function through
+    # glad's pointers, so nothing needs libOpenGL / libGLX at link time. raylib's CMake links them anyway, which ties
+    # the executable to the build machine's GL path (a Nix store path, or a distro's libGL that a Steam Deck or a
+    # container may lack). Dropped here: the binary then loads whichever GL driver the player's system has.
+    if(UNIX AND NOT APPLE AND NOT PS2X_IS_ANDROID AND TARGET raylib)
+        get_target_property(PS2X_RAYLIB_LINKS raylib INTERFACE_LINK_LIBRARIES)
+        if(PS2X_RAYLIB_LINKS)
+            list(FILTER PS2X_RAYLIB_LINKS EXCLUDE REGEX "(^|[/:])(lib)?(OpenGL|GLX|GL)(\\.so[.0-9]*)?>?$|OpenGL::")
+            set_target_properties(raylib PROPERTIES INTERFACE_LINK_LIBRARIES "${PS2X_RAYLIB_LINKS}")
+        endif()
+        get_target_property(PS2X_RAYLIB_PRIVATE raylib LINK_LIBRARIES)
+        if(PS2X_RAYLIB_PRIVATE)
+            list(FILTER PS2X_RAYLIB_PRIVATE EXCLUDE REGEX "(^|[/:])(lib)?(OpenGL|GLX|GL)(\\.so[.0-9]*)?>?$|OpenGL::")
+            set_target_properties(raylib PROPERTIES LINK_LIBRARIES "${PS2X_RAYLIB_PRIVATE}")
+        endif()
+    endif()
+
     # SDL3 for the controllers only (ps2_host_gamepads.cpp: PCSX2's "SDL-<n>" numbering, vibration, PlayStation
     # controllers without Steam/DS4Windows); the window stays raylib's. Built as SDL3.dll next to the executable, which
     # a launcher can also load to list the controllers. PS2X_SDL_INPUT=0 at run time reads GLFW's gamepads instead.
     option(PS2X_ENABLE_SDL_INPUT "Read controllers through SDL3" ON)
-    if(PS2X_ENABLE_SDL_INPUT AND WIN32)
+    # Linux desktop too (the Steam Deck included): libSDL3.so.0 next to GHR (its RPATH is $ORIGIN, src/CMakeLists.txt).
+    # SDL3 opens udev, hidapi's hidraw and evdev itself at run time, so nothing more is linked.
+    if(PS2X_ENABLE_SDL_INPUT AND (WIN32 OR (UNIX AND NOT APPLE AND NOT PS2X_IS_ANDROID)))
         set(SDL_SHARED ON CACHE BOOL "" FORCE)
         set(SDL_STATIC OFF CACHE BOOL "" FORCE)
         set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
@@ -98,6 +117,13 @@ else()
         foreach(subsystem AUDIO GPU RENDER CAMERA DIALOG TRAY POWER)
             set(SDL_${subsystem} OFF CACHE BOOL "" FORCE)
         endforeach()
+        if(NOT WIN32)
+            # Only SDL_INIT_GAMEPAD is used (ps2_host_gamepads.cpp); the window is raylib's. Without its video
+            # subsystem SDL3 needs none of X11 / Wayland, and it keeps the joystick, gamepad, haptic, hidapi and
+            # events pieces the controllers use. Windows keeps its video subsystem as before.
+            set(SDL_VIDEO OFF CACHE BOOL "" FORCE)
+            set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
+        endif()
         FetchContent_Declare(
             SDL3
             URL "https://github.com/libsdl-org/SDL/releases/download/release-3.4.10/SDL3-3.4.10.tar.gz"
@@ -106,6 +132,9 @@ else()
         )
         FetchContent_MakeAvailable(SDL3)
         set_target_properties(SDL3-shared PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+        if(NOT WIN32)
+            set_target_properties(SDL3-shared PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin") # a .so is a LIBRARY output
+        endif()
     endif()
 
     if(PS2X_ENABLE_DEBUG_UI AND NOT PS2X_IS_ANDROID)
@@ -703,4 +732,40 @@ if(KAMITE_BUILD_TESTS)
         target_compile_options(audio_stretch_test PRIVATE /W3 /utf-8)
     endif()
     add_test(NAME audio_stretch_test COMMAND audio_stretch_test)
+
+    # Keeping the display awake on Linux (runtime/keep_awake.h: issue #12, the screen blanking during play with a
+    # controller). keep_awake_test: the calls' order and fallback on a fake bus; keep_awake_bus: the real libdbus path
+    # against a private dbus-daemon with fake desktop services, and the game's own call (test/keep_awake_bus.py; skipped
+    # without dbus-daemon or python3's jeepney); keep_awake_x11: the X server's idle time reset, on Xvfb (the renderer
+    # tests' run_smoke.sh, which fails without a display or xvfb-run; skipped without libXss); keep_awake_x11_lost: the reset's X server going away doesn't end
+    # the process, another connection's still does (test/keep_awake_x11_lost.sh; skipped without Xvfb). Every skip is a
+    # failure under KAMITE_REQUIRE_ALL_TESTS=1 (the Nix check).
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+        find_package(Threads REQUIRED)
+        add_executable(keep_awake_test test/keep_awake_test.cpp src/lib/Kernel/host_keep_awake_linux.cpp)
+        target_include_directories(keep_awake_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+        target_link_libraries(keep_awake_test PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+        set_target_properties(keep_awake_test PROPERTIES EXCLUDE_FROM_ALL FALSE)
+        add_test(NAME keep_awake_test COMMAND keep_awake_test)
+        find_package(Python3 COMPONENTS Interpreter)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME keep_awake_bus
+                COMMAND "${Python3_EXECUTABLE}" -I "${CMAKE_CURRENT_SOURCE_DIR}/test/keep_awake_bus.py"
+                        "$<TARGET_FILE:keep_awake_test>")
+        else() # registered all the same: a skip, or a failure where every test must run
+            add_test(NAME keep_awake_bus COMMAND keep_awake_test missing-python)
+        endif()
+        set_tests_properties(keep_awake_bus PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+        add_test(NAME keep_awake_x11
+            COMMAND "${CMAKE_SOURCE_DIR}/thirdparty/pcsx2-gs/test/run_smoke.sh" "$<TARGET_FILE:keep_awake_test>" x11)
+        # Always a fresh Xvfb (KAMITE_SMOKE_XVFB=1): on a desktop's own display a moving mouse would reset idle too.
+        set_tests_properties(keep_awake_x11 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60 ENVIRONMENT KAMITE_SMOKE_XVFB=1)
+        add_test(NAME keep_awake_entry_x11
+            COMMAND "${CMAKE_SOURCE_DIR}/thirdparty/pcsx2-gs/test/run_smoke.sh" "$<TARGET_FILE:keep_awake_test>" entry-x11)
+        set_tests_properties(keep_awake_entry_x11 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60
+            ENVIRONMENT KAMITE_SMOKE_XVFB=1) # its session bus: one of its own that never answers
+        add_test(NAME keep_awake_x11_lost
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test/keep_awake_x11_lost.sh" "$<TARGET_FILE:keep_awake_test>")
+        set_tests_properties(keep_awake_x11_lost PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+    endif()
 endif()
