@@ -1,0 +1,48 @@
+# Guest function -> subsystem, for subsystems.py (rung 1 of claude/native-next.md). First match wins, in this order:
+# address (one function), range (start-end, inclusive start, exclusive end), module (idantony_modules.csv, regex on the
+# file stem), name (regex on kamite_function_names.inc's name). A subsystem starting with "helper:" is transparent: a
+# sample in it belongs to the nearest caller that isn't a helper (it is still counted in the helper's own line).
+kind,pattern,subsystem
+address,0x00104010,cloth
+address,0x00107360,cloth
+address,0x001067B8,cloth
+address,0x00159AD0,motion
+address,0x0014D0E8,camera
+range,0x0012F288-0x00133948,collision
+module,^game_cloth_|^game_player_springs,cloth
+module,^game_collision_|^game_ray_|^game_terrain_|^game_hitarea_|^game_scene_at|^scene_at_units|^game_dynamic_corners|^game_player_terrain|^game_player_door_probe|^game_om_door_geometry|^game_scene_dynamic_geometry|^game_player_attack_hitarea|^game_enemy_hitareas|^game_enemy_solids|^game_hitarea,collision
+module,^game_camera|^game_motion_camera|^game_render_projection|^game_event_camera_track,camera
+module,^game_actor_packets|^game_model_packets|^game_actor_model_draw|^game_actor_render|^game_render_|^game_actor_shadow_draw|^game_scene_meshes|^game_actor_palette|^game_model_texture_scroll|^game_actor_model_material|^game_scene_visibility|^game_scene_box_visibility|^game_enemy_shadow|^game_player_shadow|^game_esp_trail_draw,render
+module,^game_actor_light|^game_actor_model_light|^game_world_light|^game_event_additional_light|^game_event_light_filter,lighting
+module,^game_actor_motion|^game_actor_blend|^game_actor_two_bone|^game_actor_hierarchy|^game_actor_matrix|^game_actor_inverse|^game_actor_axis_rotation|^game_actor_model_trans|^game_actor_model_nodes|^game_actor_finish_model|^game_actor_sequence|^game_enemy_motion|^game_enemy_pose|^game_player_ground_pose|^game_enemy_2a2_pose,motion
+module,^game_effect|^game_esp,effects
+module,^game_cockpit|^id_|^game_scene_ui|^game_scene_message|^font_state|^game_action_button|^menu_state|^game_message_step|^game_system_menu|^screen_fade,ui
+module,^sound|^se_voice|^bgm_requests|^enemy_se_banks|^game_object_sound|^game_event_audio|^game_event_se_playback,sound
+module,^game_event|^game_scenario,events
+module,^game_enemy,enemy-ai
+module,^game_player|^game_title_player,player
+module,^game_om|^game_object|^game_objects|^game_children|^game_door|^game_gate,objects
+module,^game_scene|^game_room|^game_stage|^game_world|^game_checkpoint,scene
+module,^movie_task|^game_movie_pool,movie
+module,^mc_,save
+module,^tasks|^startup_task|^frame_state|^display_state|^dvd_jobs|^boot|^game_init|^game_start|^game_prepare|^rng,system
+module,^game_math_globals|^sdk_rotation_trig|^sdk_sine|^game_axis_angle|^game_ee_acos,helper:math
+name,^sceVu0,helper:libvu0
+name,^(mem(cpy|set|move|cmp)|str[a-z]*|_?printf|_?sprintf|v?sn?printf|sinf|cosf|tanf|atan2?f|acosf|asinf|sqrtf|powf|expf|logf|floorf|ceilf|fmodf|__[a-z]|_[a-z]+_r$|malloc|free|calloc|realloc)|^cVec_|^CVEC|^Quat_,helper:libc-math
+name,^(Cloth|EmCloth|cCloth),cloth
+name,^(ChkLine|HitBox|HitCheck|cCollision|cGrid|cOmHitVolume|cHitRec|cOrientBox|cDamage),collision
+name,^(cCamera|cPlCamera|PathHost|PathRec|cAreaCamManager|cCamManager),camera
+name,^(mdlPkt|cModel_draw|cModel_send|Gp_draw|Draw_|gsPacket|GsImage|cVram|SpritePacket|cScrSprite|drawPrim|cModel),render
+name,^(Motion|Mot_|Seq|cMotion|RecTrack|CurveKey),motion
+name,^(cWorldLight|cLight),lighting
+name,^(cFx|Esp|cEsp|Effect),effects
+name,^(cID|CustomID|cCock|cMess|cIDObj|cSubScr|cScr|classFADE|cActionButton|Cockpit),ui
+name,^(cSnd|Sde|ADX|Adx|cBgm|cSe|sceSd|SdSys|StreamBuf),sound
+name,^(SFD|sf[a-z]|Mwsfd|MWSF|Sftim|sfdmpv),movie
+name,^(cCoreSave|cMc|sceMc),save
+name,^(BlackJack|Poker|Slot[0-9]|cCasino|ColiseumBattle),minigames
+name,^(cScenario|cEvent|ScenarioStep|cSceAt),events
+name,^(cEm|em[0-9]),enemy-ai
+name,^(pl00|cPl|cPartner|Player),player
+name,^(cOm|cObj|cGameObj|ObjFactory|CreateObj),objects
+name,^(cDvd|cDataManager|cNode|EESyscall|sce[A-Z]|_sce|Sif|DVCI),system
