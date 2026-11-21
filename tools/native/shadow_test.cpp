@@ -79,6 +79,8 @@ KM_RECOMPILED(cModel_nodeLayerScreen_0x14be38)
 // batches 3-4 (readable natives from the decomp's C)
 KM_RECOMPILED(func_0014C5A0_0x14c5a0)
 KM_RECOMPILED(func_00151398_0x151398)
+KM_RECOMPILED(func_00148BD8_0x148bd8)
+KM_RECOMPILED(func_00151368_0x151368)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -448,6 +450,36 @@ namespace
         return n;
     }
 
+    // A texture manager's cache table at w (func_00151398's layout): entries {name, b, c, v} from the kind's start
+    // down; a hit (v < maxBlock) or, 1 in 6, a full table with no hit (the original returns 0 then; a miss in a table
+    // that isn't full makes it insert and call the upload builders, which the test doesn't have).
+    void textureTable(uint32_t w, uint64_t &name, uint64_t &type, uint32_t maxBlock)
+    {
+        const uint32_t kindPick = static_cast<uint32_t>(g_rng() % 6u);
+        type = kindPick < 2 ? 2u : kindPick < 4 ? 1u : kindPick == 4 ? 0u : g_rng();
+        const uint32_t start = w + (type == 2u ? 0x3D2F0u : type == 1u ? 0x3DC50u : 0x3C990u);
+        const uint32_t boundary = w + (type == 2u ? 0x3C9A0u : type == 1u ? 0x3D300u : 0x3C040u);
+        const bool full = g_rng() % 6u == 0u;
+        const uint32_t n = full ? (start - boundary) / 0x10u : 1u + static_cast<uint32_t>(g_rng() % 24u);
+        std::vector<uint32_t> names(n);
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            names[i] = g_rng() % 8u == 0u ? 0x80000000u | static_cast<uint32_t>(g_rng()) : static_cast<uint32_t>(g_rng() % 0x7FFFFFu);
+            const uint32_t at = start - 0x10u * i;
+            setU32(at, names[i]);
+            setU32(at + 4u, static_cast<uint32_t>(g_rng()));
+            setU32(at + 8u, static_cast<uint32_t>(g_rng()));
+            setU32(at + 12u, static_cast<uint32_t>(g_rng() % maxBlock));
+        }
+        setU32(start - 0x10u * n, 0xFFFFFFFFu); // the end (at the boundary when full)
+        name = names[g_rng() % n];
+        if (full)
+            name = 0xFFFFFFF0u; // in no entry (the random names stay below 0x7FFFFF or carry bit 31 with others)
+        name = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(name))); // as the callers pass it
+        if (full && g_rng() % 2u == 0u)
+            name = names[g_rng() % n] ^ (1ull << 40); // upper bits no lw gives: never equal (a miss)
+    }
+
     void setupBatch2(const NativeFunction &fn, Call &call, bool wild, uint32_t base, uint32_t seg)
     {
         R5900Context &ctx = call.ctx;
@@ -657,36 +689,49 @@ namespace
         }
         case 0x151398u: // batch 3: the texture cache's lookup (manager w at 0x80000 + ...; tables below w + 0x3DC50)
         {
+            uint64_t name, type;
             const uint32_t w = 0x80000u + 0x40u * static_cast<uint32_t>(g_rng() % 16u);
-            const uint32_t kindPick = static_cast<uint32_t>(g_rng() % 6u);
-            const uint64_t type = kindPick < 2 ? 2u : kindPick < 4 ? 1u : kindPick == 4 ? 0u : g_rng();
-            const uint32_t start = w + (type == 2u ? 0x3D2F0u : type == 1u ? 0x3DC50u : 0x3C990u);
-            const uint32_t boundary = w + (type == 2u ? 0x3C9A0u : type == 1u ? 0x3D300u : 0x3C040u);
-            // a hit somewhere in n entries, or (1 in 6) a full table with no hit: the original returns 0 (no calls)
-            const bool full = g_rng() % 6u == 0u;
-            const uint32_t n = full ? (start - boundary) / 0x10u : 1u + static_cast<uint32_t>(g_rng() % 24u);
-            std::vector<uint32_t> names(n);
-            for (uint32_t i = 0; i < n; ++i)
-            {
-                names[i] = g_rng() % 8u == 0u ? 0x80000000u | static_cast<uint32_t>(g_rng()) : static_cast<uint32_t>(g_rng() % 0x7FFFFFu);
-                const uint32_t at = start - 0x10u * i;
-                setU32(at, names[i]);
-                setU32(at + 4u, static_cast<uint32_t>(g_rng()));
-                setU32(at + 8u, static_cast<uint32_t>(g_rng()));
-                setU32(at + 12u, static_cast<uint32_t>(g_rng()));
-            }
-            setU32(start - 0x10u * n, 0xFFFFFFFFu); // the end (at the boundary when full)
-            uint64_t name = names[g_rng() % n];
-            if (full)
-                name = 0xFFFFFFF0u; // in no entry (the random names stay below 0x7FFFFF or carry bit 31 with others)
-            name = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(name))); // as the callers pass it
-            if (full && g_rng() % 2u == 0u)
-                name = names[g_rng() % n] ^ (1ull << 40); // upper bits no lw gives: never equal (a miss)
-            // (a miss in a table that isn't full makes the original insert and call the upload builders: not here)
+            textureTable(w, name, type, 0x10000u);
             setGpr(ctx, 4, w | seg);
             setGpr64(ctx, 5, name);
             setGpr64(ctx, 6, type);
             setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
+            return;
+        }
+        case 0x148BD8u: // batch 3: a mesh node's texture registers (node at base; the manager D_004664A0)
+        {
+            uint64_t name, type;
+            textureTable(0x4664A0u, name, type, 64u); // VRAM blocks 0..63: register rows at 0x4A4128 + 16 * block
+            for (uint32_t row = 0; row < 64u * 16u + 8u; row += 4u)
+                setU32(0x4A4128u + row, static_cast<uint32_t>(g_rng()));
+            setU32(0x7476B0u, static_cast<uint32_t>(g_rng()));
+            const uint32_t data = 0x70000u + 0x100u * static_cast<uint32_t>(g_rng() % 32u);
+            const uint32_t n = g_rng() % 8u == 0u ? 0u : 1u + static_cast<uint32_t>(g_rng() % 16u);
+            setU32(base + 0x388u, data | seg);
+            setU32(data + 8u, (n << 16) | static_cast<uint32_t>(g_rng() % 0x10000u)); // +0xA: the mesh count
+            for (uint32_t i = 0; i < 16u; ++i)
+            {
+                const uint32_t entry = 0x100u + 0x20u * static_cast<uint32_t>(g_rng() % 64u); // from data
+                setU32(data + 0x20u + 4u * i, entry);
+                setByte(data + entry + 0x16u, g_rng() % 4u == 0u ? 0xFFu : static_cast<uint8_t>(g_rng()));
+                for (uint32_t h = 0; h < 2u; ++h) // the packets' words, both halves
+                    setU32(base + 0x300u + 0x40u * h + 4u * i, (0x60000u + 0x40u * static_cast<uint32_t>(g_rng() % 256u)) | mirror);
+            }
+            setByte(base + 0x387u, static_cast<uint8_t>(g_rng()));
+            setGpr(ctx, 4, base | seg);
+            setGpr64(ctx, 5, type);
+            setGpr64(ctx, 6, name);
+            setGpr64(ctx, 7, g_rng());
+            // the stack clear of the data, or (1 in 16) one packet word pointing into another mesh's table entry
+            // read later (a write onto a read: the native declines)
+            setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
+            if (n > 1u && g_rng() % 16u == 0u)
+            {
+                uint32_t later;
+                std::memcpy(&later, g_ramA + data + 0x20u + 4u * (n - 1u), 4);
+                for (uint32_t h = 0; h < 2u; ++h)
+                    setU32(base + 0x300u + 0x40u * h, data + later + 0x16u - 0x20u - 4u); // its sd covers the byte
+            }
             return;
         }
         default:
@@ -1601,7 +1646,9 @@ int main(int argc, char **argv)
         {0x155C68u, &func_00155C68_0x155c68},    {0x155D60u, &func_00155D60_0x155d60},
         {0x15B0F0u, &PostInc_D_00566E10_0015B0F0_15B0F0_0x15b0f0}, {0x14B6F8u, &cModel_getMeshPtr_0x14b6f8},
         {0x14D768u, &ForwardNodeUpdate_14D768_0x14d768}, {0x14BE38u, &cModel_nodeLayerScreen_0x14be38},
-        {0x14C5A0u, &func_0014C5A0_0x14c5a0},    {0x151398u, &func_00151398_0x151398}};
+        {0x14C5A0u, &func_0014C5A0_0x14c5a0},    {0x151398u, &func_00151398_0x151398},
+        {0x148BD8u, &func_00148BD8_0x148bd8}};
+    g_callees.push_back({0x151368u, &func_00151368_0x151368}); // a callee only (no native)
     for (const auto &[address, f] : recompiled)
         g_callees.push_back({address, f});
     auto recompiledOf = [&](const NativeFunction &fn) {

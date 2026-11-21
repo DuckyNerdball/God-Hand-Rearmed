@@ -7,6 +7,8 @@
 #include "kamite/native/native.h"
 #include "kamite/native/ee_ctx.h"
 
+#include <algorithm>
+
 namespace kamite::native::packet
 {
     namespace
@@ -1649,11 +1651,39 @@ namespace kamite::native::packet
             Env &env;
             uint32_t stackLow, stackHigh;
             bool ok = true;
+            Footprint::Range *log = nullptr; // when set: every read's range (offset, size), for "no write onto a read"
+            int logCap = 0, logCount = 0;
             bool span(uint32_t address, uint32_t size, uint32_t &offset)
             {
                 if (!plainRam(address, size, offset) || e::overlaps(offset, size, stackLow, stackHigh - stackLow))
                     return ok = false;
+                if (log)
+                {
+                    if (logCount == logCap)
+                        return ok = false;
+                    log[logCount++] = Footprint::Range{offset, size};
+                }
                 return true;
+            }
+            uint8_t u8(uint32_t address)
+            {
+                uint32_t at;
+                return span(address, 1u, at) ? *env.at(at, 1u) : 0u;
+            }
+            int8_t s8(uint32_t address) { return static_cast<int8_t>(u8(address)); }
+            uint16_t u16(uint32_t address)
+            {
+                uint32_t at;
+                if (!span(address, 2u, at))
+                    return 0;
+                uint16_t v;
+                std::memcpy(&v, env.at(at, 2u), 2);
+                return v;
+            }
+            uint64_t u64(uint32_t address)
+            {
+                uint32_t at;
+                return span(address, 8u, at) ? e::read64(env, at) : 0u;
             }
             uint32_t u32(uint32_t address)
             {
@@ -1778,6 +1808,32 @@ namespace kamite::native::packet
         constexpr uint32_t kTextureLookupFrame = 0x70u;
         constexpr int kTextureLookupLimit = 256; // entries walked before declining (each table holds 0x95)
 
+        // The hit: v = the entry's VRAM block; backEdges = the loop's backward branches taken (one cycle charge each:
+        // bne at 0x151414 / 0x151484 / 0x1514E4). False on a miss (the original inserts or returns 0) or an unreadable
+        // / endless table.
+        template <class Env>
+        bool textureHit(Reader<Env> &rd, uint32_t w, uint64_t name, uint64_t type, int32_t &v, int &backEdges)
+        {
+            uint32_t entry = w + (type == 2u ? 0x3D2F0u : type == 1u ? 0x3DC50u : 0x3C990u);
+            auto nameAt = [&](uint32_t at) { return static_cast<uint64_t>(static_cast<int64_t>(rd.s32(at))); };
+            constexpr uint64_t kEnd = ~0ull; // Ent.name 0xFFFFFFFF
+            uint64_t current = nameAt(entry);
+            if (current == kEnd || !rd.ok)
+                return false; // an empty table: a miss
+            for (backEdges = 0;; ++backEdges)
+            {
+                if (current == name)
+                {
+                    v = rd.s32(entry + 0xCu);
+                    return rd.ok;
+                }
+                entry -= 0x10u;
+                current = nameAt(entry);
+                if (!rd.ok || current == kEnd || backEdges + 1 >= kTextureLookupLimit)
+                    return false;
+            }
+        }
+
         template <class Env>
         bool textureLookup(Env &env, R5900Context *ctx)
         {
@@ -1788,34 +1844,103 @@ namespace kamite::native::packet
             if (!plainRam(sp - kTextureLookupFrame, kTextureLookupFrame, stackTop))
                 return false;
             Reader<Env> rd{env, stackTop, stackTop + kTextureLookupFrame};
-            const uint32_t w = e::u32(ctx, e::a0);
-            const uint64_t name = e::u64(ctx, e::a1);
-            const uint64_t type = e::u64(ctx, e::a2);
-            uint32_t entry = w + (type == 2u ? 0x3D2F0u : type == 1u ? 0x3DC50u : 0x3C990u);
-            auto nameAt = [&](uint32_t at) {
-                return static_cast<uint64_t>(static_cast<int64_t>(rd.s32(at)));
-            };
-            constexpr uint64_t kEnd = ~0ull; // Ent.name 0xFFFFFFFF
-            uint64_t current = nameAt(entry);
-            if (current == kEnd || !rd.ok)
-                return false; // an empty table: a miss
-            for (int walked = 0;; ++walked)
+            int32_t v;
+            int backEdges;
+            if (!textureHit(rd, e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u64(ctx, e::a2), v, backEdges))
+                return false;
+            for (int i = 0; i < backEdges; ++i)
+                env.checkpoint(32u);
+            e::setS32(ctx, e::v0, static_cast<uint32_t>(v));
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // ---- func_00148BD8: a mesh node's texture registers (decomp src/cod/00148bd8.c) --------------------------
+        // void func_00148BD8(cModelNode *node, int type, int name, int mode): the texture `name` of kind `type` from the
+        // texture manager D_004664A0 (func_00151398: inline, its hit path; a miss declines before anything is
+        // written), then for each of the node's meshes (data->+0xA of them, data = node->data) whose entry byte +0x16
+        // isn't 0xFF: its packet word (node + 0x300, 16 per frame half) + 0x20 gets the manager's 64-bit register for
+        // that texture (func_00151368: the table at D_004664A0 + 0x3DC88, by half and texture) with the TBP field
+        // (bits 37-50) moved by the node's signed block offset (+0x387) and bits 35-36 = mode & 3.
+        constexpr uint32_t kMeshTextures = 0x148BD8u;
+        constexpr uint32_t kMeshTexturesFrame = 0xB0u + kTextureLookupFrame; // its frame + 0x151398's (0x151368: none)
+        constexpr uint32_t kTextureManager = 0x4664A0u;                     // D_004664A0
+        constexpr int kMeshTexturesLimit = 128;                             // meshes (more declines)
+
+        template <class Env>
+        bool meshTextures(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kMeshTexturesFrame, kMeshTexturesFrame, stackTop))
+                return false;
+            Footprint::Range reads[kMeshTexturesLimit * 5 + 16];
+            Reader<Env> rd{env, stackTop, stackTop + kMeshTexturesFrame};
+            rd.log = reads;
+            rd.logCap = static_cast<int>(sizeof(reads) / sizeof(reads[0]));
+            const uint32_t node = e::u32(ctx, e::a0);
+            // the plan, in the original's order
+            const uint32_t data = rd.u32(node + 0x388u);
+            const int n = rd.u16(data + 0xAu);
+            int32_t texture;
+            int lookupBackEdges;
+            if (!rd.ok || n > kMeshTexturesLimit ||
+                !textureHit(rd, kTextureManager, e::u64(ctx, e::a2), e::u64(ctx, e::a1), texture, lookupBackEdges))
+                return false;
+            const uint32_t half = rd.u32(model::kFrameParity) & 1u;
+            const uint64_t mode = (e::u64(ctx, e::a3) & 3u) << 35;
+            struct Write
             {
-                if (current == name)
-                {
-                    const int32_t v = rd.s32(entry + 0xCu);
-                    if (!rd.ok)
-                        return false;
-                    e::setS32(ctx, e::v0, static_cast<uint32_t>(v));
-                    returnToCaller(ctx);
-                    return true;
-                }
-                entry -= 0x10u;
-                current = nameAt(entry);
-                if (!rd.ok || current == kEnd || walked + 1 >= kTextureLookupLimit)
-                    return false; // a miss (the original inserts or returns 0), or an unreadable / endless table
-                env.checkpoint(32u); // the loop's backward branch (bne at 0x151414 / 0x151484 / 0x1514E4)
+                uint32_t offset;
+                uint64_t value;
+            } writes[kMeshTexturesLimit];
+            int count = 0;
+            for (int i = 0; i < n; ++i)
+            {
+                const uint32_t entry = rd.u32(data + 0x20u + 4u * static_cast<uint32_t>(i)) + data;
+                if (rd.u8(entry + 0x16u) == 0xFFu)
+                    continue;
+                const uint32_t packet = rd.u32(node + 0x300u + (half << 6) + 4u * static_cast<uint32_t>(i));
+                // func_00151368(D_004664A0, texture): the frame half read again, the texture's 16-byte row
+                const uint32_t row = kTextureManager + 0x3DC88u + ((rd.u32(model::kFrameParity) & 1u) << 3) +
+                                     (static_cast<uint32_t>(texture) << 4);
+                const uint64_t reg = rd.u64(row);
+                const uint64_t block = ((reg >> 37) & 0x3FFFu) + static_cast<uint64_t>(static_cast<int64_t>(rd.s8(node + 0x387u)));
+                uint32_t at;
+                if (!plainRam(packet + 0x20u, 8u, at) || e::overlaps(at, 8u, stackTop, kMeshTexturesFrame))
+                    return false;
+                writes[count++] = Write{at, ((((reg & 0xFFF8001FFFFFFFFFull) | ((block & 0x3FFFu) << 37)) &
+                                              0xFFFFFFE7FFFFFFFFull) | mode)};
             }
+            if (!rd.ok)
+                return false;
+            // no write may land on anything read (the original reads some of it after earlier writes)
+            Write sorted[kMeshTexturesLimit];
+            std::copy(writes, writes + count, sorted);
+            std::sort(sorted, sorted + count, [](const Write &a, const Write &b) { return a.offset < b.offset; });
+            for (int r = 0; r < rd.logCount; ++r)
+            {
+                const Footprint::Range &read = reads[r];
+                const Write *it = std::lower_bound(sorted, sorted + count, read.address < 7u ? 0u : read.address - 7u,
+                                                   [](const Write &w, uint32_t v) { return w.offset < v; });
+                if (it != sorted + count && it->offset < read.address + read.size)
+                    return false;
+            }
+
+            // the cycles: 0x151398's jal and loop, 0x151368's jal per mesh written, the loop's back-edges
+            env.call();
+            for (int i = 0; i < lookupBackEdges; ++i)
+                env.checkpoint(32u);
+            for (int i = 0; i < count; ++i)
+                env.call();
+            for (int i = 1; i < n; ++i)
+                env.checkpoint(32u);
+            for (int i = 0; i < count; ++i)
+                e::write64(env, writes[i].offset, writes[i].value);
+            returnToCaller(ctx);
+            return true;
         }
     }
 
@@ -1859,5 +1984,6 @@ namespace kamite::native::packet
         addReadable("func_0014C5A0", kQueueModel, &queueModel<RealEnv>, &queueModel<ShadowEnv>, 0u);
         addReadable("func_00151398", kTextureLookup, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,
                     NativeFunction::kReturnsV0);
+        addReadable("func_00148BD8", kMeshTextures, &meshTextures<RealEnv>, &meshTextures<ShadowEnv>, 0u);
     }
 }

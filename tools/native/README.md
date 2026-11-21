@@ -23,7 +23,7 @@ with kamite/git_commit.h):
        func_00155AE8_0x155ae8 func_00155BE8_0x155be8 func_00155C68_0x155c68 func_00155D60_0x155d60
        PostInc_D_00566E10_0015B0F0_15B0F0_0x15b0f0 cModel_getMeshPtr_0x14b6f8 ForwardNodeUpdate_14D768_0x14d768
        cModel_nodeLayerScreen_0x14be38 func_0014C5A0_0x14c5a0
-       func_00151398_0x151398"
+       func_00151398_0x151398 func_00148BD8_0x148bd8 func_00151368_0x151368"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
