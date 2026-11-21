@@ -185,6 +185,9 @@
             packages = toolsFor pkgs ++ libsFor pkgs ++ packagingTools ++ (with pkgs; [ gcc zig ]);
             shellHook = ''
               export KAMITE_APPIMAGE_RUNTIME=${runtime}
+              # build.py starts the portable tools it builds (ps2_recomp, vu1_recomp) through this loader where the
+              # system has no /lib64 one (NixOS, NixOS-WSL).
+              export KAMITE_HOST_LOADER=${pkgs.glibc}/lib/ld-linux-x86-64.so.2
             '';
           };
         };

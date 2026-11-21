@@ -80,6 +80,45 @@ def recomp_env():
     return env
 
 
+def host_command(exe):
+    """[exe], or [glibc loader, exe] when exe asks for a program loader this system lacks. The portable toolchain
+    links the tools build.py runs here (ps2_recomp, vu1_recomp) for /lib64/ld-linux-x86-64.so.2, which NixOS and the
+    Nix sandbox do not have (exec fails, exit 127): there they start through the dev shell's glibc loader instead
+    (KAMITE_HOST_LOADER from flake.nix, else the Nix compiler's own dynamic-linker)."""
+    exe = Path(exe)
+    if os.name == "nt":
+        return [str(exe)]
+    try:
+        with open(exe, "rb") as f:
+            head = f.read(64)
+            if head[:5] != b"\x7fELF\x02":
+                return [str(exe)]
+            phoff, = struct.unpack_from("<Q", head, 0x20)
+            phentsize, phnum = struct.unpack_from("<HH", head, 0x36)
+            interp = None
+            for i in range(phnum):
+                f.seek(phoff + i * phentsize)
+                ph = f.read(phentsize)
+                if struct.unpack_from("<I", ph, 0)[0] == 3:   # PT_INTERP
+                    offset, = struct.unpack_from("<Q", ph, 8)
+                    size, = struct.unpack_from("<Q", ph, 32)
+                    f.seek(offset)
+                    interp = f.read(size).rstrip(b"\0").decode()
+                    break
+    except OSError:
+        return [str(exe)]
+    if not interp or Path(interp).exists():
+        return [str(exe)]
+    loader = os.environ.get("KAMITE_HOST_LOADER", "")
+    if not loader and os.environ.get("NIX_CC"):
+        linker = Path(os.environ["NIX_CC"]) / "nix-support" / "dynamic-linker"
+        loader = linker.read_text().strip() if linker.exists() else ""
+    if not loader or not Path(loader).exists():
+        raise SystemExit(f"{exe.name} needs {interp}, which this system lacks; run build.py inside `nix develop` "
+                         f"(or set KAMITE_HOST_LOADER to a glibc ld-linux-x86-64.so.2).")
+    return [loader, str(exe)]
+
+
 def run(cmd, **kwargs):
     print("+", " ".join(str(c) for c in cmd), flush=True)
     kwargs["creationflags"] = kwargs.get("creationflags", 0) | LOW_PRIORITY
@@ -304,7 +343,7 @@ def generate(args=()):
     log = ROOT / "build" / "recomp.log"
     print(f"+ {recompiler} {staged}  (output in {log})", flush=True)
     with open(log, "w", encoding="utf-8") as out:
-        code = subprocess.run([str(recompiler), str(staged)], cwd=ROOT / "build", stdout=out, stderr=subprocess.STDOUT,
+        code = subprocess.run([*host_command(recompiler), str(staged)], cwd=ROOT / "build", stdout=out, stderr=subprocess.STDOUT,
                               creationflags=LOW_PRIORITY, env=recomp_env()).returncode
     if code:
         print(f"ps2_recomp failed ({code}); see {log}")
@@ -541,7 +580,7 @@ def modules(args=()):
         log = SNR2_GEN / f"{mod}.recomp.log"
         print(f"+ {recompiler} {staged}  (output in {log})", flush=True)
         with open(log, "w", encoding="utf-8") as out:
-            code = subprocess.run([str(recompiler), str(staged)], cwd=ROOT / "build", stdout=out, stderr=subprocess.STDOUT,
+            code = subprocess.run([*host_command(recompiler), str(staged)], cwd=ROOT / "build", stdout=out, stderr=subprocess.STDOUT,
                                   creationflags=LOW_PRIORITY, env=recomp_env()).returncode
         if code or not (staging / "register_functions.cpp").exists():
             print(f"{mod}: ps2_recomp failed ({code}); see {log}")
@@ -893,7 +932,7 @@ def vu(args=()):
     # vu1_recomp links the runtime library, which loads SDL3.dll when controllers go through SDL: it is in bin/.
     env = dict(os.environ)
     env["PATH"] = str(BIN) + os.pathsep + env.get("PATH", "")
-    code = run([VU1_RECOMP, VU_IMAGES, staging], env=env)
+    code = run([*host_command(VU1_RECOMP), VU_IMAGES, staging], env=env)
     if code:
         print(f"vu1_recomp failed (exit code {code & 0xFFFFFFFF:#010x}); keeping the VU code of the last good run in "
               f"{GENERATED / 'vu1'}.")
