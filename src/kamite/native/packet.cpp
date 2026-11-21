@@ -1765,6 +1765,58 @@ namespace kamite::native::packet
             returnToCaller(ctx);
             return true;
         }
+
+        // ---- func_00151398: the texture cache's lookup (decomp src/cod/00151398.c) -------------------------------
+        // int func_00151398(char *w, unsigned int name, int type): the texture `name` of this kind's table in the
+        // manager w (type 2 from w + 0x3D2F0, type 1 from w + 0x3DC50, else from w + 0x3C990; 16-byte entries Ent
+        // {name, b, c, v} walked down to a name of -1): a hit returns its VRAM block (e->v). A miss inserts the entry
+        // and builds the upload (func_00151990 / 151CC0 / 151688 / 151FA0, texture_slots' hook inside 0x151990), or
+        // returns 0 on a full table: this native takes the hits (every call after a texture's first) and declines a
+        // miss, which the original then runs. The code compares the whole registers: type and name as 64-bit values
+        // (an entry's name sign-extended by its lw), the sentinel -1 the same way.
+        constexpr uint32_t kTextureLookup = 0x151398u;
+        constexpr uint32_t kTextureLookupFrame = 0x70u;
+        constexpr int kTextureLookupLimit = 256; // entries walked before declining (each table holds 0x95)
+
+        template <class Env>
+        bool textureLookup(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kTextureLookupFrame, kTextureLookupFrame, stackTop))
+                return false;
+            Reader<Env> rd{env, stackTop, stackTop + kTextureLookupFrame};
+            const uint32_t w = e::u32(ctx, e::a0);
+            const uint64_t name = e::u64(ctx, e::a1);
+            const uint64_t type = e::u64(ctx, e::a2);
+            uint32_t entry = w + (type == 2u ? 0x3D2F0u : type == 1u ? 0x3DC50u : 0x3C990u);
+            auto nameAt = [&](uint32_t at) {
+                return static_cast<uint64_t>(static_cast<int64_t>(rd.s32(at)));
+            };
+            constexpr uint64_t kEnd = ~0ull; // Ent.name 0xFFFFFFFF
+            uint64_t current = nameAt(entry);
+            if (current == kEnd || !rd.ok)
+                return false; // an empty table: a miss
+            for (int walked = 0;; ++walked)
+            {
+                if (current == name)
+                {
+                    const int32_t v = rd.s32(entry + 0xCu);
+                    if (!rd.ok)
+                        return false;
+                    e::setS32(ctx, e::v0, static_cast<uint32_t>(v));
+                    returnToCaller(ctx);
+                    return true;
+                }
+                entry -= 0x10u;
+                current = nameAt(entry);
+                if (!rd.ok || current == kEnd || walked + 1 >= kTextureLookupLimit)
+                    return false; // a miss (the original inserts or returns 0), or an unreadable / endless table
+                env.checkpoint(32u); // the loop's backward branch (bne at 0x151414 / 0x151484 / 0x1514E4)
+            }
+        }
     }
 
     void registerFunctions()
@@ -1805,5 +1857,7 @@ namespace kamite::native::packet
             registerFunction(fn);
         };
         addReadable("func_0014C5A0", kQueueModel, &queueModel<RealEnv>, &queueModel<ShadowEnv>, 0u);
+        addReadable("func_00151398", kTextureLookup, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,
+                    NativeFunction::kReturnsV0);
     }
 }

@@ -15,6 +15,7 @@ func_001503B8,0x001503B8,asm,,,,,
 func_00150DC8,0x00150DC8,asm,,,,,
 func_00150F68,0x00150F68,asm,,,,,
 func_00151168,0x00151168,asm,,,,,
+func_00151398,0x00151398,decomp,func_00151398,src/cod/00151398.c,75cb123,9023711aea26,batch 3 readable, the hit path (a miss declines); kRenderPath|kChargeAtEnd
 func_00155AE8,0x00155AE8,asm,,,,,
 func_00155BE8,0x00155BE8,asm,,,,,
 func_00155C68,0x00155C68,asm,,,,,

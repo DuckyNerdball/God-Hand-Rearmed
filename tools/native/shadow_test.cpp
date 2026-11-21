@@ -78,6 +78,7 @@ KM_RECOMPILED(ForwardNodeUpdate_14D768_0x14d768)
 KM_RECOMPILED(cModel_nodeLayerScreen_0x14be38)
 // batches 3-4 (readable natives from the decomp's C)
 KM_RECOMPILED(func_0014C5A0_0x14c5a0)
+KM_RECOMPILED(func_00151398_0x151398)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -652,6 +653,40 @@ namespace
             if (over)
                 std::memset(reinterpret_cast<uint8_t *>(&ctx.r[17]) + 8, 0, 8);
             setGpr(ctx, 29, stack | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
+            return;
+        }
+        case 0x151398u: // batch 3: the texture cache's lookup (manager w at 0x80000 + ...; tables below w + 0x3DC50)
+        {
+            const uint32_t w = 0x80000u + 0x40u * static_cast<uint32_t>(g_rng() % 16u);
+            const uint32_t kindPick = static_cast<uint32_t>(g_rng() % 6u);
+            const uint64_t type = kindPick < 2 ? 2u : kindPick < 4 ? 1u : kindPick == 4 ? 0u : g_rng();
+            const uint32_t start = w + (type == 2u ? 0x3D2F0u : type == 1u ? 0x3DC50u : 0x3C990u);
+            const uint32_t boundary = w + (type == 2u ? 0x3C9A0u : type == 1u ? 0x3D300u : 0x3C040u);
+            // a hit somewhere in n entries, or (1 in 6) a full table with no hit: the original returns 0 (no calls)
+            const bool full = g_rng() % 6u == 0u;
+            const uint32_t n = full ? (start - boundary) / 0x10u : 1u + static_cast<uint32_t>(g_rng() % 24u);
+            std::vector<uint32_t> names(n);
+            for (uint32_t i = 0; i < n; ++i)
+            {
+                names[i] = g_rng() % 8u == 0u ? 0x80000000u | static_cast<uint32_t>(g_rng()) : static_cast<uint32_t>(g_rng() % 0x7FFFFFu);
+                const uint32_t at = start - 0x10u * i;
+                setU32(at, names[i]);
+                setU32(at + 4u, static_cast<uint32_t>(g_rng()));
+                setU32(at + 8u, static_cast<uint32_t>(g_rng()));
+                setU32(at + 12u, static_cast<uint32_t>(g_rng()));
+            }
+            setU32(start - 0x10u * n, 0xFFFFFFFFu); // the end (at the boundary when full)
+            uint64_t name = names[g_rng() % n];
+            if (full)
+                name = 0xFFFFFFF0u; // in no entry (the random names stay below 0x7FFFFF or carry bit 31 with others)
+            name = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(name))); // as the callers pass it
+            if (full && g_rng() % 2u == 0u)
+                name = names[g_rng() % n] ^ (1ull << 40); // upper bits no lw gives: never equal (a miss)
+            // (a miss in a table that isn't full makes the original insert and call the upload builders: not here)
+            setGpr(ctx, 4, w | seg);
+            setGpr64(ctx, 5, name);
+            setGpr64(ctx, 6, type);
+            setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
             return;
         }
         default:
@@ -1566,7 +1601,7 @@ int main(int argc, char **argv)
         {0x155C68u, &func_00155C68_0x155c68},    {0x155D60u, &func_00155D60_0x155d60},
         {0x15B0F0u, &PostInc_D_00566E10_0015B0F0_15B0F0_0x15b0f0}, {0x14B6F8u, &cModel_getMeshPtr_0x14b6f8},
         {0x14D768u, &ForwardNodeUpdate_14D768_0x14d768}, {0x14BE38u, &cModel_nodeLayerScreen_0x14be38},
-        {0x14C5A0u, &func_0014C5A0_0x14c5a0}};
+        {0x14C5A0u, &func_0014C5A0_0x14c5a0},    {0x151398u, &func_00151398_0x151398}};
     for (const auto &[address, f] : recompiled)
         g_callees.push_back({address, f});
     auto recompiledOf = [&](const NativeFunction &fn) {
