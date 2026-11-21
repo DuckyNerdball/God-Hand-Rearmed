@@ -2,6 +2,7 @@
 
 #include "kamite/native/native.h"
 #include "kamite/native/shadow.h"
+#include "kamite/native/chain_digest.h"
 
 #include "kamite/frame_patches.h"
 #include "kamite/function_hooks.h"
@@ -157,6 +158,9 @@ namespace kamite::native
         const bool shadowUnset = !shadowValue || !*shadowValue;
         const std::string shadowList = shadowUnset ? "" : lower(shadowValue);
         const bool shadowNone = shadowList == "none" || shadowList == "0";
+        // Rung 3's chain digest (chain_digest.h): every replay, whatever is shadowed.
+        if (replaying)
+            chain_digest::begin(shadowOutput().c_str());
 #endif
         for (const NativeFunction &fn : registry())
         {
@@ -212,6 +216,7 @@ namespace kamite::native
     void flush()
     {
 #if !defined(KAMITE_RELEASE)
+        chain_digest::end();
         if (g_shadowing)
             shadow::writeSummary();
 #endif

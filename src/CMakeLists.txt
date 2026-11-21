@@ -85,6 +85,7 @@ set(KAMITE_HOST_SOURCES
     kamite/native/native.cpp
     kamite/native/shadow.cpp
     kamite/native/libvu0.cpp
+    kamite/native/chain_digest.cpp
     kamite/crash_history.cpp
     kamite/hud_layout.cpp
     kamite/hotkeys.cpp
