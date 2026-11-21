@@ -1618,6 +1618,153 @@ namespace kamite::native::packet
             e::jrRa(ctx, 0x14BEF0u, target, true);
             return true;
         }
+
+        // ==== batches 3-4, the new method (K's answers on the method, Nov 21) ====================================
+        // Readable C++ written from the decomp's matched C (tools/native/sources.csv has each one's file, commit and
+        // hash; decomp_watch.py flags a change), fields by the decomp's names (include/godhand/cModel.h at 75cb123).
+        // These natives are kRenderPath | kChargeAtEnd: they set what lasts (RAM the game keeps, the return value,
+        // the callee-saved registers, pc) and leave scratch registers and the dead stack as they fall; their cycles are
+        // the original's (8 per guest call, PS2X_EE_LOOP_CYCLES per backward branch) summed and charged at the end, so
+        // they decline unless the env runs at end (the flag guarantees it). Order of work: a plan reads every field and
+        // proves every access plain RAM, clear of the stack bytes the original's frames write (so its reads and ours
+        // see the same bytes); observers of an inlined observed function run next; then the writes.
+        namespace model
+        {
+            // cModel (CMODEL_COMMON) and cModelNode fields.
+            constexpr uint32_t kPacket = 0x220u;      // char *packet[2]: the model's own draw packet, by frame parity
+            constexpr uint32_t kMeshHead = 0x25Cu;    // cModelNode *meshHead
+            constexpr uint32_t kId = 0x2ACu;          // short id
+            constexpr uint32_t kDrawKind = 0x2C0u;    // int drawKind
+            constexpr uint32_t kNodeDispFlags = 0x380u; // cModelNode.dispFlags
+            constexpr int32_t kKindPerNode = 0xA;     // CMODEL_KIND_PER_NODE
+            constexpr uint32_t kNodeSorted = 0x4080u; // CMODEL_NODE_SORTED
+            constexpr uint32_t kFrameParity = 0x7476B0u; // D_007476B0: the frame counter (its low bit picks the half)
+        }
+
+        // Plain-RAM reads for a plan: each access proved plain and clear of [stackLow, stackHigh) (the bytes below the
+        // entry sp the original's frames write before it reads), else ok = false and the native declines.
+        template <class Env>
+        struct Reader
+        {
+            Env &env;
+            uint32_t stackLow, stackHigh;
+            bool ok = true;
+            bool span(uint32_t address, uint32_t size, uint32_t &offset)
+            {
+                if (!plainRam(address, size, offset) || e::overlaps(offset, size, stackLow, stackHigh - stackLow))
+                    return ok = false;
+                return true;
+            }
+            uint32_t u32(uint32_t address)
+            {
+                uint32_t at;
+                return span(address, 4u, at) ? e::read32(env, at) : 0u;
+            }
+            int32_t s32(uint32_t address) { return static_cast<int32_t>(u32(address)); }
+            int16_t s16(uint32_t address)
+            {
+                uint32_t at;
+                if (!span(address, 2u, at))
+                    return 0;
+                int16_t v;
+                std::memcpy(&v, env.at(at, 2u), 2);
+                return v;
+            }
+        };
+
+        // 0x31A650's work from its plan (queuePlan), readable: the link 0x14FF00 makes. The slot becomes a NEXT tag to
+        // the packet; the packet's last tag becomes a NEXT to what the slot linked to before, its QWC / flags kept.
+        template <class Env>
+        void linkPacket(Env &env, const Link &link, uint32_t packet)
+        {
+            const uint64_t before = e::read32(env, (link.slot + 4u) & PS2_RAM_MASK); // lwu: the slot's old address
+            e::write64(env, link.slot, (static_cast<uint64_t>(packet) << 32) | 0x20000000u);
+            const uint64_t tag = e::read64(env, link.tail);
+            e::write64(env, link.tail, (tag & 0x0FFFFFFFu) | 0x20000000u | (before << 32));
+        }
+
+        // The return to the caller (pc = ra; sp, s0-s7 and ra as at entry: these natives never change them).
+        void returnToCaller(R5900Context *ctx)
+        {
+            ctx->pc = e::u32(ctx, e::ra);
+            ctx->in_delay_slot = false;
+        }
+
+        // ---- func_0014C5A0: queue the model's own draw packet (decomp src/cod/0012cc70.c) ------------------------
+        // void func_0014C5A0(cModel *self, short id): the packet of this frame's half, 0x70 bytes, into the order table
+        // D_00754C80: a per-node model (drawKind 0xA) by its first mesh node's sorted flag (kind 2 with `id`, else kind 1
+        // index 0xD), any other model by its own drawKind and id.
+        constexpr uint32_t kQueueModel = 0x14C5A0u;
+        constexpr uint32_t kQueueModelFrame = 0x50u; // its frame (0x40) + 0x31A650's (0x10)
+
+        template <class Env>
+        bool queueModel(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kQueueModelFrame, kQueueModelFrame, stackTop))
+                return false;
+            Reader<Env> rd{env, stackTop, stackTop + kQueueModelFrame};
+            const uint32_t self = e::u32(ctx, e::a0);
+            const int64_t id = static_cast<int16_t>(e::u32(ctx, e::a1)); // short id
+            // the plan, in the original's order: the parity, cModel_getMeshPtr(self, 0) (no walk for 0), the node's
+            // flags, the packet, the kind
+            const uint32_t parity = rd.u32(model::kFrameParity) & 1u;
+            const uint32_t node = rd.u32(self + model::kMeshHead);
+            const uint32_t flags = rd.u32(node + model::kNodeDispFlags);
+            const uint32_t start = rd.u32(self + model::kPacket + parity * 4u);
+            const int32_t kind = rd.s32(self + model::kDrawKind);
+            const uint32_t end = start + 0x70u;
+            int64_t bucket, index;
+            if (kind == model::kKindPerNode)
+            {
+                const bool sorted = (flags & model::kNodeSorted) != 0u;
+                bucket = sorted ? 2 : 1;
+                index = sorted ? id : 0xD;
+            }
+            else
+            {
+                bucket = kind;
+                index = rd.s16(self + model::kId);
+            }
+            if (!rd.ok || end == 0u) // end 0 takes 0x31A600 (a packet at -0x70): never in practice, the original runs
+                return false;
+            // 0x31A650(D_00754C80, bucket, index, start, end), its sp 0x40 below ours
+            QueuePlan q;
+            if (!queuePlan(env, sp - 0x40u, 0x754C80u, static_cast<uint64_t>(bucket), static_cast<uint64_t>(index),
+                           start, static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(end))), q))
+                return false;
+            if (q.inRange &&
+                (e::overlaps(q.half, 4u, stackTop, kQueueModelFrame) || e::overlaps(q.at, 4u, stackTop, kQueueModelFrame) ||
+                 e::overlaps(q.plan.desc0, 4u, stackTop, kQueueModelFrame) ||
+                 e::overlaps(q.plan.desc20, 4u, stackTop, kQueueModelFrame) ||
+                 e::overlaps(q.plan.slot, 8u, stackTop, kQueueModelFrame) ||
+                 e::overlaps(q.plan.tail, 8u, stackTop, kQueueModelFrame)))
+                return false;
+
+            // cModel_getMeshPtr's entry observers, with the context they'd see (a1 = 0, ra = 0x14C5D4, sp - 0x40)
+            env.call();
+            {
+                const uint64_t ra = e::u64(ctx, e::ra);
+                e::setLow64(ctx, e::a1, 0u);
+                e::setS32(ctx, e::ra, 0x14C5D4u);
+                e::setS32(ctx, e::sp, sp - 0x40u);
+                ctx->pc = kGetMeshPtr;
+                env.observe(kGetMeshPtr, ctx);
+                e::setLow64(ctx, e::ra, ra);
+                e::setS32(ctx, e::sp, sp);
+            }
+            env.call(); // the jal to 0x31A650
+            if (q.inRange)
+            {
+                env.call(); // its jal to 0x14FF00
+                linkPacket(env, q.plan, start);
+            }
+            returnToCaller(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -1647,5 +1794,16 @@ namespace kamite::native::packet
         add("func_00151168", kTextureStrip, &textureStrip<RealEnv>, &textureStrip<ShadowEnv>);
         add("func_002D8070", kLightFade, &lightFade<RealEnv>, &lightFade<ShadowEnv>);
         add("cModel_nodeLayerScreen", kNodeLayer, &nodeLayer<RealEnv>, &nodeLayer<ShadowEnv>);
+
+        // Batches 3-4 (the new method): readable natives from the decomp's C, kRenderPath | kChargeAtEnd, unchecked
+        // (dev replays shadow them; play runs the originals) until K's builds prove them.
+        auto addReadable = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
+                              bool (*shadow)(ShadowEnv &, R5900Context *), uint32_t returns) {
+            NativeFunction fn{name, address, "packet", false, real, shadow, nullptr};
+            fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
+            fn.returns = returns;
+            registerFunction(fn);
+        };
+        addReadable("func_0014C5A0", kQueueModel, &queueModel<RealEnv>, &queueModel<ShadowEnv>, 0u);
     }
 }

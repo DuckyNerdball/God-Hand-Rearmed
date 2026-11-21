@@ -116,7 +116,7 @@ namespace kamite::native::shadow
 
         bool ignored(const NativeFunction &fn, size_t offset)
         {
-            if ((fn.flags & NativeFunction::kRenderPath) && !lastingContextByte(offset))
+            if ((fn.flags & NativeFunction::kRenderPath) && !lastingContextByte(fn, offset))
                 return true;
             for (int i = 0; i < fn.dontCareCount; ++i)
                 if (offset - fn.dontCare[i].offset < fn.dontCare[i].size)
@@ -328,7 +328,7 @@ namespace kamite::native::shadow
             const bool renderPath = (slot.fn.flags & NativeFunction::kRenderPath) != 0u;
             auto lastingDiff = [&](size_t offset, size_t size) {
                 for (size_t k = offset; k < offset + size; ++k)
-                    if (n[k] != r[k] && (!renderPath || lastingContextByte(k)))
+                    if (n[k] != r[k] && (!renderPath || lastingContextByte(slot.fn, k)))
                         return true;
                 return false;
             };

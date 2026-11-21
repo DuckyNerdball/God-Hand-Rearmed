@@ -76,6 +76,8 @@ KM_RECOMPILED(PostInc_D_00566E10_0015B0F0_15B0F0_0x15b0f0)
 KM_RECOMPILED(cModel_getMeshPtr_0x14b6f8)
 KM_RECOMPILED(ForwardNodeUpdate_14D768_0x14d768)
 KM_RECOMPILED(cModel_nodeLayerScreen_0x14be38)
+// batches 3-4 (readable natives from the decomp's C)
+KM_RECOMPILED(func_0014C5A0_0x14c5a0)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -107,9 +109,14 @@ uint8_t PS2Runtime::Load8(uint8_t *, R5900Context *, uint32_t a)
     std::fprintf(stderr, "unexpected Load8 (special address) %08X\n", a);
     std::abort();
 }
-uint32_t PS2Runtime::Load32(uint8_t *, R5900Context *, uint32_t)
+uint16_t PS2Runtime::Load16(uint8_t *, R5900Context *, uint32_t a)
 {
-    std::fprintf(stderr, "unexpected Load32 (special address)\n");
+    std::fprintf(stderr, "unexpected Load16 (special address) %08X\n", a);
+    std::abort();
+}
+uint32_t PS2Runtime::Load32(uint8_t *, R5900Context *ctx, uint32_t a)
+{
+    std::fprintf(stderr, "unexpected Load32 (special address) %08X at pc %08X\n", a, ctx ? ctx->pc : 0u);
     std::abort();
 }
 uint64_t PS2Runtime::Load64(uint8_t *, R5900Context *, uint32_t a)
@@ -615,6 +622,38 @@ namespace
             std::memcpy(&ctx.f[12], &f, 4);
             return;
         }
+        case 0x14C5A0u: // batch 3: queue the model's packet (cModel at base; decomp field names in packet.cpp)
+        {
+            orderTable(mirror);
+            const uint32_t node = 0x30000u + 0x40u * static_cast<uint32_t>(g_rng() % 64u);
+            setU32(base + 0x25Cu, g_rng() % 16u == 0u ? 0u : node | seg); // meshHead (0: the flags come from 0x380)
+            const uint32_t flags = static_cast<uint32_t>(g_rng());
+            const uint32_t pick = static_cast<uint32_t>(g_rng() % 4u);
+            setU32(node + 0x380u, pick == 0 ? flags & ~0x4080u : pick == 1 ? flags | 0x4080u : flags);
+            setU32(0x380u, static_cast<uint32_t>(g_rng()));
+            for (uint32_t half = 0; half < 2; ++half)
+            {
+                const uint32_t packet = 0x60000u + 0x80u * static_cast<uint32_t>(g_rng() % 256u);
+                setU32(base + 0x220u + 4u * half, packet | mirror); // (a packet at -0x70 would send the original to 0xFFFFFF90)
+                randomBytes(packet + 0x70u, 0x10u); // the packet's last tag (0x31A650's t0 = start + 0x70)
+            }
+            const uint32_t kinds = static_cast<uint32_t>(g_rng() % 8u);
+            setU32(base + 0x2C0u, kinds < 4 ? 0xAu : kinds == 4 ? static_cast<uint32_t>(g_rng()) & 0x7FFFFFFFu :
+                                  static_cast<uint32_t>(g_rng() % 12u)); // per-node, any (non-negative: a negative kind
+                                                                         // indexes the table backwards in the original
+                                                                         // too), or 0..11 (10+ out of range)
+            setU32(base + 0x2ACu, static_cast<uint32_t>(g_rng()));
+            setGpr(ctx, 4, base | seg);
+            setGpr64(ctx, 5, g_rng()); // short id: only the low 16 bits count
+            // the stack clear of the data, or (1 in 16) its frame over the model's id: the original's sq s1 lands on it
+            // (s1's upper half 0: an index of 0, harmless) and the native declines when it reads the id
+            const bool over = g_rng() % 16u == 0u;
+            const uint32_t stack = over ? base + 0x2C0u : 0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u);
+            if (over)
+                std::memset(reinterpret_cast<uint8_t *>(&ctx.r[17]) + 8, 0, 8);
+            setGpr(ctx, 29, stack | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
+            return;
+        }
         default:
             return;
         }
@@ -728,7 +767,7 @@ namespace
         const bool renderPath = (fn.flags & NativeFunction::kRenderPath) != 0u;
         const auto *x = reinterpret_cast<const uint8_t *>(&a.ctx), *y = reinterpret_cast<const uint8_t *>(&b.ctx);
         for (size_t at = 0; at < sizeof(R5900Context); ++at)
-            if (x[at] != y[at] && (!renderPath || kamite::native::lastingContextByte(at)))
+            if (x[at] != y[at] && (!renderPath || kamite::native::lastingContextByte(fn, at)))
                 return false;
         for (const Region &r : kRegions)
             for (uint32_t i = 0; i < r.size; ++i)
@@ -745,11 +784,25 @@ namespace
     }
 
     // KM_DIFF=1: where the first mismatches differ (context words by field, RAM words).
+    // (a kRenderPath native: only what its comparison looks at)
+    const NativeFunction *g_diffFn = nullptr;
+    const Call *g_diffCall = nullptr;
+    bool diffCounts(size_t ctxAt, int64_t ramAt)
+    {
+        if (!g_diffFn || !(g_diffFn->flags & NativeFunction::kRenderPath))
+            return true;
+        if (ramAt >= 0)
+            return !kamite::native::deadStackByte(*g_diffFn, g_diffCall->ctx, static_cast<uint32_t>(ramAt));
+        for (size_t k = ctxAt; k < ctxAt + 4; ++k)
+            if (kamite::native::lastingContextByte(*g_diffFn, k))
+                return true;
+        return false;
+    }
     void printDiff(const Outcome &a, const Outcome &b)
     {
         const auto *x = reinterpret_cast<const uint8_t *>(&a.ctx), *y = reinterpret_cast<const uint8_t *>(&b.ctx);
         for (size_t at = 0; at < sizeof(R5900Context); at += 4)
-            if (std::memcmp(x + at, y + at, 4) != 0)
+            if (std::memcmp(x + at, y + at, 4) != 0 && diffCounts(at, -1))
             {
                 uint32_t u, v;
                 std::memcpy(&u, x + at, 4), std::memcpy(&v, y + at, 4);
@@ -769,7 +822,7 @@ namespace
                         (unsigned long long)b.charged, a.checkpointCalls, b.checkpointCalls);
         for (const Region &r : kRegions)
             for (uint32_t i = 0; i < r.size; i += 4)
-                if (std::memcmp(g_ramA + r.begin + i, g_ramB + r.begin + i, 4) != 0)
+                if (std::memcmp(g_ramA + r.begin + i, g_ramB + r.begin + i, 4) != 0 && diffCounts(0, r.begin + i))
                 {
                     uint32_t u, v;
                     std::memcpy(&u, g_ramA + r.begin + i, 4), std::memcpy(&v, g_ramB + r.begin + i, 4);
@@ -868,7 +921,13 @@ namespace
                 // a declined call changed nothing
                 if (std::memcmp(&native.ctx, &call.ctx, sizeof(R5900Context)) != 0 || !sameAsSaved(before, g_ramB) ||
                     native.checkpointCalls != 0)
+                {
                     fail("a declined call changed something");
+                    if (std::getenv("KM_DIFF") && g_failures <= 3)
+                        std::printf("    context %s, ram %s, checkpoints %d\n",
+                                    std::memcmp(&native.ctx, &call.ctx, sizeof(R5900Context)) ? "changed" : "same",
+                                    sameAsSaved(before, g_ramB) ? "same" : "changed", native.checkpointCalls);
+                }
                 if (!wild)
                     ++declinedOrdinary;
                 copyRam(g_ramB, g_ramA); // back in step
@@ -893,9 +952,18 @@ namespace
                               fn.name, i, call.dueAt);
                 fail(text);
                 if (std::getenv("KM_DIFF") && g_failures <= 3)
+                {
+                    g_diffFn = &fn, g_diffCall = &call;
+                    uint32_t sp0;
+                    std::memcpy(&sp0, &call.ctx.r[29], 4);
+                    std::printf("    (entry sp %08X)\n", sp0);
                     printDiff(original, native);
+                    g_diffFn = nullptr;
+                }
                 copyRam(g_ramB, g_ramA);
             }
+            else if (fn.flags & NativeFunction::kRenderPath)
+                copyRam(g_ramB, g_ramA); // the dead stack the original wrote and the native didn't: back in step
         }
         std::printf("%-20s %d calls: %d native (%d stopped at a checkpoint), %d declined (%d with ordinary values: "
                     "aliasing, angles past the limit, Inf / NaN garbage in vf4)%s\n", fn.name, calls, ran, early, declined,
@@ -1378,7 +1446,7 @@ namespace
             R5900Context probe;
             std::memcpy(static_cast<void *>(&probe), &call.ctx, sizeof(probe));
             kamite::native::RealEnv env{g_ramB, g_rt};
-            if (fn.runReal(env, &probe))
+            if (kamite::native::runNative(fn, fn.runReal, env, &probe))
                 break; // a call the native takes
         } while (true);
         g_dueAt = 0;
@@ -1390,7 +1458,7 @@ namespace
         const double native = nsPerCall([&] {
             std::memcpy(static_cast<void *>(&ctx), &call.ctx, sizeof(ctx));
             kamite::native::RealEnv env{g_ramA, g_rt};
-            fn.runReal(env, &ctx);
+            kamite::native::runNative(fn, fn.runReal, env, &ctx);
         });
         const double copy = nsPerCall([&] { std::memcpy(static_cast<void *>(&ctx), &call.ctx, sizeof(ctx)); });
         std::printf("%-20s recompiled %.1f ns, native %.1f ns (context copy %.1f ns subtracted)\n", fn.name,
@@ -1458,10 +1526,10 @@ namespace
             const Outcome original = runFrom(input, [&](R5900Context *ctx) { recompiled(g_ramA, ctx, g_rt); });
             const Outcome native = runFrom(input, [&](R5900Context *ctx) {
                 kamite::native::RealEnv env{g_ramB, g_rt};
-                fn->runReal(env, ctx);
+                kamite::native::runNative(*fn, fn->runReal, env, ctx);
             });
             std::printf("  here: native %s the recompiled function; the recompiled function %s the game's real run\n",
-                        sameOutcome(original, native) ? "matches" : "DIFFERS from",
+                        sameOutcomeFor(*fn, input, original, native) ? "matches" : "DIFFERS from",
                         std::memcmp(&original.ctx, &gameReal, ctxSize) == 0 ? "matches" : "differs from");
         }
         std::fclose(f);
@@ -1497,7 +1565,8 @@ int main(int argc, char **argv)
         {0x155AE8u, &func_00155AE8_0x155ae8},    {0x155BE8u, &func_00155BE8_0x155be8},
         {0x155C68u, &func_00155C68_0x155c68},    {0x155D60u, &func_00155D60_0x155d60},
         {0x15B0F0u, &PostInc_D_00566E10_0015B0F0_15B0F0_0x15b0f0}, {0x14B6F8u, &cModel_getMeshPtr_0x14b6f8},
-        {0x14D768u, &ForwardNodeUpdate_14D768_0x14d768}, {0x14BE38u, &cModel_nodeLayerScreen_0x14be38}};
+        {0x14D768u, &ForwardNodeUpdate_14D768_0x14d768}, {0x14BE38u, &cModel_nodeLayerScreen_0x14be38},
+        {0x14C5A0u, &func_0014C5A0_0x14c5a0}};
     for (const auto &[address, f] : recompiled)
         g_callees.push_back({address, f});
     auto recompiledOf = [&](const NativeFunction &fn) {

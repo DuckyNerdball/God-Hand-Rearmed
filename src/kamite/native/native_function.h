@@ -249,13 +249,14 @@ namespace kamite::native
         uint32_t maxBytes = 0; // a recorded footprint's limit (0 = 64 KB); more is skipped
         uint32_t flags = 0;    // kRenderPath, kChargeAtEnd
         uint32_t deadStack = 0; // kRenderPath: the bytes below the entry sp that are dead after the call (0 = 64 KB)
+        uint32_t returns = kReturnsV0 | kReturnsV1 | kReturnsF0; // kRenderPath: the return registers compared
 
         // K's answer 2 on the method (Nov 21), for render-path natives (packets, object fields: what the game keeps):
         //  - kRenderPath: the harness compares what lasts: guest RAM outside the call's dead stack, v0 / v1's low 64
-        //    bits (the return value), f0, the callee-saved registers (s0-s7, gp, sp, fp, ra; f20-f31), pc and the
+        //    bits and f0 (the results `returns` names), the callee-saved registers (s0-s7, gp, sp, fp, ra; f20-f31), pc and the
         //    rest of the context, and the EE cycles; the scratch registers (at, a0-a3, t0-t9, k0 / k1, v0 / v1's upper
         //    halves, hi / lo, sa, f1-f19, the FPU accumulator and fcr31, VU0's vf1-vf31 / vi1-vi15 / ACC / Q / P / I
-        //    and its status / MAC / clip flags) and the stack below the entry sp are don't-care (lastingContextByte,
+        //    and its status / MAC / clip flags, branch_pc) and the stack below the entry sp are don't-care (lastingContextByte,
         //    deadStackByte). A native still sets everything the original's callers can read.
         //  - kChargeAtEnd: the native runs without mid-function checkpoints, its cycles (the original's own sum)
         //    charged once at its end (RealEnv / ShadowEnv atEnd). A call the original stopped at one of its own
@@ -264,10 +265,13 @@ namespace kamite::native
         static constexpr uint32_t kRenderPath = 1u;
         static constexpr uint32_t kChargeAtEnd = 2u;
         static constexpr uint32_t kDefaultDeadStack = 64u * 1024u;
+        // kRenderPath: which of v0 / v1 (their low 64 bits) and f0 are the function's result (a void function: none;
+        // the rest of their bytes are scratch then). Default: all three, the conservative reading.
+        static constexpr uint32_t kReturnsV0 = 1u, kReturnsV1 = 2u, kReturnsF0 = 4u;
     };
 
     // kRenderPath: is this byte of R5900Context compared (what lasts after the call), or scratch?
-    inline bool lastingContextByte(size_t offset)
+    inline bool lastingContextByte(const NativeFunction &fn, size_t offset)
     {
         auto in = [offset](size_t begin, size_t size) { return offset >= begin && offset < begin + size; };
         constexpr size_t r = offsetof(R5900Context, r), q = sizeof(__m128i);
@@ -276,8 +280,8 @@ namespace kamite::native
             const size_t reg = (offset - r) / q, byte = (offset - r) % q;
             if (reg == 1u || (reg >= 4u && reg <= 15u) || (reg >= 24u && reg <= 27u)) // at, a0-a3, t0-t7, t8-t9, k0-k1
                 return false;
-            if ((reg == 2u || reg == 3u) && byte >= 8u) // v0 / v1: the return value is the low 64 bits
-                return false;
+            if (reg == 2u || reg == 3u) // v0 / v1: a return value is the low 64 bits
+                return byte < 8u && (fn.returns & (reg == 2u ? NativeFunction::kReturnsV0 : NativeFunction::kReturnsV1));
             return true;
         }
         if (in(offsetof(R5900Context, hi), 8) || in(offsetof(R5900Context, lo), 8) ||
@@ -293,9 +297,15 @@ namespace kamite::native
             in(offsetof(R5900Context, vu0_status), 2) || in(offsetof(R5900Context, vu0_mac_flags), 4) ||
             in(offsetof(R5900Context, vu0_clip_flags), 4) || in(offsetof(R5900Context, vu0_clip_flags2), 4))
             return false;
-        if (in(offsetof(R5900Context, f) + 4, 19 * 4)) // f1-f19 (f0 = the float return value)
+        if (in(offsetof(R5900Context, f) + 4, 19 * 4)) // f1-f19
             return false;
+        if (in(offsetof(R5900Context, f), 4)) // f0: the float return value
+            return (fn.returns & NativeFunction::kReturnsF0) != 0u;
         if (in(offsetof(R5900Context, f_acc), 4) || in(offsetof(R5900Context, fcr31), 4))
+            return false;
+        // The recompiler's last branch: read only while in_delay_slot (an exception in a delay slot), which stays
+        // compared (false after a return); the caller's next branch rewrites it.
+        if (in(offsetof(R5900Context, branch_pc), 4))
             return false;
         return true;
     }

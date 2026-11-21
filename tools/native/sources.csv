@@ -8,6 +8,7 @@ MtxCopy,0x00147528,asm,,,,,
 MtxMultiply,0x00147548,asm,,,,,
 cModel_getMeshPtr,0x0014B6F8,asm,,,,,
 cModel_nodeLayerScreen,0x0014BE38,asm,,,,,
+func_0014C5A0,0x0014C5A0,decomp,func_0014C5A0,src/cod/0012cc70.c,75cb123,f0f99a1b59cb,batch 3 readable; kRenderPath|kChargeAtEnd
 ForwardNodeUpdate_14D768,0x0014D768,asm,,,,,
 func_0014FF00,0x0014FF00,asm,,,,,
 func_001503B8,0x001503B8,asm,,,,,
