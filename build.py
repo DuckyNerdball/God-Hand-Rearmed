@@ -81,10 +81,11 @@ def recomp_env():
 
 
 def host_command(exe):
-    """[exe], or [glibc loader, exe] when exe asks for a program loader this system lacks. The portable toolchain
-    links the tools build.py runs here (ps2_recomp, vu1_recomp) for /lib64/ld-linux-x86-64.so.2, which NixOS and the
-    Nix sandbox do not have (exec fails, exit 127): there they start through the dev shell's glibc loader instead
-    (KAMITE_HOST_LOADER from flake.nix, else the Nix compiler's own dynamic-linker)."""
+    """[exe], or [glibc loader, exe] inside a Nix shell. The portable toolchain links the tools build.py runs here
+    (ps2_recomp, vu1_recomp) for /lib64/ld-linux-x86-64.so.2. NixOS has no such loader, or only its stub-ld there (a
+    stand-in that prints why and exits 127; NixOS-WSL too), so a file existing at that path proves nothing: whenever
+    the Nix dev shell names its glibc loader (KAMITE_HOST_LOADER from flake.nix, else the Nix compiler's own
+    dynamic-linker), they start through it. Outside one: as they are, or a clear error if their loader is missing."""
     exe = Path(exe)
     if os.name == "nt":
         return [str(exe)]
@@ -107,16 +108,18 @@ def host_command(exe):
                     break
     except OSError:
         return [str(exe)]
-    if not interp or Path(interp).exists():
+    if not interp:
         return [str(exe)]
     loader = os.environ.get("KAMITE_HOST_LOADER", "")
     if not loader and os.environ.get("NIX_CC"):
         linker = Path(os.environ["NIX_CC"]) / "nix-support" / "dynamic-linker"
         loader = linker.read_text().strip() if linker.exists() else ""
-    if not loader or not Path(loader).exists():
+    if loader and Path(loader).exists():
+        return [str(exe)] if os.path.realpath(interp) == os.path.realpath(loader) else [loader, str(exe)]
+    if not Path(interp).exists():
         raise SystemExit(f"{exe.name} needs {interp}, which this system lacks; run build.py inside `nix develop` "
                          f"(or set KAMITE_HOST_LOADER to a glibc ld-linux-x86-64.so.2).")
-    return [loader, str(exe)]
+    return [str(exe)]
 
 
 def run(cmd, **kwargs):
