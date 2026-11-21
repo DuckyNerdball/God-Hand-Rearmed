@@ -1143,6 +1143,56 @@ static void keepBorderlessBehind()
         ClearWindowState(FLAG_WINDOW_TOPMOST);
 }
 
+// Whether leaving fullscreen goes back to a maximized window (it was one when fullscreen began).
+static bool s_restoreMaximized = false;
+
+void ps2_host_display::applyMode(int mode)
+{
+    if (!IsWindowReady())
+        return;
+    ps2_host_input::releaseMouse();
+    const bool full = IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE);
+    if (mode == 2)
+    {
+        if (!full)
+        {
+            s_restoreMaximized = IsWindowMaximized();
+            ToggleBorderlessWindowed();
+            keepBorderlessBehind();
+        }
+    }
+    else
+    {
+        if (full)
+            ToggleBorderlessWindowed();
+        if (mode == 1 && !IsWindowMaximized())
+            MaximizeWindow();
+        else if (mode == 0 && IsWindowMaximized())
+            RestoreWindow();
+        s_restoreMaximized = mode == 1;
+    }
+    ps2_host_display::startFullscreen = mode == 2;
+    ps2_host_display::startMaximized = mode == 1;
+}
+
+int ps2_host_display::toggleFullscreen()
+{
+    if (!IsWindowReady())
+        return 0;
+    ps2_host_input::releaseMouse();
+    const bool leavingFullscreen = IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE);
+    if (!leavingFullscreen)
+        s_restoreMaximized = IsWindowMaximized();
+    ToggleBorderlessWindowed();
+    keepBorderlessBehind();
+    if (leavingFullscreen && s_restoreMaximized)
+        MaximizeWindow();
+    const int mode = !leavingFullscreen ? 2 : s_restoreMaximized ? 1 : 0;
+    ps2_host_display::startFullscreen = mode == 2;
+    ps2_host_display::startMaximized = mode == 1;
+    return mode;
+}
+
 // requestWindowShape: a plain window takes the display's aspect (the aspect ratio changed while playing).
 static void shapeWindowToAspect()
 {
@@ -1165,6 +1215,9 @@ static void shapeWindowToAspect()
     SetWindowPosition(static_cast<int>(origin.x) + std::max(0, (monitorWidth - width) / 2),
                       static_cast<int>(origin.y) + std::max(0, (monitorHeight - height) / 2));
 }
+#else
+void ps2_host_display::applyMode(int) {}
+int ps2_host_display::toggleFullscreen() { return 2; }
 #endif
 
 
@@ -3312,7 +3365,6 @@ void PS2Runtime::run()
         gameThreadFinished.store(true, std::memory_order_release); });
 
     ThreadPriority::RaiseCurrentThread(ThreadPriority::Level::AboveNormal);
-    bool restoreMaximized = false;
     uint64_t tick = 0;
     std::ofstream frameTimes;
     // With PCSX2's GS the presents happen on the GS thread: GSPcsx2Backend writes this file instead.
@@ -3573,45 +3625,14 @@ void PS2Runtime::run()
         const bool fullscreenAsked = ps2x::hotkeys::take(ps2x::hotkeys::Action::Fullscreen); // the F2 menu's button
         if (fullscreenKey || fullscreenAsked)
         {
-            ps2_host_input::releaseMouse();
-            const bool leavingFullscreen = IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE);
-            if (!leavingFullscreen)
-                restoreMaximized = IsWindowMaximized();
-            ToggleBorderlessWindowed();
-            keepBorderlessBehind();
-            if (leavingFullscreen && restoreMaximized)
-                MaximizeWindow();
+            const int mode = ps2_host_display::toggleFullscreen();
             // The port keeps it as its Display Mode (saved like the OPTIONS screen's row).
             if (auto *listener = ps2_host_display::modeListener.load(std::memory_order_relaxed))
-                listener(!leavingFullscreen ? 2 : restoreMaximized ? 1 : 0);
+                listener(mode);
         }
         // The OPTIONS screen's Display Mode.
         if (const int mode = ps2_host_display::requestedMode.exchange(-1, std::memory_order_relaxed); mode >= 0)
-        {
-            ps2_host_input::releaseMouse();
-            const bool full = IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE);
-            if (mode == 2)
-            {
-                if (!full)
-                {
-                    restoreMaximized = IsWindowMaximized();
-                    ToggleBorderlessWindowed();
-                    keepBorderlessBehind();
-                }
-            }
-            else
-            {
-                if (full)
-                    ToggleBorderlessWindowed();
-                if (mode == 1 && !IsWindowMaximized())
-                    MaximizeWindow();
-                else if (mode == 0 && IsWindowMaximized())
-                    RestoreWindow();
-                restoreMaximized = mode == 1;
-            }
-            ps2_host_display::startFullscreen = mode == 2;
-            ps2_host_display::startMaximized = mode == 1;
-        }
+            ps2_host_display::applyMode(mode);
         if (ps2_host_display::shapeRequested.exchange(false, std::memory_order_relaxed))
             shapeWindowToAspect();
 #endif
