@@ -580,6 +580,7 @@ namespace ps2_host_input
         std::array<ExtraHold, extra::Count> g_extraHold{}; // window thread
         bool g_extraStartWas = false;              // window thread: the controller's Start at the last sample
         bool g_hideStart = false;                  // window thread: the Start of a SaveLoad chord, hidden until released
+        std::atomic<bool> g_extraHeld{false};      // extra::setHeld: the commands are held (pause menu, title)
         std::vector<extra::Command> g_extraFired;  // window thread
         std::filesystem::file_time_type g_loadedTime{};
         uintmax_t g_loadedSize = 0u;
@@ -1070,6 +1071,7 @@ namespace ps2_host_input
             g_extraStartWas = start;
             if (!start)
                 g_hideStart = false;
+            const bool held = g_extraHeld.load(std::memory_order_relaxed);
             for (size_t b = 0; b < extra::Count; ++b)
             {
                 const extra::Command command = config.commands[b];
@@ -1077,11 +1079,11 @@ namespace ps2_host_input
                 const bool down = present && command != extra::Command::None && gp::button(device, kExtraPad[b]);
                 if (down && !hold.down)
                 {
-                    hold = ExtraHold{true, false};
-                    if (command == extra::Command::QuickSave || command == extra::Command::QuickLoad)
+                    hold = ExtraHold{true, held}; // begun while held: its release saves nothing either
+                    if (!held && (command == extra::Command::QuickSave || command == extra::Command::QuickLoad))
                         g_extraFired.push_back(command);
                 }
-                if (down && command == extra::Command::SaveLoad && startPressed)
+                if (down && command == extra::Command::SaveLoad && startPressed && !held)
                 {
                     g_extraFired.push_back(extra::Command::QuickLoad);
                     hold.startUsed = true;
@@ -1089,7 +1091,7 @@ namespace ps2_host_input
                 }
                 if (!down && hold.down)
                 {
-                    if (command == extra::Command::SaveLoad && !hold.startUsed)
+                    if (command == extra::Command::SaveLoad && !hold.startUsed && !held)
                         g_extraFired.push_back(extra::Command::QuickSave);
                     hold = ExtraHold{};
                 }
@@ -3357,6 +3359,11 @@ namespace ps2_host_input
         void requestR3QuickTurn(uint32_t pad, bool on)
         {
             controls::requestR3QuickTurn(pad, on);
+        }
+
+        void setHeld(bool held)
+        {
+            g_extraHeld.store(held, std::memory_order_relaxed);
         }
 
         Command takeFired()
