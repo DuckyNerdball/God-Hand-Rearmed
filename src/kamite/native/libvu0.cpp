@@ -942,10 +942,12 @@ namespace kamite::native::libvu0
         registerFunction(NativeFunction{"sceVu0RotMatrixZ", kRot[2].entry, "libvu0", true, &rotMatrix<2, RealEnv>,
                                         &rotMatrix<2, ShadowEnv>, &rotMatrixFootprint});
 
-        // Rung 3, step a, batch 1 (claude/native-next.md): not checked yet (dev replays shadow them); recorded footprints.
+        // Rung 3, step a, batch 1 (claude/native-next.md): checked (on by default) since K's 16:44 build of e881eeb
+        // shadowed them in every replay: ~155M calls, 0 mismatches, 0 skipped, every .ram.bin the reference's. Recorded
+        // footprints.
         auto add = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
                       bool (*shadow)(ShadowEnv &, R5900Context *)) {
-            registerFunction(NativeFunction{name, address, "libvu0", false, real, shadow, nullptr});
+            registerFunction(NativeFunction{name, address, "libvu0", true, real, shadow, nullptr});
         };
         add("sceVu0CopyMatrix", kCopyMatrix, &copyMatrix<RealEnv>, &copyMatrix<ShadowEnv>);
         add("sceVu0UnitMatrix", kUnitMatrix, &unitMatrix<RealEnv>, &unitMatrix<ShadowEnv>);

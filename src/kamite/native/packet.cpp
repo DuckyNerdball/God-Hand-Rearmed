@@ -217,10 +217,11 @@ namespace kamite::native::packet
 
     void registerFunctions()
     {
-        // Step a, batch 1: not checked yet (dev replays shadow them); recorded footprints.
-        registerFunction(NativeFunction{"func_0014FF00", kLink, "packet", false, &link<RealEnv>, &link<ShadowEnv>, nullptr});
-        registerFunction(NativeFunction{"func_0031A650", kQueue, "packet", false, &queue<RealEnv>, &queue<ShadowEnv>, nullptr});
-        registerFunction(NativeFunction{"func_0031A600", kQueueOne, "packet", false, &queueOne<RealEnv>, &queueOne<ShadowEnv>,
+        // Step a, batch 1: checked since K's 16:44 build of e881eeb (shadowed: 0 mismatches over ~20M calls, every
+        // .ram.bin the reference's); recorded footprints.
+        registerFunction(NativeFunction{"func_0014FF00", kLink, "packet", true, &link<RealEnv>, &link<ShadowEnv>, nullptr});
+        registerFunction(NativeFunction{"func_0031A650", kQueue, "packet", true, &queue<RealEnv>, &queue<ShadowEnv>, nullptr});
+        registerFunction(NativeFunction{"func_0031A600", kQueueOne, "packet", true, &queueOne<RealEnv>, &queueOne<ShadowEnv>,
                                         nullptr});
     }
 }
