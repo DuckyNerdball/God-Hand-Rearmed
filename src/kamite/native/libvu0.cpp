@@ -1497,10 +1497,11 @@ namespace kamite::native::libvu0
         add("MtxCopy", kMtxCopy, &mtxCopy<RealEnv>, &mtxCopy<ShadowEnv>);
         add("MtxMultiply", kMtxMultiply, &mtxMultiply<RealEnv>, &mtxMultiply<ShadowEnv>);
 
-        // Rung 3, step a, batch 2: the mid builders calling these (switch KAMITE_NATIVE_PACKET), unchecked.
+        // Rung 3, step a, batch 2: the mid builders calling these (switch KAMITE_NATIVE_PACKET), checked since K's
+        // 21:42 build of 99e32b8 (0 mismatches in every replay).
         auto addPacket = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
                             bool (*shadow)(ShadowEnv &, R5900Context *)) {
-            registerFunction(NativeFunction{name, address, "packet", false, real, shadow, nullptr});
+            registerFunction(NativeFunction{name, address, "packet", true, real, shadow, nullptr});
         };
         addPacket("func_001503B8", kModelMatrix, &modelMatrix<RealEnv>, &modelMatrix<ShadowEnv>);
         addPacket("func_001F8DF8", kBoxTest, &boxTest<RealEnv>, &boxTest<ShadowEnv>);

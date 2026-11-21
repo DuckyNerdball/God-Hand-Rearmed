@@ -1629,11 +1629,11 @@ namespace kamite::native::packet
         registerFunction(NativeFunction{"func_0031A600", kQueueOne, "packet", true, &queueOne<RealEnv>, &queueOne<ShadowEnv>,
                                         nullptr});
 
-        // Step a, batch 2 (the batch-2 chat, Nov 21): unchecked (dev replays shadow them); recorded footprints, the
-        // node walk's limit raised (ForwardNodeUpdate: up to 256 nodes).
+        // Step a, batch 2: checked since K's 21:42 build of 99e32b8 shadowed them in every replay (~42M calls, 0
+        // mismatches, 0 declines, 0 skipped; every .ram.bin the reference's). Recorded footprints.
         auto add = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
                       bool (*shadow)(ShadowEnv &, R5900Context *)) {
-            registerFunction(NativeFunction{name, address, "packet", false, real, shadow, nullptr});
+            registerFunction(NativeFunction{name, address, "packet", true, real, shadow, nullptr});
         };
         add("func_00155D60", kCountdown, &countdown<RealEnv>, &countdown<ShadowEnv>);
         add("cModel_getMeshPtr", kGetMeshPtr, &getMeshPtr<RealEnv>, &getMeshPtr<ShadowEnv>);

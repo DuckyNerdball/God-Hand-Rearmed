@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 21, 2026
 
+- Performance: more of the game's model drawing (texture packets, model and light matrices, the visibility test, mesh lookups) runs as native code.
 - Linux and Steam Deck: the first start shows a "Preparing shaders" notice instead of a black screen.
 - Performance: more of the game's vector helpers (normalize, cross product, camera and light matrices, copies) and the queueing of draw packets run as native code.
 - Launcher: clicks in the Options book no longer land on the row above (or below) the one under the mouse.
