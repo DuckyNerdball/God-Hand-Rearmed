@@ -1,7 +1,7 @@
 // Native libvu0 helpers (Sony's VU0 macro-mode matrix library, linked into the game): the rung 2 pilot
 // (claude/native-next.md). Leaf functions, called everywhere (rung 1: libvu0 4.9% of the game thread's busy samples, own
 // time), and part of rung 3's packet building. Switch: KAMITE_NATIVE_LIBVU0 (unset = the checked ones, 1 = all, 0 =
-// none); until checked they run in the shadow harness during dev replays only.
+// none); a native that is not checked yet runs in the shadow harness during dev replays only.
 //
 // Each run<Env>() is the recompiled function's effect (SLUS_215.03, generated/sceVu0*.cpp) without the per-op
 // bookkeeping: same loads, same ops in the same order (libvu0_core.h), same stores, same registers left behind (the
@@ -261,19 +261,20 @@ namespace kamite::native::libvu0
 
     void registerFunctions()
     {
-        // Checked (on by default): 0 mismatches over ~75M shadowed calls in K's replays of f733c30, every .ram.bin
-        // identical (claude/native-next.md "Rung 2 as built").
+        // All checked (on by default; claude/native-next.md "Rung 2 as built"): 0 mismatches and 0 declines in K's
+        // shadowed replays (MulMatrix / ApplyMatrix ~75M calls on f733c30; ecossin 31.8M and the RotMatrix trio 31.8M on
+        // 21f25ea, both rates), every .ram.bin identical, the first two measured ~3x cheaper in the sampler.
         registerFunction(NativeFunction{"sceVu0MulMatrix", kMulMatrix, "libvu0", true, &mulMatrix<RealEnv>,
                                         &mulMatrix<ShadowEnv>, &mulMatrixFootprint});
         registerFunction(NativeFunction{"sceVu0ApplyMatrix", kApplyMatrix, "libvu0", true, &applyMatrix<RealEnv>,
                                         &applyMatrix<ShadowEnv>, &applyMatrixFootprint});
-        registerFunction(NativeFunction{"_sceVu0ecossin", kEcossin, "libvu0", false, &ecossinNative<RealEnv>,
+        registerFunction(NativeFunction{"_sceVu0ecossin", kEcossin, "libvu0", true, &ecossinNative<RealEnv>,
                                         &ecossinNative<ShadowEnv>, &ecossinFootprint});
-        registerFunction(NativeFunction{"sceVu0RotMatrixX", kRot[0].entry, "libvu0", false, &rotMatrix<0, RealEnv>,
+        registerFunction(NativeFunction{"sceVu0RotMatrixX", kRot[0].entry, "libvu0", true, &rotMatrix<0, RealEnv>,
                                         &rotMatrix<0, ShadowEnv>, &rotMatrixFootprint});
-        registerFunction(NativeFunction{"sceVu0RotMatrixY", kRot[1].entry, "libvu0", false, &rotMatrix<1, RealEnv>,
+        registerFunction(NativeFunction{"sceVu0RotMatrixY", kRot[1].entry, "libvu0", true, &rotMatrix<1, RealEnv>,
                                         &rotMatrix<1, ShadowEnv>, &rotMatrixFootprint});
-        registerFunction(NativeFunction{"sceVu0RotMatrixZ", kRot[2].entry, "libvu0", false, &rotMatrix<2, RealEnv>,
+        registerFunction(NativeFunction{"sceVu0RotMatrixZ", kRot[2].entry, "libvu0", true, &rotMatrix<2, RealEnv>,
                                         &rotMatrix<2, ShadowEnv>, &rotMatrixFootprint});
     }
 }
