@@ -1942,6 +1942,179 @@ namespace kamite::native::packet
             returnToCaller(ctx);
             return true;
         }
+
+        // ---- func_0014B9A0: a node's UV-scroll packet (decomp src/cod/0014b9a0.c) --------------------------------
+        // void func_0014B9A0(cModel *self, cModelNode *node, short id): the model's slot tags (func_00155BE8: kind 2,
+        // or 0x14 for a CMODEL_F_LATE model), then a 0x120-byte packet from the frame allocator (PostInc; full: return):
+        // a CNT tag, a VIF header + eight constant quads (D_003BD860..890; +0x3C = 255.0), an identity matrix whose last
+        // row is (uvScroll u, v, 0, 1) (CopyMatrix then UnitMatrix then the row), the GS table's two tags (func_00155C68),
+        // the node's own packet word (+0x90 of this half's packet), an end; queued like func_0014C5A0 with the node's
+        // flags. vf0 must be (0, 0, 0, 1) (UnitMatrix builds from it).
+        constexpr uint32_t kScrollPacket = 0x14B9A0u;
+        constexpr uint32_t kScrollPacketFrame = 0xD0u + 0x10u; // its frame + 0x31A650's (the other callees: leaves)
+        constexpr uint32_t kGsTagTable = 0x4A5D80u;            // D_004A5D80: {w0, w1} per GS table entry
+        constexpr uint32_t kFrameAllocator = 0x566E10u;         // D_00566E10: the frame's bump pointer
+        constexpr uint32_t kObjFlags = 0x250u;                  // cModel.objFlags
+        constexpr uint32_t kLate = 0x2000u;                     // CMODEL_F_LATE
+
+        template <class Env>
+        uint64_t gsTag(Reader<Env> &rd, uint32_t index) // TAG64(D_004A5D80[index])
+        {
+            const uint32_t w0 = rd.u32(kGsTagTable + index * 8u), w1 = rd.u32(kGsTagTable + index * 8u + 4u);
+            return static_cast<uint64_t>(w1 | 0x30000000u) | (static_cast<uint64_t>(w0 & 0x0FFFFFFFu) << 32);
+        }
+
+        template <class Env>
+        bool scrollPacket(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            alignas(16) const uint32_t unitW[4] = {0u, 0u, 0u, 0x3F800000u};
+            if (std::memcmp(&ctx->vu0_vf[0], unitW, 16) != 0)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kScrollPacketFrame, kScrollPacketFrame, stackTop))
+                return false;
+            Footprint::Range reads[96]; // ~70: the eight copies and CopyMatrix's source read by the word
+            Reader<Env> rd{env, stackTop, stackTop + kScrollPacketFrame};
+            rd.log = reads;
+            rd.logCap = 96;
+            const uint32_t self = e::u32(ctx, e::a0), node = e::u32(ctx, e::a1);
+            const int64_t id = static_cast<int16_t>(e::u32(ctx, e::a2));
+
+            // the plan, in the original's order
+            const uint32_t half = rd.u32(model::kFrameParity) & 1u;
+            const uint32_t kind = (rd.u32(self + kObjFlags) & kLate) ? 0x14u : 2u;
+            // func_00155BE8(self, kind, half): the model's packet of this half, +0x50 / +0x60
+            const uint32_t slots = rd.u32(self + model::kPacket + half * 4u);
+            const uint64_t slotTag = gsTag(rd, kind);
+            // PostInc(0x120): the half's 0x60000-byte area from D_00506E10
+            rd.log = nullptr; // (the allocator word: read, then written by PostInc itself; any other read is logged)
+            const uint32_t cur = rd.u32(kFrameAllocator);
+            rd.log = reads;
+            const uint32_t next = cur + 0x120u;
+            const uint32_t limit = 0x506E10u + (rd.u32(model::kFrameParity) & 1u) * 0x60000u;
+            const bool full = limit < next;
+            const uint32_t pkt = full ? 0u : cur;
+            uint32_t slotAt, allocAt;
+            if (!rd.ok || !plainRam(slots + 0x50u, 0x18u, slotAt) || !plainRam(kFrameAllocator, 4u, allocAt))
+                return false;
+            alignas(16) uint8_t packet[0x120];
+            uint32_t pktAt = 0;
+            QueuePlan q{};
+            if (pkt != 0u)
+            {
+                auto copy16 = [&](uint32_t to, uint32_t from) {
+                    for (uint32_t k = 0; k < 16u; k += 4u)
+                    {
+                        const uint32_t word = rd.u32(from + k);
+                        std::memcpy(packet + to + k, &word, 4);
+                    }
+                };
+                auto put32 = [&](uint32_t to, uint32_t v) { std::memcpy(packet + to, &v, 4); };
+                auto put64 = [&](uint32_t to, uint64_t v) { std::memcpy(packet + to, &v, 8); };
+                std::memset(packet, 0, sizeof(packet));
+                put64(0x00u, 0x1000000Du);
+                put32(0x18u, 0x01000404u);
+                put32(0x1Cu, 0x6C0C00C8u);
+                copy16(0x20u, 0x3BD860u);
+                copy16(0x30u, 0x3BD870u);
+                copy16(0x40u, 0x3BD870u);
+                copy16(0x50u, 0x3BD880u);
+                copy16(0x60u, 0x3BD880u);
+                copy16(0x70u, 0x3BD880u);
+                copy16(0x80u, 0x3BD880u);
+                copy16(0x90u, 0x3BD890u);
+                put32(0x3Cu, 0x437F0000u); // 255.0f
+                for (uint32_t k = 0; k < 64u; k += 4u) // CopyMatrix(m, D_004A6940) reads it (UnitMatrix overwrites m)
+                    (void)rd.u32(0x4A6940u + k);
+                put32(0xA0u, 0x3F800000u); // UnitMatrix(m): m = pkt + 0xA0
+                put32(0xB4u, 0x3F800000u);
+                put32(0xC8u, 0x3F800000u);
+                put32(0xD0u, rd.u32(node + 0x38Cu)); // the last row: uvScroll u, v, 0, 1
+                put32(0xD4u, rd.u32(node + 0x390u));
+                put32(0xDCu, 0x3F800000u);
+                put64(0xE0u, gsTag(rd, kind));       // func_00155C68(pkt + 0xE0, pkt + 0xF0, kind)
+                put64(0xF0u, gsTag(rd, kind + 1u));
+                put64(0x100u, rd.u64(node + half * 0xB0u + 0x90u));
+                // the queue, as func_0014C5A0's: per-node models by this node's sorted flag
+                const int32_t drawKind = rd.s32(self + model::kDrawKind);
+                const uint32_t flags = rd.u32(node + model::kNodeDispFlags);
+                int64_t bucket, index;
+                if (drawKind == model::kKindPerNode)
+                {
+                    const bool sorted = (flags & model::kNodeSorted) != 0u;
+                    bucket = sorted ? 2 : 1;
+                    index = sorted ? id : 0xD;
+                }
+                else
+                {
+                    bucket = drawKind;
+                    index = rd.s16(self + model::kId);
+                }
+                const uint32_t last = pkt + 0x110u;
+                if (!rd.ok || !plainRam(pkt, 0x120u, pktAt) || last == 0u ||
+                    !queuePlan(env, sp - 0xD0u, 0x754C80u, static_cast<uint64_t>(bucket), static_cast<uint64_t>(index),
+                               pkt, static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(last))), q))
+                    return false;
+                if (e::overlaps(pktAt, 0x120u, stackTop, kScrollPacketFrame))
+                    return false;
+                if (q.inRange && (e::overlaps(q.half, 4u, stackTop, kScrollPacketFrame) ||
+                                  e::overlaps(q.at, 4u, stackTop, kScrollPacketFrame) ||
+                                  e::overlaps(q.plan.desc0, 4u, stackTop, kScrollPacketFrame) ||
+                                  e::overlaps(q.plan.desc20, 4u, stackTop, kScrollPacketFrame) ||
+                                  e::overlaps(q.plan.slot, 8u, stackTop, kScrollPacketFrame) ||
+                                  e::overlaps(q.plan.tail, 8u, stackTop, kScrollPacketFrame) ||
+                                  e::overlaps(q.half, 4u, pktAt, 0x120u) || e::overlaps(q.at, 4u, pktAt, 0x120u) ||
+                                  e::overlaps(q.plan.desc0, 4u, pktAt, 0x120u) ||
+                                  e::overlaps(q.plan.desc20, 4u, pktAt, 0x120u)))
+                    return false;
+            }
+            // no write (the slot tags, the allocator, the packet) onto anything read, nor onto each other or the frame
+            const Footprint::Range writes[3] = {{slotAt, 0x18u}, {allocAt, 4u}, {pktAt, pkt ? 0x120u : 0u}};
+            for (const Footprint::Range &w : writes)
+            {
+                if (w.size == 0u)
+                    continue;
+                if (e::overlaps(w.address, w.size, stackTop, kScrollPacketFrame))
+                    return false;
+                for (int r = 0; r < rd.logCount; ++r)
+                    if (e::overlaps(w.address, w.size, reads[r].address, reads[r].size))
+                        return false;
+            }
+            if (pkt && (e::overlaps(slotAt, 0x18u, pktAt, 0x120u) || e::overlaps(allocAt, 4u, pktAt, 0x120u)))
+                return false;
+            if (e::overlaps(slotAt, 0x18u, allocAt, 4u))
+                return false;
+
+            // the writes and the cycles, in the original's order
+            env.call(); // func_00155BE8
+            e::write64(env, slotAt, slotTag);
+            e::write64(env, slotAt + 0x10u, 0x10000000u);
+            env.call(); // PostInc
+            if (!full)
+                e::write32(env, allocAt, next);
+            if (pkt != 0u)
+            {
+                for (int loop = 0; loop < 8 * 3; ++loop) // the eight 4-float copies' back-edges
+                    env.checkpoint(32u);
+                env.call(); // CopyMatrix
+                env.call(); // UnitMatrix
+                for (int loop = 0; loop < 3; ++loop) // the last row's copy
+                    env.checkpoint(32u);
+                std::memcpy(env.at(pktAt, 0x120u), packet, 0x120u);
+                env.call(); // func_00155C68
+                env.call(); // 0x31A650
+                if (q.inRange)
+                {
+                    env.call(); // its 0x14FF00
+                    linkPacket(env, q.plan, pkt);
+                }
+            }
+            returnToCaller(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -1985,5 +2158,6 @@ namespace kamite::native::packet
         addReadable("func_00151398", kTextureLookup, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,
                     NativeFunction::kReturnsV0);
         addReadable("func_00148BD8", kMeshTextures, &meshTextures<RealEnv>, &meshTextures<ShadowEnv>, 0u);
+        addReadable("func_0014B9A0", kScrollPacket, &scrollPacket<RealEnv>, &scrollPacket<ShadowEnv>, 0u);
     }
 }

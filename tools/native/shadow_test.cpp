@@ -80,6 +80,7 @@ KM_RECOMPILED(cModel_nodeLayerScreen_0x14be38)
 KM_RECOMPILED(func_0014C5A0_0x14c5a0)
 KM_RECOMPILED(func_00151398_0x151398)
 KM_RECOMPILED(func_00148BD8_0x148bd8)
+KM_RECOMPILED(func_0014B9A0_0x14b9a0)
 KM_RECOMPILED(func_00151368_0x151368)
 #undef KM_RECOMPILED
 
@@ -201,7 +202,8 @@ namespace
     // + batch 2's fixed addresses: the GS table 0x4A5D80, the allocator 0x566E10, the view matrix pointer 0x5CAFF0,
     // 0x7476B0 / 0x747A2C / 0x747AA8, the order table's descriptors 0x755780...
     constexpr Region kRegions[] = {{0u, 1u << 20}, {0x3C3C00u, 0x100u}, {0x4A5D80u, 0x810u}, {0x566E00u, 0x20u},
-                                   {0x5CAFF0u, 0x10u}, {0x747600u, 0x500u}, {0x755700u, 0x100u}};
+                                   {0x5CAFF0u, 0x10u}, {0x747600u, 0x500u}, {0x755700u, 0x100u},
+                                   {0x4F8000u, 0x18000u}}; // batch 3: the frame allocator's areas around 0x506E10
     constexpr uint32_t usedBytes()
     {
         uint32_t total = 0;
@@ -695,6 +697,42 @@ namespace
             setGpr(ctx, 4, w | seg);
             setGpr64(ctx, 5, name);
             setGpr64(ctx, 6, type);
+            setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
+            return;
+        }
+        case 0x14B9A0u: // batch 3: a node's UV-scroll packet (cModel at base, its node at 0x30000 + ...)
+        {
+            orderTable(mirror);
+            const uint32_t node = 0x30000u + 0x800u * static_cast<uint32_t>(g_rng() % 8u);
+            const uint32_t half = [] { uint32_t v; std::memcpy(&v, g_ramA + 0x7476B0u, 4); return v & 1u; }();
+            setU32(base + 0x250u, static_cast<uint32_t>(g_rng())); // objFlags (CMODEL_F_LATE 0x2000: kind 0x14, else 2)
+            for (uint32_t h = 0; h < 2u; ++h)
+                setU32(base + 0x220u + 4u * h, (0x68000u + 0x80u * static_cast<uint32_t>(g_rng() % 64u)) | mirror);
+            for (uint32_t k = 0; k < 2u * 8u + 16u; k += 4u) // GS table entries 2, 3, 0x14, 0x15
+                setU32(0x4A5D80u + 2u * 8u + k, static_cast<uint32_t>(g_rng())), setU32(0x4A5D80u + 0x14u * 8u + k, static_cast<uint32_t>(g_rng()));
+            for (uint32_t k = 0; k < 0x40u; k += 4u)
+                setU32(0x3BD860u + k, inputFloat(wild)), setU32(0x4A6940u + k, static_cast<uint32_t>(g_rng()));
+            floatsAt(node + 0x38Cu, 2, wild);
+            randomBytes(node + 0x90u, 8u), randomBytes(node + 0xB0u + 0x90u, 8u);
+            const uint32_t flags = static_cast<uint32_t>(g_rng());
+            setU32(node + 0x380u, g_rng() % 2u ? flags & ~0x4080u : flags | 0x4080u);
+            const uint32_t kinds = static_cast<uint32_t>(g_rng() % 8u);
+            setU32(base + 0x2C0u, kinds < 4 ? 0xAu : static_cast<uint32_t>(g_rng() % 12u));
+            setU32(base + 0x2ACu, static_cast<uint32_t>(g_rng()));
+            // the allocator: room in this half's area (it ends at 0x506E10 / 0x566E10), or (1 in 8) full
+            const uint32_t limit = 0x506E10u + half * 0x60000u;
+            const uint32_t room = g_rng() % 8u == 0u ? 0x100u : 0x120u + 0x10u * static_cast<uint32_t>(g_rng() % 0x400u);
+            const uint32_t cur = half ? 0x506E10u + 0x10u * static_cast<uint32_t>(g_rng() % 0x900u) : limit - room;
+            setU32(0x566E10u, cur);
+            for (uint32_t k = 0; k < 0x120u && cur + k + 4u <= 0x510000u && cur >= 0x4F8000u; k += 4u)
+                setU32(cur + k, static_cast<uint32_t>(g_rng())); // old bytes (the packet's tail tag is read back)
+            if (g_rng() % 16u == 0u) // the slot tags over the node's uvScroll (read after them): the native declines
+                setU32(base + 0x220u + 4u * half, node + 0x38Cu - 0x50u);
+            if (g_rng() % 32u == 0u) // a broken vf0: UnitMatrix's result would follow it; the native declines
+                ctx.vu0_vf[0] = _mm_set_ps(2.0f, 0.0f, 0.0f, 0.0f);
+            setGpr(ctx, 4, base | seg);
+            setGpr(ctx, 5, node | seg);
+            setGpr64(ctx, 6, g_rng());
             setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
             return;
         }
@@ -1647,7 +1685,7 @@ int main(int argc, char **argv)
         {0x15B0F0u, &PostInc_D_00566E10_0015B0F0_15B0F0_0x15b0f0}, {0x14B6F8u, &cModel_getMeshPtr_0x14b6f8},
         {0x14D768u, &ForwardNodeUpdate_14D768_0x14d768}, {0x14BE38u, &cModel_nodeLayerScreen_0x14be38},
         {0x14C5A0u, &func_0014C5A0_0x14c5a0},    {0x151398u, &func_00151398_0x151398},
-        {0x148BD8u, &func_00148BD8_0x148bd8}};
+        {0x148BD8u, &func_00148BD8_0x148bd8},    {0x14B9A0u, &func_0014B9A0_0x14b9a0}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // a callee only (no native)
     for (const auto &[address, f] : recompiled)
         g_callees.push_back({address, f});
