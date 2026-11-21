@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 21, 2026
 
+- Launcher: clicks in the Options book no longer land on the row above (or below) the one under the mouse.
 - Performance: the draw data sent to the PS2's vector unit each frame is gathered in one pass (about twice as fast in crowded scenes).
 - Fixed the monitor turning off mid-game when playing with a controller (Windows' screen timeout) (#12).
 - Performance: the game's matrix, rotation and sine / cosine helpers (libvu0's MulMatrix, ApplyMatrix, RotMatrixX / Y / Z, ecossin) run as native code.
