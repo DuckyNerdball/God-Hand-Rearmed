@@ -78,6 +78,10 @@ namespace kamite::native
         void unmark() const;
     };
 
+    // native.cpp: the entry observers of `address` (FunctionHooks::observeEntry), run by a native that runs an observed
+    // function inline where the guest call would have entered it (K's pick, Nov 21).
+    void runEntryObservers(uint32_t address, uint8_t *ram, R5900Context *ctx, PS2Runtime *runtime);
+
     // Where a native's memory accesses go: the real RAM (RealEnv) or the shadow scratch (ShadowEnv). Both are the
     // runtime's 128 MB backing: a guest address in plain RAM is ram + (address & PS2_RAM_MASK). New natives reach RAM
     // through env.at(offset, size) (the bytes of one access, offset from plainRam): the real RAM's pointer, or the
@@ -89,6 +93,8 @@ namespace kamite::native
         bool checkpoint(uint32_t cycles) { return runtime->eeCheckpointDue(cycles); }
         bool call() { return runtime->eeCheckpointDue(8u); } // EeScheduler::kGuestDispatchCycles
         uint8_t *at(uint32_t offset, uint32_t) { return ram + offset; }
+        // An observed function run inline: its observers first, on the real RAM and context (ctx at its entry).
+        void observe(uint32_t address, R5900Context *ctx) { runEntryObservers(address, ram, ctx, runtime); }
     };
 
     struct ShadowEnv
@@ -120,6 +126,8 @@ namespace kamite::native
             charged += 8u;
             return due();
         }
+        // The shadow run leaves observers to the real call (they act on the real RAM).
+        void observe(uint32_t, R5900Context *) {}
     };
 
     // A context field the comparison leaves out (with the reason, which the summary prints).

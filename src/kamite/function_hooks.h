@@ -41,6 +41,15 @@ namespace kamite
         // unchanged). Only calls that go through the dispatch table are seen (direct_tail_calls = false in the toml).
         bool observeEntry(uint32_t address, std::string name, EntryObserver observer);
         bool replace(uint32_t address, std::string name, GuestFunction implementation, ReplacementStatus status, std::string reason);
+        // Puts `implementation` in the function's place behind its entry observers (claude/native-next.md rung 3, K's
+        // pick for natives): the observers keep running first, now or if the address is observed later. Returns what
+        // the implementation falls back to (the function it stands in for behind the observers), nullptr when the
+        // address has no function.
+        GuestFunction replaceBehindObservers(uint32_t address, std::string name, GuestFunction implementation,
+                                             ReplacementStatus status, std::string reason);
+        // Runs the entry observers of `address`, if any (a native that runs an observed function inline calls this
+        // where the guest call would have entered it). Cheap when the address has none.
+        static void runEntryObservers(uint32_t address, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
         GuestFunction original(uint32_t address) const;
         void logBindings() const;
 

@@ -147,6 +147,11 @@ namespace kamite::native
         registry().push_back(function);
     }
 
+    void runEntryObservers(uint32_t address, uint8_t *ram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        FunctionHooks::runEntryObservers(address, ram, ctx, runtime);
+    }
+
     void installFromEnvironment(PS2Runtime &runtime)
     {
         libvu0::registerFunctions();
@@ -192,7 +197,8 @@ namespace kamite::native
                 std::fprintf(stderr, "[native] %s 0x%08X: no recompiled function there, left out\n", fn.name, fn.address);
                 continue;
             }
-            const PS2Runtime::RecompiledFunction held = runtime.lookupFunction(fn.address); // a hook's trampoline, or the recompiled function
+            // Every native goes in the function's place behind its entry observers (K, Nov 21): observers keep running
+            // first; `held` is what a declined call runs (the recompiled function, or a hook's replacement).
 #if !defined(KAMITE_RELEASE)
             if (shadowed)
             {
@@ -209,9 +215,11 @@ namespace kamite::native
                     shadow::begin(settings);
                     g_shadowing = true;
                 }
+                const PS2Runtime::RecompiledFunction held = FunctionHooks::instance().replaceBehindObservers(
+                    fn.address, fn.name, &shadow::entry, ReplacementStatus::Native, "shadow check: native beside the recompiled code");
+                if (!held)
+                    continue;
                 shadow::add(fn, held);
-                FunctionHooks::instance().replace(fn.address, fn.name, &shadow::entry, ReplacementStatus::Native,
-                                                  "shadow check: native beside the recompiled code");
                 std::fprintf(stderr, "[native] %s 0x%08X: shadow-checked (%s)\n", fn.name, fn.address, how.c_str());
                 continue;
             }
@@ -221,8 +229,12 @@ namespace kamite::native
                 std::fprintf(stderr, "[native] %s: more than %zu natives, left out\n", fn.name, kMaxNatives);
                 continue;
             }
-            g_installed[g_installedCount] = Installed{fn, held};
-            FunctionHooks::instance().replace(fn.address, fn.name, kEntries[g_installedCount], ReplacementStatus::Native, how);
+            g_installed[g_installedCount] = Installed{fn, nullptr};
+            const PS2Runtime::RecompiledFunction held = FunctionHooks::instance().replaceBehindObservers(
+                fn.address, fn.name, kEntries[g_installedCount], ReplacementStatus::Native, how);
+            if (!held)
+                continue;
+            g_installed[g_installedCount].held = held;
             ++g_installedCount;
             std::fprintf(stderr, "[native] %s 0x%08X: native (%s)\n", fn.name, fn.address, how.c_str());
         }

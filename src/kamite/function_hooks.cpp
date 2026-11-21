@@ -34,6 +34,7 @@ namespace kamite
         {
             FunctionBinding binding;
             GuestFunction original = nullptr;
+            GuestFunction behind = nullptr; // replaceBehindObservers: runs in original's place, after the observers
             std::vector<EntryObserver> observers;
         };
 
@@ -61,7 +62,7 @@ namespace kamite
             auto table = std::make_unique<ObservedTable>();
             for (const auto &[address, hook] : g_hooks)
                 if (!hook.observers.empty())
-                    table->push_back(ObservedEntry{address, hook.original, hook.observers});
+                    table->push_back(ObservedEntry{address, hook.behind ? hook.behind : hook.original, hook.observers});
             std::sort(table->begin(), table->end(), [](const ObservedEntry &a, const ObservedEntry &b) { return a.address < b.address; });
             g_observed.store(table.get(), std::memory_order_release);
             g_retiredTables.push_back(std::move(table));
@@ -143,6 +144,12 @@ namespace kamite
                 return false;
             }
         }
+        else if (it->second.behind && it->second.observers.empty())
+        {
+            // A function replaced behind its observers before it had any: the trampoline goes in front of it now.
+            if (!m_runtime->replaceFunction(address, &FunctionHooks::observedTrampoline))
+                return false;
+        }
         it->second.observers.push_back(std::move(observer));
         publishObservedTable();
         return true;
@@ -160,6 +167,49 @@ namespace kamite
             hook.original = original;
         hook.binding = FunctionBinding{address, std::move(name), status, std::move(reason)};
         return m_runtime->replaceFunction(address, implementation);
+    }
+
+    GuestFunction FunctionHooks::replaceBehindObservers(uint32_t address, std::string name, GuestFunction implementation,
+                                                        ReplacementStatus status, std::string reason)
+    {
+        if (!m_runtime || !m_runtime->hasFunction(address))
+            return nullptr;
+        std::lock_guard<std::mutex> lock(g_mutex);
+        auto it = g_hooks.find(address);
+        if (it == g_hooks.end())
+        {
+            Hook hook;
+            hook.original = m_runtime->lookupFunction(address);
+            it = g_hooks.emplace(address, std::move(hook)).first;
+        }
+        Hook &hook = it->second;
+        GuestFunction fallback;
+        if (!hook.observers.empty())
+        {
+            fallback = hook.behind ? hook.behind : hook.original; // the slot keeps the trampoline
+            hook.behind = implementation;
+            publishObservedTable();
+            reason += " (behind its entry observers)";
+        }
+        else
+        {
+            fallback = m_runtime->lookupFunction(address);
+            hook.behind = implementation;
+            if (!m_runtime->replaceFunction(address, implementation))
+            {
+                hook.behind = nullptr;
+                return nullptr;
+            }
+        }
+        hook.binding = FunctionBinding{address, std::move(name), status, std::move(reason)};
+        return fallback;
+    }
+
+    void FunctionHooks::runEntryObservers(uint32_t address, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (const ObservedEntry *entry = findObserved(address))
+            for (const EntryObserver &observer : entry->observers)
+                observer(rdram, ctx, runtime);
     }
 
     void FunctionHooks::observedTrampoline(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
