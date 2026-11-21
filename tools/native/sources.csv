@@ -1,0 +1,45 @@
+# Where each native came from (rung 3+, K's answer 1 on the method, Nov 21): source = decomp (written from the
+# decomp's matched C: decomp_name, decomp_file, decomp_commit and decomp_hash = tools/native/decomp_watch.py --record)
+# or asm (from the disassembly: the decomp had no C, or the native predates the decomp feed). decomp_watch.py lists
+# asm natives whose function is now matched C and decomp natives whose C changed.
+name,address,source,decomp_name,decomp_file,decomp_commit,decomp_hash,note
+Tramp_001F7DF8_00101E28,0x00101E28,asm,,,,,
+MtxCopy,0x00147528,asm,,,,,
+MtxMultiply,0x00147548,asm,,,,,
+cModel_getMeshPtr,0x0014B6F8,asm,,,,,
+cModel_nodeLayerScreen,0x0014BE38,asm,,,,,
+ForwardNodeUpdate_14D768,0x0014D768,asm,,,,,
+func_0014FF00,0x0014FF00,asm,,,,,
+func_001503B8,0x001503B8,asm,,,,,
+func_00150DC8,0x00150DC8,asm,,,,,
+func_00150F68,0x00150F68,asm,,,,,
+func_00151168,0x00151168,asm,,,,,
+func_00155AE8,0x00155AE8,asm,,,,,
+func_00155BE8,0x00155BE8,asm,,,,,
+func_00155C68,0x00155C68,asm,,,,,
+func_00155D60,0x00155D60,asm,,,,,
+PostInc_D_00566E10_0015B0F0_15B0F0,0x0015B0F0,asm,,,,,
+capVu0Length,0x001F7DF8,asm,,,,,
+func_001F8DF8,0x001F8DF8,asm,,,,,
+func_002D7E50,0x002D7E50,asm,,,,,
+func_002D8008,0x002D8008,asm,,,,,
+func_002D8070,0x002D8070,asm,,,,,
+sceVu0ApplyMatrix,0x0030A2B0,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0MulMatrix,0x0030A2E0,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0OuterProduct,0x0030A328,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0Normalize,0x0030A370,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0TransposeMatrix,0x0030A3B0,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0InversMatrix,0x0030A3F8,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0MulVector,0x0030A4D0,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0ScaleVector,0x0030A4E8,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0TransMatrix,0x0030A508,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0CopyMatrix,0x0030A548,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0UnitMatrix,0x0030A5A0,asm,,,,,Sony libvu0 (SDK); rung 2
+_sceVu0ecossin,0x0030A5D0,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0RotMatrixZ,0x0030A650,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0RotMatrixX,0x0030A700,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0RotMatrixY,0x0030A7B8,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0CameraMatrix,0x0030A8C8,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0NormalLightMatrix,0x0030A978,asm,,,,,Sony libvu0 (SDK); rung 2
+func_0031A600,0x0031A600,asm,,,,,
+func_0031A650,0x0031A650,asm,,,,,

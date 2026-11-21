@@ -52,3 +52,18 @@ runtime's own ops in the natives' domains). A constant 1.0 lets the compiler fol
 so the vectors take it through a volatile, as the game does from a register. Where the network refuses GitHub's archive
 zips (the configure step fetches glslang, SPIRV-Headers, SPIRV-Tools and shaderc that way: thirdparty/pcsx2-gs/
 shaderc.cmake), fetch each pinned commit / tag with git and pass -DFETCHCONTENT_SOURCE_DIR_KAMITE_<NAME>=<dir>.
+
+## The decomp feed (rung 3+)
+
+Every native has a line in `sources.csv`: where it came from, the decomp's matched C (file, decomp commit, a hash of the
+function's C) or `asm` (the disassembly). Natives written from now on come from the decomp's C where it has one; print
+the line with `decomp_watch.py <decomp> --record 0x<address>`. The weekly upstream watch runs
+
+    git clone --depth 1 --filter=blob:none --sparse https://github.com/LucasPicoli/god-hand-decomp /tmp/decomp
+    git -C /tmp/decomp sparse-checkout set config include src
+    python3 tools/native/decomp_watch.py /tmp/decomp [--update]
+
+which lists asm natives whose function is now matched C (REWRITE: from the C, the harness proves it equal), decomp
+natives whose C changed since their commit (CHANGED), functions matched since `decomp_rung4.txt`'s commit in the rung-4
+subsystems (RUNG4: motion, collision, cloth, effects, as tools/perf/subsystems.py classifies them; `--update` moves the
+baseline), and natives missing from `sources.csv` (MANIFEST). `--show 0x<address>` prints one function's C.
