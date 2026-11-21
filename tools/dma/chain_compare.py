@@ -4,6 +4,10 @@ chain_digest.h; claude/native-next.md rung 3). Prints the chains per channel in 
 (test frame, channel, bytes, hash).
 
     python3 tools/dma/chain_compare.py <a.chain.bin> <b.chain.bin> [--max 10]
+    python3 tools/dma/chain_compare.py <a.run1> <a.run2> <b.run1> <b.run2>    (two builds, both runs each)
+
+Two builds: a chain counts as different only where both builds' run 1 = run 2 there (a few single chains differ
+between two runs of one build: host-timing noise, 4 of ~45,000 in K's 24ba1d9 replays; claude/native-next.md).
 """
 import struct
 import sys
@@ -38,6 +42,22 @@ def main():
     if "--max" in sys.argv:
         limit = int(sys.argv[sys.argv.index("--max") + 1])
         args = [a for a in args if a != str(limit)]
+    if len(args) == 4:
+        a1, a2, b1, b2 = (read(x) for x in args)
+        if not (len(a1) == len(a2) == len(b1) == len(b2)):
+            print(f"chain counts differ: {len(a1)} {len(a2)} {len(b1)} {len(b2)}")
+        noise = diff = 0
+        for i, recs in enumerate(zip(a1, a2, b1, b2)):
+            x1, x2, y1, y2 = recs
+            if x1 != x2 or y1 != y2:
+                noise += 1
+                continue
+            if x1 != y1:
+                diff += 1
+                if diff <= limit:
+                    print(f"#{i}: frame {x1[0]} {CHANNELS.get(x1[1], x1[1])}: A {x1[2]} bytes {x1[3]:016x} | B {y1[2]} bytes {y1[3]:016x}")
+        print(f"{diff} chains differ between the builds ({noise} skipped: run 1 != run 2 in a build)")
+        return
     a, b = read(args[0]), read(args[1])
     print("A:", summary(a))
     print("B:", summary(b))
