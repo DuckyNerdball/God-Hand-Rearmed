@@ -47,7 +47,7 @@ def load_names():
 
 class Classifier:
     def __init__(self):
-        self.address, self.ranges, self.modules, self.names = {}, [], [], []
+        self.address, self.ranges, self.modules, self.names, self.forced = {}, [], [], [], []
         with open(os.path.join(HERE, "subsystems.csv"), encoding="utf-8") as f:
             rows = [r for r in csv.reader(line for line in f if not line.startswith("#"))][1:]
         for kind, pattern, subsystem in rows:
@@ -60,6 +60,8 @@ class Classifier:
                 self.modules.append((re.compile(pattern), subsystem))
             elif kind == "name":
                 self.names.append((re.compile(pattern), subsystem))
+            elif kind == "force":
+                self.forced.append((re.compile(pattern), subsystem))
         self.module_of = {}
         path = os.path.join(HERE, "idantony_modules.csv")
         if os.path.exists(path):
@@ -81,6 +83,12 @@ class Classifier:
         if hit is not None:
             return hit
         result = self.address.get(address)
+        n = name if name and name != "func" and not name.startswith("func_") else self.name_at(address)
+        if result is None and n:
+            for rx, s in self.forced:
+                if rx.search(n):
+                    result = s
+                    break
         if result is None:
             for a, b, s in self.ranges:
                 if a <= address < b:
@@ -95,7 +103,6 @@ class Classifier:
                 if result:
                     break
         if result is None:
-            n = name if name and name != "func" else self.name_at(address)
             if n:
                 for rx, s in self.names:
                     if rx.search(n):
@@ -122,9 +129,16 @@ def host_kind(token):
     return "other host code"
 
 
+GENERATED = re.compile(r"^~[^!]*!(.+)_0x([0-9a-fA-F]+)$")
+
+
 def parse_frame(token):
-    """(name, address) for a guest frame, None for host / idle."""
-    if token.startswith("~") or token.startswith("["):
+    """(name, address) for a guest frame, None for host / idle. Recompiled code the sampler couldn't map through the
+    table (a slot holding a hook's trampoline) arrives as a host frame named <name>_0x<address>: a guest frame too."""
+    if token.startswith("~"):
+        m = GENERATED.match(token)
+        return (m.group(1), int(m.group(2), 16)) if m else None
+    if token.startswith("["):
         return None
     name, _, addr = token.rpartition("@")
     try:
@@ -167,13 +181,18 @@ def analyse(stacks, classify):
     kinds = Counter()
     for tokens, n in stacks.items():
         frames = [f for f in (parse_frame(t) for t in tokens) if f]
-        innermost_host = tokens[-1] if tokens[-1].startswith("~") else None
+        innermost_host = tokens[-1] if tokens[-1].startswith("~") and not GENERATED.match(tokens[-1]) else None
         kinds[host_kind(innermost_host) if innermost_host else "game code"] += n
         if not frames:
             own["(no guest frame)"] += n
             continue
         subs = [classify(a, name) for name, a in frames]
-        owner = next((s for s in reversed(subs) if not s.startswith("helper:")), "unclassified")
+        owner = next((s for s in reversed(subs) if not s.startswith("helper:")), None)
+        if owner is None:  # only dispatchers / helpers on the stack: the host code they called owns it
+            if any("test_mode" in t for t in tokens) or (innermost_host and re.search(r"fputs|free_base", innermost_host)):
+                owner = "(replay tooling)"
+            else:
+                owner = "(host: " + (host_kind(innermost_host) if innermost_host else "game code") + ")"
         own[owner] += n
         innermost_sub = subs[-1]
         if innermost_sub.startswith("helper:"):
@@ -214,14 +233,26 @@ def report(rate, stacks, meta, classify, top):
         print(f"  {pct(n, busy)}  {k}")
 
 
-def flame(stacks, path, title):
-    """A plain SVG flame graph (outermost at the bottom), widths by samples; frames under 0.1% are merged away."""
+PALETTE = ["#e69138", "#cc4125", "#6aa84f", "#3d85c6", "#a64d79", "#f1c232", "#45818e", "#8e7cc3", "#38761d",
+           "#e06666", "#0b5394", "#b4a7d6", "#bf9000", "#76a5af", "#f6b26b", "#741b47"]
+
+
+def flame(stacks, path, title, classify):
+    """A plain SVG flame graph (outermost at the bottom), widths by samples, guest frames coloured by subsystem (the
+    legend on top), host code grey; frames under 0.1% are merged away. Hover a frame for its name and share."""
     tree = {}
     total = 0
+    colours = {}
     for tokens, n in stacks.items():
         total += n
         node = tree
-        for t in tokens:
+        for raw in tokens:
+            frame = parse_frame(raw)
+            if frame:
+                sub = classify(frame[1], frame[0])
+                t = f"{frame[0]}@{frame[1]:08X}|{sub}"
+            else:
+                t = raw + "|"
             entry = node.setdefault(t, [0, {}])
             entry[0] += n
             node = entry[1]
@@ -241,15 +272,25 @@ def flame(stacks, path, title):
             x += w
 
     walk(tree, 0.0, 0)
-    height = (depth_max[0] + 3) * row
+    subs = sorted({key.split("|")[1] for _, _, _, key, _ in rects} - {""})
+    for i, sub in enumerate(subs):
+        colours[sub] = ("#d0d0d0" if sub.startswith("helper:") else "#b7b7a4" if sub == "unclassified"
+                        else PALETTE[i % len(PALETTE)])
+    legend_rows = (len(subs) + 7) // 8
+    top = 22 + legend_rows * 16
+    height = top + (depth_max[0] + 2) * row
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" font-family="monospace" font-size="11">',
-           f'<rect width="100%" height="100%" fill="#fffdf6"/><text x="6" y="13">{html.escape(title)}</text>']
-    for x, depth, w, name, n in rects:
+           f'<rect width="100%" height="100%" fill="#fffdf6"/><text x="6" y="14">{html.escape(title)}</text>']
+    for i, sub in enumerate(subs):
+        lx, ly = 6 + (i % 8) * 198, 22 + (i // 8) * 16
+        out.append(f'<rect x="{lx}" y="{ly}" width="12" height="11" fill="{colours[sub]}"/>'
+                   f'<text x="{lx + 16}" y="{ly + 10}">{html.escape(sub)}</text>')
+    for x, depth, w, key, n in rects:
+        name, _, sub = key.partition("|")
         y = height - (depth + 1) * row
-        hue = 30 + (hash(name.split("@")[0]) % 30)
-        colour = "#c9d8ef" if name.startswith("~") else f"hsl({hue},85%,62%)"
+        colour = colours.get(sub, "#c9d8ef")
         label = name if len(name) * 6.6 < w else name[: max(0, int(w / 6.6) - 2)] + ".." if w > 30 else ""
-        out.append(f'<g><title>{html.escape(name)} {100.0 * n / total:.2f}%</title>'
+        out.append(f'<g><title>{html.escape(name)} [{html.escape(sub or "host")}] {100.0 * n / total:.2f}%</title>'
                    f'<rect x="{x:.1f}" y="{y}" width="{max(w - 0.5, 0.5):.1f}" height="{row - 1}" fill="{colour}"/>'
                    f'<text x="{x + 3:.1f}" y="{y + 11}">{html.escape(label)}</text></g>')
     out.append("</svg>")
@@ -281,7 +322,8 @@ def main(argv):
         for rate, c in stacks.items():
             if not args.rate or rate == args.rate:
                 merged.update(c)
-        flame(merged, args.flame, f"GHR game thread, busy samples ({len(paths)} files)")
+        flame(merged, args.flame, f"GHR game thread, busy samples ({len(paths)} files"
+              + (f", {args.rate} FPS)" if args.rate else ")"), classify)
         print(f"\nflame graph: {args.flame}")
     return 0
 
