@@ -24,6 +24,14 @@
 #include <cstdint>
 #include <vector>
 
+// The natives' one-instruction helpers (ee_ctx.h, plainRam) must inline: a call per guest instruction costs more than
+// the instruction (GCC and MSVC leave them out of line in a big file otherwise).
+#if defined(_MSC_VER)
+#define KM_NATIVE_INLINE __forceinline
+#else
+#define KM_NATIVE_INLINE inline __attribute__((always_inline))
+#endif
+
 namespace kamite::native
 {
     // The guest bytes a call reads or writes, as the function addresses them (before the RAM mask). The harness
@@ -160,7 +168,7 @@ namespace kamite::native
     // The guest address -> offset of a plain-RAM access of `size` bytes, or false for an address the native must decline
     // (scratchpad, I/O, VU memory, BIOS, KSEG2/3, or a range that wraps the backing): what READn / WRITEn take the
     // runtime's slow path for.
-    inline bool plainRam(uint32_t address, uint32_t size, uint32_t &offset)
+    KM_NATIVE_INLINE bool plainRam(uint32_t address, uint32_t size, uint32_t &offset)
     {
         if (Ps2IsSpecialAddress(address) || Ps2IsSpecialAddress(address + size - 1u))
             return false;

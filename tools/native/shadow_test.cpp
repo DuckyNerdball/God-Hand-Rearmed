@@ -16,6 +16,7 @@
 #include "kamite/native/native.h"
 #include "kamite/native/shadow.h"
 #include "kamite/native/libvu0_core.h"
+#include "ps2_runtime_macros.h" // batch 2 vectors: the runtime's FPU / VU0 ops as the reference
 
 #include <chrono>
 #include <cmath>
@@ -58,6 +59,23 @@ KM_RECOMPILED(MtxMultiply_0x147548)
 KM_RECOMPILED(func_0014FF00_0x14ff00)
 KM_RECOMPILED(func_0031A650_0x31a650)
 KM_RECOMPILED(func_0031A600_0x31a600)
+// rung 3, step a, batch 2
+KM_RECOMPILED(func_001503B8_0x1503b8)
+KM_RECOMPILED(func_001F8DF8_0x1f8df8)
+KM_RECOMPILED(func_002D7E50_0x2d7e50)
+KM_RECOMPILED(func_002D8008_0x2d8008)
+KM_RECOMPILED(func_002D8070_0x2d8070)
+KM_RECOMPILED(func_00150DC8_0x150dc8)
+KM_RECOMPILED(func_00150F68_0x150f68)
+KM_RECOMPILED(func_00151168_0x151168)
+KM_RECOMPILED(func_00155AE8_0x155ae8)
+KM_RECOMPILED(func_00155BE8_0x155be8)
+KM_RECOMPILED(func_00155C68_0x155c68)
+KM_RECOMPILED(func_00155D60_0x155d60)
+KM_RECOMPILED(PostInc_D_00566E10_0015B0F0_15B0F0_0x15b0f0)
+KM_RECOMPILED(cModel_getMeshPtr_0x14b6f8)
+KM_RECOMPILED(ForwardNodeUpdate_14D768_0x14d768)
+KM_RECOMPILED(cModel_nodeLayerScreen_0x14be38)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -82,6 +100,11 @@ __m128i PS2Runtime::Load128(uint8_t *, R5900Context *, uint32_t)
 void PS2Runtime::Store128(uint8_t *, R5900Context *, uint32_t, __m128i)
 {
     std::fprintf(stderr, "unexpected Store128 (special address)\n");
+    std::abort();
+}
+uint8_t PS2Runtime::Load8(uint8_t *, R5900Context *, uint32_t a)
+{
+    std::fprintf(stderr, "unexpected Load8 (special address) %08X\n", a);
     std::abort();
 }
 uint32_t PS2Runtime::Load32(uint8_t *, R5900Context *, uint32_t)
@@ -110,6 +133,11 @@ void PS2Runtime::SignalException(R5900Context *, PS2Exception)
     std::abort();
 }
 void PS2Runtime::requestStop() { g_stopRequested = true; }
+// func_00150F68's `break 7` (the natives decline before it): the recompiled function's only.
+int g_breaks = 0;
+void PS2Runtime::handleBreak(uint8_t *, R5900Context *) { ++g_breaks; }
+// native.cpp is not linked: no entry observers here.
+void kamite::native::runEntryObservers(uint32_t, uint8_t *, R5900Context *, PS2Runtime *) {}
 
 // The generated JAL (ps2_runtime.cpp callGuestFunctionAs): the callee's slot (its recompiled function, or the shadow
 // harness's entry when the nested checks route shadowed callees through it), the 8-cycle checkpoint first.
@@ -160,8 +188,18 @@ namespace
     {
         uint32_t begin, size;
     };
-    constexpr Region kRegions[] = {{0u, 1u << 20}, {0x3C3C00u, 0x100u}, {0x747600u, 0x100u}};
-    constexpr uint32_t kUsed = (1u << 20) + 0x200u;
+    // + batch 2's fixed addresses: the GS table 0x4A5D80, the allocator 0x566E10, the view matrix pointer 0x5CAFF0,
+    // 0x7476B0 / 0x747A2C / 0x747AA8, the order table's descriptors 0x755780...
+    constexpr Region kRegions[] = {{0u, 1u << 20}, {0x3C3C00u, 0x100u}, {0x4A5D80u, 0x810u}, {0x566E00u, 0x20u},
+                                   {0x5CAFF0u, 0x10u}, {0x747600u, 0x500u}, {0x755700u, 0x100u}};
+    constexpr uint32_t usedBytes()
+    {
+        uint32_t total = 0;
+        for (const Region &r : kRegions)
+            total += r.size;
+        return total;
+    }
+    constexpr uint32_t kUsed = usedBytes();
     uint8_t *backing()
     {
         void *p = mmap(nullptr, PS2_RDRAM_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -341,6 +379,247 @@ namespace
         setGpr(call.ctx, 8, tail2); // 0 half the time: the last tag is then a3's
     }
 
+    // ---- rung 3, step a, batch 2: each function's tables, lists and arguments --------------------------------------
+    void setU64(uint32_t at, uint64_t v)
+    {
+        std::memcpy(g_ramA + at, &v, 8);
+        std::memcpy(g_ramB + at, &v, 8);
+    }
+    void setByte(uint32_t at, uint8_t v) { g_ramA[at] = g_ramB[at] = v; }
+    void floatsAt(uint32_t at, int count, bool wild)
+    {
+        fillFloats(g_ramA, at, count, wild);
+        std::memcpy(g_ramB + at, g_ramA + at, 4u * static_cast<uint32_t>(count));
+    }
+    void setFloat(uint32_t at, float f)
+    {
+        uint32_t bits;
+        std::memcpy(&bits, &f, 4);
+        setU32(at, bits);
+    }
+    void setGpr64(R5900Context &ctx, int reg, uint64_t value) { std::memcpy(&ctx.r[reg], &value, 8); }
+    // A GS table index as the code sees it (andi 0xFF, bltz): mostly small, sometimes negative or with upper bits.
+    uint64_t gsIndex()
+    {
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 16u);
+        if (pick == 0)
+            return static_cast<uint64_t>(-static_cast<int64_t>(1 + g_rng() % 4u));
+        if (pick == 1)
+            return g_rng(); // anything
+        return g_rng() % 300u;
+    }
+    // The order table at 0x754C80 the texture builders queue into (descriptors at +0xB00, as setupBatch1's).
+    void orderTable(uint32_t mirror)
+    {
+        setU32(0x7476B0u, static_cast<uint32_t>(g_rng()));
+        for (int i = -4; i < 24; ++i)
+            setU32(0x755780u + static_cast<uint32_t>(4 * i), (0x40000u + 0x40u * static_cast<uint32_t>(g_rng() % 16u)) | mirror);
+        for (uint32_t k = 0; k < 16; ++k)
+        {
+            setU32(0x40000u + 0x40u * k, (0x50000u + 0x100u * static_cast<uint32_t>(g_rng() % 8u)) | mirror);
+            setU32(0x40000u + 0x40u * k + 0x20u, static_cast<uint32_t>(g_rng() % 24u));
+        }
+        randomBytes(0x50000u, 0x1000u);
+    }
+    // A mesh list from model + 0x25C (next at +0x404, the countdown byte at +0x385); its nodes.
+    uint32_t g_meshSpacing = 0;
+    int meshList(uint32_t model, uint32_t seg, bool cycles, bool zeroBytes)
+    {
+        const int n = static_cast<int>(g_rng() % 7u);
+        const uint32_t spacing = g_meshSpacing = (g_rng() % 3u == 0u) ? 0x420u : (g_rng() % 4u == 0u) ? 0x100u : 0x800u;
+        const uint32_t first = 0x30000u + 0x40u * static_cast<uint32_t>(g_rng() % 8u);
+        for (int i = 0; i < n; ++i)
+        {
+            const uint32_t node = first + spacing * static_cast<uint32_t>(i);
+            setU32(node + 0x404u, i + 1 < n ? (node + spacing) | seg : 0u);
+            setByte(node + 0x385u, (zeroBytes && g_rng() % 30u == 0u) ? 0u : static_cast<uint8_t>(1u + g_rng() % 4u));
+        }
+        if (cycles && n > 0 && g_rng() % 4u == 0u)
+            setU32(first + spacing * static_cast<uint32_t>(n - 1) + 0x404u, (first + spacing * static_cast<uint32_t>(g_rng() % n)) | seg);
+        setU32(model + 0x25Cu, n ? first | seg : 0u);
+        return n;
+    }
+
+    void setupBatch2(const NativeFunction &fn, Call &call, bool wild, uint32_t base, uint32_t seg)
+    {
+        R5900Context &ctx = call.ctx;
+        uint32_t sp;
+        std::memcpy(&sp, &ctx.r[29], 4);
+        sp &= 0x1FFFFFFu;
+        const uint32_t mirror = (g_rng() % 4u == 0u) ? 0x20000000u : 0u;
+        switch (fn.address)
+        {
+        case 0x155D60u:
+        {
+            const uint32_t pick = static_cast<uint32_t>(g_rng() % 20u);
+            // a 0 byte spins the original ~4G times: only when a checkpoint stops it early
+            setByte(base + 0x385u, pick == 0 && call.dueAt ? 0u : pick == 1 ? 255u : static_cast<uint8_t>(1u + g_rng() % 6u));
+            setGpr(ctx, 4, base | seg);
+            setGpr64(ctx, 5, g_rng());
+            setGpr(ctx, 6, (g_rng() % 8u == 0u) ? 0xFFFFFFFFu : static_cast<uint32_t>(g_rng() % 4u));
+            return;
+        }
+        case 0x14B6F8u:
+        {
+            const int n = meshList(base, seg, true, false);
+            setGpr(ctx, 4, base | seg);
+            if (g_rng() % 16u == 0u)
+                setGpr64(ctx, 5, (g_rng() << 32) | static_cast<uint32_t>(g_rng() % 10u)); // upper bits: no cycle wanted
+            else
+                setGpr64(ctx, 5, g_rng() % static_cast<uint64_t>(n + 3));
+            uint64_t index;
+            std::memcpy(&index, &ctx.r[5], 8);
+            if (((index >> 32) != 0u || static_cast<uint32_t>(index) == 0u) && n > 0)
+                meshList(base, seg, false, false); // rebuilt without a cycle
+            return;
+        }
+        case 0x14D768u:
+        {
+            meshList(base, seg, false, call.dueAt != 0);
+            setGpr(ctx, 4, base | seg);
+            setGpr64(ctx, 5, g_rng());
+            // nodes 0x100 apart: index 7 writes over the next node's link (the native declines; the original would
+            // follow a garbage pointer): a 0 then, which ends the list
+            const uint32_t index = static_cast<uint32_t>(g_rng() % 12u);
+            if (g_meshSpacing == 0x100u && index >= 7u)
+                setGpr64(ctx, 5, 0u);
+            setGpr(ctx, 6, index);
+            return;
+        }
+        case 0x15B0F0u:
+        {
+            const uint32_t half = static_cast<uint32_t>(g_rng());
+            setU32(0x7476B0u, half);
+            setU32(0x566E10u, 0x506E10u + (half & 1u) * 0x60000u + static_cast<uint32_t>(g_rng() % 0x60010u));
+            setGpr(ctx, 4, (g_rng() % 8u == 0u) ? static_cast<uint32_t>(g_rng()) : static_cast<uint32_t>(g_rng() % 0x2000u));
+            return;
+        }
+        case 0x155AE8u:
+        case 0x155BE8u:
+        case 0x155C68u:
+            randomBytes(0x4A5D80u, 0x808u);
+            setGpr64(ctx, fn.address == 0x155C68u ? 6 : 5, gsIndex());
+            if (fn.address == 0x155AE8u)
+            {
+                setGpr(ctx, 4, base | seg);
+                setGpr(ctx, 6, static_cast<uint32_t>(g_rng() % 4u));
+            }
+            else if (fn.address == 0x155BE8u)
+            {
+                setGpr(ctx, 4, base | seg);
+                setGpr(ctx, 6, static_cast<uint32_t>(g_rng() % 8u));
+                for (uint32_t k = 0; k < 8; ++k)
+                    setU32(base + 0x220u + 4u * k, (0x60000u + 0x80u * static_cast<uint32_t>(g_rng() % 16u)) | seg);
+            }
+            else
+            {
+                setGpr(ctx, 4, (base + 8u * static_cast<uint32_t>(g_rng() % 32u)) | seg);
+                setGpr(ctx, 5, (base + 8u * static_cast<uint32_t>(g_rng() % 32u)) | seg);
+            }
+            return;
+        case 0x150DC8u:
+        case 0x150F68u:
+        case 0x151168u:
+        {
+            orderTable(mirror);
+            const uint32_t pick = static_cast<uint32_t>(g_rng() % 12u);
+            setU32(base + 0x3Cu, pick == 0 ? 0x280u : pick == 1 ? 0x27Fu : static_cast<uint32_t>(g_rng() % 12u));
+            setU32(0x747A2Cu, static_cast<uint32_t>(g_rng()) & ((g_rng() % 4u == 0u) ? ~0u : ~0x800u));
+            const uint64_t kind = g_rng() % 6u;
+            const uint32_t sign = (g_rng() % 4u == 0u) ? 0xFFFFFFFFu : static_cast<uint32_t>(g_rng() % 2u);
+            setGpr(ctx, 4, base | seg);
+            if (fn.address == 0x150DC8u)
+            {
+                const uint32_t tex = 0x70000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u);
+                randomBytes(0x70000u, 0x1000u);
+                setU32(base + 0x304u, tex | seg);
+                setGpr(ctx, 5, (base + 0x300u) | seg);
+                setGpr(ctx, 6, static_cast<uint32_t>(g_rng()));
+                setGpr(ctx, 7, sign);
+                setGpr64(ctx, 8, kind);
+                return;
+            }
+            setU32(sp, static_cast<uint32_t>(kind)); // the kind, on the caller's stack
+            const uint32_t formats[6] = {0u, 0x13u, 0x14u, static_cast<uint32_t>(g_rng() % 30u), 0xFFFFFFFFu, 0x13u};
+            setGpr(ctx, 5, static_cast<uint32_t>(g_rng()));
+            setGpr(ctx, 6, formats[g_rng() % 6u]);
+            setGpr(ctx, 7, static_cast<uint32_t>(g_rng()));
+            setGpr64(ctx, 8, g_rng());
+            setGpr(ctx, 9, (g_rng() % 10u == 0u) ? 0u : static_cast<uint32_t>(g_rng() % 1024u) - (g_rng() % 8u == 0u ? 512u : 0u));
+            setGpr(ctx, 10, static_cast<uint32_t>(g_rng() % 1024u) - (g_rng() % 8u == 0u ? 512u : 0u));
+            setGpr(ctx, 11, sign);
+            return;
+        }
+        case 0x2D8070u:
+        {
+            floatsAt(base + 0x16150u, 5, wild);
+            if (g_rng() % 8u == 0u) // near == far: a zero divisor
+                setU32(base + 0x16154u, 0u), setU32(base + 0x16150u, 0u);
+            for (uint32_t k = 0; k < 3; ++k)
+                if (g_rng() % 2u)
+                    setFloat(base + 0x16158u + 4u * k, static_cast<float>(static_cast<int>(g_rng() % 600u) - 100) / 2.0f);
+            setGpr(ctx, 4, base | seg);
+            setGpr(ctx, 5, (base + 0x200u) | seg);
+            setGpr(ctx, 6, (base + 0x300u + 8u * static_cast<uint32_t>(g_rng() % 8u)) | seg);
+            const uint32_t f = inputFloat(wild);
+            std::memcpy(&ctx.f[12], &f, 4);
+            return;
+        }
+        case 0x14BE38u:
+        {
+            const uint32_t node = base + 0x100u;
+            setU32(node + 0x380u, static_cast<uint32_t>(g_rng()));
+            setU32(base + 0x250u, static_cast<uint32_t>(g_rng()));
+            if (g_rng() % 2u)
+            {
+                setFloat(base + 0x24Cu, 1.0f);
+                setByte(base + 0x2B6u, 255u), setByte(base + 0x2B7u, 255u), setByte(base + 0x2BCu, 255u);
+            }
+            else
+            {
+                setU32(base + 0x24Cu, inputFloat(wild));
+                setByte(base + 0x2B6u, static_cast<uint8_t>(g_rng())), setByte(base + 0x2B7u, static_cast<uint8_t>(g_rng()));
+                setByte(base + 0x2BCu, static_cast<uint8_t>(g_rng()));
+            }
+            setU32(0x747AA8u, (g_rng() % 2u) ? 0u : static_cast<uint32_t>(g_rng()));
+            setGpr(ctx, 4, base | seg);
+            setGpr(ctx, 5, node | seg);
+            return;
+        }
+        case 0x1503B8u:
+            setGpr(ctx, 4, base | seg);
+            if (g_rng() % 16u != 0u)
+                setGpr(ctx, 5, (base + 0x200u) | seg);
+            return;
+        case 0x2D8008u:
+            setGpr(ctx, 4, base | seg);
+            setGpr(ctx, 5, (base + 0x100u) | seg);
+            setGpr(ctx, 6, (base + 0x200u + 4u * static_cast<uint32_t>(g_rng() % 8u)) | seg);
+            setGpr(ctx, 8, (base + 0x300u) | seg);
+            return;
+        case 0x2D7E50u:
+            floatsAt(base + 0x161A0u, 24, wild);
+            for (uint32_t v = 0x161A0u; v <= 0x161C0u && g_rng() % 2u; v += 0x10u)
+                setU32(base + v + 12u, 0u); // light w lanes as the game has them
+            setGpr(ctx, 4, base | seg);
+            setGpr(ctx, 6, (0x80000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | seg);
+            setGpr(ctx, 7, (0x90000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | seg);
+            setGpr(ctx, 9, (base + 0x380u + 4u * static_cast<uint32_t>(g_rng() % 4u)) | seg);
+            return;
+        case 0x1F8DF8u:
+        {
+            setGpr(ctx, 4, base | seg);
+            setGpr(ctx, 5, (base + 0x100u) | seg);
+            setU32(0x5CAFF0u, (g_rng() % 8u == 0u) ? (base + 0x140u) | seg : (base + 0x200u) | seg);
+            const uint32_t f = inputFloat(wild);
+            std::memcpy(&ctx.f[12], &f, 4);
+            return;
+        }
+        default:
+            return;
+        }
+    }
+
     // Picks the argument addresses for a function: a0 = out, a1 = matrix, a2 = matrix / vector; sometimes aliased.
     void setupCall(const NativeFunction &fn, Call &call, bool wild)
     {
@@ -375,6 +654,7 @@ namespace
             std::memset(&call.ctx.r[7], 0, 8); // r7: ecossin's sign choice (else random, mostly non-zero)
         call.dueAt = static_cast<int>(g_rng() % 5u); // 0 = none, else the checkpoint that comes due
         setupBatch1(fn, call, wild, base, seg);
+        setupBatch2(fn, call, wild, base, seg);
     }
 
     // Runs `run` from the call's state on `ram`; returns the context after, the cycles and checkpoint calls.
@@ -506,15 +786,16 @@ namespace
                 kamite::native::RealEnv env{g_ramB, g_rt};
                 accepted = fn.runReal(env, ctx);
             });
-            // footprint: everything the original changed is declared
+            // footprint: everything the original changed is declared (a recorded one: every range it recorded)
             kamite::native::Footprint fp;
+            std::vector<kamite::native::Footprint::Range> ranges;
             if (fn.footprint)
+            {
                 fn.footprint(&call.ctx, fp);
+                ranges.assign(fp.ranges, fp.ranges + fp.count);
+            }
             else
-                for (const auto &r : rec.ranges)
-                    fp.ranges[fp.count < kamite::native::Footprint::kMaxRanges ? fp.count++ : fp.count - 1] = r;
-            if (!fn.footprint && rec.ranges.size() > kamite::native::Footprint::kMaxRanges)
-                fail("test limit: more recorded ranges than the check holds");
+                ranges = rec.ranges;
             size_t savedAt = 0;
             for (const Region &region : kRegions)
             {
@@ -526,8 +807,8 @@ namespace
                     if (g_ramA[at] == before[savedAt])
                         continue;
                     bool inside = false;
-                    for (int r = 0; r < fp.count; ++r)
-                        inside |= at - (fp.ranges[r].address & PS2_RAM_MASK) < fp.ranges[r].size;
+                    for (const auto &range : ranges)
+                        inside |= at - (range.address & PS2_RAM_MASK) < range.size;
                     if (!inside)
                     {
                         fail("the original wrote outside the footprint");
@@ -847,6 +1128,92 @@ namespace
         }
         std::fclose(f);
         std::printf("wrote %d batch-1 maths vectors to %s\n", written, opsPath.c_str());
+
+        // Rung 3's batch 2 maths (<path>.b2, 64-byte records: u32 kind, inputs, the runtime's results (the recompiled
+        // functions' ops)): 1 the light fade (near, far, f12 -> d, q0, q1, s0, s1, m), 2 VU0 max / min (a, b -> max,
+        // min), 3 cvt.w.s (f -> word), 4 VU0 mul by 1.0 / add (a, b -> a * 1, a + b), 5 the node layer's product (alpha,
+        // three bytes -> b0 / 255, b1 / 255, b2 / 255, the product).
+        const std::string b2Path = std::string(path) + ".b2";
+        f = std::fopen(b2Path.c_str(), "wb");
+        written = 0;
+        auto bitsOfF = [](float x) { uint32_t b; std::memcpy(&b, &x, 4); return b; };
+        auto fOfBits = [](uint32_t b) { float x; std::memcpy(&x, &b, 4); return x; };
+        for (int i = 0; i < count; ++i)
+        {
+            const uint32_t kind = 1u + static_cast<uint32_t>(i % 5);
+            uint32_t rec[16] = {kind};
+            switch (kind)
+            {
+            case 1:
+            {
+                const float n = fOfBits(gameFloat()), fa = (g_rng() % 4u) ? fOfBits(inputFloat(false)) : fOfBits(gameFloat());
+                const float f12 = fOfBits(inputFloat(i % 3 == 0));
+                uint32_t fcr31 = 0;
+                const float d = ps2FpuSub(fa, n), q0 = ps2FpuDivide(fcr31, n, d), q1 = ps2FpuDivide(fcr31, f12, d);
+                const float s0 = ps2FpuAdd(q0, 1.0f), s1 = ps2FpuSub(s0, q1), m = ps2FpuMul(s1, 255.0f);
+                const float in[3] = {n, fa, f12}, out[6] = {d, q0, q1, s0, s1, m};
+                for (int k = 0; k < 3; ++k)
+                    rec[1 + k] = bitsOfF(in[k]);
+                for (int k = 0; k < 6; ++k)
+                    rec[4 + k] = bitsOfF(out[k]);
+                break;
+            }
+            case 2:
+            {
+                alignas(16) uint32_t a[4], b[4];
+                for (int k = 0; k < 4; ++k)
+                {
+                    const uint32_t pick = static_cast<uint32_t>(g_rng() % 8u);
+                    a[k] = pick == 0 ? 0x80000000u : pick == 1 ? static_cast<uint32_t>(g_rng()) & 0x807FFFFFu : gameFloat();
+                    b[k] = (g_rng() % 4u == 0u) ? a[k] ^ 0x80000000u : gameFloat();
+                }
+                const __m128 va = _mm_load_ps(reinterpret_cast<float *>(a)), vb = _mm_load_ps(reinterpret_cast<float *>(b));
+                std::memcpy(rec + 1, a, 16), std::memcpy(rec + 5, b, 16);
+                const __m128 mx = ps2VuMax(va, vb), mn = ps2VuMin(va, vb);
+                std::memcpy(rec + 9, &mx, 16);
+                std::memcpy(rec + 13, &mn, 12); // max, then min's xyz (the record's room)
+                break;
+            }
+            case 3:
+            {
+                const uint32_t x = (g_rng() % 2u) ? gameFloat() : bitsOfF(static_cast<float>(static_cast<int>(g_rng() % 100000u) - 20000) / 7.0f);
+                rec[1] = x;
+                rec[2] = static_cast<uint32_t>(ps2FpuConvertToWord(fOfBits(x)));
+                break;
+            }
+            case 4:
+            {
+                alignas(16) uint32_t a[4], b[4];
+                for (int k = 0; k < 4; ++k)
+                    a[k] = (g_rng() % 3u) ? inputFloat(false) : gameFloat(), b[k] = inputFloat(i % 2 == 0);
+                const __m128 va = _mm_load_ps(reinterpret_cast<float *>(a)), vb = _mm_load_ps(reinterpret_cast<float *>(b));
+                volatile float oneValue = 1.0f; // a constant 1.0 lets the compiler fold x * 1 to x (no flush)
+                const __m128 one = _mm_set1_ps(oneValue);
+                const __m128 mu = ps2VuMul(va, one), ad = ps2VuAdd(va, vb);
+                std::memcpy(rec + 1, a, 16), std::memcpy(rec + 5, b, 16);
+                std::memcpy(rec + 9, &mu, 12), std::memcpy(rec + 12, &ad, 16); // mul's xyz, add's xyzw
+                break;
+            }
+            default:
+            {
+                const uint32_t alpha = (g_rng() % 3u) ? bitsOfF(1.0f) : gameFloat();
+                const int b0 = static_cast<int>(g_rng() % 256u), b1 = (g_rng() % 2u) ? 255 : static_cast<int>(g_rng() % 256u);
+                const int b2 = (g_rng() % 2u) ? 255 : static_cast<int>(g_rng() % 256u);
+                uint32_t fcr31 = 0;
+                const float k = fOfBits(0x437F0000u);
+                const float q0 = ps2FpuDivide(fcr31, FPU_CVT_S_W(b0), k), q1 = ps2FpuDivide(fcr31, FPU_CVT_S_W(b1), k);
+                const float q2 = ps2FpuDivide(fcr31, FPU_CVT_S_W(b2), k);
+                const float pr = ps2FpuMul(ps2FpuMul(ps2FpuMul(fOfBits(alpha), q0), q1), q2);
+                rec[1] = alpha, rec[2] = static_cast<uint32_t>(b0), rec[3] = static_cast<uint32_t>(b1), rec[4] = static_cast<uint32_t>(b2);
+                rec[5] = bitsOfF(q0), rec[6] = bitsOfF(q1), rec[7] = bitsOfF(q2), rec[8] = bitsOfF(pr);
+                break;
+            }
+            }
+            std::fwrite(rec, 4, 16, f);
+            ++written;
+        }
+        std::fclose(f);
+        std::printf("wrote %d batch-2 maths vectors to %s\n", written, b2Path.c_str());
         resetRam();
     }
 }
@@ -990,7 +1357,15 @@ int main(int argc, char **argv)
         {0x30A978u, &sceVu0NormalLightMatrix_0x30a978}, {0x1F7DF8u, &capVu0Length_0x1f7df8},
         {0x101E28u, &Tramp_001F7DF8_00101E28_0x101e28}, {0x147528u, &MtxCopy_0x147528},
         {0x147548u, &MtxMultiply_0x147548},      {0x14FF00u, &func_0014FF00_0x14ff00},
-        {0x31A650u, &func_0031A650_0x31a650},    {0x31A600u, &func_0031A600_0x31a600}};
+        {0x31A650u, &func_0031A650_0x31a650},    {0x31A600u, &func_0031A600_0x31a600},
+        {0x1503B8u, &func_001503B8_0x1503b8},    {0x1F8DF8u, &func_001F8DF8_0x1f8df8},
+        {0x2D7E50u, &func_002D7E50_0x2d7e50},    {0x2D8008u, &func_002D8008_0x2d8008},
+        {0x2D8070u, &func_002D8070_0x2d8070},    {0x150DC8u, &func_00150DC8_0x150dc8},
+        {0x150F68u, &func_00150F68_0x150f68},    {0x151168u, &func_00151168_0x151168},
+        {0x155AE8u, &func_00155AE8_0x155ae8},    {0x155BE8u, &func_00155BE8_0x155be8},
+        {0x155C68u, &func_00155C68_0x155c68},    {0x155D60u, &func_00155D60_0x155d60},
+        {0x15B0F0u, &PostInc_D_00566E10_0015B0F0_15B0F0_0x15b0f0}, {0x14B6F8u, &cModel_getMeshPtr_0x14b6f8},
+        {0x14D768u, &ForwardNodeUpdate_14D768_0x14d768}, {0x14BE38u, &cModel_nodeLayerScreen_0x14be38}};
     for (const auto &[address, f] : recompiled)
         g_callees.push_back({address, f});
     auto recompiledOf = [&](const NativeFunction &fn) {
@@ -1000,6 +1375,11 @@ int main(int argc, char **argv)
         std::printf("no recompiled function for %s\n", fn.name);
         std::exit(2);
     };
+    if (argc > 2 && std::strcmp(argv[1], "vectors") == 0) // the maths vectors alone
+    {
+        writeVectors(argv[2], 20000);
+        return 0;
+    }
     if (argc > 2 && std::strcmp(argv[1], "rerun") == 0)
         return rerun(argv[2], recompiled);
     if (argc > 1 && std::strcmp(argv[1], "bench") == 0)
@@ -1010,6 +1390,15 @@ int main(int argc, char **argv)
     }
     const int calls = argc > 1 ? std::atoi(argv[1]) : 20000;
 
+    // KM_ONLY=<name>: the native checks of that function only (a quick loop while one is being fixed).
+    if (const char *only = std::getenv("KM_ONLY"))
+    {
+        for (const NativeFunction &fn : g_natives)
+            if (std::strcmp(fn.name, only) == 0)
+                checkNative(fn, recompiledOf(fn), calls);
+        std::printf(g_failures ? "%d FAILURES\n" : "all passed\n", g_failures);
+        return g_failures ? 1 : 0;
+    }
     for (const NativeFunction &fn : g_natives)
         checkNative(fn, recompiledOf(fn), calls);
 
@@ -1032,7 +1421,8 @@ int main(int argc, char **argv)
     g_nested = false;
     g_nestedCalls = true;
     for (const NativeFunction &fn : g_natives)
-        for (uint32_t caller : {0x30A8C8u, 0x30A978u, 0x147528u, 0x147548u, 0x101E28u, 0x31A650u, 0x31A600u})
+        for (uint32_t caller : {0x30A8C8u, 0x30A978u, 0x147528u, 0x147548u, 0x101E28u, 0x31A650u, 0x31A600u, 0x14D768u,
+                                0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u})
             if (fn.address == caller)
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;

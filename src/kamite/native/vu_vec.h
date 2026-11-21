@@ -330,6 +330,66 @@ namespace kamite::native
         return r;
     }
 
+    // ---- the EE FPU's scalar ops (rung 3, batch 2), for operands the native's entry checks keep in the host-exact
+    // range (no result at or past FLT_MAX - 1 ulp, no zero / denormal / exponent-255 divisor): one rounding each under
+    // the game thread's chop + flush, as the runtime's ps2FpuAdd / Sub / Mul / Divide do there.
+    inline float addScalar(float a, float b)
+    {
+        volatile float r = a + b;
+        return r;
+    }
+    inline float subScalar(float a, float b)
+    {
+        volatile float r = a - b;
+        return r;
+    }
+    inline float mulScalar(float a, float b)
+    {
+        volatile float r = a * b;
+        return r;
+    }
+    // cvt.w.s (ps2FpuConvertToWord): truncation, saturated from 2^31 up (exponent 255 included).
+    inline int32_t fpuToWord(float a)
+    {
+        const uint32_t bits = floatBits(a);
+        if ((bits & 0x7F800000u) >= 0x4F000000u)
+            return (bits & 0x80000000u) ? INT32_MIN : INT32_MAX;
+        return static_cast<int32_t>(a);
+    }
+    // cvt.s.w for |v| < 2^24 (exact on every host; callers pass bytes).
+    inline float fpuFromSmallWord(int32_t v) { return static_cast<float>(v); }
+    // A result the host can't produce exactly (past FLT_MAX - 1 ulp: ps2FpuPastMax).
+    inline bool fpuPastMax(float r) { return (floatBits(r) & 0x7FFFFFFFu) > 0x7F7FFFFDu; }
+
+    // VU0 max / min (ps2VuMax / Min): sign-magnitude order with exponent-0 lanes as 0; a tie keeps the first operand.
+    inline int32_t vuKey(uint32_t bits)
+    {
+        if ((bits & 0x7F800000u) == 0u)
+            return 0;
+        const int32_t magnitude = static_cast<int32_t>(bits & 0x7FFFFFFFu);
+        return (bits & 0x80000000u) ? -magnitude : magnitude;
+    }
+    inline Vec4 vuMax(Vec4 a, Vec4 b)
+    {
+        alignas(16) uint32_t x[4], y[4];
+        store(x, a);
+        store(y, b);
+        for (int i = 0; i < 4; ++i)
+            if (vuKey(y[i]) > vuKey(x[i]))
+                x[i] = y[i];
+        return load(x);
+    }
+    inline Vec4 vuMin(Vec4 a, Vec4 b)
+    {
+        alignas(16) uint32_t x[4], y[4];
+        store(x, a);
+        store(y, b);
+        for (int i = 0; i < 4; ++i)
+            if (vuKey(x[i]) > vuKey(y[i]))
+                x[i] = y[i];
+        return load(x);
+    }
+
     // The VU's float environment for the duration of a native program: round toward zero, denormals flushed (inputs
     // and results). The x86 runtime already runs its VU jobs this way (runLoopWith); set it here for every path, so a
     // program also runs right when called from elsewhere (the replay tool, other platforms).

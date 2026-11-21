@@ -126,18 +126,26 @@ namespace kamite::native::libvu0
         // ---- sceVu0ApplyMatrix 0x30A2B0 (a0 = out vector, a1 = matrix, a2 = vector) --------------------------------
         constexpr uint32_t kApplyMatrix = 0x30A2B0u;
 
+        // Its checks from the argument values (a caller running it inline predicts them); offsets out. Touches the
+        // three through env.at (a caller's recorded footprint).
         template <class Env>
-        bool applyMatrix(Env &env, R5900Context *ctx)
+        bool applyCheck(Env &env, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t &out, uint32_t &ma, uint32_t &vb)
         {
-            const uint32_t a0 = gpr32(ctx, 4), a1 = gpr32(ctx, 5), a2 = gpr32(ctx, 6);
-            uint32_t out, ma, vb;
             if (!plainRam(a0 & ~0xFu, 16u, out) || !plainRam(a1 & ~0xFu, 64u, ma) || !plainRam(a2 & ~0xFu, 16u, vb))
                 return false;
+            env.at(ma, 64u);
+            env.at(vb, 16u);
+            env.at(out, 16u);
+            uint8_t *const ram = env.ram;
+            return finiteInputs(load(ram + ma)) && finiteInputs(load(ram + ma + 16)) && finiteInputs(load(ram + ma + 32)) &&
+                   finiteInputs(load(ram + ma + 48)) && finiteInputs(load(ram + vb));
+        }
+        template <class Env>
+        void applyOn(Env &env, R5900Context *ctx, uint32_t out, uint32_t ma, uint32_t vb)
+        {
             uint8_t *const ram = env.ram;
             const Vec4 m0 = load(ram + ma), m1 = load(ram + ma + 16), m2 = load(ram + ma + 32), m3 = load(ram + ma + 48);
             const Vec4 b = load(ram + vb);
-            if (!finiteInputs(m0) || !finiteInputs(m1) || !finiteInputs(m2) || !finiteInputs(m3) || !finiteInputs(b))
-                return false;
             const RowResult row = mulRow(m0, m1, m2, m3, b);
             store(ram + out, row.r);
             setVf(ctx, 4, m0);
@@ -148,6 +156,14 @@ namespace kamite::native::libvu0
             store(&ctx->vu0_acc, row.acc);
             setVf(ctx, 9, row.r);
             ctx->pc = gpr32(ctx, 31);
+        }
+        template <class Env>
+        bool applyMatrix(Env &env, R5900Context *ctx)
+        {
+            uint32_t out, ma, vb;
+            if (!applyCheck(env, gpr32(ctx, 4), gpr32(ctx, 5), gpr32(ctx, 6), out, ma, vb))
+                return false;
+            applyOn(env, ctx, out, ma, vb);
             return true;
         }
 
@@ -364,20 +380,30 @@ namespace kamite::native::libvu0
         // ---- sceVu0MulVector 0x30A4D0 (a0 = out, a1, a2): vf6 = vf4 * vf5 ----------------------------------------
         constexpr uint32_t kMulVector = 0x30A4D0u;
         template <class Env>
-        bool mulVector(Env &env, R5900Context *ctx)
+        bool mulVectorCheck(Env &env, uint32_t a0, uint32_t a1, uint32_t a2)
         {
             uint32_t out, va, vb;
-            if (!plain16(e::u32(ctx, e::a0), out) || !plain16(e::u32(ctx, e::a1), va) || !plain16(e::u32(ctx, e::a2), vb))
+            if (!plain16(a0, out) || !plain16(a1, va) || !plain16(a2, vb))
                 return false;
-            const Vec4 a = e::read128(env, va), b = e::read128(env, vb);
-            if (!finiteInputs(a) || !finiteInputs(b))
-                return false;
+            return finiteInputs(e::read128(env, va)) && finiteInputs(e::read128(env, vb));
+        }
+        template <class Env>
+        void mulVectorOn(Env &env, R5900Context *ctx)
+        {
+            const Vec4 a = e::read128(env, off16(e::u32(ctx, e::a1))), b = e::read128(env, off16(e::u32(ctx, e::a2)));
             const Vec4 r = mul(a, b);
             e::setVf(ctx, 4, a);
             e::setVf(ctx, 5, b);
             e::setVf(ctx, 6, r);
-            e::write128(env, out, r);
+            e::write128(env, off16(e::u32(ctx, e::a0)), r);
             ctx->pc = e::u32(ctx, e::ra);
+        }
+        template <class Env>
+        bool mulVector(Env &env, R5900Context *ctx)
+        {
+            if (!mulVectorCheck(env, e::u32(ctx, e::a0), e::u32(ctx, e::a1), e::u32(ctx, e::a2)))
+                return false;
+            mulVectorOn(env, ctx);
             return true;
         }
 
@@ -821,17 +847,18 @@ namespace kamite::native::libvu0
         // out[k] = norm(-light k) for k = 0..2, row 3 = (0, 0, 0, 1), then out transposed in place. A 0x60 frame:
         // f20 (swc1), s0-s2 (sq), ra (sd), the scaled vector at sp.
         constexpr uint32_t kNormalLightMatrix = 0x30A978u;
+        // Its checks from the values it will be called with (sp, a0-a3; vf0 from ctx); the frame's offset out.
         template <class Env>
-        bool normalLightMatrix(Env &env, R5900Context *ctx)
+        bool normalLightCheck(Env &env, const R5900Context *ctx, uint32_t sp0, uint32_t a0, uint32_t a1, uint32_t a2,
+                              uint32_t a3, uint32_t &frame, uint32_t l[3])
         {
-            const uint32_t sp0 = e::u32(ctx, e::sp);
-            uint32_t frame, out, l[3];
-            if ((sp0 & 0xFu) != 0u || !plainRam(sp0 - 0x60u, 0x60u, frame) || !e::vf0Constant(ctx) ||
-                (e::u32(ctx, e::a0) & 0xFu) != 0u || !plain64(e::u32(ctx, e::a0), out) || !plain16(e::u32(ctx, e::a1), l[0]) ||
-                !plain16(e::u32(ctx, e::a2), l[1]) || !plain16(e::u32(ctx, e::a3), l[2]))
+            uint32_t out;
+            if ((sp0 & 0xFu) != 0u || !plainRam(sp0 - 0x60u, 0x60u, frame) || !e::vf0Constant(ctx) || (a0 & 0xFu) != 0u ||
+                !plain64(a0, out) || !plain16(a1, l[0]) || !plain16(a2, l[1]) || !plain16(a3, l[2]))
                 return false;
-            for (uint32_t light : l)
+            for (int k = 0; k < 3; ++k)
             {
+                const uint32_t light = l[k];
                 // read after the frame and the earlier rows are written: keep them clear of both
                 if (e::overlaps(frame, 0x60u, light, 16u) || e::overlaps(out, 64u, light, 16u))
                     return false;
@@ -839,7 +866,25 @@ namespace kamite::native::libvu0
                 if (!finiteInputs(v) || !normalizeInput(v)) // -v: the same squares
                     return false;
             }
-
+            return true;
+        }
+        template <class Env>
+        bool normalLightBody(Env &env, R5900Context *ctx, uint32_t frame);
+        template <class Env>
+        bool normalLightMatrix(Env &env, R5900Context *ctx)
+        {
+            uint32_t frame, l[3];
+            if (!normalLightCheck(env, ctx, e::u32(ctx, e::sp), e::u32(ctx, e::a0), e::u32(ctx, e::a1), e::u32(ctx, e::a2),
+                                  e::u32(ctx, e::a3), frame, l))
+                return false;
+            normalLightBody(env, ctx, frame);
+            return true;
+        }
+        // From its entry, the checks passed; false = stopped at a guest call (ctx left there).
+        template <class Env>
+        bool normalLightBody(Env &env, R5900Context *ctx, uint32_t frame)
+        {
+            const uint32_t sp0 = e::u32(ctx, e::sp);
             const uint32_t sp = sp0 - 0x60u;
             e::setS32(ctx, e::sp, sp);
             e::write32(env, frame + 0x50u, floatBits(ctx->f[20]));
@@ -856,14 +901,14 @@ namespace kamite::native::libvu0
             e::jal(ctx, 0x30A9A8u, kScaleVector, true);
             ctx->f[12] = ctx->f[20];
             if (env.call())
-                return true;
+                return false;
             scaleVectorOn(env, ctx);
 
             e::move(ctx, e::a1, e::sp);
             e::jal(ctx, 0x30A9B4u, kNormalize, true);
             e::move(ctx, e::a0, e::s0);
             if (env.call())
-                return true;
+                return false;
             normalizeOn(env, ctx);
 
             e::move(ctx, e::a0, e::sp);
@@ -871,14 +916,14 @@ namespace kamite::native::libvu0
             e::jal(ctx, 0x30A9C4u, kScaleVector, true);
             e::move(ctx, e::a1, e::s1);
             if (env.call())
-                return true;
+                return false;
             scaleVectorOn(env, ctx);
 
             e::move(ctx, e::a1, e::sp);
             e::jal(ctx, 0x30A9D0u, kNormalize, true);
             e::setS32(ctx, e::a0, e::u32(ctx, e::s0) + 0x10u);
             if (env.call())
-                return true;
+                return false;
             normalizeOn(env, ctx);
 
             ctx->f[12] = ctx->f[20];
@@ -886,14 +931,14 @@ namespace kamite::native::libvu0
             e::jal(ctx, 0x30A9E0u, kScaleVector, true);
             e::move(ctx, e::a1, e::s2);
             if (env.call())
-                return true;
+                return false;
             scaleVectorOn(env, ctx);
 
             e::setS32(ctx, e::a0, e::u32(ctx, e::s0) + 0x20u);
             e::jal(ctx, 0x30A9ECu, kNormalize, true);
             e::move(ctx, e::a1, e::sp);
             if (env.call())
-                return true;
+                return false;
             normalizeOn(env, ctx);
 
             std::memset(&ctx->f[0], 0, 4); // mtc1 zero, f0
@@ -908,7 +953,7 @@ namespace kamite::native::libvu0
             e::jal(ctx, 0x30AA14u, kTransposeMatrix, true);
             e::write32(env, (s0 + 0x34u) & PS2_RAM_MASK, floatBits(ctx->f[0]));
             if (env.call())
-                return true;
+                return false;
             transposeOn(env, ctx);
 
             e::lq(env, ctx, e::s0, frame + 0x40u);
@@ -920,6 +965,493 @@ namespace kamite::native::libvu0
             const uint32_t target = e::u32(ctx, e::ra);
             e::setS32(ctx, e::sp, e::u32(ctx, e::sp) + 0x60u);
             e::jrRa(ctx, 0x30AA30u, target, true);
+            return true;
+        }
+
+        // ==== rung 3, step a, batch 2 (the batch-2 chat, Nov 21): the mid builders that call these helpers (switch
+        // KAMITE_NATIVE_PACKET). Each body is its disassembly, one op:: helper per instruction (ee_ctx.h), its callees
+        // run inline after their guest call's cycles; the entry checks predict every callee's inputs (intermediates by
+        // the same core maths) and decline anything the callees would decline, or an overlap that would change them.
+        using namespace e::op;
+        bool plainSpan(uint32_t address, uint32_t size, uint32_t &offset) { return plainRam(address, size, offset); }
+        bool vfBelow(Vec4 v, uint32_t limit) { return magnitudesBelow(v, limit); }
+
+        // ---- func_001503B8 (a0 = model, a1 = out): out = MtxMultiply(model's matrix +0x80, a unit matrix with row 3's
+        // xyz = the model's +0xC0..+0xC8). A 0x50 frame: the matrix at sp, ra at +0x40.
+        constexpr uint32_t kModelMatrix = 0x1503B8u;
+        template <class Env>
+        bool modelMatrix(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp0 = e::u32(ctx, e::sp), model = e::u32(ctx, e::a0);
+            uint32_t frame, wrap, fields;
+            if ((sp0 & 0xFu) != 0u || !plainSpan(sp0 - 0x50u, 0x50u, frame) || !plainSpan(sp0 - 0x60u, 16u, wrap) ||
+                !plainSpan(model + 0xC0u, 12u, fields) || !e::vf0Constant(ctx) || e::overlaps(fields, 12u, frame, 0x50u))
+                return false;
+            // MulMatrix's arguments: out = a1, A = model + 0x80, B = the frame's matrix (rows: vf7, vf6, vf5, vf4 with
+            // the model's three floats in row 3).
+            MulMatrixArgs m;
+            const uint32_t outAddr = e::u32(ctx, e::a1), maAddr = model + 0x80u;
+            if (!plainRam(outAddr & ~0xFu, 64u, m.out) || !plainRam(maAddr & ~0xFu, 64u, m.ma))
+                return false;
+            m.mb = frame;
+            m.a0 = outAddr;
+            m.a2 = sp0 - 0x50u;
+            if (addiOverflows(outAddr, 64u) || addiOverflows(m.a2, 64u) || overlapsUnequal(m.out, m.mb, 64u) ||
+                e::overlaps(m.ma, 64u, frame, 0x50u) || e::overlaps(m.ma, 64u, wrap, 16u) ||
+                e::overlaps(m.out, 64u, frame, 0x50u) || e::overlaps(m.out, 64u, wrap, 16u))
+                return false;
+            env.at(m.ma, 64u);
+            env.at(m.out, 64u);
+            const uint8_t *const ram = env.ram;
+            for (uint32_t row = 0; row < 64u; row += 16u)
+                if (!finiteInputs(load(ram + m.ma + row)))
+                    return false;
+            const uint32_t t0 = e::read32(env, fields), t1 = e::read32(env, fields + 4u), t2 = e::read32(env, fields + 8u);
+            if (!finiteInputs(bitsOf(t0, t1, t2, 0u)))
+                return false; // the unit rows are 0 / 1
+
+            daddu(ctx, e::v0, e::a0, e::zero);
+            addiu(ctx, e::sp, e::sp, -0x50);
+            daddu(ctx, e::a0, e::a1, e::zero);
+            sd(env, ctx, e::ra, e::sp, 0x40);
+            const Vec4 v4 = e::vf(ctx, 0), v5 = rotateLanes(v4), v6 = rotateLanes(v5), v7 = rotateLanes(v6);
+            e::setVf(ctx, 4, v4);
+            e::setVf(ctx, 5, v5);
+            e::setVf(ctx, 6, v6);
+            e::setVf(ctx, 7, v7);
+            sqc2(env, ctx, 4, e::sp, 0x30);
+            sqc2(env, ctx, 5, e::sp, 0x20);
+            sqc2(env, ctx, 6, e::sp, 0x10);
+            sqc2(env, ctx, 7, e::sp, 0);
+            lwc1(env, ctx, 2, e::v0, 0xC0);
+            addiu(ctx, e::a1, e::v0, 0x80);
+            lwc1(env, ctx, 1, e::v0, 0xC4);
+            daddu(ctx, e::a2, e::sp, e::zero);
+            lwc1(env, ctx, 0, e::v0, 0xC8);
+            swc1(env, ctx, 2, e::sp, 0x30);
+            swc1(env, ctx, 1, e::sp, 0x34);
+            e::jal(ctx, 0x150404u, kMtxMultiply, true);
+            swc1(env, ctx, 0, e::sp, 0x38);
+            if (env.call())
+                return true;
+            wrapperEnter(env, ctx, wrap, kMtxMultiply, kMulMatrix);
+            if (env.call())
+                return true;
+            mulMatrixBody(env, ctx, m);
+            if (ctx->pc != kMtxMultiply + 0x10u)
+                return true;
+            wrapperLeave(env, ctx, wrap, kMtxMultiply);
+            ld(env, ctx, e::ra, e::sp, 0x40);
+            const uint32_t target = e::u32(ctx, e::ra);
+            addiu(ctx, e::sp, e::sp, 0x50);
+            e::jrRa(ctx, 0x150410u, target, true);
+            return true;
+        }
+
+        // The four-float copy loops (lwc1 f0, 0(src); addiu n, -1; addiu src, 4; swc1 f0, 0(dst); bne n, end (addiu dst,
+        // 4)) from n = 3 to -1: four words, three backward branches. false = stopped at a checkpoint.
+        template <class Env>
+        bool copyFour(Env &env, R5900Context *ctx, int src, int n, int dst, int end, uint32_t bneSite, uint32_t head)
+        {
+            for (;;)
+            {
+                lwc1(env, ctx, 0, src, 0);
+                addiu(ctx, n, n, -1);
+                addiu(ctx, src, src, 4);
+                swc1(env, ctx, 0, dst, 0);
+                const bool again = e::u64(ctx, n) != e::u64(ctx, end);
+                addiu(ctx, dst, dst, 4);
+                e::delaySlot(ctx, bneSite);
+                if (!again)
+                    return true;
+                ctx->pc = head;
+                if (env.checkpoint(32u))
+                    return false;
+            }
+        }
+
+        // ---- func_002D8008 (a0, a1, a2 = out, t0): a1 +0x3C = 1.0; out +0x30 = MulVector(a0 + 0x30, t0) (through the
+        // frame). A 0x30 frame: the product at sp, ra at +0x10, s0 at +0x20.
+        constexpr uint32_t kLightColour = 0x2D8008u;
+        template <class Env>
+        bool lightColour(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp0 = e::u32(ctx, e::sp);
+            uint32_t frame, one, va, vb, dst;
+            const uint32_t aAddr = e::u32(ctx, e::a0) + 0x30u, bAddr = e::u32(ctx, e::t0);
+            if ((sp0 & 0xFu) != 0u || !plainSpan(sp0 - 0x30u, 0x30u, frame) || !plainSpan(e::u32(ctx, e::a1) + 0x3Cu, 4u, one) ||
+                !plain16(aAddr, va) || !plain16(bAddr, vb) || !plainSpan(e::u32(ctx, e::a2) + 0x30u, 16u, dst))
+                return false;
+            // MulVector reads a / b after the frame's sq / sd and the 1.0: clear of both
+            if (e::overlaps(va, 16u, frame, 0x30u) || e::overlaps(vb, 16u, frame, 0x30u) || e::overlaps(va, 16u, one, 4u) ||
+                e::overlaps(vb, 16u, one, 4u) || !mulVectorCheck(env, sp0 - 0x30u, aAddr, bAddr))
+                return false;
+
+            addiu(ctx, e::sp, e::sp, -0x30);
+            lui(ctx, e::at, 0x3F80);
+            e::mtc1(ctx, e::at, 0);
+            sqOp(env, ctx, e::s0, e::sp, 0x20);
+            addiu(ctx, e::v0, e::a0, 0x30);
+            sd(env, ctx, e::ra, e::sp, 0x10);
+            daddu(ctx, e::s0, e::a2, e::zero);
+            swc1(env, ctx, 0, e::a1, 0x3C);
+            daddu(ctx, e::a0, e::sp, e::zero);
+            daddu(ctx, e::a1, e::v0, e::zero);
+            e::jal(ctx, 0x2D8030u, kMulVector, true);
+            daddu(ctx, e::a2, e::t0, e::zero);
+            if (env.call())
+                return true;
+            mulVectorOn(env, ctx);
+            addiu(ctx, e::a0, e::zero, -1);
+            addiu(ctx, e::s0, e::s0, 0x30);
+            addiu(ctx, e::v1, e::zero, 0x3);
+            daddu(ctx, e::v0, e::sp, e::zero);
+            if (!copyFour(env, ctx, e::v0, e::v1, e::s0, e::a0, 0x2D8058u, 0x2D8048u))
+                return true;
+            lqOp(env, ctx, e::s0, e::sp, 0x20);
+            ld(env, ctx, e::ra, e::sp, 0x10);
+            const uint32_t target = e::u32(ctx, e::ra);
+            addiu(ctx, e::sp, e::sp, 0x30);
+            e::jrRa(ctx, 0x2D8068u, target, true);
+            return true;
+        }
+
+        // ---- func_002D7E50 (a0 = light set, a2 = out, a3 = colours, t1 = ambient): out = NormalLightMatrix(the set's
+        // three directions +0x161A0 / B0 / C0), out row 3 = the ambient; colours rows 0-2 = the set's +0x161D0 / E0 / F0,
+        // row 3 = +0x40 (xyz * 1.0); every lane clamped to 0..1 (VMAX vf0.x, VMINI vf0.w). A 0x50 frame: ra at sp,
+        // s3 / s2 / s1 / s0 at +0x10 / 20 / 30 / 40.
+        constexpr uint32_t kLightMatrix = 0x2D7E50u;
+        template <class Env>
+        bool lightMatrix(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp0 = e::u32(ctx, e::sp), set = e::u32(ctx, e::a0), out = e::u32(ctx, e::a2);
+            const uint32_t colours = e::u32(ctx, e::a3), ambient = e::u32(ctx, e::t1);
+            uint32_t frame, nlFrame, l[3], src[3], amb, row3, dst3, cols, outRows;
+            if ((sp0 & 0xFu) != 0u || (colours & 0xFu) != 0u || !plainSpan(sp0 - 0x50u, 0x50u, frame) ||
+                !plainSpan(set + 0x161D0u, 0x30u, src[0]) || !plainSpan(set + 0x40u, 16u, row3) ||
+                !plainSpan(ambient, 16u, amb) || !plainSpan(out + 0x30u, 16u, dst3) || !plainSpan(colours, 0x40u, cols) ||
+                !plainSpan(out, 64u, outRows))
+                return false;
+            if (!normalLightCheck(env, ctx, sp0 - 0x50u, out, set + 0x161A0u, set + 0x161B0u, set + 0x161C0u, nlFrame, l))
+                return false;
+            for (uint32_t light : l)
+                if (e::overlaps(light, 16u, frame, 0x50u))
+                    return false;
+            // row 3's lanes go through VMUL x 1.0: the host's product unless at / past FLT_MAX (the recompiled
+            // function's ps2ee). Read them as they will be (clear of every write before the lqc2).
+            if (e::overlaps(row3, 16u, frame, 0x50u) || e::overlaps(row3, 16u, nlFrame, 0x60u) ||
+                e::overlaps(row3, 16u, outRows, 64u) || e::overlaps(row3, 16u, cols, 0x40u))
+                return false;
+            if (!vfBelow(blend<8>(e::read128(env, row3), splat(0.0f)), 0x7F7FFFFFu))
+                return false;
+            (void)src;
+
+            addiu(ctx, e::sp, e::sp, -0x50);
+            lui(ctx, e::a1, 0x1);
+            sqOp(env, ctx, e::s0, e::sp, 0x40);
+            lui(ctx, e::v0, 0x1);
+            sqOp(env, ctx, e::s2, e::sp, 0x20);
+            lui(ctx, e::v1, 0x1);
+            sqOp(env, ctx, e::s3, e::sp, 0x10);
+            daddu(ctx, e::s2, e::a0, e::zero);
+            daddu(ctx, e::s0, e::a2, e::zero);
+            ori(ctx, e::v0, e::v0, 0x61B0);
+            ori(ctx, e::v1, e::v1, 0x61C0);
+            sqOp(env, ctx, e::s1, e::sp, 0x30);
+            ori(ctx, e::a1, e::a1, 0x61A0);
+            daddu(ctx, e::s3, e::a3, e::zero);
+            addu(ctx, e::a2, e::s2, e::v0);
+            addu(ctx, e::a3, e::s2, e::v1);
+            daddu(ctx, e::a0, e::s0, e::zero);
+            sd(env, ctx, e::ra, e::sp, 0);
+            daddu(ctx, e::s1, e::t1, e::zero);
+            e::jal(ctx, 0x2D7E9Cu, kNormalLightMatrix, true);
+            addu(ctx, e::a1, e::s2, e::a1);
+            if (env.call())
+                return true;
+            if (!normalLightBody(env, ctx, nlFrame))
+                return true;
+            addiu(ctx, e::v1, e::zero, -1);
+            addiu(ctx, e::s0, e::s0, 0x30);
+            addiu(ctx, e::v0, e::zero, 0x3);
+            if (!copyFour(env, ctx, e::s1, e::v0, e::s0, e::v1, 0x2D7EC0u, 0x2D7EB0u))
+                return true;
+            lui(ctx, e::v0, 0x1);
+            daddu(ctx, e::v1, e::s3, e::zero);
+            ori(ctx, e::v0, e::v0, 0x61D0);
+            addiu(ctx, e::a0, e::zero, 0x3);
+            addu(ctx, e::v0, e::s2, e::v0);
+            addiu(ctx, e::a2, e::s3, 0x10);
+            addiu(ctx, e::a3, e::s3, 0x20);
+            addiu(ctx, e::t0, e::s3, 0x30);
+            addiu(ctx, e::t1, e::s2, 0x40);
+            addiu(ctx, e::a1, e::zero, -1);
+            if (!copyFour(env, ctx, e::v0, e::a0, e::v1, e::a1, 0x2D7F00u, 0x2D7EF0u))
+                return true;
+            lui(ctx, e::v0, 0x1);
+            daddu(ctx, e::v1, e::a2, e::zero);
+            ori(ctx, e::v0, e::v0, 0x61E0);
+            addiu(ctx, e::a0, e::zero, 0x3);
+            addu(ctx, e::v0, e::s2, e::v0);
+            addiu(ctx, e::a1, e::zero, -1);
+            if (!copyFour(env, ctx, e::v0, e::a0, e::v1, e::a1, 0x2D7F30u, 0x2D7F20u))
+                return true;
+            lui(ctx, e::v0, 0x1);
+            daddu(ctx, e::v1, e::a3, e::zero);
+            ori(ctx, e::v0, e::v0, 0x61F0);
+            addiu(ctx, e::a1, e::zero, 0x3);
+            addu(ctx, e::a0, e::s2, e::v0);
+            addiu(ctx, e::v0, e::zero, -1);
+            if (!copyFour(env, ctx, e::a0, e::a1, e::v1, e::v0, 0x2D7F60u, 0x2D7F50u))
+                return true;
+            daddu(ctx, e::v1, e::t0, e::zero);
+            daddu(ctx, e::v0, e::t1, e::zero);
+            addiu(ctx, e::a0, e::zero, 0x3);
+            addiu(ctx, e::a1, e::zero, -1);
+            if (!copyFour(env, ctx, e::v0, e::a0, e::v1, e::a1, 0x2D7F88u, 0x2D7F78u))
+                return true;
+            lui(ctx, e::at, 0x3F80);
+            e::mtc1(ctx, e::at, 0);
+            e::mfc1(ctx, e::t0, 0);
+            std::memcpy(&ctx->vu0_vf[1], &ctx->r[e::t0], 16); // qmtc2.ni: the whole register
+            lqc2(env, ctx, 5, e::s3, 0x30);
+            lqc2(env, ctx, 2, e::s3, 0);
+            lqc2(env, ctx, 3, e::s3, 0x10);
+            lqc2(env, ctx, 4, e::s3, 0x20);
+            e::setVf(ctx, 5, blend<7>(e::vf(ctx, 5), mul(e::vf(ctx, 5), splat<0>(e::vf(ctx, 1)))));
+            const Vec4 lo = splat<0>(e::vf(ctx, 0)), hi = splat<3>(e::vf(ctx, 0));
+            for (int r = 2; r <= 5; ++r)
+                e::setVf(ctx, r, vuMax(e::vf(ctx, r), lo));
+            for (int r = 2; r <= 5; ++r)
+                e::setVf(ctx, r, vuMin(e::vf(ctx, r), hi));
+            sqc2(env, ctx, 2, e::s3, 0);
+            sqc2(env, ctx, 3, e::s3, 0x10);
+            sqc2(env, ctx, 4, e::s3, 0x20);
+            sqc2(env, ctx, 5, e::s3, 0x30);
+            lqOp(env, ctx, e::s0, e::sp, 0x40);
+            lqOp(env, ctx, e::s1, e::sp, 0x30);
+            lqOp(env, ctx, e::s2, e::sp, 0x20);
+            lqOp(env, ctx, e::s3, e::sp, 0x10);
+            ld(env, ctx, e::ra, e::sp, 0);
+            const uint32_t target = e::u32(ctx, e::ra);
+            addiu(ctx, e::sp, e::sp, 0x50);
+            e::jrRa(ctx, 0x2D7FFCu, target, true);
+            return true;
+        }
+
+        // ---- func_001F8DF8 (a0 = box: centre +0, half sizes +0xC.., a1 = matrix, f12 = threshold): the centre and the
+        // eight corners (box matrix, then + the centre's xyz, then the matrix at *0x5CAFF0); v0 = 1 unless the smallest
+        // corner w is below f12 by the compare key. A 0x140 frame: the centre row at sp, its transform at +0x10 / +0x20,
+        // the matrix copy at +0x30, the corners at +0x70..; ra +0xF0, s2 / s1 / s0 +0x100 / 110 / 120, f20 / f21 +0x130 /
+        // 138. Each guest call (ApplyMatrix 17 times, MtxCopy) and the corner loop's branch can stop it.
+        constexpr uint32_t kBoxTest = 0x1F8DF8u, kViewMatrix = 0x5CAFF0u;
+        constexpr uint32_t kOne = 0x3F800000u;
+        template <class Env>
+        bool boxTest(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp0 = e::u32(ctx, e::sp), box = e::u32(ctx, e::a0), mAddr = e::u32(ctx, e::a1);
+            uint32_t frame, copyFrame, boxAt, viewAt, ma, view;
+            if ((sp0 & 0xFu) != 0u || !plainSpan(sp0 - 0x140u, 0x140u, frame) || !plainSpan(sp0 - 0x150u, 16u, copyFrame) ||
+                !plainSpan(box, 0x18u, boxAt) || !plainSpan(kViewMatrix, 4u, viewAt) || !plain64(mAddr, ma))
+                return false;
+            const uint32_t viewAddr = e::read32(env, viewAt);
+            if (!plain64(viewAddr, view))
+                return false;
+            // Everything read after the frame's writes stays clear of them (the frame, MtxCopy's frame).
+            const uint32_t reads[4][2] = {{boxAt, 0x18u}, {viewAt, 4u}, {ma, 64u}, {view, 64u}};
+            for (const auto &r : reads)
+                if (e::overlaps(r[0], r[1], frame, 0x140u) || e::overlaps(r[0], r[1], copyFrame, 16u))
+                    return false;
+            env.at(ma, 64u);
+            env.at(view, 64u);
+            const uint8_t *const ram = env.ram;
+            const Vec4 m0 = load(ram + ma), m1 = load(ram + ma + 16), m2 = load(ram + ma + 32), m3 = load(ram + ma + 48);
+            const Vec4 g0 = load(ram + view), g1 = load(ram + view + 16), g2 = load(ram + view + 32), g3 = load(ram + view + 48);
+            if (!finiteInputs(m0) || !finiteInputs(m1) || !finiteInputs(m2) || !finiteInputs(m3) || !finiteInputs(g0) ||
+                !finiteInputs(g1) || !finiteInputs(g2) || !finiteInputs(g3))
+                return false;
+            // The maths ahead, as it will run: the centre, each corner's two transforms and the add between them.
+            const uint32_t cx = e::read32(env, boxAt), cy = e::read32(env, boxAt + 4u), cz = e::read32(env, boxAt + 8u);
+            const uint32_t hx = e::read32(env, boxAt + 0xCu), hy = e::read32(env, boxAt + 0x10u), hz = e::read32(env, boxAt + 0x14u);
+            const Vec4 centre = bitsOf(cx, cy, cz, kOne);
+            if (!finiteInputs(centre) || !finiteInputs(bitsOf(hx, hy, hz, kOne)))
+                return false;
+            const Vec4 c = mulRow(m0, m1, m2, m3, centre).r;
+            const Vec4 shift = blend<8>(c, splat(1.0f)); // the centre row at sp: its xyz, w still 1.0
+            for (int k = 0; k < 8; ++k)
+            {
+                const uint32_t sx = (k & 1) ? hx : hx ^ 0x80000000u, sy = (k & 4) ? hy ^ 0x80000000u : hy,
+                               sz = (k & 2) ? hz : hz ^ 0x80000000u;
+                const Vec4 p = mulRow(m0, m1, m2, m3, bitsOf(sx, sy, sz, kOne)).r;
+                const Vec4 q = blend<7>(p, add(p, shift));
+                if (!finiteInputs(q))
+                    return false; // the second transform's input (and no sum past FLT_MAX)
+            }
+
+            addiu(ctx, e::sp, e::sp, -0x140);
+            sqOp(env, ctx, e::s0, e::sp, 0x120);
+            sqOp(env, ctx, e::s1, e::sp, 0x110);
+            addiu(ctx, e::s0, e::sp, 0x20);
+            sqOp(env, ctx, e::s2, e::sp, 0x100);
+            daddu(ctx, e::s1, e::a0, e::zero);
+            swc1(env, ctx, 21, e::sp, 0x138);
+            daddu(ctx, e::s2, e::a1, e::zero);
+            swc1(env, ctx, 20, e::sp, 0x130);
+            e::setFBits(ctx, 21, e::fBits(ctx, 12)); // mov.s
+            sd(env, ctx, e::ra, e::sp, 0xF0);
+            lui(ctx, e::at, 0x3F80);
+            e::mtc1(ctx, e::at, 20);
+            lwc1(env, ctx, 2, e::s1, 0);
+            lwc1(env, ctx, 1, e::s1, 4);
+            lwc1(env, ctx, 0, e::s1, 8);
+            swc1(env, ctx, 2, e::sp, 0);
+            swc1(env, ctx, 1, e::sp, 4);
+            swc1(env, ctx, 0, e::sp, 8);
+            swc1(env, ctx, 20, e::sp, 0xC);
+            lqc2(env, ctx, 4, e::sp, 0);
+            sqc2(env, ctx, 4, e::sp, 0x20);
+            daddu(ctx, e::a0, e::s0, e::zero);
+            daddu(ctx, e::a1, e::s2, e::zero);
+            e::jal(ctx, 0x1F8E58u, kApplyMatrix, true);
+            daddu(ctx, e::a2, e::s0, e::zero);
+            if (env.call())
+                return true;
+            uint32_t out, mat, vec;
+            applyCheck(env, e::u32(ctx, e::a0), e::u32(ctx, e::a1), e::u32(ctx, e::a2), out, mat, vec); // offsets
+            applyOn(env, ctx, out, mat, vec);
+            lqc2(env, ctx, 4, e::s0, 0);
+            sqc2(env, ctx, 4, e::sp, 0x10);
+            addiu(ctx, e::v0, e::sp, 0x10);
+            lwc1(env, ctx, 0, e::sp, 0x10); // beq sp, v0's delay slot (never taken)
+            e::delaySlot(ctx, 0x1F8E6Cu);
+            lwc1(env, ctx, 1, e::sp, 0x14);
+            lwc1(env, ctx, 2, e::sp, 0x18);
+            swc1(env, ctx, 0, e::sp, 0);
+            swc1(env, ctx, 1, e::sp, 4);
+            swc1(env, ctx, 2, e::sp, 8);
+            daddu(ctx, e::a1, e::s2, e::zero);
+            e::jal(ctx, 0x1F8E8Cu, kMtxCopy, true);
+            addiu(ctx, e::a0, e::sp, 0x30);
+            if (env.call())
+                return true;
+            wrapperEnter(env, ctx, copyFrame, kMtxCopy, kCopyMatrix);
+            if (env.call())
+                return true;
+            copyMatrixOn(env, ctx);
+            wrapperLeave(env, ctx, copyFrame, kMtxCopy);
+            daddu(ctx, e::s2, e::zero, e::zero);
+            lwc1(env, ctx, 5, e::s1, 0xC);
+            addiu(ctx, e::v0, e::sp, 0x70);
+            lwc1(env, ctx, 6, e::s1, 0x14);
+            addiu(ctx, e::v1, e::sp, 0x80);
+            e::setFBits(ctx, 3, e::fBits(ctx, 5) ^ 0x80000000u); // neg.s
+            lwc1(env, ctx, 1, e::s1, 0x10);
+            e::setFBits(ctx, 2, e::fBits(ctx, 6) ^ 0x80000000u);
+            daddu(ctx, e::s0, e::v0, e::zero);
+            e::mtc1(ctx, e::zero, 0);
+            lui(ctx, e::s1, 0x5D);
+            swc1(env, ctx, 3, e::sp, 0x70);
+            e::setFBits(ctx, 4, e::fBits(ctx, 1) ^ 0x80000000u);
+            swc1(env, ctx, 0, e::sp, 0x60);
+            swc1(env, ctx, 0, e::sp, 0x68);
+            swc1(env, ctx, 0, e::sp, 0x64);
+            swc1(env, ctx, 1, e::v0, 4);
+            swc1(env, ctx, 2, e::v0, 8);
+            swc1(env, ctx, 20, e::v0, 0xC);
+            swc1(env, ctx, 5, e::sp, 0x80);
+            swc1(env, ctx, 1, e::v1, 4);
+            swc1(env, ctx, 2, e::v1, 8);
+            swc1(env, ctx, 20, e::v1, 0xC);
+            swc1(env, ctx, 3, e::sp, 0x90);
+            addiu(ctx, e::v1, e::sp, 0x90);
+            swc1(env, ctx, 1, e::v1, 4);
+            swc1(env, ctx, 6, e::v1, 8);
+            swc1(env, ctx, 20, e::v1, 0xC);
+            swc1(env, ctx, 5, e::sp, 0xA0);
+            addiu(ctx, e::v1, e::sp, 0xA0);
+            swc1(env, ctx, 1, e::v1, 4);
+            swc1(env, ctx, 6, e::v1, 8);
+            swc1(env, ctx, 20, e::v1, 0xC);
+            swc1(env, ctx, 3, e::sp, 0xB0);
+            addiu(ctx, e::v1, e::sp, 0xB0);
+            swc1(env, ctx, 4, e::v1, 4);
+            swc1(env, ctx, 2, e::v1, 8);
+            swc1(env, ctx, 20, e::v1, 0xC);
+            swc1(env, ctx, 5, e::sp, 0xC0);
+            addiu(ctx, e::v1, e::sp, 0xC0);
+            swc1(env, ctx, 2, e::v1, 8);
+            swc1(env, ctx, 4, e::v1, 4);
+            swc1(env, ctx, 20, e::v1, 0xC);
+            addiu(ctx, e::v1, e::sp, 0xD0);
+            swc1(env, ctx, 3, e::sp, 0xD0);
+            swc1(env, ctx, 4, e::v1, 4);
+            swc1(env, ctx, 6, e::v1, 8);
+            swc1(env, ctx, 20, e::v1, 0xC);
+            swc1(env, ctx, 5, e::sp, 0xE0);
+            addiu(ctx, e::v1, e::sp, 0xE0);
+            swc1(env, ctx, 20, e::v1, 0xC);
+            swc1(env, ctx, 4, e::v1, 4);
+            swc1(env, ctx, 6, e::v1, 8);
+            for (;;)
+            {
+                daddu(ctx, e::a0, e::s0, e::zero);
+                addiu(ctx, e::a1, e::sp, 0x30);
+                e::jal(ctx, 0x1F8F70u, kApplyMatrix, true);
+                daddu(ctx, e::a2, e::s0, e::zero);
+                if (env.call())
+                    return true;
+                applyCheck(env, e::u32(ctx, e::a0), e::u32(ctx, e::a1), e::u32(ctx, e::a2), out, mat, vec);
+                applyOn(env, ctx, out, mat, vec);
+                lqc2(env, ctx, 4, e::s0, 0);
+                lqc2(env, ctx, 5, e::sp, 0);
+                e::setVf(ctx, 4, blend<7>(e::vf(ctx, 4), add(e::vf(ctx, 4), e::vf(ctx, 5))));
+                sqc2(env, ctx, 4, e::s0, 0);
+                lw(env, ctx, e::a1, e::s1, -0x5010);
+                daddu(ctx, e::a0, e::s0, e::zero);
+                daddu(ctx, e::a2, e::s0, e::zero);
+                e::jal(ctx, 0x1F8F94u, kApplyMatrix, true);
+                addiu(ctx, e::s2, e::s2, 1);
+                if (env.call())
+                    return true;
+                applyCheck(env, e::u32(ctx, e::a0), e::u32(ctx, e::a1), e::u32(ctx, e::a2), out, mat, vec);
+                applyOn(env, ctx, out, mat, vec);
+                slti(ctx, e::v0, e::s2, 0x8);
+                const bool again = e::u64(ctx, e::v0) != 0u;
+                addiu(ctx, e::s0, e::s0, 0x10);
+                e::delaySlot(ctx, 0x1F8FA0u);
+                if (!again)
+                    break;
+                ctx->pc = 0x1F8F68u;
+                if (env.checkpoint(32u))
+                    return true;
+            }
+            // the smallest w by the compare key (c.lt.s f1, f0; bc1tl mov.s f0, f1)
+            lwc1(env, ctx, 0, e::sp, 0x7C);
+            const uint32_t minSites[7] = {0x1F8FB8u, 0x1F8FCCu, 0x1F8FE0u, 0x1F8FF4u, 0x1F9008u, 0x1F901Cu, 0x1F9030u};
+            for (int k = 0; k < 7; ++k)
+            {
+                lwc1(env, ctx, 1, e::sp, 0x8C + 0x10 * k);
+                e::setC(ctx, e::cLt(ctx, 1, 0));
+                if (e::cBit(ctx))
+                {
+                    e::setFBits(ctx, 0, e::fBits(ctx, 1));
+                    e::delaySlot(ctx, minSites[k]);
+                }
+            }
+            e::setC(ctx, e::cLt(ctx, 21, 0));
+            daddu(ctx, e::v0, e::zero, e::zero); // bc1t's delay slot
+            e::delaySlot(ctx, 0x1F9040u);
+            if (!e::cBit(ctx))
+                addiu(ctx, e::v0, e::zero, 0x1);
+            lqOp(env, ctx, e::s0, e::sp, 0x120);
+            lqOp(env, ctx, e::s1, e::sp, 0x110);
+            lqOp(env, ctx, e::s2, e::sp, 0x100);
+            ld(env, ctx, e::ra, e::sp, 0xF0);
+            lwc1(env, ctx, 21, e::sp, 0x138);
+            lwc1(env, ctx, 20, e::sp, 0x130);
+            const uint32_t target = e::u32(ctx, e::ra);
+            addiu(ctx, e::sp, e::sp, 0x140);
+            e::jrRa(ctx, 0x1F9064u, target, true);
             return true;
         }
     }
@@ -964,5 +1496,15 @@ namespace kamite::native::libvu0
         add("Tramp_001F7DF8_00101E28", kLengthThunk, &lengthThunk<RealEnv>, &lengthThunk<ShadowEnv>);
         add("MtxCopy", kMtxCopy, &mtxCopy<RealEnv>, &mtxCopy<ShadowEnv>);
         add("MtxMultiply", kMtxMultiply, &mtxMultiply<RealEnv>, &mtxMultiply<ShadowEnv>);
+
+        // Rung 3, step a, batch 2: the mid builders calling these (switch KAMITE_NATIVE_PACKET), unchecked.
+        auto addPacket = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
+                            bool (*shadow)(ShadowEnv &, R5900Context *)) {
+            registerFunction(NativeFunction{name, address, "packet", false, real, shadow, nullptr});
+        };
+        addPacket("func_001503B8", kModelMatrix, &modelMatrix<RealEnv>, &modelMatrix<ShadowEnv>);
+        addPacket("func_001F8DF8", kBoxTest, &boxTest<RealEnv>, &boxTest<ShadowEnv>);
+        addPacket("func_002D7E50", kLightMatrix, &lightMatrix<RealEnv>, &lightMatrix<ShadowEnv>);
+        addPacket("func_002D8008", kLightColour, &lightColour<RealEnv>, &lightColour<ShadowEnv>);
     }
 }

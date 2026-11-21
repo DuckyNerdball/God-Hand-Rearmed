@@ -17,7 +17,12 @@ with kamite/git_commit.h):
        sceVu0MulVector_0x30a4d0 sceVu0ScaleVector_0x30a4e8 sceVu0OuterProduct_0x30a328 sceVu0Normalize_0x30a370
        sceVu0TransMatrix_0x30a508 sceVu0TransposeMatrix_0x30a3b0 sceVu0InversMatrix_0x30a3f8 sceVu0CameraMatrix_0x30a8c8
        sceVu0NormalLightMatrix_0x30a978 capVu0Length_0x1f7df8 Tramp_001F7DF8_00101E28_0x101e28 MtxCopy_0x147528
-       MtxMultiply_0x147548 func_0014FF00_0x14ff00 func_0031A650_0x31a650 func_0031A600_0x31a600"
+       MtxMultiply_0x147548 func_0014FF00_0x14ff00 func_0031A650_0x31a650 func_0031A600_0x31a600
+       func_001503B8_0x1503b8 func_001F8DF8_0x1f8df8 func_002D7E50_0x2d7e50 func_002D8008_0x2d8008
+       func_002D8070_0x2d8070 func_00150DC8_0x150dc8 func_00150F68_0x150f68 func_00151168_0x151168
+       func_00155AE8_0x155ae8 func_00155BE8_0x155be8 func_00155C68_0x155c68 func_00155D60_0x155d60
+       PostInc_D_00566E10_0015B0F0_15B0F0_0x15b0f0 cModel_getMeshPtr_0x14b6f8 ForwardNodeUpdate_14D768_0x14d768
+       cModel_nodeLayerScreen_0x14be38"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -26,6 +31,8 @@ with kamite/git_commit.h):
     /tmp/nt/shadow_test 20000 /tmp/nt/vectors.bin    # natives, footprints, invisibility, detection; writes vectors
     /tmp/nt/shadow_test bench                        # ns per call (GCC: a hint only)
     /tmp/nt/shadow_test rerun <case>.<rate>.native.bin   # a replay's saved mismatches, again here
+    /tmp/nt/shadow_test vectors /tmp/nt/vectors.bin      # the maths vectors alone
+    KM_ONLY=<name> KM_DIFF=1 /tmp/nt/shadow_test 3000   # one native's checks only, with the differing fields
 
 The maths alone on every path (SSE, plain C++, NEON under qemu):
 
@@ -39,3 +46,9 @@ core maths to a vectors check. A native with a recorded footprint (footprint = n
 the recording run (ShadowEnv filled from RAM on first touch) must agree with the real run, and every byte the
 recompiled function writes must lie in what the native recorded. KM_DIFF=1 prints the first mismatches' differing
 context words and RAM.
+
+Rung 3's batch 2 adds `<vectors>.b2` (the FPU scalar ops, VU0 max / min, cvt.w.s, VU0 mul by 1.0 / add, against the
+runtime's own ops in the natives' domains). A constant 1.0 lets the compiler fold x * 1 to x (no flush of a denormal),
+so the vectors take it through a volatile, as the game does from a register. Where the network refuses GitHub's archive
+zips (the configure step fetches glslang, SPIRV-Headers, SPIRV-Tools and shaderc that way: thirdparty/pcsx2-gs/
+shaderc.cmake), fetch each pinned commit / tag with git and pass -DFETCHCONTENT_SOURCE_DIR_KAMITE_<NAME>=<dir>.

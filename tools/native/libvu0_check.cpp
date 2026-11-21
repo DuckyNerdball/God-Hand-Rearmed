@@ -196,7 +196,93 @@ int main(int argc, char **argv)
 #else
     const char *path = "plain C++";
 #endif
-    std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ\n", path,
-                count, bad - rotBad - opsBad, rotCount, rotBad, opsCount, opsBad);
+    // Rung 3's batch 2 (<vectors>.b2): the FPU scalar ops, VU0 max / min, cvt.w.s, mul by 1 / add, in the natives'
+    // domains (as their entry checks keep them), against the runtime's results.
+    int b2Count = 0, b2Bad = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".b2").c_str(), "rb"))
+    {
+        uint32_t rec[16];
+        auto fl = [](uint32_t b) { float x; std::memcpy(&x, &b, 4); return x; };
+        while (std::fread(rec, 4, 16, o) == 16)
+        {
+            uint32_t got[8] = {}, want[8] = {};
+            int words = 0;
+            switch (rec[0])
+            {
+            case 1:
+            {
+                constexpr uint32_t kLimit = 0x7E800000u;
+                if ((rec[1] & 0x7FFFFFFFu) >= kLimit || (rec[2] & 0x7FFFFFFFu) >= kLimit || (rec[3] & 0x7FFFFFFFu) >= kLimit)
+                    continue;
+                const float d = subScalar(fl(rec[2]), fl(rec[1]));
+                const uint32_t ed = (floatBits(d) >> 23) & 0xFFu;
+                if (ed == 0u || ed == 255u)
+                    continue;
+                const float q0 = divScalar(fl(rec[1]), d), q1 = divScalar(fl(rec[3]), d);
+                const float s0 = addScalar(q0, 1.0f), s1 = subScalar(s0, q1), m = mulScalar(s1, 255.0f);
+                if (fpuPastMax(q0) || fpuPastMax(q1) || fpuPastMax(s0) || fpuPastMax(s1) || fpuPastMax(m))
+                    continue;
+                const float r[6] = {d, q0, q1, s0, s1, m};
+                for (int k = 0; k < 6; ++k)
+                    got[k] = floatBits(r[k]), want[k] = rec[4 + k];
+                words = 6;
+                break;
+            }
+            case 2:
+            {
+                const Vec4 a = load(rec + 1), b = load(rec + 5);
+                store(got, vuMax(a, b));
+                store(got + 4, vuMin(a, b));
+                std::memcpy(want, rec + 9, 28);
+                words = 7;
+                break;
+            }
+            case 3:
+                got[0] = static_cast<uint32_t>(fpuToWord(fl(rec[1])));
+                want[0] = rec[2];
+                words = 1;
+                break;
+            case 4:
+            {
+                const Vec4 a = load(rec + 1), b = load(rec + 5);
+                if (!magnitudesBelow(blend<8>(a, splat(0.0f)), 0x7F7FFFFFu))
+                    continue;
+                volatile float one = 1.0f; // as the game's: from a register (a constant folds x * 1 to x)
+                store(got, mul(a, splat(one)));
+                std::memcpy(want, rec + 9, 12);
+                words = 3;
+                if (libvu0::finiteInputs(a) && libvu0::finiteInputs(b)) // the box test's add (inputs below 2^62)
+                {
+                    store(got + 3, add(a, b));
+                    std::memcpy(want + 3, rec + 12, 16);
+                    words = 7;
+                }
+                break;
+            }
+            default:
+            {
+                if ((rec[1] & 0x7FFFFFFFu) >= 0x7E800000u)
+                    continue;
+                const float k = fl(0x437F0000u);
+                const float q0 = divScalar(fpuFromSmallWord(static_cast<int32_t>(rec[2])), k);
+                const float q1 = divScalar(fpuFromSmallWord(static_cast<int32_t>(rec[3])), k);
+                const float q2 = divScalar(fpuFromSmallWord(static_cast<int32_t>(rec[4])), k);
+                const float pr = mulScalar(mulScalar(mulScalar(fl(rec[1]), q0), q1), q2);
+                got[0] = floatBits(q0), got[1] = floatBits(q1), got[2] = floatBits(q2), got[3] = floatBits(pr);
+                std::memcpy(want, rec + 5, 16);
+                words = 4;
+                break;
+            }
+            }
+            ++b2Count;
+            if (std::memcmp(got, want, 4u * static_cast<unsigned>(words)) != 0 && ++b2Bad <= 5)
+                std::printf("batch-2 vector %d (kind %u) differs\n", b2Count, rec[0]);
+        }
+        std::fclose(o);
+    }
+    bad += b2Bad;
+    std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
+                "maths %d vectors, %d differ\n", path, count, bad - rotBad - opsBad - b2Bad, rotCount, rotBad, opsCount, opsBad,
+                b2Count, b2Bad);
     return bad ? 1 : 0;
 }
