@@ -548,6 +548,29 @@
       }
     },
     {
+      "id": "CameraInvertY",
+      "label": "Invert Camera Y-Axis",
+      "help": "Freecam: push up or move the mouse up to look down. Brawling dodges stay as they are.",
+      "group": "Camera",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "Game/CameraInvertY": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "Game/CameraInvertY": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/CameraInvertY": "0"
+      }
+    },
+    {
       "id": "Vibration",
       "label": "Vibration",
       "help": "Controller rumble. Girls know what it's for.",

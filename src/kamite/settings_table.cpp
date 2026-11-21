@@ -164,6 +164,7 @@ namespace kamite::settings
             return s.choices = choices, s.choiceCount = count, s.fallback = fallback, s;
         }
         constexpr Setting wideOnly(Setting s) { return s.wideOnly = true, s; }
+        constexpr Setting freeCamera(Setting s) { return s.freeCamera = true, s; }
         constexpr Setting slider(Setting s, const char *unit) { return s.gameSlider = true, s.unit = unit, s; }
         // In game only while that device is in use, under its in-game name (nullptr: the launcher's).
         constexpr Setting onDevice(Setting s, int8_t device, const char *gameName = nullptr)
@@ -212,6 +213,11 @@ namespace kamite::settings
                          "Instead of removing walls, the camera sees\nthrough them around Gene and enemies.",
                          "Video", "SeeThrough", true),
                   "F2 > Camera sizes it while playing.")),
+        // The free camera's up / down, stick and mouse alike (F2 > Controls' Invert up/down; brawl mode's dodges keep the
+        // stick as it is). Listed under Modern only (K, Nov 21).
+        live(freeCamera(toggle(Tab::Controls, "Camera", "Invert Camera Y-Axis",
+                               "Freecam: push up or move the mouse up to look down.\nBrawling dodges stay as they are.",
+                               "Game", "CameraInvertY", false))),
         live(toggle(Tab::Controls, "Controller", "Vibration", "Controller rumble.\nGirls know what it's for.", "Game",
                     "Vibration", true)),
         live(deadzone("Left Stick Deadzone", "How far the left stick must move before it counts.\nRaise it if Gene walks on his own.",
@@ -495,8 +501,18 @@ namespace kamite::settings
         return -1;
     }
 
+    bool modernStyle(const IniFile &ini, int8_t device)
+    {
+        const Setting *pad = find("ControlStyle"), *kbm = find("KbmControlStyle");
+        const bool padModern = pad && !same(value(ini, *pad), "classic");
+        const bool kbmModern = kbm && same(value(ini, *kbm), "modern");
+        return device == kPad ? padModern : device == kKeyboard ? kbmModern : padModern || kbmModern;
+    }
+
     bool parentAllows(const IniFile &ini, const Setting &setting)
     {
+        if (setting.freeCamera && !modernStyle(ini, -1))
+            return false;
         if (!setting.parent)
             return true;
         if (std::strcmp(setting.parent, "DisplayMode") == 0) // two keys in GHR.ini (StartFullscreen, StartMaximized)

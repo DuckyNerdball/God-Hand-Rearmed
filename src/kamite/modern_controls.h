@@ -50,6 +50,8 @@ namespace kamite::modern
     bool holdCamEnabled();
     void setAuto(bool on);
     void setMouseCamera(bool on);
+    // The free camera's up / down, stick and mouse ([Game] CameraInvertY; the Options' Invert Camera Y-Axis).
+    void setInvertY(bool on);
     // The keyboard & mouse's own Control Style and Auto ([Game] KbmControlStyle / KbmModernAuto; K, Nov 16). enabled()
     // and autoEnabled() answer for the device used last.
     void setKbmModern(bool on);

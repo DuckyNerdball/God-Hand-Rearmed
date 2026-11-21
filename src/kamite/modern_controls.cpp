@@ -851,6 +851,7 @@ namespace kamite::modern
     void setKbmModern(bool on) { g_kbmModern = on; }
     void setKbmAuto(bool on) { g_kbmAuto = on; }
     void setMouseCamera(bool on) { g_mouseCamera = on; }
+    void setInvertY(bool on) { g_invertY = on; }
 
     bool autoEnabled() { return autoNow(); }
 

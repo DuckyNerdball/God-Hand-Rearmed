@@ -977,6 +977,8 @@ namespace kamite::options_screen
                 modern::setKbmAuto(on);
             else if (id == "MouseCamera")
                 modern::setMouseCamera(on);
+            else if (id == "CameraInvertY")
+                modern::setInvertY(on);
             else if (id == "BallBusterWomen")
                 setBallBusterWomen(on);
             else if (id == "TensionPlacable")
