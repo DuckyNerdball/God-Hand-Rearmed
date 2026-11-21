@@ -66,6 +66,7 @@
 #include "kamite/launcher.h"
 #endif
 #include "kamite/pc_sampler.h"
+#include "kamite/native/native.h"
 #include "kamite/thread_policy.h"
 
 #if defined(PS2X_ENABLE_DEBUG_UI)
@@ -1189,6 +1190,7 @@ int main(int argc, char *argv[])
         });
         kamite::calltrace::installFromEnvironment(runtime);
         kamite::pcsampler::installFromEnvironment(runtime);
+        kamite::native::installFromEnvironment(runtime); // native EE functions + dev replays' shadow checks: wraps the slots as they are
         kamite::FunctionHooks::instance().logBindings();
         kamite::callprofile::installFromEnvironment(runtime); // last: wraps whatever the slots hold now
 
@@ -1212,6 +1214,7 @@ int main(int argc, char *argv[])
             code = kExitTestFailed;
             reason = "the test could not be carried out (see the test: lines above)";
         }
+        kamite::native::flush(); // the shadow checks' summary
         KM_INFO(Boot, "runtime exited: " << reason << "; exit code " << code << " after " << kamite::log::elapsedSeconds() << " s");
         std::cout.flush();
         std::fflush(stdout);

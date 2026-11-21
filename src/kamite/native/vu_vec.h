@@ -3,7 +3,9 @@
 #include <cstdint>
 #include <cstring>
 
-// Four floats with the VU's arithmetic, for the native VU1 programs (docs: claude/native-vu1.md). Three paths with one
+// Four floats with the VU's arithmetic: the one maths layer of all native code (the native VU1 programs in
+// src/kamite/render, claude/native-vu1.md; native EE functions in src/kamite/native, claude/native-next.md rung 0: no
+// raw SSE / NEON outside this file). Three paths with one
 // API: SSE (x86), NEON (AArch64) and plain C++ (the reference; KAMITE_VU_SCALAR forces it, to diff it against the other
 // two). All of them leave rounding to the float environment (VuFloatEnv below): the VU's round toward zero, with
 // denormal inputs and results flushed to zero. In that environment an overflow saturates to +-FLT_MAX (round toward
@@ -28,7 +30,7 @@
 #include <cfenv>
 #endif
 
-namespace kamite::render
+namespace kamite::native
 {
     // The status register's sticky zero / sign / underflow / overflow bits (ZS SS US OS): a native run sets all four.
     // No microprogram of the game reads them (no FSAND / FSOR / FSEQ / FSSET in any image) and the EE cannot read VU1's
@@ -60,6 +62,12 @@ namespace kamite::render
     }
     template <int L>
     inline uint32_t laneBits(Vec4 a) { return static_cast<uint32_t>(_mm_extract_ps(a.v, L)); }
+    // Every lane's magnitude bits (sign cleared) below limit (limit <= 0x7F800000): an entry check for huge values.
+    inline bool magnitudesBelow(Vec4 a, uint32_t limit)
+    {
+        const __m128i m = _mm_and_si128(_mm_castps_si128(a.v), _mm_set1_epi32(0x7FFFFFFF));
+        return _mm_movemask_ps(_mm_castsi128_ps(_mm_cmplt_epi32(m, _mm_set1_epi32(static_cast<int>(limit))))) == 0xF;
+    }
     inline Vec4 add(Vec4 a, Vec4 b) { return {_mm_add_ps(a.v, b.v)}; }
     inline Vec4 sub(Vec4 a, Vec4 b) { return {_mm_sub_ps(a.v, b.v)}; }
     inline Vec4 mul(Vec4 a, Vec4 b) { return {_mm_mul_ps(a.v, b.v)}; }
@@ -109,6 +117,11 @@ namespace kamite::render
     inline float lane(Vec4 a) { return vgetq_lane_f32(a.v, L); }
     template <int L>
     inline uint32_t laneBits(Vec4 a) { return vgetq_lane_u32(vreinterpretq_u32_f32(a.v), L); }
+    inline bool magnitudesBelow(Vec4 a, uint32_t limit)
+    {
+        const uint32x4_t m = vandq_u32(vreinterpretq_u32_f32(a.v), vdupq_n_u32(0x7FFFFFFFu));
+        return vminvq_u32(vcltq_u32(m, vdupq_n_u32(limit))) != 0u;
+    }
     inline Vec4 add(Vec4 a, Vec4 b) { return {vaddq_f32(a.v, b.v)}; }
     inline Vec4 sub(Vec4 a, Vec4 b) { return {vsubq_f32(a.v, b.v)}; }
     inline Vec4 mul(Vec4 a, Vec4 b) { return {vmulq_f32(a.v, b.v)}; }
@@ -166,6 +179,13 @@ namespace kamite::render
     inline float lane(Vec4 a) { return a.v[L]; }
     template <int L>
     inline uint32_t laneBits(Vec4 a) { return bitsOfFloat(a.v[L]); }
+    inline bool magnitudesBelow(Vec4 a, uint32_t limit)
+    {
+        for (int i = 0; i < 4; ++i)
+            if ((bitsOfFloat(a.v[i]) & 0x7FFFFFFFu) >= limit)
+                return false;
+        return true;
+    }
     // volatile keeps each result rounded on its own (no contraction, no wider evaluation).
     inline Vec4 add(Vec4 a, Vec4 b)
     {
@@ -310,4 +330,10 @@ namespace kamite::render
         int m_saved;
 #endif
     };
+}
+
+// The VU1 programs' name for it (they were written in kamite::render).
+namespace kamite::render
+{
+    using namespace kamite::native;
 }
