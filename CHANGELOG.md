@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 22, 2026
 
+- OPTIONS > Controls: Button Mapping and Menu Controls lead the Controller list.
 - Mash Assistic (Controls > Controller, off): in grabs and Gene's stun, a held face button mashes and a held stick waggles; in Pummel and the other mash moves, a held Circle (B) mashes.
 - Release, build and tester zips name their folders with '/', so they unpack on Linux too (#25).
 - Launcher: backslashes and underscores no longer show the font's credit stamp.

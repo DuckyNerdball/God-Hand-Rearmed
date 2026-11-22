@@ -227,6 +227,10 @@ namespace kamite::settings
         live(freeCamera(toggle(Tab::Controls, "Camera", "Invert Camera Y-Axis",
                                "Freecam: push up or move the mouse up to look down.\nBrawling dodges stay as they are.",
                                "Game", "CameraInvertY", false))),
+        // Button Mapping (options_pages.cpp: a link row, not a setting) comes first, then Menu Controls (K, Nov 22).
+        live(choice(Tab::Controls, "Controller", "Menu Controls",
+                    "Western: bottom button confirms; right cancels.\nJapanese: right button confirms; bottom cancels.",
+                    "Game", "MenuButtons", "western", kMenuButtons)),
         live(toggle(Tab::Controls, "Controller", "Vibration", "Controller rumble.\nGirls know what it's for.", "Game",
                     "Vibration", true)),
         live(deadzone("Left Stick Deadzone", "How far the left stick must move before it counts.\nRaise it if Gene walks on his own.",
@@ -240,9 +244,6 @@ namespace kamite::settings
                     "Game", "SwapSticks", false)),
         live(toggle(Tab::Controls, "Controller", "Mash Assistic", "Are ya winning, dad?\nWaggle and mash events are easier.",
                     "Game", "MashAssist", false)),
-        live(choice(Tab::Controls, "Controller", "Menu Controls",
-                    "Western: bottom button confirms; right cancels.\nJapanese: right button confirms; bottom cancels.",
-                    "Game", "MenuButtons", "western", kMenuButtons)),
 
         // ---- Display --------------------------------------------------------------------------------------------
         live(withChoices(custom("DisplayMode", Tab::Display, "Game Window", "Display Mode",

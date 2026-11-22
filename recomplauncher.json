@@ -571,6 +571,35 @@
       }
     },
     {
+      "id": "MenuButtons",
+      "label": "Menu Controls",
+      "help": "Western: bottom button confirms; right cancels. Japanese: right button confirms; bottom cancels.",
+      "group": "Controller",
+      "choices": [
+        {
+          "label": "Western",
+          "set": {
+            "Game/MenuButtons": "western"
+          }
+        },
+        {
+          "label": "Japanese",
+          "set": {
+            "Game/MenuButtons": "japanese"
+          }
+        },
+        {
+          "label": "Classic",
+          "set": {
+            "Game/MenuButtons": "classic"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/MenuButtons": "western"
+      }
+    },
+    {
       "id": "Vibration",
       "label": "Vibration",
       "help": "Controller rumble. Girls know what it's for.",
@@ -669,35 +698,6 @@
       ],
       "defaults": {
         "Game/MashAssist": "0"
-      }
-    },
-    {
-      "id": "MenuButtons",
-      "label": "Menu Controls",
-      "help": "Western: bottom button confirms; right cancels. Japanese: right button confirms; bottom cancels.",
-      "group": "Controller",
-      "choices": [
-        {
-          "label": "Western",
-          "set": {
-            "Game/MenuButtons": "western"
-          }
-        },
-        {
-          "label": "Japanese",
-          "set": {
-            "Game/MenuButtons": "japanese"
-          }
-        },
-        {
-          "label": "Classic",
-          "set": {
-            "Game/MenuButtons": "classic"
-          }
-        }
-      ],
-      "defaults": {
-        "Game/MenuButtons": "western"
       }
     },
     {

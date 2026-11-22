@@ -107,6 +107,17 @@ namespace kamite::options_pages
                 d.rows.push_back(header);
                 d.setting.push_back(nullptr);
             }
+            if (tab == settings::Tab::Controls && std::strcmp(s.key, "MenuButtons") == 0)
+            {
+                // BUTTON MAPPING first under CONTROLLER, above Menu Controls (K, Nov 22): a row with no value that opens
+                // its own page.
+                options_overlay::PageRow link;
+                link.name = kMappingName;
+                link.help = d.keep(wrapHelp(kMappingHelp, aspect));
+                d.mappingRow = static_cast<int>(d.rows.size());
+                d.rows.push_back(link);
+                d.setting.push_back(nullptr);
+            }
             options_overlay::PageRow row;
             row.name = d.keep(upper(s.gameName ? s.gameName : s.name));
             // The in-game note after the description: on its own line when it starts with one ("\n...").
@@ -185,16 +196,6 @@ namespace kamite::options_pages
             }
             d.rows.push_back(row);
             d.setting.push_back(&s);
-            if (tab == settings::Tab::Controls && std::strcmp(s.key, "MenuButtons") == 0)
-            {
-                // BUTTON MAPPING under Menu Controls: a row with no value that opens its own page.
-                options_overlay::PageRow link;
-                link.name = kMappingName;
-                link.help = d.keep(wrapHelp(kMappingHelp, aspect));
-                d.mappingRow = static_cast<int>(d.rows.size());
-                d.rows.push_back(link);
-                d.setting.push_back(nullptr);
-            }
         }
         d.page.name = d.name.c_str();
         d.page.rows = d.rows.data();
