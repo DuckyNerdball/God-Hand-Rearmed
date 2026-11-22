@@ -4,7 +4,7 @@ class PS2Runtime;
 
 // Mash Assistic ([Game] MashAssist, OPTIONS > Controls > Controller, off by default, live): the game's mash and waggle
 // events take held input. While Gene struggles (an enemy's grab, his own stun mash-out), holding any face button counts
-// as a press every other game frame and holding the left stick off centre at all as a stick flick every fourth; in the
+// as a press every third game frame (10 a second) and holding the left stick off centre at all as a stick flick every fourth; in the
 // mash moves (Pummel, Spanking, Stinger, Cobra Twist, the spin and the rest of the eleven), holding Circle (B) does.
 //
 // How: a hook just before each of those states' read of the pressed-buttons word (GameWork +0x08) adds the press to the

@@ -14,7 +14,8 @@
 // press anyway (the counter only drops on one), so nothing else sees input a human masher wouldn't have given.
 //
 // Cadence: on game frames (+0x210 counts main loops; at 60 FPS, +0x569 == 1, two make a 30 FPS frame), so 30 and 60
-// FPS mash alike: a face press at least every 2 frames (15 a second), a stick flick at least every 4. Kept as the last
+// FPS mash alike: a face press at least every 3 frames (10 a second; 15 looked wrong in a pummel, K, Nov 22), a
+// stick flick at least every 4. Kept as the last
 // frame given, not a phase, so a state that reads only on some vblanks (held frames at 60) still gets its presses.
 #include "kamite/mash_assist.h"
 
@@ -45,7 +46,7 @@ namespace kamite::mash_assist
         constexpr int kStickOffCentre = 16; // of 128: drift is the stick deadzone's job; anything past this is held
         // The direction bits as func_0031B560 sets them (lui 0x80 / 0x40 / 0x10 / 0x20 at 0x31B7A8..0x31B7FC).
         constexpr uint32_t kStickRight = 0x800000u, kStickLeft = 0x400000u, kStickUp = 0x100000u, kStickDown = 0x200000u;
-        constexpr uint32_t kFaceEvery = 2u, kStickEvery = 4u; // game frames (30 FPS ones)
+        constexpr uint32_t kFaceEvery = 3u, kStickEvery = 4u; // game frames (30 FPS ones): 10 presses a second (K)
 
         std::atomic<bool> g_on{false};
         // The last press given (EE thread only): its 30 FPS frame (the spacing) and its main loop (other reads in the
