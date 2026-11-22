@@ -1469,6 +1469,10 @@ float soft(vec2 p)
                          it->second.y + it->second.h > atlas.height
                      ? atlas.glyphs.erase(it)
                      : std::next(it);
+        // The font's backslash and underscore hold its author's credit, not the character (K saw it in a help text,
+        // Nov 22): left to the fallback font.
+        atlas.glyphs.erase('\\');
+        atlas.glyphs.erase('_');
         return true;
     }
 

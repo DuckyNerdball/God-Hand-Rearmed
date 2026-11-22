@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 22, 2026
 
+- Launcher: backslashes and underscores no longer show the font's credit stamp.
 - Vulkan: a GPU lost while presenting through DXGI switches to Vulkan's own presenting instead of closing the game, and stays so on that GPU and driver (#22).
 - Builds no longer carry the build machine's folders (assert messages, the .pdb path).
 - Mods: texture packs are mods: drop a pack's folder in mods as it comes (replacements, SLUS-21503\replacements), or install its zip.
