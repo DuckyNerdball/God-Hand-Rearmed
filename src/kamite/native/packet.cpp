@@ -3915,7 +3915,8 @@ namespace kamite::native::packet
                     &setNodeMaterial<ShadowEnv>, 0u);
         addReadable("ForwardAttackByMode_14B5D8", kForwardAttack, true, &forwardAttack<RealEnv>,
                     &forwardAttack<ShadowEnv>, 0u);
-        // func_00154240, a node's lighting block (its callees inline on one Txn): unchecked (dev replays shadow it).
-        addReadable("func_00154240", kNodeLighting, false, &nodeLighting<RealEnv>, &nodeLighting<ShadowEnv>, 0u);
+        // func_00154240, a node's lighting block (its callees inline on one BlockTxn). Checked on K's 14:30 build of
+        // ed4a13e (every replay shadowed: 1.41M calls, 0 mismatches, 0 declines; every .ram.bin the reference's).
+        addReadable("func_00154240", kNodeLighting, true, &nodeLighting<RealEnv>, &nodeLighting<ShadowEnv>, 0u);
     }
 }
