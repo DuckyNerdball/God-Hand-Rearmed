@@ -10,7 +10,7 @@ Newest first, one line per change; the code comments say how.
 - Launcher: an existing textures\SLUS-21503 pack moves to mods\Texture Pack; a Loose Textures mod is made for loose images.
 - Replacement textures switch on and off while playing: T (and Graphics > Replacement Textures); Shift+T reloads them.
 - Sound: Dolby Pro Logic II is decoded for 4.0 / 5.1 / 7.1 speakers, so sounds behind the camera play on the rear speakers (#18).
-- Performance: queueing each model's draw packet, building the UV-scroll packets and the texture cache (lookups, loading a frame's new textures into VRAM, the meshes' texture registers) run as native code.
+- Performance: queueing each model's draw packet, building the UV-scroll packets and the texture cache (lookups, loading a frame's new textures into VRAM, the meshes' texture registers, choosing each node's material textures) run as native code.
 
 ## November 21, 2026
 

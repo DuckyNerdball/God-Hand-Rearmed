@@ -3401,10 +3401,11 @@ namespace kamite::native::packet
         addReadable("func_00148D30", kNodeTextures, true, &nodeTextures<RealEnv>, &nodeTextures<ShadowEnv>, 0u);
         addReadable("func_00148690", kNodeMaterial, true, &nodeMaterial<RealEnv>, &nodeMaterial<ShadowEnv>, 0u);
         // Rung 3 step a, the rest of batches 3-4 (Nov 22): the callers of the Txn natives, their callees' bodies inline on
-        // one Txn. Unchecked: dev replays shadow them.
-        addReadable("cModel_setNodeMaterial", kSetNodeMaterial, false, &setNodeMaterial<RealEnv>,
+        // one Txn. Checked on K's 10:49 build of 224a9a9 (every replay shadowed: 1.35M / 1.10M calls, 0 mismatches, 0
+        // declines; every .ram.bin the reference's).
+        addReadable("cModel_setNodeMaterial", kSetNodeMaterial, true, &setNodeMaterial<RealEnv>,
                     &setNodeMaterial<ShadowEnv>, 0u);
-        addReadable("ForwardAttackByMode_14B5D8", kForwardAttack, false, &forwardAttack<RealEnv>,
+        addReadable("ForwardAttackByMode_14B5D8", kForwardAttack, true, &forwardAttack<RealEnv>,
                     &forwardAttack<ShadowEnv>, 0u);
     }
 }
