@@ -25,7 +25,8 @@ with kamite/git_commit.h):
        cModel_nodeLayerScreen_0x14be38 func_0014C5A0_0x14c5a0
        func_00151398_0x151398 func_00148BD8_0x148bd8 func_00151368_0x151368
        func_0014B9A0_0x14b9a0 func_00151630_0x151630 func_00151688_0x151688 func_00151990_0x151990
-       func_00151CC0_0x151cc0 func_00151FA0_0x151fa0 func_00309C30_0x309c30 ps2___muldi3_0x31de10"
+       func_00151CC0_0x151cc0 func_00151FA0_0x151fa0 func_00309C30_0x309c30 ps2___muldi3_0x31de10
+       func_00148D30_0x148d30 SearchDataByTwoNames_0x31cdc0 cIDBase_getSlotPtr_0x1522c0"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
