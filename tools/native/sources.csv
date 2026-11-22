@@ -6,7 +6,7 @@ name,address,source,decomp_name,decomp_file,decomp_commit,decomp_hash,note
 Tramp_001F7DF8_00101E28,0x00101E28,asm,,,,,
 MtxCopy,0x00147528,asm,,,,,
 MtxMultiply,0x00147548,asm,,,,,
-func_00148BD8,0x00148BD8,decomp,func_00148BD8,src/cod/00148bd8.c,75cb123,ababfb683163,batch 3 readable; 0x151398 hit path + 0x151368 inline; kRenderPath|kChargeAtEnd
+func_00148BD8,0x00148BD8,decomp,func_00148BD8,src/cod/00148bd8.c,75cb123,ababfb683163,batch 3 readable; 0x151398 inline (hits; a miss: insert + builder on a Txn) + 0x151368 inline; kRenderPath|kChargeAtEnd
 cModel_getMeshPtr,0x0014B6F8,asm,,,,,
 func_0014B9A0,0x0014B9A0,decomp,func_0014B9A0,src/cod/0014b9a0.c,75cb123,03d8a0f79c6a,batch 3 readable; 0x155BE8 / PostInc / CopyMatrix / UnitMatrix / 0x155C68 / queue inline; kRenderPath|kChargeAtEnd
 cModel_nodeLayerScreen,0x0014BE38,asm,,,,,
@@ -17,7 +17,7 @@ func_001503B8,0x001503B8,asm,,,,,
 func_00150DC8,0x00150DC8,asm,,,,,
 func_00150F68,0x00150F68,asm,,,,,
 func_00151168,0x00151168,asm,,,,,
-func_00151398,0x00151398,decomp,func_00151398,src/cod/00151398.c,75cb123,9023711aea26,batch 3 readable, the hit path (a miss declines); kRenderPath|kChargeAtEnd
+func_00151398,0x00151398,decomp,func_00151398,src/cod/00151398.c,75cb123,9023711aea26,batch 3 readable, hits + full table; a miss: insert + 0x151630 + the builder inline on a Txn (batch 3-4b); kRenderPath|kChargeAtEnd
 func_00155AE8,0x00155AE8,asm,,,,,
 func_00155BE8,0x00155BE8,asm,,,,,
 func_00155C68,0x00155C68,asm,,,,,
@@ -47,3 +47,8 @@ sceVu0CameraMatrix,0x0030A8C8,asm,,,,,Sony libvu0 (SDK); rung 2
 sceVu0NormalLightMatrix,0x0030A978,asm,,,,,Sony libvu0 (SDK); rung 2
 func_0031A600,0x0031A600,asm,,,,,
 func_0031A650,0x0031A650,asm,,,,,
+func_00151630,0x00151630,decomp,func_00151630,src/cod/00151630.c,75cb123,faa11a504248,batch 3-4b readable: the texture file's class; kRenderPath|kChargeAtEnd
+func_00151688,0x00151688,asm,,,,,batch 3-4b: the game's own texture pack (unmatched at 75cb123; decomp names); on a Txn; 0x150DC8 / __muldi3 inline
+func_00151990,0x00151990,asm,,,,,batch 3-4b: the TIM2 loader (unmatched at 75cb123); on a Txn; 0x309C30 / 0x150F68 / queue inline; texture_slots' fix (fittedSize) at its hook's place
+func_00151CC0,0x00151CC0,asm,,,,,batch 3-4b: the TIM3 loader (unmatched at 75cb123); on a Txn; 0x309C30 / 0x151168 / 0x150F68 inline
+func_00151FA0,0x00151FA0,asm,,,,,batch 3-4b: the TM loader (unmatched at 75cb123); on a Txn; 0x151168 / 0x309C30 / 0x150F68 inline

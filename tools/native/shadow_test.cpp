@@ -16,6 +16,7 @@
 #include "kamite/native/native.h"
 #include "kamite/native/shadow.h"
 #include "kamite/native/libvu0_core.h"
+#include "kamite/texture_slots.h"
 #include "ps2_runtime_macros.h" // batch 2 vectors: the runtime's FPU / VU0 ops as the reference
 
 #include <chrono>
@@ -82,6 +83,14 @@ KM_RECOMPILED(func_00151398_0x151398)
 KM_RECOMPILED(func_00148BD8_0x148bd8)
 KM_RECOMPILED(func_0014B9A0_0x14b9a0)
 KM_RECOMPILED(func_00151368_0x151368)
+// batches 3-4b (the texture cache's misses)
+KM_RECOMPILED(func_00151630_0x151630)
+KM_RECOMPILED(func_00151688_0x151688)
+KM_RECOMPILED(func_00151990_0x151990)
+KM_RECOMPILED(func_00151CC0_0x151cc0)
+KM_RECOMPILED(func_00151FA0_0x151fa0)
+KM_RECOMPILED(func_00309C30_0x309c30)
+KM_RECOMPILED(ps2___muldi3_0x31de10)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -133,6 +142,21 @@ void PS2Runtime::Store32(uint8_t *, R5900Context *, uint32_t, uint32_t)
     std::fprintf(stderr, "unexpected Store32 (special address)\n");
     std::abort();
 }
+void PS2Runtime::Store8(uint8_t *, R5900Context *, uint32_t, uint8_t)
+{
+    std::fprintf(stderr, "unexpected Store8 (special address)\n");
+    std::abort();
+}
+void PS2Runtime::Store16(uint8_t *, R5900Context *, uint32_t, uint16_t)
+{
+    std::fprintf(stderr, "unexpected Store16 (special address)\n");
+    std::abort();
+}
+bool PS2Runtime::dispatchGuestBranch(uint8_t *, R5900Context *, uint32_t target, uint32_t, uint32_t, GuestBranchKind, const char *)
+{
+    std::fprintf(stderr, "unexpected indirect branch to 0x%08X\n", target);
+    std::abort();
+}
 void PS2Runtime::Store64(uint8_t *, R5900Context *, uint32_t, uint64_t)
 {
     std::fprintf(stderr, "unexpected Store64 (special address)\n");
@@ -149,6 +173,40 @@ int g_breaks = 0;
 void PS2Runtime::handleBreak(uint8_t *, R5900Context *) { ++g_breaks; }
 // native.cpp is not linked: no entry observers here.
 void kamite::native::runEntryObservers(uint32_t, uint8_t *, R5900Context *, PS2Runtime *) {}
+
+// The patch flags and host hooks the generated code reads (ps2_runtime.cpp's; not linked here): the TIM2 loader's
+// texture_slots hook at 0x151C70, registered by texture_slots::install() and switched per call by the setups.
+std::atomic<uint32_t> g_ps2xPatchFlags{0u};
+namespace
+{
+    std::vector<std::string> g_flagNames;
+    std::vector<std::pair<std::string, PS2Runtime::RecompiledFunction>> g_hostHooks;
+}
+uint32_t ps2xPatchFlagMask(const char *name)
+{
+    for (size_t i = 0; i < g_flagNames.size(); ++i)
+        if (g_flagNames[i] == name)
+            return 1u << i;
+    g_flagNames.emplace_back(name);
+    return 1u << (g_flagNames.size() - 1u);
+}
+void ps2xSetPatchFlag(const char *name, bool enabled)
+{
+    const uint32_t mask = ps2xPatchFlagMask(name);
+    if (enabled)
+        g_ps2xPatchFlags.fetch_or(mask);
+    else
+        g_ps2xPatchFlags.fetch_and(~mask);
+}
+bool ps2xPatchFlag(const char *name) { return (g_ps2xPatchFlags.load() & ps2xPatchFlagMask(name)) != 0u; }
+void ps2xRegisterHostHook(const char *name, PS2Runtime::RecompiledFunction hook) { g_hostHooks.emplace_back(name, hook); }
+PS2Runtime::RecompiledFunction ps2xHostHook(const char *name)
+{
+    for (const auto &[n, hook] : g_hostHooks)
+        if (n == name)
+            return hook;
+    return nullptr;
+}
 
 // The generated JAL (ps2_runtime.cpp callGuestFunctionAs): the callee's slot (its recompiled function, or the shadow
 // harness's entry when the nested checks route shadowed callees through it), the 8-cycle checkpoint first.
@@ -199,9 +257,9 @@ namespace
     {
         uint32_t begin, size;
     };
-    // + batch 2's fixed addresses: the GS table 0x4A5D80, the allocator 0x566E10, the view matrix pointer 0x5CAFF0,
+    // + batch 2's fixed addresses: the texture manager D_004664A0 (its tables up to +0x3F8AB) and the GS table 0x4A5D80, the allocator 0x566E10, the view matrix pointer 0x5CAFF0,
     // 0x7476B0 / 0x747A2C / 0x747AA8, the order table's descriptors 0x755780...
-    constexpr Region kRegions[] = {{0u, 1u << 20}, {0x3C3C00u, 0x100u}, {0x4A5D80u, 0x810u}, {0x566E00u, 0x20u},
+    constexpr Region kRegions[] = {{0u, 1u << 20}, {0x3C3C00u, 0x100u}, {0x466000u, 0x40590u}, {0x566E00u, 0x20u},
                                    {0x5CAFF0u, 0x10u}, {0x747600u, 0x500u}, {0x755700u, 0x100u},
                                    {0x4F8000u, 0x18000u}}; // batch 3: the frame allocator's areas around 0x506E10
     constexpr uint32_t usedBytes()
@@ -482,6 +540,151 @@ namespace
             name = names[g_rng() % n] ^ (1ull << 40); // upper bits no lw gives: never equal (a miss)
     }
 
+    // ---- batches 3-4b: the texture cache's misses ------------------------------------------------------------------
+    void setU16(uint32_t at, uint16_t v)
+    {
+        std::memcpy(g_ramA + at, &v, 2);
+        std::memcpy(g_ramB + at, &v, 2);
+    }
+    // The fixed tables the builders read: the TIM / TM formats -> PSM (0x41ED68 / 80 / 98, the ELF's: 2 1 0 0x14 0x13
+    // 0; a picture type of 0 or 7 reads either neighbour) and func_00309C30's jump table (0x4502E0).
+    void textureTables()
+    {
+        static const uint32_t jump[59] = {
+            0x309C54u,0x309C54u,0x309C54u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C54u,
+            0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C70u,0x309C70u,0x309C94u,
+            0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C54u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,
+            0x309C94u,0x309C94u,0x309C94u,0x309C54u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,
+            0x309C54u,0x309C94u,0x309C94u,0x309C94u,0x309C54u,0x309C54u,0x309C54u,0x309C94u,0x309C94u,0x309C94u,0x309C94u,
+            0x309C94u,0x309C94u,0x309C94u,0x309C54u};
+        for (uint32_t i = 0; i < 59u; ++i)
+            setU32(0x4502E0u + 4u * i, jump[i]);
+        static const uint32_t formats[6] = {2u, 1u, 0u, 0x14u, 0x13u, 0u};
+        for (uint32_t table : {0x41ED68u, 0x41ED80u, 0x41ED98u})
+            for (uint32_t i = 0; i < 6u; ++i)
+                setU32(table + 4u * i, formats[i]);
+        setU32(0x41ED64u, g_rng() % 2u ? 0x13u : 0x3Bu + static_cast<uint32_t>(g_rng() % 4u)); // type 0's PSM
+        setU32(0x41EDB0u, g_rng() % 2u ? 0x2Cu : 0x80000000u);                                // type 7 of the TM table
+    }
+    // A texture manager at w: the uploads' object (its record counter at +0x3C, the next records' old bytes), the VRAM
+    // cursors (+0x3DC60..), the register cursor and the upload counts (+0x3F8A8 / AA / AB), the GS flag, the order table.
+    void textureManager(uint32_t w)
+    {
+        textureTables();
+        orderTable((g_rng() % 4u == 0u) ? 0x20000000u : 0u);
+        setU32(0x747A2Cu, g_rng() % 8u == 0u ? 0x800u : static_cast<uint32_t>(g_rng()) & ~0x800u);
+        const uint32_t records = g_rng() % 16u == 0u ? 0x280u - static_cast<uint32_t>(g_rng() % 3u)
+                                                    : static_cast<uint32_t>(g_rng() % 0x270u);
+        setU32(w + 0x3Cu, records);
+        const uint32_t from = w + 0x40u + std::min(records, 0x27Fu) * 0x180u;
+        randomBytes(from, std::min(0x180u * 8u, w + 0x3C040u - from));
+        for (uint32_t k = 0; k < 9u; ++k)
+            setU32(w + 0x3DC60u + 4u * k, (k % 3u == 1u ? 0x1C20u : 0x2800u) + static_cast<uint32_t>(g_rng() % 0x400u));
+        setU32(w + 0x3F8A8u, static_cast<uint32_t>(g_rng() % 0x100u) | (static_cast<uint32_t>(g_rng()) & 0xFFFF0000u));
+        ps2xSetPatchFlag("texture_slots", g_rng() % 4u != 0u);
+    }
+    // A TIM picture header (0x30 bytes) at p: its type (1-5, sometimes 0 / 6 / 7), size, header size, CLUT size,
+    // GsTex0 (random).
+    void timPicture(uint32_t p)
+    {
+        randomBytes(p, 0x30u);
+        setByte(p + 0x13u, g_rng() % 16u == 0u ? static_cast<uint8_t>(g_rng() % 8u) : static_cast<uint8_t>(1u + g_rng() % 5u));
+        const uint32_t sizes = static_cast<uint32_t>(g_rng() % 16u);
+        setU16(p + 0x14u, sizes == 0 ? static_cast<uint16_t>(g_rng() % 2048u) : static_cast<uint16_t>(1u << (g_rng() % 11u)));
+        setU16(p + 0x16u, sizes == 1 ? static_cast<uint16_t>(g_rng() % 2048u) : static_cast<uint16_t>(1u << (g_rng() % 11u)));
+        setU16(p + 0xCu, g_rng() % 8u == 0u ? static_cast<uint16_t>(g_rng() % 0x100u) : 0x30u);
+        setU32(p + 4u, g_rng() % 3u == 0u ? 0x40u : g_rng() % 2u ? 0x400u : static_cast<uint32_t>(g_rng() % 0x1000u));
+        setU32(p + 8u, g_rng() % 8u == 0u ? static_cast<uint32_t>(g_rng()) : static_cast<uint32_t>(g_rng() % 0x80000u));
+    }
+    // A texture file of class `kind` at f (0 TIM2, 1 TIM3, 2 the game's pack, 3 TM), as func_00151630 classifies them.
+    void textureFile(int kind, uint32_t f)
+    {
+        randomBytes(f, 0x20u);
+        switch (kind)
+        {
+        case 0:
+        case 1:
+        {
+            const bool tim3 = kind == 1 || g_rng() % 4u == 0u;
+            setByte(f, 'T'), setByte(f + 1u, 'I'), setByte(f + 2u, 'M'), setByte(f + 3u, tim3 ? '3' : '2');
+            if (kind == 1)
+            {
+                setByte(f + 5u, 6u);
+                timPicture(f + 0x10u);
+                return;
+            }
+            const uint8_t format = g_rng() % 2u ? 0u : static_cast<uint8_t>(1u + g_rng() % 5u); // a TIM3 here: not 6
+            setByte(f + 5u, format);
+            const uint32_t n = g_rng() % 10u == 0u ? 0u : 1u + static_cast<uint32_t>(g_rng() % 4u);
+            setU16(f + 6u, static_cast<uint16_t>(n));
+            for (uint32_t i = 0; i < n; ++i)
+                timPicture(f + (format ? 0x80u : 0x10u) + 0x30u * i);
+            return;
+        }
+        case 3:
+        {
+            setByte(f, 'T'), setByte(f + 1u, 'M');
+            setByte(f + 3u, static_cast<uint8_t>(0x34u + g_rng() % 0x40u)); // not '2' / '3'
+            const uint32_t pick = static_cast<uint32_t>(g_rng() % 16u);
+            setU32(f + 4u, pick == 0 ? 0x100u : (1u + static_cast<uint32_t>(g_rng() % 4u)) |
+                                                    (pick == 1 ? static_cast<uint32_t>(g_rng()) & 0xFFFFFF00u : 0u));
+            setU32(f + 0xCu, static_cast<uint32_t>(g_rng() % 0x200000u));
+            for (uint32_t i = 0; i < 256u; ++i)
+                setU32(f + 0x10u + 4u * i, 0x400u + 0x40u * (i % 8u));
+            for (uint32_t i = 0; i < 8u; ++i)
+                timPicture(f + 0x410u + 0x40u * i);
+            return;
+        }
+        default:
+        {
+            // the pack: +0 the entry count (bit 31: relocated), +4 / +6 its size, +8 / +0xC the holders' sections,
+            // +0x10 / +0x12 their counts, entries of 0x18 from +0x18, packets of 0x60 from +0x200
+            const bool relocated = g_rng() % 2u == 0u;
+            const uint32_t entries = g_rng() % 8u == 0u ? 0u : 1u + static_cast<uint32_t>(g_rng() % 5u);
+            setU32(f, entries | (relocated ? 0x80000000u : 0u));
+            setU16(f + 4u, static_cast<uint16_t>(g_rng() % 2u ? 1u << (g_rng() % 10u) : g_rng()));
+            setU16(f + 6u, static_cast<uint16_t>(g_rng() % 2u ? 1u << (g_rng() % 10u) : g_rng()));
+            setU32(f + 8u, 0x100u), setU32(f + 0xCu, 0x180u);
+            const uint32_t n1 = static_cast<uint32_t>(g_rng() % 5u), n2 = static_cast<uint32_t>(g_rng() % 4u);
+            setU16(f + 0x10u, static_cast<uint16_t>(n1)), setU16(f + 0x12u, static_cast<uint16_t>(n2));
+            randomBytes(f + 0x18u, 0x18u * 5u);
+            randomBytes(f + 0x100u, 0x100u);
+            randomBytes(f + 0x200u, 0x60u * 7u);
+            for (uint32_t j = 0; j < 7u; ++j)
+            {
+                const bool second = j >= 4u;
+                const uint32_t holder = second ? f + 0x180u + 0x10u * (j - 4u) : f + 0x100u + 0x10u * j;
+                const uint32_t packet = f + 0x200u + 0x60u * static_cast<uint32_t>(g_rng() % 7u);
+                setU32(holder + 4u, relocated ? packet : packet - (second ? f + 0x180u : f + 0x100u));
+            }
+            return;
+        }
+        }
+    }
+    // The table of type `type` in the manager at w with room left and no entry named `name` (a miss that inserts).
+    void textureMissTable(uint32_t w, uint64_t type, uint32_t name)
+    {
+        const uint32_t start = w + (type == 2u ? 0x3D2F0u : type == 1u ? 0x3DC50u : 0x3C990u);
+        const uint32_t n = static_cast<uint32_t>(g_rng() % 24u);
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            const uint32_t at = start - 0x10u * i;
+            uint32_t v = static_cast<uint32_t>(g_rng() % 0x7FFFFFu);
+            if (v == name)
+                ++v;
+            setU32(at, v), setU32(at + 4u, static_cast<uint32_t>(g_rng())), setU32(at + 8u, static_cast<uint32_t>(g_rng()));
+            setU32(at + 12u, static_cast<uint32_t>(g_rng() % 0x10000u));
+        }
+        setU32(start - 0x10u * n, 0xFFFFFFFFu);
+        randomBytes(start - 0x10u * n + 4u, 12u); // the new entry's old bytes
+    }
+    uint32_t textureFileAt() { return 0xD0000u + 0x800u * static_cast<uint32_t>(g_rng() % 16u); }
+    uint64_t textureType()
+    {
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 8u);
+        return pick < 3 ? 2u : pick < 5 ? 1u : pick < 7 ? 0u : g_rng();
+    }
+
     void setupBatch2(const NativeFunction &fn, Call &call, bool wild, uint32_t base, uint32_t seg)
     {
         R5900Context &ctx = call.ctx;
@@ -693,7 +896,17 @@ namespace
         {
             uint64_t name, type;
             const uint32_t w = 0x80000u + 0x40u * static_cast<uint32_t>(g_rng() % 16u);
-            textureTable(w, name, type, 0x10000u);
+            if (g_rng() % 2u == 0u) // batches 3-4b: a miss with room (the name is the file: insert + builder)
+            {
+                const uint32_t f = textureFileAt();
+                textureFile(static_cast<int>(g_rng() % 4u), f);
+                textureManager(w);
+                type = textureType();
+                textureMissTable(w, type, f);
+                name = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(f | (g_rng() % 8u == 0u ? 0x20000000u : 0u))));
+            }
+            else
+                textureTable(w, name, type, 0x10000u);
             setGpr(ctx, 4, w | seg);
             setGpr64(ctx, 5, name);
             setGpr64(ctx, 6, type);
@@ -739,7 +952,20 @@ namespace
         case 0x148BD8u: // batch 3: a mesh node's texture registers (node at base; the manager D_004664A0)
         {
             uint64_t name, type;
-            textureTable(0x4664A0u, name, type, 64u); // VRAM blocks 0..63: register rows at 0x4A4128 + 16 * block
+            const bool miss = g_rng() % 2u == 0u; // batches 3-4b: the texture's first lookup (insert + builder)
+            uint32_t f = 0;
+            if (miss)
+            {
+                f = textureFileAt();
+                textureFile(static_cast<int>(g_rng() % 4u), f);
+                textureManager(0x4664A0u);
+                setU16(0x4664A0u + 0x3F8A8u, static_cast<uint16_t>(g_rng() % 64u)); // the rows below stay random
+                type = textureType();
+                textureMissTable(0x4664A0u, type, f);
+                name = f;
+            }
+            else
+                textureTable(0x4664A0u, name, type, 64u); // VRAM blocks 0..63: register rows at 0x4A4128 + 16 * block
             for (uint32_t row = 0; row < 64u * 16u + 8u; row += 4u)
                 setU32(0x4A4128u + row, static_cast<uint32_t>(g_rng()));
             setU32(0x7476B0u, static_cast<uint32_t>(g_rng()));
@@ -770,6 +996,34 @@ namespace
                 for (uint32_t h = 0; h < 2u; ++h)
                     setU32(base + 0x300u + 0x40u * h, data + later + 0x16u - 0x20u - 4u); // its sd covers the byte
             }
+            return;
+        }
+        case 0x151630u: // batches 3-4b: the classification (a file's header)
+        {
+            const uint32_t f = textureFileAt();
+            textureFile(static_cast<int>(g_rng() % 4u), f);
+            if (g_rng() % 4u == 0u)
+                randomBytes(f, 8u);
+            setGpr(ctx, 4, f | seg);
+            return;
+        }
+        case 0x151990u: // batches 3-4b: the builders (w, the file, pa / pb, the kind)
+        case 0x151CC0u:
+        case 0x151688u:
+        case 0x151FA0u:
+        {
+            const int kind = fn.address == 0x151990u ? 0 : fn.address == 0x151CC0u ? 1 : fn.address == 0x151688u ? 2 : 3;
+            const uint32_t w = 0x80000u + 0x40u * static_cast<uint32_t>(g_rng() % 16u);
+            const uint32_t f = textureFileAt();
+            textureFile(kind, f);
+            textureManager(w);
+            const uint32_t pa = w + 0x3DC60u + 0xCu * static_cast<uint32_t>(g_rng() % 3u);
+            setGpr(ctx, 4, w | seg);
+            setGpr(ctx, 5, f | (g_rng() % 8u == 0u ? 0x20000000u : 0u));
+            setGpr(ctx, 6, pa | seg);
+            setGpr(ctx, 7, (pa + 4u) | seg);
+            setGpr64(ctx, 8, textureType());
+            setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
             return;
         }
         default:
@@ -1685,8 +1939,14 @@ int main(int argc, char **argv)
         {0x15B0F0u, &PostInc_D_00566E10_0015B0F0_15B0F0_0x15b0f0}, {0x14B6F8u, &cModel_getMeshPtr_0x14b6f8},
         {0x14D768u, &ForwardNodeUpdate_14D768_0x14d768}, {0x14BE38u, &cModel_nodeLayerScreen_0x14be38},
         {0x14C5A0u, &func_0014C5A0_0x14c5a0},    {0x151398u, &func_00151398_0x151398},
-        {0x148BD8u, &func_00148BD8_0x148bd8},    {0x14B9A0u, &func_0014B9A0_0x14b9a0}};
-    g_callees.push_back({0x151368u, &func_00151368_0x151368}); // a callee only (no native)
+        {0x148BD8u, &func_00148BD8_0x148bd8},    {0x14B9A0u, &func_0014B9A0_0x14b9a0},
+        {0x151630u, &func_00151630_0x151630},    {0x151990u, &func_00151990_0x151990},
+        {0x151CC0u, &func_00151CC0_0x151cc0},    {0x151688u, &func_00151688_0x151688},
+        {0x151FA0u, &func_00151FA0_0x151fa0}};
+    g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
+    g_callees.push_back({0x309C30u, &func_00309C30_0x309c30});
+    g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
+    kamite::texture_slots::install(); // its hook in the TIM2 loader (the setups switch the flag per call)
     for (const auto &[address, f] : recompiled)
         g_callees.push_back({address, f});
     auto recompiledOf = [&](const NativeFunction &fn) {

@@ -28,32 +28,37 @@ namespace kamite::texture_slots
             const uint32_t header = (GPR_U32(ctx, 21) - 0x30u) & PS2_RAM_MASK; // $s5 is past the 0x30-byte picture header
             if (header + 0x30u > PS2_RDRAM_SIZE)
                 return;
-            const uint8_t type = rdram[header + 0x13u];
             uint16_t width, height;
             std::memcpy(&width, rdram + header + 0x14u, 2u);
             std::memcpy(&height, rdram + header + 0x16u, 2u);
-            uint32_t psm;
-            switch (type)
+            const uint32_t size = fittedSize(rdram[header + 0x13u], width, height, GPR_U32(ctx, 3));
+            if (size != GPR_U32(ctx, 3))
             {
-            case 1: psm = 0x02u; break; // CT16
-            case 2: psm = 0x01u; break; // CT24
-            case 3: psm = 0x00u; break; // CT32
-            case 4: psm = 0x14u; break; // T4
-            case 5: psm = 0x13u; break; // T8
-            default: return;
-            }
-            if (width == 0u || height == 0u || width > 1024u || height > 1024u)
-                return;
-            // TBW as the game sets it (func_00309C30): 64-texel units, even for the palette formats.
-            uint32_t tbw = (width + 63u) / 64u;
-            if ((psm == 0x13u || psm == 0x14u) && (tbw & 1u))
-                ++tbw;
-            const uint32_t need = footprintBlocks(psm, width, height, tbw) * 256u;
-            if (need > GPR_U32(ctx, 3))
-            {
-                SET_GPR_U32(ctx, 3, need);
+                SET_GPR_U32(ctx, 3, size);
             }
         }
+    }
+
+    uint32_t fittedSize(uint8_t imageType, uint16_t width, uint16_t height, uint32_t size)
+    {
+        uint32_t psm;
+        switch (imageType)
+        {
+        case 1: psm = 0x02u; break; // CT16
+        case 2: psm = 0x01u; break; // CT24
+        case 3: psm = 0x00u; break; // CT32
+        case 4: psm = 0x14u; break; // T4
+        case 5: psm = 0x13u; break; // T8
+        default: return size;
+        }
+        if (width == 0u || height == 0u || width > 1024u || height > 1024u)
+            return size;
+        // TBW as the game sets it (func_00309C30): 64-texel units, even for the palette formats.
+        uint32_t tbw = (width + 63u) / 64u;
+        if ((psm == 0x13u || psm == 0x14u) && (tbw & 1u))
+            ++tbw;
+        const uint32_t need = footprintBlocks(psm, width, height, tbw) * 256u;
+        return need > size ? need : size;
     }
 
     uint32_t footprintBlocks(uint32_t psm, uint32_t width, uint32_t height, uint32_t tbw)

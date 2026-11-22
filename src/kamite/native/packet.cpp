@@ -6,8 +6,10 @@
 
 #include "kamite/native/native.h"
 #include "kamite/native/ee_ctx.h"
+#include "kamite/texture_slots.h"
 
 #include <algorithm>
+#include <vector>
 
 namespace kamite::native::packet
 {
@@ -1796,6 +1798,749 @@ namespace kamite::native::packet
             return true;
         }
 
+        // ==== batches 3-4b: the texture cache's misses (K's order, Nov 22) ======================================
+        // A miss in func_00151398 inserts the texture's entry and builds its uploads: func_00151630 classifies the file
+        // by its header ("TIM2", or "TIM3" with byte 5 != 6: the TIM2 loader func_00151990; "TIM3" with byte 5 = 6:
+        // func_00151CC0; "TM..": func_00151FA0; anything else: func_00151688, the game's own pack). A builder writes each
+        // picture's TEX0 into the manager's register table (w + 0x3DC88, by frame half and the cursor w + 0x3F8A8, the
+        // table func_00151368 reads), queues its image and CLUT uploads (func_00150F68 / 00151168 / 00150DC8: a GS packet
+        // in the object's records, linked into the order table D_00754C80) and moves the VRAM cursors (*pa, *pb). The
+        // builders are unmatched in the decomp (75cb123): our own C++ from the disassembly, the decomp's names where it
+        // has them. Their reads follow their own writes (each link reads what the last one wrote; 0x151688 relocates its
+        // pack in place), so they run on a Txn: every read sees the writes made so far and nothing reaches RAM before the
+        // end, so a decline midway changes nothing.
+
+        // The Txn's working storage, one per thread, reused (a native never opens a second one while one is open:
+        // busy declines).
+        struct TxnStore
+        {
+            struct Write
+            {
+                uint32_t at;
+                uint32_t size;
+                alignas(16) uint8_t bytes[16];
+            };
+            static constexpr uint32_t kWrites = 16384u;
+            static constexpr uint32_t kHash = 65536u; // 8-byte granules written (granule + 1; 0 = empty)
+            std::vector<Write> writes;
+            std::vector<uint32_t> hash, used;
+            bool busy = false;
+        };
+        inline TxnStore &txnStore()
+        {
+            thread_local TxnStore store;
+            if (store.writes.empty())
+            {
+                store.writes.resize(TxnStore::kWrites);
+                store.hash.assign(TxnStore::kHash, 0u);
+                store.used.reserve(TxnStore::kWrites * 3u);
+            }
+            return store;
+        }
+
+        // Reads and writes of guest RAM in the original's order, held until commit(). Every access is plain RAM and clear
+        // of [stackLow, stackHigh) (the bytes below the entry sp that the original's frames write), else ok = false and
+        // the native declines (nothing written). A read returns the latest write over each byte, else RAM.
+        template <class Env>
+        struct Txn
+        {
+            Env &env;
+            uint32_t stackLow, stackHigh;
+            bool ok = true;
+            TxnStore *store = nullptr;
+            uint32_t count = 0;
+            Txn(Env &e, uint32_t low, uint32_t high) : env(e), stackLow(low), stackHigh(high)
+            {
+                TxnStore &s = txnStore();
+                if (s.busy)
+                    ok = false;
+                else
+                    s.busy = true, store = &s;
+            }
+            ~Txn()
+            {
+                if (!store)
+                    return;
+                for (uint32_t slot : store->used)
+                    store->hash[slot] = 0u;
+                store->used.clear();
+                store->busy = false;
+            }
+            Txn(const Txn &) = delete;
+            Txn &operator=(const Txn &) = delete;
+
+            bool span(uint32_t address, uint32_t size, uint32_t &offset)
+            {
+                if (!ok)
+                    return false;
+                if (!plainRam(address, size, offset) || e::overlaps(offset, size, stackLow, stackHigh - stackLow))
+                    return ok = false;
+                return true;
+            }
+            static uint32_t slotOf(uint32_t granule) { return (granule * 0x9E3779B1u) >> 16; }
+            bool written(uint32_t granule) const
+            {
+                for (uint32_t i = slotOf(granule);; i = (i + 1u) & (TxnStore::kHash - 1u))
+                {
+                    const uint32_t v = store->hash[i];
+                    if (v == 0u)
+                        return false;
+                    if (v == granule + 1u)
+                        return true;
+                }
+            }
+            void mark(uint32_t granule)
+            {
+                for (uint32_t i = slotOf(granule);; i = (i + 1u) & (TxnStore::kHash - 1u))
+                {
+                    const uint32_t v = store->hash[i];
+                    if (v == granule + 1u)
+                        return;
+                    if (v == 0u)
+                    {
+                        store->hash[i] = granule + 1u;
+                        store->used.push_back(i);
+                        return;
+                    }
+                }
+            }
+            void read(uint32_t address, uint32_t size, void *out)
+            {
+                uint32_t at;
+                if (!span(address, size, at))
+                {
+                    std::memset(out, 0, size);
+                    return;
+                }
+                std::memcpy(out, env.at(at, size), size);
+                bool hit = false;
+                for (uint32_t g = at >> 3; g <= (at + size - 1u) >> 3; ++g)
+                    hit = hit || written(g);
+                if (!hit)
+                    return;
+                // the latest write over each byte: newest first, until every byte is settled
+                uint32_t settled = 0u;
+                const uint32_t all = size >= 32u ? ~0u : (1u << size) - 1u;
+                uint8_t *o = static_cast<uint8_t *>(out);
+                for (uint32_t i = count; i-- > 0u && settled != all;)
+                {
+                    const TxnStore::Write &w = store->writes[i];
+                    const uint32_t lo = std::max(w.at, at), hi = std::min(w.at + w.size, at + size);
+                    for (uint32_t b = lo; b < hi; ++b)
+                        if (!(settled & (1u << (b - at))))
+                        {
+                            o[b - at] = w.bytes[b - w.at];
+                            settled |= 1u << (b - at);
+                        }
+                }
+            }
+            void write(uint32_t address, uint32_t size, const void *in)
+            {
+                uint32_t at;
+                if (!span(address, size, at))
+                    return;
+                if (count == TxnStore::kWrites || store->used.size() + 3u > TxnStore::kHash / 2u)
+                {
+                    ok = false;
+                    return;
+                }
+                TxnStore::Write &w = store->writes[count++];
+                w.at = at;
+                w.size = size;
+                std::memcpy(w.bytes, in, size);
+                for (uint32_t g = at >> 3; g <= (at + size - 1u) >> 3; ++g)
+                    mark(g);
+            }
+            template <class T>
+            T get(uint32_t address)
+            {
+                T v;
+                read(address, sizeof(T), &v);
+                return v;
+            }
+            uint8_t u8(uint32_t a) { return get<uint8_t>(a); }
+            int8_t s8(uint32_t a) { return static_cast<int8_t>(get<uint8_t>(a)); }
+            uint16_t u16(uint32_t a) { return get<uint16_t>(a); }
+            int16_t s16(uint32_t a) { return static_cast<int16_t>(get<uint16_t>(a)); }
+            uint32_t u32(uint32_t a) { return get<uint32_t>(a); }
+            int32_t s32(uint32_t a) { return static_cast<int32_t>(get<uint32_t>(a)); }
+            uint64_t u64(uint32_t a) { return get<uint64_t>(a); }
+            void w8(uint32_t a, uint8_t v) { write(a, 1u, &v); }
+            void w16(uint32_t a, uint16_t v) { write(a, 2u, &v); }
+            void w32(uint32_t a, uint32_t v) { write(a, 4u, &v); }
+            void w64(uint32_t a, uint64_t v) { write(a, 8u, &v); }
+            // lq / sq: the address's low 4 bits cleared
+            void lq(uint32_t a, uint8_t (&v)[16]) { read(a & ~0xFu, 16u, v); }
+            void sq(uint32_t a, const uint8_t (&v)[16]) { write(a & ~0xFu, 16u, v); }
+            void commit()
+            {
+                for (uint32_t i = 0; i < count; ++i)
+                {
+                    const TxnStore::Write &w = store->writes[i];
+                    std::memcpy(env.at(w.at, w.size), w.bytes, w.size);
+                }
+            }
+        };
+
+        inline uint64_t sx32(uint32_t v) { return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(v))); }
+
+        // 0x31A650(D_00754C80, bucket, order, packet, tail) and its link 0x14FF00, on a Txn (queuePlan + linkPacket's
+        // work in the original's order): a bucket below 10 picks this half's descriptor; the slot (the order clamped to
+        // the descriptor's first) becomes a NEXT tag to the packet, the packet's last tag (tail; the packet when the
+        // tail register is 0) a NEXT to what the slot linked before.
+        template <class Env>
+        void txnQueue(Txn<Env> &t, uint64_t bucket, uint64_t order, uint32_t packet, uint32_t tail)
+        {
+            t.env.call(); // jal 0x31A650
+            if (static_cast<int64_t>(bucket) >= 10)
+                return;
+            const uint32_t where = kOrderTable + (((t.u32(kFrameHalf) & 1u) << 2) + (static_cast<uint32_t>(bucket) << 3));
+            const uint32_t descriptor = t.u32(where + 0xB00u);
+            const uint32_t last = tail != 0u ? tail : packet;
+            t.env.call(); // jal 0x14FF00
+            const uint64_t first = sx32(t.u32(descriptor + 0x20u));
+            const uint32_t slots = t.u32(descriptor);
+            const uint64_t lowest = first < order ? first : order;
+            const uint32_t slot = slots + ((static_cast<uint32_t>(first) - static_cast<uint32_t>(lowest)) << 4);
+            const uint64_t before = t.u32(slot + 4u); // lwu
+            t.w64(slot, (static_cast<uint64_t>(packet) << 32) | 0x20000000u);
+            const uint64_t tag = t.u64(last);
+            t.w64(last, (tag & 0x0FFFFFFFu) | 0x20000000u | (before << 32));
+        }
+        // The three upload functions' queue: kind 0 / 3 bucket 1 order 0xE, 2: 6 / 8, 1: 1 / 2, else none (a 64-bit
+        // compare of the kind register).
+        template <class Env>
+        void txnQueueKind(Txn<Env> &t, uint64_t kind, uint32_t record)
+        {
+            uint32_t bucket = 0, order = 0;
+            if (kind == 0u || kind == 3u)
+                bucket = 1u, order = 0xEu;
+            else if (kind == 2u)
+                bucket = 6u, order = 8u;
+            else if (kind == 1u)
+                bucket = 1u, order = 2u;
+            if (bucket != 0u)
+                txnQueue(t, bucket, order, record, record + 0x80u);
+        }
+        // The upload functions' head: -1 when the GS flag 0x800 is set (unless `sign` < 0) or the object's 0x280
+        // records are used up; else the record (object + 0x40 + n * 0x180, this half's 0xC0 in) and the counter moved.
+        template <class Env>
+        bool uploadRecord(Txn<Env> &t, uint32_t object, int64_t sign, uint32_t &record)
+        {
+            if (sign >= 0 && (t.u32(kGsFlag) & 0x800u) != 0u)
+                return false;
+            const uint32_t n = t.u32(object + 0x3Cu);
+            if (n == 0x280u)
+                return false;
+            const uint32_t half = t.u32(kFrameHalf) & 1u;
+            t.w32(object + 0x3Cu, n + 1u);
+            record = object + (n * 0x180u + 0x40u) + half * 0xC0u;
+            return true;
+        }
+
+        // func_00150F68: an image upload (a1 = the source, a2 = the PSM: 0x13, 0x14 or 0 build a packet; a3 = DBP, t0 =
+        // DBW, t1 = width, t2 = height, t3 = sign, the stack word = the kind). Returns v0 (-1 / 0); false = decline (its
+        // `break 7`, a zero transfer width).
+        template <class Env>
+        bool txnImageUp(Txn<Env> &t, uint32_t object, uint64_t src, uint64_t psm, uint64_t dbp, uint64_t dbw,
+                        uint64_t width, uint64_t height, int64_t sign, uint64_t kind)
+        {
+            uint32_t r;
+            if (!uploadRecord(t, object, sign, r))
+                return t.ok;
+            uint64_t t7;
+            if (psm == 0x13u)
+                t7 = width;
+            else if (static_cast<int64_t>(psm) < 0x14)
+            {
+                if (psm != 0u)
+                    return t.ok;
+                t7 = sx32(static_cast<uint32_t>(width) << 2);
+            }
+            else if (psm == 0x14u)
+            {
+                const uint32_t w = static_cast<uint32_t>(width);
+                t7 = sx32(static_cast<uint32_t>(static_cast<int32_t>(w + (w >> 31)) >> 1));
+            }
+            else
+                return t.ok;
+            if (t7 == 0u)
+                return false; // break 7
+            const uint32_t lo = static_cast<uint32_t>(static_cast<int64_t>(static_cast<int32_t>(t7)) *
+                                                      static_cast<int64_t>(static_cast<int32_t>(height)));
+            const uint32_t qwc = lo >> 4;
+            t.w64(r, (static_cast<uint64_t>((r + 0x70u) & 0x0FFFFFFFu) << 32) | 0x20000006u);
+            t.w32(r + 0xCu, 0x50000006u);
+            t.w64(r + 0x20u, (dbp << 32) | (dbw << 48) | (psm << 56));
+            t.w64(r + 0x40u, width | (height << 32));
+            t.w64(r + 0x60u, static_cast<uint64_t>(qwc | 0x8000u) | (0x8000ull << 44));
+            t.w64(r + 0x70u, static_cast<uint64_t>(qwc | 0x30000000u) | (static_cast<uint64_t>(static_cast<uint32_t>(src) & 0x0FFFFFFFu) << 32));
+            t.w32(r + 0x7Cu, qwc | 0x50000000u);
+            txnQueueKind(t, kind, r);
+            return t.ok;
+        }
+
+        // func_00151168: a strip upload (decomp 00151168.c: a1 = src, a2 = psm, a3 = dbp, t1 = width, t2 = height,
+        // t3 = mode, the stack word = the kind; width halved, height quartered for 0x14 / halved for 0x13).
+        template <class Env>
+        bool txnStripUp(Txn<Env> &t, uint32_t object, uint64_t src, uint64_t psm, uint64_t dbp, uint64_t width,
+                        uint64_t height, int64_t mode, uint64_t kind)
+        {
+            uint32_t r;
+            if (!uploadRecord(t, object, mode, r))
+                return t.ok;
+            const uint32_t w32 = static_cast<uint32_t>(width);
+            const int32_t w = static_cast<int32_t>(w32 + (w32 >> 31)) >> 1;
+            uint64_t h = height;
+            if (psm == 0x14u)
+            {
+                const uint32_t v = static_cast<int64_t>(height) > -1 ? static_cast<uint32_t>(height) : static_cast<uint32_t>(height) + 3u;
+                h = sx32(static_cast<uint32_t>(static_cast<int32_t>(v) >> 2));
+            }
+            else if (psm == 0x13u)
+            {
+                const uint32_t v = static_cast<uint32_t>(height);
+                h = sx32(static_cast<uint32_t>(static_cast<int32_t>(v + (v >> 31)) >> 1));
+            }
+            const uint32_t lo = static_cast<uint32_t>(static_cast<int64_t>(w) * static_cast<int64_t>(static_cast<int32_t>(h)));
+            const uint32_t qwc = static_cast<uint32_t>(static_cast<int32_t>(lo) >> 2);
+            const int32_t bw = (w > -1 ? w : w + 0x3F) >> 6;
+            t.w64(r, (static_cast<uint64_t>((r + 0x70u) & 0x0FFFFFFFu) << 32) | 0x20000006u);
+            t.w32(r + 0xCu, 0x50000006u);
+            t.w64(r + 0x20u, (dbp << 32) | (static_cast<uint64_t>(static_cast<uint32_t>(bw)) << 48));
+            t.w64(r + 0x40u, sx32(static_cast<uint32_t>(w)) | (h << 32));
+            t.w64(r + 0x60u, static_cast<uint64_t>(qwc | 0x8000u) | (0x8000ull << 44));
+            t.w64(r + 0x70u, static_cast<uint64_t>(qwc | 0x30000000u) | (static_cast<uint64_t>(static_cast<uint32_t>(src) & 0x0FFFFFFFu) << 32));
+            t.w32(r + 0x7Cu, qwc | 0x50000000u);
+            txnQueueKind(t, kind, r);
+            return t.ok;
+        }
+
+        // func_00150DC8: an upload from a prepared GS packet (a1 = its holder, +4 the packet; a2 = the VRAM base: added
+        // to the packet's BITBLTBUF word, or (a3 odd, a CLUT) or-ed with 0x10000 in its place; t0 = the kind).
+        template <class Env>
+        bool txnPacketUp(Txn<Env> &t, uint32_t object, uint32_t holder, uint64_t base, int64_t sign, uint64_t kind)
+        {
+            uint32_t r;
+            if (!uploadRecord(t, object, sign, r))
+                return t.ok;
+            const uint32_t p = t.u32(holder + 4u);
+            t.w32(r + 0xCu, 0x50000005u);
+            t.w64(r, (static_cast<uint64_t>((r + 0x70u) & 0x0FFFFFFFu) << 32) | 0x20000005u);
+            uint8_t q[16];
+            t.lq(p + 0x10u, q);
+            t.sq(r + 0x20u, q);
+            if (sign & 1)
+                t.w32(r + 0x24u, static_cast<uint32_t>(base | 0x10000u));
+            else
+                t.w32(r + 0x24u, t.u32(r + 0x24u) + static_cast<uint32_t>(base));
+            t.lq(p + 0x30u, q);
+            t.sq(r + 0x40u, q);
+            const uint32_t count = (t.u32(p + 0x50u) & 0x7FFFu) + 1u;
+            t.w64(r + 0x70u, (static_cast<uint64_t>((p + 0x50u) & 0x0FFFFFFFu) << 32) | (count | 0x30000000u));
+            t.w32(r + 0x7Cu, ((t.u32(p + 0x50u) & 0x7FFFu) + 1u) | 0x50000000u);
+            txnQueueKind(t, kind, r);
+            return t.ok;
+        }
+
+        // func_00309C30(psm, width): TBW, the buffer width in 64-texel units (even for 0x13 / 0x14), 0 for a PSM it
+        // doesn't know (decomp 00309c30.c). Its jump table (0x4502E0) read like the code reads it: a target this
+        // doesn't know declines.
+        template <class Env>
+        bool txnBufferWidth(Txn<Env> &t, uint64_t psm, uint32_t width, uint32_t &tbw)
+        {
+            tbw = 0u;
+            if (psm >= 0x3Bu) // sltiu: the whole register
+                return t.ok;
+            const uint32_t target = t.u32(0x4502E0u + (static_cast<uint32_t>(psm) << 2));
+            const uint32_t v = width + 0x3Fu;
+            const int32_t w = (static_cast<int32_t>(v) > -1 ? static_cast<int32_t>(v) : static_cast<int32_t>(width + 0x7Eu)) >> 6;
+            if (target == 0x309C54u)
+                tbw = static_cast<uint32_t>(w);
+            else if (target == 0x309C70u)
+                tbw = static_cast<uint32_t>(w + (w & 1));
+            else if (target != 0x309C94u)
+                return t.ok = false;
+            return t.ok;
+        }
+
+        // The TEX0 the TIM loaders build from the picture's own (GsTex0 & ~PSM, its PSM from the format table): TBP =
+        // the VRAM cursor, TBW, TCC set, TFX / CPSM / CSA / CLD cleared then CLD = 1, CBP = the CLUT cursor.
+        inline uint64_t timTex0(uint64_t s0, uint32_t tbp, uint32_t tbw, uint32_t cbp)
+        {
+            s0 = (s0 & ~0x3FFFull) | (tbp & 0x3FFFu);
+            s0 = (s0 & 0xFFFFFFFFFFF03FFFull) | (static_cast<uint64_t>(tbw & 0x3Fu) << 14);
+            s0 |= 0x400000000ull;
+            s0 &= 0xFF87FFFFFFFFFFFFull & 0xFF7FFFFFFFFFFFFFull & 0xE0FFFFFFFFFFFFFFull & 0x1FFFFFFFFFFFFFFFull;
+            s0 |= 0x2000000000000000ull;
+            s0 &= 0xFFF8001FFFFFFFFFull;
+            return s0 | (static_cast<uint64_t>(cbp & 0x3FFFu) << 37);
+        }
+        constexpr uint32_t kTexCounters = 0x38000u; // w + 0x38000: +0x5C88 the register table, +0x78A8 the cursor,
+                                                   // +0x78AA / +0x78AB the image / CLUT uploads (bytes)
+        constexpr uint32_t kTim2Formats = 0x41ED68u, kTim3Formats = 0x41ED80u, kTmFormats = 0x41ED98u;
+
+        template <class Env>
+        void txnBump8(Txn<Env> &t, uint32_t at) { t.w8(at, static_cast<uint8_t>(t.u8(at) + 1u)); }
+
+        // The texture_slots fix (texture_slots.h) where its hook sits in the TIM2 loader (0x151C70): the picture's size
+        // grown to its real footprint, while the flag is on.
+        inline bool textureSlotsOn()
+        {
+            static const uint32_t mask = ps2xPatchFlagMask("texture_slots");
+            return (g_ps2xPatchFlags.load(std::memory_order_relaxed) & mask) != 0u;
+        }
+
+        // A CLUT upload after a TIM picture: 16 x 16 for 8-bit pictures (type 5) and any CLUT not 0x40 bytes, else 8 x 2
+        // (`small`: the TM loader's 8 x 8).
+        template <class Env>
+        bool txnClut(Txn<Env> &t, uint32_t w, uint32_t src, uint32_t cbp, uint64_t type, bool big, uint64_t smallH)
+        {
+            t.env.call(); // jal 0x150F68
+            return big ? txnImageUp(t, w, src, 0u, sx32(cbp), 1u, 0x10u, 0x10u, 0, sx32(static_cast<uint32_t>(type)))
+                       : txnImageUp(t, w, src, 0u, sx32(cbp), 1u, 8u, smallH, 0, sx32(static_cast<uint32_t>(type)));
+        }
+
+        // func_00151990, the TIM2 loader (w, name = the file, pa / pb = the VRAM / CLUT cursors, type = the kind): its
+        // pictures (+0x6 of them) from +0x10 (+0x80 when byte 5 is set), 0x30 apart.
+        constexpr uint32_t kUploadTim2 = 0x151990u, kUploadTim3 = 0x151CC0u, kUploadPack = 0x151688u, kUploadTm = 0x151FA0u;
+        constexpr int kTextureLoopLimit = 4096; // pictures / entries before declining
+        template <class Env>
+        bool txnTim2(Txn<Env> &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
+        {
+            const uint32_t n = t.u16(name + 6u);
+            uint32_t s5 = t.u8(name + 5u) == 0u ? name + 0x10u : name + 0x80u;
+            uint32_t fp = t.u32(pa);
+            uint32_t s7 = t.u32(pb);
+            if (n > static_cast<uint32_t>(kTextureLoopLimit))
+                return false;
+            const uint32_t c = w + kTexCounters;
+            for (uint32_t i = 0; i < n && t.ok; ++i)
+            {
+                if (i != 0u)
+                    t.env.checkpoint(32u); // bnez at 0x151C74
+                const uint32_t psm = t.u32(kTim2Formats + ((static_cast<uint32_t>(t.u8(s5 + 0x13u)) - 1u) << 2));
+                uint64_t s0 = t.u64(s5 + 0x18u) & 0xFFFFFFFFFC0FFFFFull;
+                const uint32_t width = t.u16(s5 + 0x14u);
+                const uint32_t image = s5 + t.u16(s5 + 0xCu);
+                s0 |= static_cast<uint64_t>(psm & 0x3Fu) << 20;
+                const uint32_t height = t.u16(s5 + 0x16u);
+                t.w64(s5 + 0x18u, s0);
+                t.env.call(); // jal 0x309C30
+                uint32_t tbw;
+                if (!txnBufferWidth(t, sx32(psm), width, tbw))
+                    return false;
+                const uint32_t cursor = t.u16(c + 0x78A8u);
+                const uint32_t half = t.u32(kFrameHalf) & 1u;
+                const uint32_t clut = (s5 + t.u16(s5 + 0xCu)) + t.u32(s5 + 8u);
+                t.w64(c + (half << 3) + (cursor << 4) + 0x5C88u, timTex0(s0, fp, tbw, s7));
+                t.w16(c + 0x78A8u, static_cast<uint16_t>(t.u16(c + 0x78A8u) + 1u));
+                t.env.call(); // jal 0x150F68
+                if (!txnImageUp(t, w, image, sx32(psm), sx32(fp), tbw, width, height, 0, sx32(static_cast<uint32_t>(type))))
+                    return false;
+                txnBump8(t, c + 0x78AAu);
+                const bool big = t.u8(s5 + 0x13u) == 5u || t.u32(s5 + 4u) != 0x40u;
+                if (!txnClut(t, w, clut, s7, type, big, 2u))
+                    return false;
+                s7 += 4u;
+                txnBump8(t, c + 0x78ABu);
+                uint32_t size = t.u32(s5 + 8u);
+                if (textureSlotsOn() && (s5 & PS2_RAM_MASK) + 0x30u <= PS2_RDRAM_SIZE)
+                {
+                    const uint32_t header = s5; // the hook's $s5 - 0x30 (s5 already moved on there)
+                    size = texture_slots::fittedSize(t.u8(header + 0x13u), t.u16(header + 0x14u), t.u16(header + 0x16u), size);
+                }
+                s5 += 0x30u;
+                fp += size >> 8;
+            }
+            t.w32(pa, fp);
+            t.w32(pb, s7);
+            return t.ok;
+        }
+
+        // func_00151CC0, the TIM3 loader (one picture at +0x10, its strip upload func_00151168, its formats table).
+        template <class Env>
+        bool txnTim3(Txn<Env> &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
+        {
+            const uint32_t s6 = name + 0x10u;
+            const uint32_t format = t.u8(s6 + 0x13u);
+            uint64_t s0 = t.u64(s6 + 0x18u) & 0xFFFFFFFFFC0FFFFFull;
+            const uint32_t psm = t.u32(kTim3Formats + ((format - 1u) << 2));
+            const uint32_t cur = t.u32(pa);
+            s0 |= static_cast<uint64_t>(psm & 0x3Fu) << 20;
+            uint32_t s7 = t.u32(pb);
+            const uint32_t width = t.u16(s6 + 0x14u);
+            const uint32_t height = t.u16(s6 + 0x16u);
+            const uint32_t image = s6 + t.u16(s6 + 0xCu);
+            t.w64(s6 + 0x18u, s0);
+            t.env.call(); // jal 0x309C30
+            uint32_t tbw;
+            if (!txnBufferWidth(t, sx32(psm), width, tbw))
+                return false;
+            const uint32_t imageSize = t.u32(s6 + 8u);
+            const uint32_t c = w + kTexCounters;
+            const uint32_t cursor = t.u16(c + 0x78A8u);
+            const uint32_t half = t.u32(kFrameHalf) & 1u;
+            const uint32_t clut = (s6 + t.u16(s6 + 0xCu)) + imageSize;
+            t.w64(c + (half << 3) + (cursor << 4) + 0x5C88u, timTex0(s0, cur, tbw, s7));
+            t.w16(c + 0x78A8u, static_cast<uint16_t>(t.u16(c + 0x78A8u) + 1u));
+            t.env.call(); // jal 0x151168
+            if (!txnStripUp(t, w, image, sx32(psm), sx32(cur), width, height, 0, sx32(static_cast<uint32_t>(type))))
+                return false;
+            txnBump8(t, c + 0x78AAu);
+            const bool big = t.u8(s6 + 0x13u) == 5u || t.u32(s6 + 4u) != 0x40u;
+            if (!txnClut(t, w, clut, s7, type, big, 2u))
+                return false;
+            s7 += 4u;
+            txnBump8(t, c + 0x78ABu);
+            t.w32(pa, cur + (t.u32(s6 + 8u) >> 8));
+            t.w32(pb, s7);
+            return t.ok;
+        }
+
+        // func_00151FA0, the TM loader: one T4 strip of the whole image block (128 wide), then per picture (the low byte
+        // of +4; 0 = 256) its TEX0 and CLUT, the pictures' offsets from +0x10.
+        template <class Env>
+        bool txnTm(Txn<Env> &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
+        {
+            const uint32_t s5 = name;
+            const uint32_t base = s5 + 0x10u;
+            const uint32_t images = t.u32(s5 + 0x10u) + s5;
+            const uint32_t pictures = t.u32(s5 + 4u);
+            uint32_t s4 = t.u32(pa);
+            const uint32_t t2 = (t.u32(s5 + 0xCu) >> 13) << 7;
+            const uint32_t s0start = images + (pictures << 6);
+            uint32_t s3 = t.u32(pb);
+            t.env.call(); // jal 0x151168
+            if (!txnStripUp(t, w, s0start, 0x14u, sx32(s4), 0x80u, sx32(t2), 0, sx32(static_cast<uint32_t>(type))))
+                return false;
+            const uint32_t c = w + kTexCounters;
+            txnBump8(t, c + 0x78AAu);
+            uint32_t s6 = s0start + t.u32(s5 + 0xCu);
+            uint32_t s7 = pictures & 0xFFu;
+            uint32_t index = 0u;
+            for (int loop = 0;; ++loop)
+            {
+                if (!t.ok)
+                    return false;
+                const uint32_t s1 = t.u32(base + (index << 2)) + s5 + 0x10u;
+                uint64_t s0 = t.u64(s1 + 0x18u) & 0xFFFFFFFFFC0FFFFFull;
+                const uint32_t width = t.u16(s1 + 0x14u);
+                const uint32_t psm = t.u32(kTmFormats + ((static_cast<uint32_t>(t.u8(s1 + 0x13u)) - 1u) << 2));
+                s0 |= static_cast<uint64_t>(psm & 0x3Fu) << 20;
+                t.w64(s1 + 0x18u, s0);
+                t.env.call(); // jal 0x309C30
+                uint32_t tbw;
+                if (!txnBufferWidth(t, sx32(psm), width, tbw))
+                    return false;
+                s0 = timTex0(s0, s4, tbw, s3);
+                const uint32_t clut = s6;
+                s6 = clut + t.u32(s1 + 4u);
+                t.env.call(); // jal 0x150F68
+                const bool big = t.u8(s1 + 0x13u) == 5u;
+                if (!(big ? txnImageUp(t, w, clut, 0u, sx32(s3), 1u, 0x10u, 0x10u, 0, sx32(static_cast<uint32_t>(type)))
+                          : txnImageUp(t, w, clut, 0u, sx32(s3), 1u, 8u, 8u, 0, sx32(static_cast<uint32_t>(type)))))
+                    return false;
+                const uint8_t clutUploads = t.u8(c + 0x78ABu);
+                const uint32_t cursor = t.u16(c + 0x78A8u);
+                t.w8(c + 0x78ABu, static_cast<uint8_t>(clutUploads + 1u));
+                index = (index + 1u) & 0xFFu;
+                s3 += 4u;
+                s7 = (s7 - 1u) & 0xFFu;
+                const uint32_t half = t.u32(kFrameHalf) & 1u;
+                t.w64(c + (half << 3) + (cursor << 4) + 0x5C88u, s0);
+                t.w16(c + 0x78A8u, static_cast<uint16_t>(t.u16(c + 0x78A8u) + 1u));
+                s4 += t.u32(s1 + 8u) >> 8;
+                if (s7 == 0u)
+                    break;
+                t.env.checkpoint(32u); // bnez at 0x152274
+            }
+            t.w32(pa, s4);
+            t.w32(pb, s3);
+            return t.ok;
+        }
+
+        // func_00151688, the game's own pack: +0 its entry count (bit 31: relocated), +4 / +6 the image size, +8 / +0xC
+        // the image and CLUT holders' offsets (+0x10 / +0x12 of them, 0x10 each), entries of 0x18 from +0x18 (+8 a
+        // TEX0 whose TBP / CBP are offsets from the cursors). It moves the cursors first, writes each entry's TEX0,
+        // relocates the holders' packet pointers once, then uploads every image and CLUT packet (func_00150DC8).
+        template <class Env>
+        bool txnPack(Txn<Env> &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
+        {
+            const uint32_t s2 = name;
+            const uint32_t cur = t.u32(pa);
+            const uint32_t h = t.u16(s2 + 6u), wd = t.u16(s2 + 4u);
+            const int32_t area = static_cast<int32_t>(static_cast<uint32_t>(static_cast<int64_t>(static_cast<int32_t>(wd)) * static_cast<int32_t>(h)));
+            const uint32_t pbv = t.u32(pb);
+            const uint32_t s1start = s2 + t.u32(s2 + 8u);
+            const uint32_t s4start = s2 + t.u32(s2 + 0xCu);
+            const uint32_t fp = t.u32(s2) & 0x7FFFFFFFu;
+            t.w32(pa, cur + static_cast<uint32_t>(area / 64));
+            t.w32(pb, t.u32(pb) + (fp << 2));
+            const uint32_t half = t.u32(kFrameHalf) & 1u;
+            if (fp > static_cast<uint32_t>(kTextureLoopLimit))
+                return false;
+            const uint32_t c = w + kTexCounters;
+            for (uint32_t k = 0; k < fp && t.ok; ++k)
+            {
+                if (k != 0u)
+                    t.env.checkpoint(32u); // bnez at 0x151820
+                const uint32_t entry = s2 + 0x18u + 0x18u * k;
+                uint64_t s0 = t.u64(entry + 8u);
+                s0 = (s0 & ~0x3FFFull) | (((s0 & 0x3FFFu) + cur) & 0x3FFFu);
+                t.env.call(); // jal __muldi3 (the CBP offset * 4)
+                const uint64_t cbp = (((s0 >> 37) & 0x3FFFu) * 4u + pbv) & 0x3FFFu;
+                const uint32_t cursor = t.u16(c + 0x78A8u);
+                s0 = ((s0 & 0xFFF8001FFFFFFFFFull) | (cbp << 37)) | 0x400000000ull;
+                t.w64(c + 0x5C88u + ((half << 3) + (cursor << 4)), s0);
+                t.w16(c + 0x78A8u, static_cast<uint16_t>(t.u16(c + 0x78A8u) + 1u));
+            }
+            if (t.s32(s2) >= 0)
+            {
+                // relocate the holders' packet pointers (+4) once, from their section's start
+                for (int list = 0; list < 2; ++list)
+                {
+                    const uint32_t countAt = s2 + (list ? 0x12u : 0x10u);
+                    const uint32_t start = list ? s4start : s1start;
+                    uint32_t holder = start;
+                    if (t.u16(countAt) == 0u)
+                        continue;
+                    for (uint32_t j = 0;;)
+                    {
+                        t.w32(holder + 4u, t.u32(holder + 4u) + start);
+                        ++j;
+                        holder += 0x10u;
+                        if (!t.ok || j > static_cast<uint32_t>(kTextureLoopLimit))
+                            return false;
+                        if (!(j < t.u16(countAt)))
+                            break;
+                        t.env.checkpoint(32u);
+                    }
+                }
+                t.w32(s2, t.u32(s2) | 0x80000000u);
+            }
+            uint32_t holder = s2 + t.u32(s2 + 8u);
+            uint32_t clutHolder = s2 + t.u32(s2 + 0xCu);
+            if (t.u16(s2 + 0x10u) != 0u)
+                for (uint32_t j = 0;;)
+                {
+                    t.env.call(); // jal 0x150DC8
+                    if (!txnPacketUp(t, w, holder, sx32(cur), 0, sx32(static_cast<uint32_t>(type))))
+                        return false;
+                    ++j;
+                    txnBump8(t, c + 0x78AAu);
+                    holder += 0x10u;
+                    if (j > static_cast<uint32_t>(kTextureLoopLimit))
+                        return false;
+                    if (!(j < t.u16(s2 + 0x10u)))
+                        break;
+                    t.env.checkpoint(32u);
+                }
+            if (t.u16(s2 + 0x12u) != 0u)
+            {
+                uint32_t clut = pbv;
+                for (uint32_t j = 0;;)
+                {
+                    t.env.call(); // jal 0x150DC8
+                    if (!txnPacketUp(t, w, clutHolder, sx32(clut), 1, sx32(static_cast<uint32_t>(type))))
+                        return false;
+                    ++j;
+                    clut += 4u;
+                    txnBump8(t, c + 0x78ABu);
+                    clutHolder += 0x10u;
+                    if (j > static_cast<uint32_t>(kTextureLoopLimit))
+                        return false;
+                    if (!(j < t.u16(s2 + 0x12u)))
+                        break;
+                    t.env.checkpoint(32u);
+                }
+            }
+            return t.ok;
+        }
+
+        // func_00151630: the file's class by its header (decomp 00151630.c).
+        template <class R>
+        int textureClass(R &t, uint32_t name)
+        {
+            if (t.s8(name) == 0x54)
+            {
+                const int8_t b3 = t.s8(name + 3u);
+                if (b3 == 0x33)
+                    return t.s8(name + 5u) == 6 ? 1 : 0;
+                if (b3 == 0x32)
+                    return 0;
+                if (t.s8(name + 1u) == 0x4D)
+                    return 3;
+            }
+            return 2;
+        }
+        template <class Env>
+        bool txnBuild(Txn<Env> &t, int kind, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
+        {
+            switch (kind)
+            {
+            case 0: return txnTim2(t, w, name, pa, pb, type);
+            case 1: return txnTim3(t, w, name, pa, pb, type);
+            case 2: return txnPack(t, w, name, pa, pb, type);
+            case 3: return txnTm(t, w, name, pa, pb, type);
+            default: return t.ok;
+            }
+        }
+
+        // func_00151398's miss with room: the entry {name, *pa, *pb, cursor} at `entry`, then the builder; v = the
+        // cursor before (lhu).
+        template <class Env>
+        bool txnMiss(Txn<Env> &t, uint32_t w, uint64_t name, uint64_t type, uint32_t entry, int32_t &v)
+        {
+            const uint32_t pa = w + (type == 2u ? 0x3DC6Cu : type == 1u ? 0x3DC78u : 0x3DC60u);
+            const uint32_t pb = pa + 4u;
+            const uint32_t cursorAt = w + kTexCounters + 0x78A8u;
+            v = t.u16(cursorAt);
+            t.w32(entry, static_cast<uint32_t>(name));
+            t.w32(entry + 4u, t.u32(pa));
+            t.w32(entry + 8u, t.u32(pb));
+            t.w32(entry + 0xCu, t.u16(cursorAt));
+            t.env.call(); // jal 0x151630
+            const int kind = textureClass(t, static_cast<uint32_t>(name));
+            if (kind >= 0 && kind <= 3)
+                t.env.call(); // jal the builder
+            return t.ok && txnBuild(t, kind, w, static_cast<uint32_t>(name), pa, pb, type);
+        }
+
+        // The builders and the classification as natives of their own (reached from 0x151398's original when it runs).
+        constexpr uint32_t kTextureClass = 0x151630u;
+        template <class Env>
+        bool textureClassNative(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            Reader<Env> rd{env, 0u, 0u};
+            const int kind = textureClass(rd, e::u32(ctx, e::a0));
+            if (!rd.ok)
+                return false;
+            e::setLow64(ctx, e::v0, static_cast<uint64_t>(static_cast<int64_t>(kind)));
+            returnToCaller(ctx);
+            return true;
+        }
+        constexpr uint32_t kBuilderWindow = 0x140u; // a builder's frame (<= 0xF0) + an upload's (0x10) + 0x31A650's
+        template <class Env, int Kind>
+        bool builderNative(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kBuilderWindow, kBuilderWindow, stackTop))
+                return false;
+            Txn<Env> t{env, stackTop, stackTop + kBuilderWindow};
+            if (!t.ok || !txnBuild(t, Kind, e::u32(ctx, e::a0), e::u32(ctx, e::a1), e::u32(ctx, e::a2), e::u32(ctx, e::a3),
+                                   e::u64(ctx, e::t0)))
+                return false;
+            t.commit();
+            returnToCaller(ctx);
+            return true;
+        }
+
         // ---- func_00151398: the texture cache's lookup (decomp src/cod/00151398.c) -------------------------------
         // int func_00151398(char *w, unsigned int name, int type): the texture `name` of this kind's table in the
         // manager w (type 2 from w + 0x3D2F0, type 1 from w + 0x3DC50, else from w + 0x3C990; 16-byte entries Ent
@@ -1815,8 +2560,9 @@ namespace kamite::native::packet
         // each (bne at 0x151414 / 0x151484 / 0x1514E4; the default kind's full return is a backward beq at 0x1514F4 too,
         // types 2 and 1 branch forward). False on a miss with room (the original inserts and builds the upload) or an
         // unreadable / endless table.
-        template <class Env>
-        bool textureHit(Reader<Env> &rd, uint32_t w, uint64_t name, uint64_t type, int32_t &v, int &backEdges)
+        template <class R>
+        bool textureHit(R &rd, uint32_t w, uint64_t name, uint64_t type, int32_t &v, int &backEdges,
+                        uint32_t *missAt = nullptr)
         {
             uint32_t entry = w + (type == 2u ? 0x3D2F0u : type == 1u ? 0x3DC50u : 0x3C990u);
             const uint32_t last = w + (type == 2u ? 0x3C9A0u : type == 1u ? 0x3D300u : 0x3C040u);
@@ -1832,8 +2578,13 @@ namespace kamite::native::packet
             uint64_t current = nameAt(entry);
             if (!rd.ok)
                 return false;
+            auto missed = [&] {
+                if (missAt)
+                    *missAt = entry;
+                return false;
+            };
             if (current == kEnd)
-                return entry == last ? full() : false; // an empty table: a miss with room
+                return entry == last ? full() : missed(); // an empty table: a miss with room
             for (;; ++backEdges)
             {
                 if (current == name)
@@ -1846,8 +2597,35 @@ namespace kamite::native::packet
                 if (!rd.ok || backEdges + 1 >= kTextureLookupLimit)
                     return false;
                 if (current == kEnd)
-                    return entry == last ? full() : false;
+                    return entry == last ? full() : missed();
             }
+        }
+
+        // A miss with room: the walk again on a Txn, the entry and the builder (txnMiss); v0 = the cursor before.
+        constexpr uint32_t kTextureMissWindow = kTextureLookupFrame + kBuilderWindow;
+        template <class Env>
+        bool textureLookupMiss(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kTextureMissWindow, kTextureMissWindow, stackTop))
+                return false;
+            Txn<Env> t{env, stackTop, stackTop + kTextureMissWindow};
+            const uint32_t w = e::u32(ctx, e::a0);
+            const uint64_t name = e::u64(ctx, e::a1), type = e::u64(ctx, e::a2);
+            int32_t v;
+            int backEdges;
+            uint32_t missAt = 0u;
+            if (!t.ok || textureHit(t, w, name, type, v, backEdges, &missAt) || missAt == 0u)
+                return false;
+            for (int i = 0; i < backEdges; ++i)
+                env.checkpoint(32u);
+            if (!txnMiss(t, w, name, type, missAt, v))
+                return false;
+            t.commit();
+            e::setS32(ctx, e::v0, static_cast<uint32_t>(v));
+            returnToCaller(ctx);
+            return true;
         }
 
         template <class Env>
@@ -1862,8 +2640,9 @@ namespace kamite::native::packet
             Reader<Env> rd{env, stackTop, stackTop + kTextureLookupFrame};
             int32_t v;
             int backEdges;
-            if (!textureHit(rd, e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u64(ctx, e::a2), v, backEdges))
-                return false;
+            uint32_t missAt = 0u;
+            if (!textureHit(rd, e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u64(ctx, e::a2), v, backEdges, &missAt))
+                return rd.ok && missAt != 0u && textureLookupMiss(env, ctx);
             for (int i = 0; i < backEdges; ++i)
                 env.checkpoint(32u);
             e::setS32(ctx, e::v0, static_cast<uint32_t>(v));
@@ -1882,6 +2661,56 @@ namespace kamite::native::packet
         constexpr uint32_t kMeshTexturesFrame = 0xB0u + kTextureLookupFrame; // its frame + 0x151398's (0x151368: none)
         constexpr uint32_t kTextureManager = 0x4664A0u;                     // D_004664A0
         constexpr int kMeshTexturesLimit = 128;                             // meshes (more declines)
+
+        // The texture's first lookup in the frame (a miss with room): everything on a Txn, in the original's order
+        // (the builder writes the register rows the meshes then read).
+        constexpr uint32_t kMeshTexturesMissWindow = kMeshTexturesFrame + kBuilderWindow;
+        template <class Env>
+        bool meshTexturesMiss(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kMeshTexturesMissWindow, kMeshTexturesMissWindow, stackTop))
+                return false;
+            Txn<Env> t{env, stackTop, stackTop + kMeshTexturesMissWindow};
+            const uint32_t node = e::u32(ctx, e::a0);
+            const uint32_t data = t.u32(node + 0x388u);
+            const int n = t.u16(data + 0xAu);
+            const uint64_t name = e::u64(ctx, e::a2), type = e::u64(ctx, e::a1);
+            int32_t texture;
+            int lookupBackEdges;
+            uint32_t missAt = 0u;
+            if (!t.ok || n > kMeshTexturesLimit ||
+                textureHit(t, kTextureManager, name, type, texture, lookupBackEdges, &missAt) || missAt == 0u)
+                return false;
+            env.call(); // jal 0x151398
+            for (int i = 0; i < lookupBackEdges; ++i)
+                env.checkpoint(32u);
+            if (!txnMiss(t, kTextureManager, name, type, missAt, texture))
+                return false;
+            const uint32_t half = t.u32(model::kFrameParity) & 1u;
+            const uint64_t mode = (e::u64(ctx, e::a3) & 3u) << 35;
+            for (int i = 0; i < n && t.ok; ++i)
+            {
+                if (i != 0)
+                    env.checkpoint(32u);
+                const uint32_t entry = t.u32(data + 0x20u + 4u * static_cast<uint32_t>(i)) + data;
+                if (t.u8(entry + 0x16u) == 0xFFu)
+                    continue;
+                const uint32_t packet = t.u32(node + 0x300u + (half << 6) + 4u * static_cast<uint32_t>(i));
+                env.call(); // jal 0x151368: the frame half read again, the texture's row
+                const uint32_t row = kTextureManager + 0x3DC88u + ((t.u32(model::kFrameParity) & 1u) << 3) +
+                                     (static_cast<uint32_t>(texture) << 4);
+                const uint64_t reg = t.u64(row);
+                const uint64_t block = ((reg >> 37) & 0x3FFFu) + static_cast<uint64_t>(static_cast<int64_t>(t.s8(node + 0x387u)));
+                t.w64(packet + 0x20u, (((reg & 0xFFF8001FFFFFFFFFull) | ((block & 0x3FFFu) << 37)) & 0xFFFFFFE7FFFFFFFFull) | mode);
+            }
+            if (!t.ok)
+                return false;
+            t.commit();
+            returnToCaller(ctx);
+            return true;
+        }
 
         template <class Env>
         bool meshTextures(Env &env, R5900Context *ctx)
@@ -1902,9 +2731,11 @@ namespace kamite::native::packet
             const int n = rd.u16(data + 0xAu);
             int32_t texture;
             int lookupBackEdges;
-            if (!rd.ok || n > kMeshTexturesLimit ||
-                !textureHit(rd, kTextureManager, e::u64(ctx, e::a2), e::u64(ctx, e::a1), texture, lookupBackEdges))
+            uint32_t missAt = 0u;
+            if (!rd.ok || n > kMeshTexturesLimit)
                 return false;
+            if (!textureHit(rd, kTextureManager, e::u64(ctx, e::a2), e::u64(ctx, e::a1), texture, lookupBackEdges, &missAt))
+                return rd.ok && missAt != 0u && meshTexturesMiss(env, ctx);
             const uint32_t half = rd.u32(model::kFrameParity) & 1u;
             const uint64_t mode = (e::u64(ctx, e::a3) & 3u) << 35;
             struct Write
@@ -2175,9 +3006,18 @@ namespace kamite::native::packet
             registerFunction(fn);
         };
         addReadable("func_0014C5A0", kQueueModel, true, &queueModel<RealEnv>, &queueModel<ShadowEnv>, 0u);
-        addReadable("func_00151398", kTextureLookup, true, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,
+        // 0x151398 shadowed again for one round (Nov 22): its miss path (insert + builders, on a Txn) is new.
+        addReadable("func_00151398", kTextureLookup, false, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,
                     NativeFunction::kReturnsV0);
         addReadable("func_00148BD8", kMeshTextures, false, &meshTextures<RealEnv>, &meshTextures<ShadowEnv>, 0u);
         addReadable("func_0014B9A0", kScrollPacket, true, &scrollPacket<RealEnv>, &scrollPacket<ShadowEnv>, 0u);
+        // Batches 3-4b (Nov 22): the texture cache's misses. 0x151398 and 0x148BD8 above run them inline (on a Txn);
+        // the classification and the four builders also stand alone (reached when 0x151398's original runs).
+        addReadable("func_00151630", kTextureClass, false, &textureClassNative<RealEnv>, &textureClassNative<ShadowEnv>,
+                    NativeFunction::kReturnsV0);
+        addReadable("func_00151990", kUploadTim2, false, &builderNative<RealEnv, 0>, &builderNative<ShadowEnv, 0>, 0u);
+        addReadable("func_00151CC0", kUploadTim3, false, &builderNative<RealEnv, 1>, &builderNative<ShadowEnv, 1>, 0u);
+        addReadable("func_00151688", kUploadPack, false, &builderNative<RealEnv, 2>, &builderNative<ShadowEnv, 2>, 0u);
+        addReadable("func_00151FA0", kUploadTm, false, &builderNative<RealEnv, 3>, &builderNative<ShadowEnv, 3>, 0u);
     }
 }

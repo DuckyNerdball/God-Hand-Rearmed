@@ -19,4 +19,7 @@ namespace kamite::texture_slots
     // Blocks a texture of this PSM (GS code: 0x00 CT32, 0x01 CT24, 0x02 CT16, 0x13 T8, 0x14 T4) and size takes at
     // TBW tbw (64-texel units), from its base block: the highest block it touches + 1.
     uint32_t footprintBlocks(uint32_t psm, uint32_t width, uint32_t height, uint32_t tbw);
+    // The fix itself: a TIM2 picture's ImageSize (its ImageType 1-5, width, height) grown to its real footprint x 256
+    // when that is larger (the hook at 0x151C70; the native TIM2 loader, src/kamite/native/packet.cpp, calls it too).
+    uint32_t fittedSize(uint8_t imageType, uint16_t width, uint16_t height, uint32_t size);
 }

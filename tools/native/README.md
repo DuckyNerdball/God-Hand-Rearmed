@@ -24,12 +24,13 @@ with kamite/git_commit.h):
        PostInc_D_00566E10_0015B0F0_15B0F0_0x15b0f0 cModel_getMeshPtr_0x14b6f8 ForwardNodeUpdate_14D768_0x14d768
        cModel_nodeLayerScreen_0x14be38 func_0014C5A0_0x14c5a0
        func_00151398_0x151398 func_00148BD8_0x148bd8 func_00151368_0x151368
-       func_0014B9A0_0x14b9a0"
+       func_0014B9A0_0x14b9a0 func_00151630_0x151630 func_00151688_0x151688 func_00151990_0x151990
+       func_00151CC0_0x151cc0 func_00151FA0_0x151fa0 func_00309C30_0x309c30 ps2___muldi3_0x31de10"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
         src/kamite/native/libvu0.cpp src/kamite/native/packet.cpp src/kamite/native/recording.cpp \
-        runtime/ps2xRuntime/src/lib/ps2_ee_float.cpp /tmp/nt/*.o -o /tmp/nt/shadow_test
+        src/kamite/texture_slots.cpp runtime/ps2xRuntime/src/lib/ps2_ee_float.cpp /tmp/nt/*.o -o /tmp/nt/shadow_test
     /tmp/nt/shadow_test 20000 /tmp/nt/vectors.bin    # natives, footprints, invisibility, detection; writes vectors
     /tmp/nt/shadow_test bench                        # ns per call (GCC: a hint only)
     /tmp/nt/shadow_test rerun <case>.<rate>.native.bin   # a replay's saved mismatches, again here
@@ -80,3 +81,13 @@ checkpoints: native.cpp and the harness set the env's `atEnd`, checkpoints only 
 line per function), not compared. shadow_test covers both: relaxed detection cases (scratch / dead stack ignored, s0,
 a live result and cycles caught) and twins of seven composites flagged both ways (checkNative + shadowed at a spare
 address).
+
+## The texture cache's misses (batches 3-4b, Nov 22)
+
+func_00151398's miss (insert the entry, classify the file with func_00151630, run one of the four upload builders)
+reads what it has just written (each queued upload's link reads the last link's writes; the game's pack is relocated in
+place), so those natives run on a `Txn` (packet.cpp): reads see the writes made so far, nothing reaches RAM until
+`commit()`, a decline midway changes nothing. shadow_test builds real TIM2 / TIM3 / TM / pack files and texture managers
+for them (textureFile, textureManager), switches texture_slots per call (its hook is registered through stubs of the
+runtime's patch flags), and fills func_00309C30's jump table and the format tables from the ELF's values. A recorded
+footprint past 256 ranges (a TM file of 256 pictures) is skipped, not compared.
