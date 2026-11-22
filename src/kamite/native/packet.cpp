@@ -3229,8 +3229,7 @@ namespace kamite::native::packet
         // (dev replays shadow them; play runs the originals) until K's builds prove them. Proven: 0x14C5A0 and 0x14B9A0
         // (K's 05:35 build of 02ab933: 437K / 6.6K calls shadowed, 0 mismatches, 0 declines) and 0x151398 (K's 06:50
         // build of 9d10281: 3.3M calls matched; its declines, a third, are each texture's first lookup in a frame:
-        // func_00150AA8 empties the cache every frame). Still shadowed: 0x148BD8 (TEST_407's env-map pass: one call a
-        // frame, always the ENV texture's first lookup, a miss: it runs native once the upload builders do).
+        // func_00150AA8 empties the cache every frame); 0x148BD8 with the misses native (batches 3-4b, below).
         auto addReadable = [](const char *name, uint32_t address, bool checked, bool (*real)(RealEnv &, R5900Context *),
                               bool (*shadow)(ShadowEnv &, R5900Context *), uint32_t returns) {
             NativeFunction fn{name, address, "packet", checked, real, shadow, nullptr};
@@ -3239,20 +3238,24 @@ namespace kamite::native::packet
             registerFunction(fn);
         };
         addReadable("func_0014C5A0", kQueueModel, true, &queueModel<RealEnv>, &queueModel<ShadowEnv>, 0u);
-        // 0x151398 shadowed again for one round (Nov 22): its miss path (insert + builders, on a Txn) is new.
-        addReadable("func_00151398", kTextureLookup, false, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,
+        // 0x151398 with its miss path (insert + builders on a Txn): K's 08:32 build of 881a8dd shadowed 5.05M calls, 0
+        // mismatches, 0 declines (the TM builder's branch never ran in a replay: sandbox-proven only).
+        addReadable("func_00151398", kTextureLookup, true, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,
                     NativeFunction::kReturnsV0);
-        addReadable("func_00148BD8", kMeshTextures, false, &meshTextures<RealEnv>, &meshTextures<ShadowEnv>, 0u);
+        addReadable("func_00148BD8", kMeshTextures, true, &meshTextures<RealEnv>, &meshTextures<ShadowEnv>, 0u);
         addReadable("func_0014B9A0", kScrollPacket, true, &scrollPacket<RealEnv>, &scrollPacket<ShadowEnv>, 0u);
         // Batches 3-4b (Nov 22): the texture cache's misses. 0x151398 and 0x148BD8 above run them inline (on a Txn);
-        // the classification and the four builders also stand alone (reached when 0x151398's original runs).
-        addReadable("func_00151630", kTextureClass, false, &textureClassNative<RealEnv>, &textureClassNative<ShadowEnv>,
+        // the classification and the four builders also stand alone (reached when 0x151398's original runs). Checked
+        // on K's 08:32 build of 881a8dd (every replay shadowed: 0 mismatches, 0 declines; 0x148BD8 292 calls in
+        // TEST_407, 0x148690 1.34M, 0x148D30 1.08M, 0x151630 7.5M, the builders 1.75M); 0x151FA0 (TM) had no call: stays
+        // shadowed.
+        addReadable("func_00151630", kTextureClass, true, &textureClassNative<RealEnv>, &textureClassNative<ShadowEnv>,
                     NativeFunction::kReturnsV0);
-        addReadable("func_00151990", kUploadTim2, false, &builderNative<RealEnv, 0>, &builderNative<ShadowEnv, 0>, 0u);
-        addReadable("func_00151CC0", kUploadTim3, false, &builderNative<RealEnv, 1>, &builderNative<ShadowEnv, 1>, 0u);
-        addReadable("func_00151688", kUploadPack, false, &builderNative<RealEnv, 2>, &builderNative<ShadowEnv, 2>, 0u);
+        addReadable("func_00151990", kUploadTim2, true, &builderNative<RealEnv, 0>, &builderNative<ShadowEnv, 0>, 0u);
+        addReadable("func_00151CC0", kUploadTim3, true, &builderNative<RealEnv, 1>, &builderNative<ShadowEnv, 1>, 0u);
+        addReadable("func_00151688", kUploadPack, true, &builderNative<RealEnv, 2>, &builderNative<ShadowEnv, 2>, 0u);
         addReadable("func_00151FA0", kUploadTm, false, &builderNative<RealEnv, 3>, &builderNative<ShadowEnv, 3>, 0u);
-        addReadable("func_00148D30", kNodeTextures, false, &nodeTextures<RealEnv>, &nodeTextures<ShadowEnv>, 0u);
-        addReadable("func_00148690", kNodeMaterial, false, &nodeMaterial<RealEnv>, &nodeMaterial<ShadowEnv>, 0u);
+        addReadable("func_00148D30", kNodeTextures, true, &nodeTextures<RealEnv>, &nodeTextures<ShadowEnv>, 0u);
+        addReadable("func_00148690", kNodeMaterial, true, &nodeMaterial<RealEnv>, &nodeMaterial<ShadowEnv>, 0u);
     }
 }

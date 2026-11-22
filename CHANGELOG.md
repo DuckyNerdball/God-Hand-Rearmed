@@ -5,7 +5,7 @@ Newest first, one line per change; the code comments say how.
 ## November 22, 2026
 
 - Sound: Dolby Pro Logic II is decoded for 4.0 / 5.1 / 7.1 speakers, so sounds behind the camera play on the rear speakers (#18).
-- Performance: queueing each model's draw packet, building the UV-scroll packets and the texture cache's lookups run as native code.
+- Performance: queueing each model's draw packet, building the UV-scroll packets and the texture cache (lookups, loading a frame's new textures into VRAM, the meshes' texture registers) run as native code.
 
 ## November 21, 2026
 
