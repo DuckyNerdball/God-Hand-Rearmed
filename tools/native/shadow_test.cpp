@@ -93,6 +93,8 @@ KM_RECOMPILED(func_00309C30_0x309c30)
 KM_RECOMPILED(ps2___muldi3_0x31de10)
 KM_RECOMPILED(func_00148D30_0x148d30)
 KM_RECOMPILED(func_00148690_0x148690)
+KM_RECOMPILED(cModel_setNodeMaterial_0x14b4d0)
+KM_RECOMPILED(ForwardAttackByMode_14B5D8_0x14b5d8)
 KM_RECOMPILED(SearchDataByTwoNames_0x31cdc0)
 KM_RECOMPILED(cIDBase_getSlotPtr_0x1522c0)
 #undef KM_RECOMPILED
@@ -1176,6 +1178,68 @@ namespace
             setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
             return;
         }
+        case 0x14B4D0u: // step a: cModel_setNodeMaterial (model at 0x38000.., node at base; its callee's setup below)
+        case 0x14B5D8u: // step a: ForwardAttackByMode (the same)
+        {
+            const bool material = fn.address == 0x14B4D0u;
+            // the callee's path: the special pass (0x148BD8, 1 in 3) or the other (0x148690 / 0x148D30); its own setup
+            // fills the node, the manager and the files, and its registers say what the model must hold
+            const bool special = g_rng() % 3u == 0u;
+            NativeFunction callee = fn;
+            callee.address = special ? 0x148BD8u : material ? 0x148690u : 0x148D30u;
+            setupBatch2(callee, call, wild, base, seg);
+            uint64_t a1, a2;
+            std::memcpy(&a1, &ctx.r[5], 8);
+            std::memcpy(&a2, &ctx.r[6], 8);
+            const uint32_t model = 0x38000u + 0x400u * static_cast<uint32_t>(g_rng() % 8u);
+            randomBytes(model, 0x2E4u);
+            setU32(model + 0x2C4u, static_cast<uint32_t>(a1)); // drawPrio: the callee's kind
+            // the special pass: the node's flag and D_00747AA8 (the pass's name) both set; the other path: one of them
+            // (or both) clear, so a random name never reaches the cache (its miss would read a file at a random address)
+            const uint32_t clear = special ? 0u : 1u + static_cast<uint32_t>(g_rng() % 3u); // 1: the flag, 2: the pass, 3: both
+            setU32(0x747AA8u, special ? static_cast<uint32_t>(a2) : (clear & 2u) ? 0u : static_cast<uint32_t>(g_rng()) | 1u);
+            const bool flagOn = special || !(clear & 1u);
+            uint32_t flags;
+            std::memcpy(&flags, g_ramA + base + 0x380u, 4);
+            if (material)
+            {
+                // the node: CMODEL_NODE_SPECIAL as above, CMODEL_NODE_ALPHA half the time
+                flags = (flags & ~0x60000000u) | (flagOn ? 0x40000000u : 0u) |
+                        (g_rng() % 2u ? 0x20000000u : 0u);
+                setU32(base + 0x380u, flags);
+                // the alpha: 1.0 x 255 x 255 x 255 (mode 3), near it, random, or past the host's exact range (declines)
+                const uint32_t pick = static_cast<uint32_t>(g_rng() % 8u);
+                const uint32_t tint = pick < 3 ? 0x3F800000u : pick == 3 ? 0x3F800001u : pick == 4 ? 0x3F7FFFFFu
+                                      : pick == 5 ? inputFloat(wild) : pick == 6 ? 0x7F000000u | static_cast<uint32_t>(g_rng() % 0x800000u)
+                                      : static_cast<uint32_t>(g_rng() % 0x800000u); // a denormal
+                setU32(model + 0x24Cu, tint);
+                const bool full = pick < 4 || g_rng() % 2u;
+                setByte(model + 0x2B6u, full ? 255u : static_cast<uint8_t>(g_rng()));
+                setByte(model + 0x2B7u, full ? 255u : static_cast<uint8_t>(g_rng()));
+                setByte(model + 0x2BCu, full ? 255u : static_cast<uint8_t>(g_rng()));
+                // the texture exchange table: the callee's remap (its a2) copied to texSlot when it had one
+                const bool exchange = !special && a2 != 0u;
+                uint32_t texFlags;
+                std::memcpy(&texFlags, g_ramA + model + 0x254u, 4);
+                setU32(model + 0x254u, (texFlags & ~0x10000000u) | (exchange ? 0x10000000u : 0u));
+                if (exchange)
+                    for (uint32_t i = 0; i < 256u; ++i)
+                        setByte(model + 0x2D4u + i, g_ramA[(static_cast<uint32_t>(a2) & 0x1FFFFFFu) + i]);
+            }
+            else
+            {
+                // node->info->flags: CMODEL_MESH_SPECIAL as the path wants
+                const uint32_t info = 0x3A000u + 0x40u * static_cast<uint32_t>(g_rng() % 16u);
+                setU32(base + 0x414u, info | seg);
+                uint32_t mesh = static_cast<uint32_t>(g_rng()) & ~0x200000u;
+                if (flagOn)
+                    mesh |= 0x200000u;
+                setU32(info + 0x34u, mesh);
+            }
+            setGpr(ctx, 4, model | seg);
+            setGpr(ctx, 5, base | seg);
+            return;
+        }
         default:
             return;
         }
@@ -2093,7 +2157,8 @@ int main(int argc, char **argv)
         {0x151630u, &func_00151630_0x151630},    {0x151990u, &func_00151990_0x151990},
         {0x151CC0u, &func_00151CC0_0x151cc0},    {0x151688u, &func_00151688_0x151688},
         {0x151FA0u, &func_00151FA0_0x151fa0},    {0x148D30u, &func_00148D30_0x148d30},
-        {0x148690u, &func_00148690_0x148690}};
+        {0x148690u, &func_00148690_0x148690},    {0x14B4D0u, &cModel_setNodeMaterial_0x14b4d0},
+        {0x14B5D8u, &ForwardAttackByMode_14B5D8_0x14b5d8}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &func_00309C30_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});

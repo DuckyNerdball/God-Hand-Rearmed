@@ -2662,34 +2662,31 @@ namespace kamite::native::packet
         constexpr uint32_t kTextureManager = 0x4664A0u;                     // D_004664A0
         constexpr int kMeshTexturesLimit = 128;                             // meshes (more declines)
 
-        // The texture's first lookup in the frame (a miss with room): everything on a Txn, in the original's order
-        // (the builder writes the register rows the meshes then read).
-        constexpr uint32_t kMeshTexturesMissWindow = kMeshTexturesFrame + kBuilderWindow;
+        // func_00148BD8's body on a caller's Txn (rung 3 step a: its callers, cModel_setNodeMaterial and
+        // ForwardAttackByMode, run it inline): the lookup (a hit, or a miss with room: insert + builder, which writes
+        // the register rows the meshes then read), then the meshes, in the original's order. type / name / a3 as the
+        // registers hold them. False = decline (nothing reaches RAM: the caller's Txn isn't committed).
         template <class Env>
-        bool meshTexturesMiss(Env &env, R5900Context *ctx)
+        bool txnMeshTextures(Txn<Env> &t, uint32_t node, uint64_t type, uint64_t name, uint64_t a3)
         {
-            const uint32_t sp = e::u32(ctx, e::sp);
-            uint32_t stackTop;
-            if (!plainRam(sp - kMeshTexturesMissWindow, kMeshTexturesMissWindow, stackTop))
-                return false;
-            Txn<Env> t{env, stackTop, stackTop + kMeshTexturesMissWindow};
-            const uint32_t node = e::u32(ctx, e::a0);
+            Env &env = t.env;
             const uint32_t data = t.u32(node + 0x388u);
             const int n = t.u16(data + 0xAu);
-            const uint64_t name = e::u64(ctx, e::a2), type = e::u64(ctx, e::a1);
             int32_t texture;
             int lookupBackEdges;
             uint32_t missAt = 0u;
-            if (!t.ok || n > kMeshTexturesLimit ||
-                textureHit(t, kTextureManager, name, type, texture, lookupBackEdges, &missAt) || missAt == 0u)
+            if (!t.ok || n > kMeshTexturesLimit)
+                return false;
+            const bool hit = textureHit(t, kTextureManager, name, type, texture, lookupBackEdges, &missAt);
+            if (!hit && (!t.ok || missAt == 0u))
                 return false;
             env.call(); // jal 0x151398
             for (int i = 0; i < lookupBackEdges; ++i)
                 env.checkpoint(32u);
-            if (!txnMiss(t, kTextureManager, name, type, missAt, texture))
+            if (!hit && !txnMiss(t, kTextureManager, name, type, missAt, texture))
                 return false;
             const uint32_t half = t.u32(model::kFrameParity) & 1u;
-            const uint64_t mode = (e::u64(ctx, e::a3) & 3u) << 35;
+            const uint64_t mode = (a3 & 3u) << 35;
             for (int i = 0; i < n && t.ok; ++i)
             {
                 if (i != 0)
@@ -2705,7 +2702,22 @@ namespace kamite::native::packet
                 const uint64_t block = ((reg >> 37) & 0x3FFFu) + static_cast<uint64_t>(static_cast<int64_t>(t.s8(node + 0x387u)));
                 t.w64(packet + 0x20u, (((reg & 0xFFF8001FFFFFFFFFull) | ((block & 0x3FFFu) << 37)) & 0xFFFFFFE7FFFFFFFFull) | mode);
             }
-            if (!t.ok)
+            return t.ok;
+        }
+
+        // The thin wrapper: func_00148BD8 on its own Txn (the plan below takes this path for the texture's first lookup
+        // in the frame).
+        constexpr uint32_t kMeshTexturesMissWindow = kMeshTexturesFrame + kBuilderWindow;
+        template <class Env>
+        bool meshTexturesTxn(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kMeshTexturesMissWindow, kMeshTexturesMissWindow, stackTop))
+                return false;
+            Txn<Env> t{env, stackTop, stackTop + kMeshTexturesMissWindow};
+            if (!t.ok ||
+                !txnMeshTextures(t, e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u64(ctx, e::a2), e::u64(ctx, e::a3)))
                 return false;
             t.commit();
             returnToCaller(ctx);
@@ -2735,7 +2747,7 @@ namespace kamite::native::packet
             if (!rd.ok || n > kMeshTexturesLimit)
                 return false;
             if (!textureHit(rd, kTextureManager, e::u64(ctx, e::a2), e::u64(ctx, e::a1), texture, lookupBackEdges, &missAt))
-                return rd.ok && missAt != 0u && meshTexturesMiss(env, ctx);
+                return rd.ok && missAt != 0u && meshTexturesTxn(env, ctx);
             const uint32_t half = rd.u32(model::kFrameParity) & 1u;
             const uint64_t mode = (e::u64(ctx, e::a3) & 3u) << 35;
             struct Write
@@ -2844,18 +2856,11 @@ namespace kamite::native::packet
             }
         }
 
+        // func_00148D30's body on a caller's Txn (ForwardAttackByMode runs it inline). False = decline.
         template <class Env>
-        bool nodeTextures(Env &env, R5900Context *ctx)
+        bool txnNodeTextures(Txn<Env> &t, uint32_t node, uint64_t kind)
         {
-            if (!env.atEnd)
-                return false;
-            const uint32_t sp = e::u32(ctx, e::sp);
-            uint32_t stackTop;
-            if (!plainRam(sp - kNodeTexturesWindow, kNodeTexturesWindow, stackTop))
-                return false;
-            Txn<Env> t{env, stackTop, stackTop + kNodeTexturesWindow};
-            const uint32_t node = e::u32(ctx, e::a0);
-            const uint64_t kind = e::u64(ctx, e::a1);
+            Env &env = t.env;
             if (t.u32(kRoomPack) != 0u)
             {
                 const bool named = (t.u32(node + model::kNodeDispFlags) & 0x02000000u) != 0u;
@@ -2909,7 +2914,21 @@ namespace kamite::native::packet
                     t.w64(packet + 0x20u, t.u64(row));
                 }
             }
-            if (!t.ok)
+            return t.ok;
+        }
+
+        // The thin wrapper: func_00148D30 on its own Txn.
+        template <class Env>
+        bool nodeTextures(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kNodeTexturesWindow, kNodeTexturesWindow, stackTop))
+                return false;
+            Txn<Env> t{env, stackTop, stackTop + kNodeTexturesWindow};
+            if (!t.ok || !txnNodeTextures(t, e::u32(ctx, e::a0), e::u64(ctx, e::a1)))
                 return false;
             t.commit();
             returnToCaller(ctx);
@@ -2942,20 +2961,13 @@ namespace kamite::native::packet
         constexpr uint32_t kNodeMaterial = 0x148690u;
         constexpr uint32_t kNodeMaterialWindow = 0xC0u + kTextureLookupFrame + kBuilderWindow;
 
+        // func_00148690's body on a caller's Txn (cModel_setNodeMaterial runs it inline): kind / remap / a3 as the
+        // registers hold them. False = decline.
         template <class Env>
-        bool nodeMaterial(Env &env, R5900Context *ctx)
+        bool txnNodeMaterial(Txn<Env> &t, uint32_t node, uint64_t kind, uint64_t remap, uint64_t a3)
         {
-            if (!env.atEnd)
-                return false;
-            const uint32_t sp = e::u32(ctx, e::sp);
-            uint32_t stackTop;
-            if (!plainRam(sp - kNodeMaterialWindow, kNodeMaterialWindow, stackTop))
-                return false;
-            Txn<Env> t{env, stackTop, stackTop + kNodeMaterialWindow};
-            const uint32_t node = e::u32(ctx, e::a0);
-            const uint64_t kind = e::u64(ctx, e::a1);
-            const uint64_t remap = e::u64(ctx, e::a2);
-            const uint64_t mode = (e::u64(ctx, e::a3) & 3u) << 35;
+            Env &env = t.env;
+            const uint64_t mode = (a3 & 3u) << 35;
             const uint32_t data = t.u32(node + 0x388u);
             const uint32_t flags = t.u32(node + model::kNodeDispFlags);
             const uint32_t n = t.u16(data + 0xAu);
@@ -3016,7 +3028,136 @@ namespace kamite::native::packet
                 const uint64_t block = (((reg >> 37) & 0x3FFFu) + static_cast<uint64_t>(static_cast<int64_t>(t.s8(node + 0x387u)))) & 0x3FFFu;
                 t.w64(packet + 0x20u, (((reg & 0xFFF8001FFFFFFFFFull) | (block << 37)) & 0xFFFFFFE7FFFFFFFFull) | mode);
             }
-            if (!t.ok)
+            return t.ok;
+        }
+
+        // The thin wrapper: func_00148690 on its own Txn.
+        template <class Env>
+        bool nodeMaterial(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kNodeMaterialWindow, kNodeMaterialWindow, stackTop))
+                return false;
+            Txn<Env> t{env, stackTop, stackTop + kNodeMaterialWindow};
+            if (!t.ok || !txnNodeMaterial(t, e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u64(ctx, e::a2), e::u64(ctx, e::a3)))
+                return false;
+            t.commit();
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // ---- cModel_setNodeMaterial 0x14B4D0 (decomp src/cod/0014b4d0.c) and ForwardAttackByMode 0x14B5D8 (decomp
+        // src/cod/00137ae8.c): rung 3 step a, Txn compositions --------------------------------------------------------
+        // void cModel_setNodeMaterial(cModel *self, cModelNode *node): mode = 3 when the node blends with the model's
+        // alpha (dispFlags CMODEL_NODE_ALPHA) and cModel_alpha(self) == 1.0f, else 0; then the node's special pass
+        // (CMODEL_NODE_SPECIAL and D_00747AA8 set): func_00148BD8(node, self->drawPrio, D_00747AA8, mode), else
+        // func_00148690(node, self->drawPrio, self->texSlot when texFlags has CMODEL_TEX_EXCHANGE else 0, mode).
+        // int ForwardAttackByMode_14B5D8(cModel *self, cModelNode *node): node->info->flags CMODEL_MESH_SPECIAL and
+        // D_00747AA8 set: func_00148BD8(node, self->drawPrio, D_00747AA8, 0), else func_00148D30(node, self->drawPrio).
+        // Both run their callee's body inline on one Txn (the callee's own natives' bodies), one jal charged for it.
+        // Their callers (cModel_Tag_set_rate) ignore v0: void on the relaxed bar.
+        constexpr uint32_t kSetNodeMaterial = 0x14B4D0u;
+        constexpr uint32_t kForwardAttack = 0x14B5D8u;
+        constexpr uint32_t kSpecialPass = 0x747AA8u; // D_00747AA8: the special pass's texture name
+        constexpr uint32_t kModelTint = 0x24Cu;      // cModel.tint.w (the tint's alpha)
+        constexpr uint32_t kModelDrawPrio = 0x2C4u, kModelTexFlags = 0x254u, kModelTexSlot = 0x2D4u;
+        constexpr uint32_t kNodeAlpha = 0x20000000u, kNodeSpecial = 0x40000000u; // CMODEL_NODE_ALPHA / _SPECIAL
+        constexpr uint32_t kTexExchange = 0x10000000u;                             // CMODEL_TEX_EXCHANGE
+        constexpr uint32_t kMeshSpecial = 0x200000u;                               // CMODEL_MESH_SPECIAL
+        // their frame (0x10) + the deepest callee's window
+        constexpr uint32_t kNodeCallerWindow =
+            0x10u + std::max(std::max(kMeshTexturesMissWindow, kNodeMaterialWindow), kNodeTexturesWindow);
+
+        // cModel_alpha(self) == 1.0f (decomp cModel.h, inline at 0x14B4F4): tint.w * (alphaA / 255) * (alphaB / 255) *
+        // (alphaC / 255) in the code's order (cvt.s.w of the bytes, the three div.s, then the three mul.s), c.eq.s with
+        // 1.0. The host matches the runtime's default float rules there when |tint.w| < 2^126 (the quotients are in
+        // [0, 1], the divisor normal, no product past FLT_MAX - 1 ulp); else exact = false (decline), as
+        // cModel_nodeLayerScreen does for the same maths.
+        template <class R>
+        bool modelAlphaOne(R &t, uint32_t self, bool &exact)
+        {
+            const uint32_t a = t.u8(self + 0x2B6u), b = t.u8(self + 0x2B7u), c = t.u8(self + 0x2BCu);
+            const uint32_t w = t.u32(self + kModelTint);
+            exact = (w & 0x7FFFFFFFu) < 0x7E800000u;
+            if (!exact)
+                return false;
+            const float k = 255.0f;
+            const float qa = divScalar(fpuFromSmallWord(static_cast<int32_t>(a)), k);
+            const float qb = divScalar(fpuFromSmallWord(static_cast<int32_t>(b)), k);
+            const float qc = divScalar(fpuFromSmallWord(static_cast<int32_t>(c)), k);
+            float p = mulScalar(bitsFloat(w), qa);
+            p = mulScalar(p, qb);
+            p = mulScalar(p, qc);
+            return e::fpuKey(floatBits(p)) == e::fpuKey(0x3F800000u);
+        }
+
+        template <class Env>
+        bool setNodeMaterial(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kNodeCallerWindow, kNodeCallerWindow, stackTop))
+                return false;
+            Txn<Env> t{env, stackTop, stackTop + kNodeCallerWindow};
+            const uint32_t self = e::u32(ctx, e::a0), node = e::u32(ctx, e::a1);
+            uint64_t mode = 0u;
+            if (t.u32(node + model::kNodeDispFlags) & kNodeAlpha)
+            {
+                bool exact;
+                const bool one = modelAlphaOne(t, self, exact);
+                if (!exact)
+                    return false;
+                if (one)
+                    mode = 3u;
+            }
+            bool done;
+            if ((t.u32(node + model::kNodeDispFlags) & kNodeSpecial) != 0u && t.u32(kSpecialPass) != 0u)
+            {
+                const uint64_t pass = sx32(t.u32(kSpecialPass));
+                const uint64_t prio = sx32(t.u32(self + kModelDrawPrio));
+                env.call(); // jal 0x148BD8
+                done = txnMeshTextures(t, node, prio, pass, mode);
+            }
+            else
+            {
+                const uint64_t remap = (t.u32(self + kModelTexFlags) & kTexExchange) ? sx32(self + kModelTexSlot) : 0u;
+                const uint64_t prio = sx32(t.u32(self + kModelDrawPrio));
+                env.call(); // jal 0x148690
+                done = txnNodeMaterial(t, node, prio, remap, mode);
+            }
+            if (!done || !t.ok)
+                return false;
+            t.commit();
+            returnToCaller(ctx);
+            return true;
+        }
+
+        template <class Env>
+        bool forwardAttack(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kNodeCallerWindow, kNodeCallerWindow, stackTop))
+                return false;
+            Txn<Env> t{env, stackTop, stackTop + kNodeCallerWindow};
+            const uint32_t self = e::u32(ctx, e::a0), node = e::u32(ctx, e::a1);
+            bool done;
+            const uint32_t info = t.u32(node + 0x414u);
+            const uint32_t pass = (t.u32(info + 0x34u) & kMeshSpecial) ? t.u32(kSpecialPass) : 0u;
+            const uint64_t prio = sx32(t.u32(self + kModelDrawPrio));
+            env.call(); // jal 0x148BD8 / 0x148D30
+            if (pass != 0u)
+                done = txnMeshTextures(t, node, prio, sx32(pass), 0u);
+            else
+                done = txnNodeTextures(t, node, prio);
+            if (!done || !t.ok)
                 return false;
             t.commit();
             returnToCaller(ctx);
@@ -3257,5 +3398,11 @@ namespace kamite::native::packet
         addReadable("func_00151FA0", kUploadTm, false, &builderNative<RealEnv, 3>, &builderNative<ShadowEnv, 3>, 0u);
         addReadable("func_00148D30", kNodeTextures, true, &nodeTextures<RealEnv>, &nodeTextures<ShadowEnv>, 0u);
         addReadable("func_00148690", kNodeMaterial, true, &nodeMaterial<RealEnv>, &nodeMaterial<ShadowEnv>, 0u);
+        // Rung 3 step a, the rest of batches 3-4 (Nov 22): the callers of the Txn natives, their callees' bodies inline on
+        // one Txn. Unchecked: dev replays shadow them.
+        addReadable("cModel_setNodeMaterial", kSetNodeMaterial, false, &setNodeMaterial<RealEnv>,
+                    &setNodeMaterial<ShadowEnv>, 0u);
+        addReadable("ForwardAttackByMode_14B5D8", kForwardAttack, false, &forwardAttack<RealEnv>,
+                    &forwardAttack<ShadowEnv>, 0u);
     }
 }

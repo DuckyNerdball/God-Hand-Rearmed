@@ -54,3 +54,5 @@ func_00151CC0,0x00151CC0,asm,,,,,batch 3-4b: the TIM3 loader (unmatched at 75cb1
 func_00151FA0,0x00151FA0,asm,,,,,batch 3-4b: the TM loader (unmatched at 75cb123); on a Txn; 0x151168 / 0x309C30 / 0x150F68 inline
 func_00148D30,0x00148D30,asm,,,,,batch 3-4b: a node's textures by mesh (unmatched at 75cb123); on a Txn; SearchDataByTwoNames (0031cdc0.c) / cIDBase_getSlotPtr (0012b5c0.c) / 0x151398 / 0x151368 inline
 func_00148690,0x00148690,asm,,,,,batch 3-4b: a node's material textures, four variants (unmatched at 75cb123); on a Txn; 0x151398 / 0x1522C0 / 0x31CDC0 / 0x151368 inline
+cModel_setNodeMaterial,0x0014B4D0,decomp,cModel_setNodeMaterial,src/cod/0014b4d0.c,baee8f4,4fdb0dcc62dc,step a readable: a Txn composition (cModel_alpha inline: divScalar / mulScalar for |tint.w| < 2^126) over func_00148BD8's / func_00148690's bodies; kRenderPath|kChargeAtEnd
+ForwardAttackByMode_14B5D8,0x0014B5D8,decomp,ForwardAttackByMode_14B5D8,src/cod/00137ae8.c,baee8f4,e7d854e80cb7,step a readable: a Txn composition over func_00148BD8's / func_00148D30's bodies; kRenderPath|kChargeAtEnd
