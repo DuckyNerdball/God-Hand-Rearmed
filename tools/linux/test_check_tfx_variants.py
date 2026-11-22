@@ -208,11 +208,20 @@ class RealSources(unittest.TestCase):
                 self.assertTrue(any(p == path and re.search(a, text) for p, a, _ in c.cites), place)
 
     def test_citations_named_in_the_critique(self):
-        cited = {c.params: ctv.cite(c) for c in ctv.CONSTRAINTS}
-        self.assertIn(f"{ctv.DEVICE_CPP}:5148", cited[("PS_ROV_COLOR", "PS_NO_COLOR1")])
-        for line in (f"{ctv.RENDERER_HW}:6771", f"{ctv.RENDERER_HW}:6779", f"{ctv.RENDERER_HW}:8404",
-                     f"{ctv.DEVICE_CPP}:6154"):
-            self.assertIn(line, cited[("PS_DATE",)])
+        # By the code each citation lands on, not its line number: an edit higher up in
+        # GSDeviceVK.cpp or GSRendererHW.cpp moves the lines and must not fail this test.
+        def cited_text(params):
+            c = next(c for c in ctv.CONSTRAINTS if c.params == params)
+            out = []
+            for place in ctv.cite(c).split(", "):
+                path, line = place.rsplit(":", 1)
+                out.append((path, (ROOT / path).read_text().splitlines()[int(line) - 1].strip()))
+            return out
+        self.assertIn((ctv.DEVICE_CPP, "pps.no_color1 = true;"), cited_text(("PS_ROV_COLOR", "PS_NO_COLOR1")))
+        date = cited_text(("PS_DATE",))
+        self.assertIn((ctv.DEVICE_CPP, "config.ps.date = 3;"), date)
+        discard = "m_conf.ps.date = 5 + m_cached_ctx.TEST.DATM;"
+        self.assertGreaterEqual(sum(p == ctv.RENDERER_HW and t.startswith(discard) for p, t in date), 3)
 
     def test_a_stale_citation_stops(self):
         c = dataclasses.replace(ctv.CONSTRAINTS[0], cites=((ctv.DEVICE_CPP, r"pipe\.ps\.no_color", 1),))
