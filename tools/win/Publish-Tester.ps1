@@ -37,6 +37,29 @@ function Say([string]$msg) {
     [System.IO.File]::AppendAllText($Log, $line + "`r`n", $Utf8)
 }
 
+# Zips with '/' between folders (issue #25): Windows PowerShell 5.1's ZipFile.CreateFromDirectory writes '\', which
+# the zip format doesn't allow and Linux unzippers take as part of the file name. The source folder's name is the top
+# folder in the zip.
+function Write-Zip([string]$Source, [string]$Zip) {
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Remove-Item -LiteralPath $Zip -Force -ErrorAction SilentlyContinue
+    $src = (Get-Item -LiteralPath $Source).FullName.TrimEnd('\')
+    $top = (Split-Path -Leaf $src) + '/'
+    $level = [System.IO.Compression.CompressionLevel]::Optimal
+    $archive = [System.IO.Compression.ZipFile]::Open($Zip, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($item in Get-ChildItem -LiteralPath $src -Recurse -Force) {
+            $name = $top + $item.FullName.Substring($src.Length + 1).Replace('\', '/')
+            if ($item.PSIsContainer) {
+                if (-not (Get-ChildItem -LiteralPath $item.FullName -Force | Select-Object -First 1)) { [void]$archive.CreateEntry($name + '/') }
+            } else {
+                [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $item.FullName, $name, $level)
+            }
+        }
+    } finally { $archive.Dispose() }
+}
+
 # One publish at a time: a second build finishing meanwhile waits here.
 $mutex = New-Object System.Threading.Mutex($false, 'Local\GHR-Publish-Tester')
 try { [void]$mutex.WaitOne() } catch [System.Threading.AbandonedMutexException] { } # a crashed run's: ours now
@@ -130,8 +153,7 @@ Controls > Hotkeys, or F2 > Controls).
     [System.IO.File]::WriteAllText((Join-Path $stage 'README-FIRST.txt'), $readme.Replace("`r`n", "`n").Replace("`n", "`r`n"), $Utf8)
     $zipName = "GHR-tester-$short-$time.zip"
     $zip = Join-Path $root $zipName
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
+    Write-Zip $stage $zip
     $mb = [math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 1)
     Say "Packed $zipName ($mb MB)"
 
