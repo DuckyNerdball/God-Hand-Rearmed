@@ -53,6 +53,16 @@ if(NOT MSVC AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
     add_compile_options(-msse4.1)
 endif()
 
+# No build machine's folders in the shipped binaries (issue #22's assert showed the builder's user folder): __FILE__
+# (assert messages) relative to the repository, and GHR.exe / pcsx2gs.dll naming their .pdb without its folder.
+if(MSVC)
+    file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/" KAMITE_SOURCE_PREFIX)
+    add_compile_options("/d1trimfile:${KAMITE_SOURCE_PREFIX}" "/d1trimfile:${CMAKE_SOURCE_DIR}/")
+    add_link_options("/PDBALTPATH:%_PDB%")
+else()
+    add_compile_options("-ffile-prefix-map=${CMAKE_SOURCE_DIR}/=")
+endif()
+
 # The tests, run with ctest: runtime/ps2xRuntime/test (the vblank lock on simulated displays, issue #1; the audio's
 # time-stretch on a PC below full speed, issue #5), tests/unit (the operating-system layer's pure logic; also builds on
 # its own, see tests/unit/CMakeLists.txt) and, further down, the PCSX2 renderer's on Linux.

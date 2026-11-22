@@ -9,6 +9,8 @@
 #include "common/Assertions.h"
 #include "common/CocoaTools.h"
 #include "common/Console.h"
+#include "common/FileSystem.h"
+#include "common/Path.h"
 
 #include <algorithm>
 #include <array>
@@ -31,10 +33,45 @@ static int DxgiVSync(VkPresentModeKHR mode)
 	return mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? 0 : mode == VK_PRESENT_MODE_MAILBOX_KHR ? 2 : 1;
 }
 
+// The marker of a GPU lost presenting through DXGI: "<device name> | <driver version>" (a new driver tries again).
+static std::string DxgiLostPath()
+{
+	return Path::Combine(EmuFolders::Cache, "vulkan-dxgi-lost.txt");
+}
+
+static std::string DxgiGpuKey()
+{
+	const GSDeviceVK* device = GSDeviceVK::GetInstance();
+	if (!device)
+		return {};
+	const VkPhysicalDeviceProperties& props = device->GetDeviceProperties();
+	return std::string(props.deviceName) + " | " + std::to_string(props.driverVersion);
+}
+
+void VKSwapChain::DxgiDeviceLost()
+{
+	if (s_dxgi_failed)
+		return;
+	s_dxgi_failed = true;
+	const std::string key = DxgiGpuKey();
+	if (!key.empty())
+		FileSystem::WriteStringToFile(DxgiLostPath().c_str(), key);
+	std::fprintf(stderr, "[pcsx2-gs] the GPU was lost presenting through DXGI (%s): the native Vulkan way from now on\n",
+		key.c_str());
+}
+
 bool VKSwapChain::CreateDxgiSwapChain()
 {
 	if (!pcsx2gs::g_vkDxgiPresent || s_dxgi_failed || m_window_info.type != WindowInfo::Type::Win32)
 		return false;
+	if (const std::optional<std::string> lost = FileSystem::ReadFileToString(DxgiLostPath().c_str());
+		lost.has_value() && !lost->empty() && *lost == DxgiGpuKey())
+	{
+		s_dxgi_failed = true;
+		std::fprintf(stderr, "[pcsx2-gs] Vulkan presents natively: this GPU and driver were lost presenting through DXGI "
+							 "before (%s)\n", DxgiLostPath().c_str());
+		return false;
+	}
 	// The native swap chain's format, so the present pipelines (compiled for the first one) fit either.
 	const std::optional<VkSurfaceFormatKHR> native_format = SelectSurfaceFormat(m_surface);
 	const VkFormat format = native_format.has_value() ? native_format->format : VK_FORMAT_R8G8B8A8_UNORM;
@@ -843,3 +880,9 @@ void VKSwapChain::DestroySurface()
 	DestroyVulkanSurface(GSDeviceVK::GetInstance()->GetVulkanInstance(), &m_window_info, m_surface);
 	m_surface = VK_NULL_HANDLE;
 }
+
+#ifndef _WIN32
+void VKSwapChain::DxgiDeviceLost() // pcsx2gs (Kamite): no DXGI off Windows
+{
+}
+#endif

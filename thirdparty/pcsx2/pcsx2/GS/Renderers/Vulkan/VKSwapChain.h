@@ -77,6 +77,9 @@ public:
 	}
 
 	// pcsx2gs (Kamite): the frames shown through a DXGI swap chain instead of a VkSwapchainKHR (VKDxgiPresent.h).
+	// The GPU was lost while presenting through DXGI (issue #22: an AMD card, at the first frames): the native swap chain
+	// from the device's reopen on, and on later starts with this GPU and driver (a marker in the cache folder).
+	static void DxgiDeviceLost();
 #ifdef _WIN32
 	__fi bool IsDxgi() const { return m_dxgi != nullptr; }
 	__fi u64 GetDxgiWaitValue() const { return m_dxgi->SlotFree(m_current_image); }

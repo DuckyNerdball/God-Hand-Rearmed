@@ -2506,7 +2506,11 @@ GSDevice::PresentResult GSDeviceVK::BeginPresent(bool frame_skip)
 
 	// Check if the device was lost.
 	if (m_last_submit_failed)
+	{
+		if (m_swap_chain && m_swap_chain->IsDxgi()) // pcsx2gs (Kamite): the reopen presents natively (issue #22)
+			VKSwapChain::DxgiDeviceLost();
 		return PresentResult::DeviceLost;
+	}
 
 	if (frame_skip)
 		return PresentResult::FrameSkipped;
