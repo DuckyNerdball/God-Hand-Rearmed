@@ -28,23 +28,6 @@ screen, with as much or as little of our own nonsense as you want.
 
 The first start compiles shaders for your GPU, so the screen may stay black before coming back. Patience, young ass-whooper.
 
-### Linux and Steam Deck
-
-1. Grab `GHR-v…-Linux-x64.AppImage` (one file) or `GHR-v…-Linux-x64.tar.gz` (a folder) from
-   [Releases](https://github.com/God-Hand-Rearmed/God-Hand-Rearmed/releases).
-2. AppImage: make it executable (file manager > Properties > Is executable, or `chmod +x`) and run it. Settings and
-   saves go to `~/.local/share/GodHandRearmed` (or into a `GHR-data` folder you make next to the AppImage).
-   Folder: unpack it anywhere you can write to and run `GHR`; it keeps everything inside, like the Windows zip.
-3. Point the launcher at your disc image once (it also looks in `~/Games`, `~/Downloads` and on your SD card), pick a
-   preset, "**Play**"!
-4. **Steam Deck:** do steps 1 to 3 in Desktop Mode, then hit **Add to Steam** in the launcher: back in Game Mode it's in
-   your library with its artwork, fullscreen at the Deck's 16:10.
-
-Needs glibc 2.31 or newer (any distro from 2020 on, SteamOS included) and a Vulkan driver.
-
-When a new version is out, the launcher says so: **What's new** shows the changes, **Update** installs them and
-restarts. Your settings, saves, and mods stay where they are.
-
 ## What's In It
 
 <!-- MEDIA: assets/readme/launcher.png — the launcher -->
