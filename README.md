@@ -34,8 +34,7 @@ The first start compiles shaders for your GPU, so the screen may stay black befo
 
 ### God Hand - Gone Native!
 
-Recompiled as a Windows program under Vulkan or DX11, and a Linux / Steam Deck one under Vulkan; PCSX2 as the renderer
-until later.
+Recompiled as a Windows program under Vulkan or DX11; PCSX2 as the renderer until later.
 
 ---
 
