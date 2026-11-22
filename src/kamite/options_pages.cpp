@@ -1,4 +1,5 @@
 #include "kamite/options_pages.h"
+#include "runtime/ps2_hotkeys.h"
 
 #include "kamite/ini_file.h"
 
@@ -109,8 +110,15 @@ namespace kamite::options_pages
             options_overlay::PageRow row;
             row.name = d.keep(upper(s.gameName ? s.gameName : s.name));
             // The in-game note after the description: on its own line when it starts with one ("\n...").
-            row.help = d.keep(wrapHelp(s.gameNote ? (std::string(s.description) + (*s.gameNote == '\n' ? "" : " ") + s.gameNote).c_str()
-                                                  : s.description,
+            std::string description = s.description;
+            if (const size_t at = description.find("[T]"); at != std::string::npos)
+            {
+                // Replacement Textures' hotkey as bound now.
+                const ps2x::hotkeys::Binding key = ps2x::hotkeys::binding(ps2x::hotkeys::Action::ToggleTextures);
+                description.replace(at, 3, key.bound() ? "[" + ps2x::hotkeys::text(key) + "]" : "its hotkey (unbound)");
+            }
+            row.help = d.keep(wrapHelp(s.gameNote ? (description + (*s.gameNote == '\n' ? "" : " ") + s.gameNote).c_str()
+                                                  : description.c_str(),
                                        aspect));
             row.sub = s.parent != nullptr;
             const std::string value = settings::value(ini, s);

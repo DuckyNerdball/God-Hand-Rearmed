@@ -151,6 +151,12 @@ namespace
     std::vector<std::pair<std::string, std::string>> g_liveGs;
     int g_liveVsync = -1;
     float g_liveAspect = -1.0f;      // < 0: none waiting; 0 = the PS2's 4:3
+    // The replacement textures changed while running (the port's live switch, K Nov 22): texture_first's new folders
+    // ('|' between; empty = none: the mods' and packs' textures off), and texture_reload (read every folder again).
+    bool g_liveTextureFirstSet = false;
+    std::string g_liveTextureFirst;
+    bool g_liveTextureReload = false;
+    bool g_textureFirstLive = false; // texture_first was changed while running: a reopen keeps that list, not the open's
     uint32_t g_aspectMode = 0u;      // the last pcsx2gs_set_aspect mode (0 = the game's 4:3, shown in the custom shape)
     bool g_stretch = false;          // the open's stretch (Pcsx2GsOpenParams)
 
@@ -197,14 +203,69 @@ namespace
         return value == 1 ? GSVSyncMode::FIFO : value == 2 ? GSVSyncMode::Mailbox : GSVSyncMode::Disabled;
     }
 
+    // texture_first / texture_reload: the folders listed again (ReloadReplacementMap clears the texture_add images too, so
+    // they go back in, in the order they came: the last image of a name wins), and every texture the GS holds dropped, so
+    // each comes back from its new replacement (or the game's own art).
+    void ApplyLiveTextures(bool setFirst, const std::string &first, bool reload)
+    {
+        if (!setFirst && !reload)
+            return;
+        size_t folders = 0;
+        if (setFirst)
+        {
+            g_textureFirstLive = true;
+            pcsx2gs::ClearFirstTextureFolders();
+            size_t start = 0;
+            while (start <= first.size())
+            {
+                const size_t bar = first.find('|', start);
+                const std::string folder = first.substr(start, bar == std::string::npos ? std::string::npos : bar - start);
+                if (!folder.empty())
+                {
+                    pcsx2gs::AddFirstTextureFolder(folder);
+                    ++folders;
+                }
+                if (bar == std::string::npos)
+                    break;
+                start = bar + 1;
+            }
+        }
+        if (!GSConfig.LoadTextureReplacements)
+        {
+            if (pcsx2gs::FirstTextureFolders().empty() && pcsx2gs::ExtraTextureFolders().empty())
+                return;
+            Pcsx2Config::GSOptions options = GSConfig;
+            options.LoadTextureReplacements = true;
+            options.LoadTextureReplacementsAsync = true;
+            EmuConfig.GS = options;
+            GSUpdateConfig(options); // starts the loader and lists the folders
+        }
+        else
+            GSTextureReplacements::ReloadReplacementMap();
+        for (const std::string &path : g_textureAdded)
+            GSTextureReplacements::AddReplacementFile(path);
+        if (g_gs_renderer)
+            g_gs_renderer->PurgeTextureCache(true, false, true);
+        if (setFirst)
+            std::fprintf(stderr, "[pcsx2-gs] replacement textures: %zu folder(s) ahead of the extra ones\n", folders);
+        else
+            std::fprintf(stderr, "[pcsx2-gs] replacement textures read again\n");
+    }
+
     void ApplyLiveOptions()
     {
         std::string scaling;
         float aspect = -1.0f;
         std::vector<std::pair<std::string, std::string>> graphics;
         int vsync = -1;
+        bool textureFirstSet = false, textureReload = false;
+        std::string textureFirst;
         {
             std::lock_guard<std::mutex> lock(g_liveMutex);
+            textureFirstSet = g_liveTextureFirstSet;
+            textureFirst.swap(g_liveTextureFirst);
+            textureReload = g_liveTextureReload;
+            g_liveTextureFirstSet = g_liveTextureReload = false;
             scaling.swap(g_liveNativeScaling);
             aspect = g_liveAspect;
             g_liveAspect = -1.0f;
@@ -249,6 +310,7 @@ namespace
                 std::fprintf(stderr, "[pcsx2-gs] post effects: %s\n", scaling.c_str());
             }
         }
+        ApplyLiveTextures(textureFirstSet, textureFirst, textureReload);
         if (aspect >= 0.0f && !g_stretch)
         {
             g_customAspect = aspect > 0.5f && aspect < 5.0f ? aspect : 0.0f;
@@ -332,7 +394,13 @@ namespace
             if (key == "texture_first")
             {
                 // Folders searched before the pack's replacements/ (the enabled mods' textures/), '|' between them, the
-                // winner first; on even without a pack.
+                // winner first; on even without a pack. After a live change (a reopen: the graphics API) that list stays.
+                if (g_textureFirstLive)
+                {
+                    if (!pcsx2gs::FirstTextureFolders().empty())
+                        options.LoadTextureReplacements = options.LoadTextureReplacementsAsync = true;
+                    continue;
+                }
                 size_t start = 0;
                 while (start <= text.size())
                 {
@@ -425,6 +493,9 @@ namespace
         g_window.surface_height = std::max(1u, params->height);
         pcsx2gs::SetRenderWindow(g_window);
         pcsx2gs::SetFolders(params->resources ? params->resources : "", params->cache ? params->cache : "");
+        // No texture_dir: PCSX2's own pack folder points nowhere (not <cwd>/SLUS-21503); the port hands its packs over
+        // as texture_first.
+        pcsx2gs::SetTextureFolder(std::string(params->cache ? params->cache : ".") + "/no-texture-pack/SLUS-21503");
 
         Pcsx2Config::GSOptions options;
         options.UpscaleMultiplier = std::max(1.0f, params->scale);
@@ -791,6 +862,8 @@ PCSX2GS_EXPORT void pcsx2gs_set_display(void *display)
 // Options the port changes while the game runs (the in-game menu), any thread; unknown keys are ignored:
 //   texture_add=<path> a replacement image written while the game runs (the port's button prompts), added at
 //                      the next vsync (GSTextureReplacements::AddReplacementFile)
+//   texture_first=<folders> the folders ahead of the pack ('|' between; empty: none), then every folder listed again
+//                      at the next vsync (the port's live replacement-textures switch); texture_reload=1 lists them again
 //   dof=0/1            the game's depth-of-field composite drawn (1, the default) or skipped (GSRendererHW.cpp)
 //   crunchy=0/1/2, fxaa=0/1, trilinear=-1/2, anisotropy=0..16, brightness_percent=50..150, vsync=0/1/2
 //                      the GRAPHICS options (claude/graphics-options.md); all but crunchy at the next Vsync
@@ -896,6 +969,19 @@ PCSX2GS_EXPORT void pcsx2gs_set_option(const char *key, const char *value)
     {
         std::lock_guard<std::mutex> lock(pcsx2gs::g_textureAddMutex);
         pcsx2gs::g_textureAdds.emplace_back(value);
+        return;
+    }
+    if (std::strcmp(key, "texture_first") == 0)
+    {
+        std::lock_guard<std::mutex> lock(g_liveMutex);
+        g_liveTextureFirstSet = true;
+        g_liveTextureFirst = value;
+        return;
+    }
+    if (std::strcmp(key, "texture_reload") == 0)
+    {
+        std::lock_guard<std::mutex> lock(g_liveMutex);
+        g_liveTextureReload = true;
         return;
     }
     if (std::strcmp(key, "native_scaling") == 0)

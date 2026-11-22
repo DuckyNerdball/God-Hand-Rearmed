@@ -23,6 +23,8 @@ namespace ps2x::hotkeys
             {"FpsOverlay", "FPS overlay", {KEY_F3}},
             {"Fullscreen", "Full screen", {KEY_F11}},
             {"HudLayout", "HUD layout 16:9 / 4:3", {KEY_F7}},
+            {"ToggleTextures", "Replacement textures on / off", {KEY_T}},
+            {"ReloadTextures", "Reload replacement textures", {KEY_T, true}},
             {"Dump2D", "Write one frame's 2D to the log", {KEY_F6}},
             {"ReloadPnach", "Reload .pnach patches", {KEY_F4}},
             {"RamDump", "RAM dump + VU1 trace", {KEY_F8}},

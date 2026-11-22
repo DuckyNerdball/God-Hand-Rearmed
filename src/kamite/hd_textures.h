@@ -15,18 +15,36 @@
 // searches too (generatedDir, added to PS2X_PCSX2_TEXTURE_EXTRA). PCSX2 lists the replacement folders when the GS
 // opens, so the images have to be written before the game's first frame: install() and the features' prepare steps
 // run right after the runtime is initialised.
+//
+// The replacement textures' layers (K, Nov 22): the enabled mods' texture folders (a texture pack is a mod; mods.cpp,
+// mod_list.h), then the Texture Pack Folder ([Runtime] PS2X_PCSX2_TEXTURE_DIR; without one, textures/SLUS-21503 next
+// to the exe or up to three folders above it: the repository's when run from build/port/bin, and an install the
+// launcher has not moved into mods/ yet). They go to the GS as PS2X_PCSX2_TEXTURE_FIRST and are switched while running
+// ("Replacement Textures", [Runtime] PS2X_PCSX2_TEXTURES; the T hotkey): off = the game's own art. Never switched: the
+// port's own images (generatedDir) and the characters' textures (PS2X_PCSX2_TEXTURE_EXTRA).
 namespace kamite::hd_textures
 {
-    // Reads [Runtime] PS2X_PCSX2_TEXTURES / PS2X_PCSX2_TEXTURE_DIR, lists the pack's file names and adds
-    // <exe>/cache/hd-textures to PS2X_PCSX2_TEXTURE_EXTRA. Call after characters::install (which sets that variable).
+    // Lists the layers' file names, sets the GS's folders for the start (on or off) and adds <exe>/cache/hd-textures to
+    // PS2X_PCSX2_TEXTURE_EXTRA. Call after mods::prepare (PS2X_PCSX2_TEXTURE_FIRST) and characters::install (EXTRA).
     void install(const std::filesystem::path &exeDir);
 
-    // Texture replacements on (and the generated folder usable).
+    // The generated folder usable (the port's own images; on whether the replacement textures are or not).
     bool enabled();
+    // The replacement textures (mods, texture packs) on now. Any thread.
+    bool packOn();
+    // Switches them while running (the GS lists its folders again at its next vsync); the features whose images follow
+    // the pack (radar_glow, the tutorials' stick sheet) watch packOn(). A notice says which. Saving the setting is the
+    // caller's (options_screen).
+    void setPackOn(bool on);
+    // Every folder read again (after an image was edited; Shift+T).
+    void reload();
+    // How many layers / images, for the F2 menu ("3 folders, 2140 images").
+    std::string summary();
     // The play folder (paths.h; set by install even when replacements are off): cache/ is under it. The
     // resources are paths::resources().
     const std::filesystem::path &exeDirectory();
-    // The pack's file for a replacement name ("9c64...-82a5...-000061d3"), .png or .dds; empty when it has none.
+    // The layers' file for a replacement name ("9c64...-82a5...-000061d3"), .png or .dds, the winning layer's; empty
+    // when none has one. Whether they are on or not (the features build both versions).
     std::filesystem::path packFile(const std::string &name);
     // Where the port writes its own images (exists when enabled()).
     const std::filesystem::path &generatedDir();

@@ -119,9 +119,70 @@ namespace kamite::mod_list
                 m.name = m.folder;
         }
 
+        // A child folder of `dir` by name, any case ("" when none).
+        fs::path childFolder(const fs::path &dir, const char *name)
+        {
+            std::error_code error;
+            for (const auto &entry : fs::directory_iterator(dir, error))
+                if (entry.is_directory(error) && lower(utf8(entry.path().filename())) == name)
+                    return entry.path();
+            return {};
+        }
+
+        // The texture folders right inside `dir`: textures/, replacements/, SLUS-21503/replacements/ (K, Nov 22: a texture
+        // pack is a mod, dropped in as it comes).
+        std::vector<fs::path> textureFoldersIn(const fs::path &dir)
+        {
+            std::vector<fs::path> out;
+            for (const char *name : {"textures", "replacements"})
+                if (fs::path f = childFolder(dir, name); !f.empty())
+                    out.push_back(f);
+            if (const fs::path serial = childFolder(dir, "slus-21503"); !serial.empty())
+                if (fs::path f = childFolder(serial, "replacements"); !f.empty())
+                    out.push_back(f);
+            return out;
+        }
+
+        // A mod's texture folders: at its top, else one folder deeper (only when that is the mod's one folder: a zip
+        // unpacked into a folder of its own name).
+        std::vector<fs::path> findTextureFolders(const fs::path &mod)
+        {
+            std::vector<fs::path> out = textureFoldersIn(mod);
+            if (!out.empty())
+                return out;
+            std::error_code error;
+            std::vector<fs::path> folders;
+            for (const auto &entry : fs::directory_iterator(mod, error))
+                if (entry.is_directory(error))
+                    folders.push_back(entry.path());
+            if (folders.size() == 1u)
+                out = textureFoldersIn(folders[0]);
+            return out;
+        }
+
         void readContents(Mod &m, bool details)
         {
             std::error_code error;
+            m.textureFolders = findTextureFolders(m.path);
+            m.hasTextures = !m.textureFolders.empty();
+            // Relative to the mod, lower case: the texture folders, and the folder that holds them when one deeper (none
+            // of it is game files).
+            std::vector<std::string> textureRels;
+            std::string wrapper;
+            for (const fs::path &f : m.textureFolders)
+            {
+                const std::string rel = lower(utf8(f.lexically_relative(m.path)));
+                textureRels.push_back(rel);
+                const std::string top = topFolder(rel + "/");
+                if (top != "textures" && top != "replacements" && top != "slus-21503")
+                    wrapper = top;
+            }
+            const auto underTextures = [&](const std::string &rel) {
+                for (const std::string &t : textureRels)
+                    if (rel.size() > t.size() && rel.compare(0, t.size(), t) == 0 && rel[t.size()] == '/')
+                        return true;
+                return false;
+            };
             for (auto it = fs::recursive_directory_iterator(m.path, fs::directory_options::skip_permission_denied, error);
                  !error && it != fs::recursive_directory_iterator(); it.increment(error))
             {
@@ -129,18 +190,18 @@ namespace kamite::mod_list
                 const std::string top = topFolder(rel);
                 if (it->is_directory(error))
                 {
-                    if (it.depth() == 0 && (rel == "textures" || rel == "patches" || rel == "characters"))
+                    if (it.depth() == 0 && rel == "characters")
                     {
-                        m.hasTextures = m.hasTextures || rel == "textures";
-                        m.hasCharacters = m.hasCharacters || rel == "characters";
-                        if (rel == "characters" || (rel == "textures" && !details))
-                            it.disable_recursion_pending(); // not walked: characters are step 4's; the boot only needs the folder
+                        m.hasCharacters = true;
+                        it.disable_recursion_pending(); // not walked: characters are step 4's
                     }
+                    else if (!details && std::find(textureRels.begin(), textureRels.end(), rel) != textureRels.end())
+                        it.disable_recursion_pending(); // the boot only needs the folder
                     continue;
                 }
                 if (!it->is_regular_file(error) || top.empty())
                     continue;
-                if (top == "textures")
+                if (underTextures(rel))
                 {
                     const std::string ext = lower(utf8(it->path().extension()));
                     if (ext == ".png" || ext == ".dds")
@@ -151,7 +212,8 @@ namespace kamite::mod_list
                     if (lower(utf8(it->path().extension())) == ".pnach")
                         m.patches.push_back(it->path());
                 }
-                else if (top != "characters")
+                else if (top != "characters" && top != wrapper && top != "textures" && top != "replacements" &&
+                         top != "slus-21503")
                     m.files.push_back(rel);
             }
             std::sort(m.files.begin(), m.files.end());

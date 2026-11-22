@@ -12,7 +12,9 @@
 //                                except the ones below; files at the top (mod.ini, a readme, pictures) are not.
 //   mods/<name>/<x.afs>/<entry>  one entry of an archive (bgm/bgm00.afs/12.ogg, se/ev/ev01.afs/ev01_cut00.wav): by
 //                                its stored name or number; audio converted to the game's ADX (step 2)
-//   mods/<name>/textures/        PCSX2 replacement images (before the player's texture pack)
+//   mods/<name>/textures/        PCSX2 replacement images (ahead of the Texture Pack Folder): a texture pack is a mod.
+//                                Also found as replacements/ or SLUS-21503/replacements/ (a PCSX2 pack as shipped),
+//                                or one folder deeper (a zip that unpacks into a folder of its own name); not game files
 //   mods/<name>/patches/*.pnach  PCSX2 patches
 //   mods/<name>/characters/      characters (step 4; not game files)
 // mods/characters (the character folders of before) and folders starting with '.' are not mods.
@@ -33,7 +35,8 @@ namespace kamite::mod_list
         std::vector<std::string> textures; // textures/ images (.png / .dds): file names without extension, lower case,
                                            // sorted (only with details)
         size_t textureCount = 0;           // textures/ images (only with details)
-        bool hasTextures = false;          // a textures/ folder
+        bool hasTextures = false;          // a texture folder (textureFolders)
+        std::vector<std::filesystem::path> textureFolders; // its replacement images' folders (textures/ first)
         std::vector<std::filesystem::path> patches; // patches/*.pnach, by name
         bool hasCharacters = false;        // a characters/ folder
     };

@@ -22,6 +22,8 @@ namespace ps2x::hotkeys
         FpsOverlay,  // F3
         Fullscreen,  // F11
         HudLayout,   // F7: 16:9 / 4:3 HUD
+        ToggleTextures, // T: replacement textures (mods, texture packs) on / off, live (kamite/hd_textures.cpp)
+        ReloadTextures, // Shift+T: the replacement textures read again from their folders
         Dump2D,      // F6: one frame's 2D to the log
         ReloadPnach, // F4
         RamDump,     // F8: RAM + VU1 trace

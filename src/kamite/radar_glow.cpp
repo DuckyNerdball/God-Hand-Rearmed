@@ -47,10 +47,11 @@ namespace kamite::radar_glow
         uint8_t *g_ram = nullptr;
         bool g_captured = false, g_built = false, g_warned = false, g_fromDisc = false;
         std::vector<uint8_t> g_origData, g_origClut, g_glowData, g_glowClut;
-        // The other route's glow (K, Nov 7: a save state made with the pack holds the full route's marked CLUT; loaded
-        // with replacement textures off, the CLUT was not recognised and never swapped while the texels were, so the
-        // PS2-resolution band showed through the original colours, speckled). Recognised either way, and replaced.
-        std::vector<uint8_t> g_altData, g_altClut, g_markedClut;
+        // Both routes' glows, picked each vblank by whether the replacement textures are on (K, Nov 22: switched live
+        // with T): native = the PS2-resolution band (the PS2 art, rope rings and all), full = the pack's radar with the
+        // glow (its CLUT marked; empty when the layers have no PNG for the radar). Either is recognised in RAM and
+        // replaced (K, Nov 7: a save state made with the pack holds the full route's marked CLUT).
+        std::vector<uint8_t> g_nativeData, g_nativeClut, g_fullData, g_fullClut, g_markedClut;
         std::vector<uint16_t> g_offsets; // texel (row-major) -> byte in the payload
 
         uint32_t rd32(uint32_t address)
@@ -277,8 +278,8 @@ namespace kamite::radar_glow
                 KM_WARN(Game, "radar glow: could not write the full-resolution glow image; drawn at the PS2's resolution");
                 return false;
             }
-            g_glowData = g_origData;
-            g_glowClut = std::move(marked);
+            g_fullData = g_origData;
+            g_fullClut = std::move(marked);
             KM_INFO(Game, "radar glow: full resolution, over the pack's radar (" << image.width << "x" << image.height << ", disc at "
                                                                                  << disc.cx << "," << disc.cy << " r " << disc.radius << ")");
             return true;
@@ -305,11 +306,16 @@ namespace kamite::radar_glow
             makeOffsets();
             makeMarkedClut();
             buildNative();
-            g_altData = g_glowData; // with the pack, the other route's (PS2-resolution) glow
-            g_altClut = g_glowClut;
-            if (!buildFull())
-                g_altClut = g_markedClut.empty() ? g_origClut : g_markedClut; // without: the full route's CLUT
+            g_nativeData = g_glowData;
+            g_nativeClut = g_glowClut;
+            buildFull();
             g_built = true;
+        }
+
+        // The glow for now: the full route while the replacement textures are on and it exists.
+        bool fullNow()
+        {
+            return !g_fullClut.empty() && hd_textures::packOn();
         }
 
         bool shaMatches(const uint8_t *data, const uint8_t *clut)
@@ -342,10 +348,16 @@ namespace kamite::radar_glow
         {
             return std::memcmp(data, a.data(), a.size()) == 0 || std::memcmp(data, b.data(), b.size()) == 0;
         }
-        // Either route's version (the original, this route's glow, the other route's glow).
-        bool knownAny(const uint8_t *bytes, const std::vector<uint8_t> &a, const std::vector<uint8_t> &b, const std::vector<uint8_t> &c)
+        // Any version (the original, either route's glow; the marked CLUT even when the full route was not built: a
+        // state made with a pack loaded without one).
+        bool knownData(const uint8_t *bytes)
         {
-            return known(bytes, a, b) || (!c.empty() && std::memcmp(bytes, c.data(), c.size()) == 0);
+            return known(bytes, g_origData, g_nativeData) || (!g_fullData.empty() && std::memcmp(bytes, g_fullData.data(), kPayloadBytes) == 0);
+        }
+        bool knownClut(const uint8_t *bytes)
+        {
+            return known(bytes, g_origClut, g_nativeClut) || (!g_fullClut.empty() && std::memcmp(bytes, g_fullClut.data(), kClutBytes) == 0) ||
+                   (!g_markedClut.empty() && std::memcmp(bytes, g_markedClut.data(), kClutBytes) == 0);
         }
 
         void onVblank()
@@ -363,9 +375,7 @@ namespace kamite::radar_glow
                 // From the disc: the radar as on the disc, or already glowing (K Nov 4: a save state made while the free
                 // camera was on holds the glow, and the radar was never taken over again, so the glow stayed on in brawl
                 // mode; as the prompt sheets, 3373e0d).
-                const bool same = g_fromDisc ? (knownAny(data, g_origData, g_glowData, g_altData) &&
-                                                knownAny(clut, g_origClut, g_glowClut, g_altClut))
-                                             : shaMatches(data, clut);
+                const bool same = g_fromDisc ? (knownData(data) && knownClut(clut)) : shaMatches(data, clut);
                 if (!same)
                 {
                     if (!g_warned)
@@ -388,11 +398,12 @@ namespace kamite::radar_glow
             if (!g_built)
                 return;
             const bool glow = modern::freeCameraNow(); // K, Nov 3: the glow marks the free camera, not the original
-
-            const std::vector<uint8_t> &wantData = glow ? g_glowData : g_origData, &wantClut = glow ? g_glowClut : g_origClut;
-            if (std::memcmp(data, wantData.data(), kPayloadBytes) != 0 && knownAny(data, g_origData, g_glowData, g_altData))
+            const bool full = fullNow();
+            const std::vector<uint8_t> &wantData = !glow ? g_origData : full ? g_fullData : g_nativeData,
+                                       &wantClut = !glow ? g_origClut : full ? g_fullClut : g_nativeClut;
+            if (std::memcmp(data, wantData.data(), kPayloadBytes) != 0 && knownData(data))
                 std::memcpy(data, wantData.data(), kPayloadBytes);
-            if (std::memcmp(clut, wantClut.data(), kClutBytes) != 0 && knownAny(clut, g_origClut, g_glowClut, g_altClut))
+            if (std::memcmp(clut, wantClut.data(), kClutBytes) != 0 && knownClut(clut))
                 std::memcpy(clut, wantClut.data(), kClutBytes);
         }
     }

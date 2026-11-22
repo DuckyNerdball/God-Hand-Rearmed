@@ -619,7 +619,7 @@ namespace kamite::button_prompts
             hd_textures::Image disc; // the disc's art at 1x (when ours must go and the pack has none)
         };
         StickSheet g_stickSheet;
-        int g_sticksShown = -1; // builder thread: what the GS has (set * 2 + Modern; -1: the disc's or the pack's)
+        int g_sticksShown = -1; // builder thread: what the GS has ((set * 2 + Modern) * 2 + pack on; -1: none yet)
 
         bool loadStickSheet()
         {
@@ -659,7 +659,10 @@ namespace kamite::button_prompts
             if (!hd_textures::enabled() || !loadStickSheet())
                 return;
             const bool art = set != prompt_hd::Set::PlayStation && set != prompt_hd::Set::Keyboard;
-            const int want = static_cast<int>(set) * 2 + (modern ? 1 : 0);
+            // PlayStation and keys show the pack's art while the replacement textures are on, the disc's while off (K,
+            // Nov 22: switched live).
+            const bool pack = !art && hd_textures::packOn();
+            const int want = (static_cast<int>(set) * 2 + (modern ? 1 : 0)) * 2 + (pack ? 1 : 0);
             if (want == g_sticksShown)
                 return;
             namespace fs = std::filesystem;
@@ -671,11 +674,11 @@ namespace kamite::button_prompts
             {
                 // The pack's art (a PNG; a DDS can't be read here) or the disc's, the LEFT cell (and with Modern the
                 // RIGHT one) cleared.
-                const fs::path pack = hd_textures::packFile(g_stickSheet.name);
-                std::string ext = pack.extension().string();
+                const fs::path packed = pack ? hd_textures::packFile(g_stickSheet.name) : fs::path();
+                std::string ext = packed.extension().string();
                 for (char &c : ext)
                     c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                if (pack.empty() || ext != ".png" || !hd_textures::loadPng(pack, image) || image.width < 2 || image.height < 1)
+                if (packed.empty() || ext != ".png" || !hd_textures::loadPng(packed, image) || image.width < 2 || image.height < 1)
                     image = g_stickSheet.disc;
                 const int half = image.width / 2;
                 for (int y = 0; y < image.height; ++y)
@@ -704,7 +707,7 @@ namespace kamite::button_prompts
             uint32_t lastGeneration = 0u;
             bindings::Device lastDevice = bindings::Device::Keys;
             bindings::PadStyle lastStyle = bindings::PadStyle::Unknown;
-            bool lastModern = false;
+            bool lastModern = false, lastPack = hd_textures::packOn();
             menu_buttons::PromptMode lastMode = menu_buttons::PromptMode::Play;
             bool built = false;
             uint64_t version = 0u;
@@ -728,13 +731,15 @@ namespace kamite::button_prompts
                 const bool crateNew = g_crateRebuild.exchange(false, std::memory_order_acq_rel);
                 const bool setNew = g_promptsRebuild.exchange(false, std::memory_order_acq_rel);
                 const bool modern = modern::enabled();
+                const bool pack = hd_textures::packOn(); // the stick sheet's PlayStation / keys art follows it
                 // The keyboard's art follows the menu layer (its fixed keys); a controller's never changes with it.
                 const menu_buttons::PromptMode mode =
                     device == bindings::Device::Keys ? menu_buttons::promptMode() : menu_buttons::PromptMode::Play;
                 if (built && !crateNew && !setNew && generation == lastGeneration && device == lastDevice && style == lastStyle &&
-                    modern == lastModern && mode == lastMode)
+                    modern == lastModern && mode == lastMode && pack == lastPack)
                     continue;
                 lastModern = modern;
+                lastPack = pack;
                 lastMode = mode;
                 built = true;
                 lastGeneration = generation;

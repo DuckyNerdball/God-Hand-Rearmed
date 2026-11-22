@@ -455,6 +455,11 @@ const std::vector<std::string> &pcsx2gs::FirstTextureFolders()
     return g_firstTextureFolders;
 }
 
+void pcsx2gs::ClearFirstTextureFolders()
+{
+    g_firstTextureFolders.clear();
+}
+
 void pcsx2gs::SetVerticalFrequency(double hz)
 {
     g_verticalFrequency = hz;

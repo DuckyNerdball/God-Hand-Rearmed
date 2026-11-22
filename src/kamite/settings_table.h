@@ -78,6 +78,8 @@ namespace kamite::settings
         // Listed only while a Modern control style is picked (the free camera's own settings; K, Nov 21): in the launcher
         // either device's, in game the device in use's (modernStyle).
         bool freeCamera = false;
+        // In game only: the launcher draws it elsewhere (Replacement Textures: the Mods tab's Texture Packs row).
+        bool gameOnly = false;
     };
     inline constexpr int8_t kPad = 0, kKeyboard = 1;
 

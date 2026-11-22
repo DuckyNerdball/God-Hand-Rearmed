@@ -335,14 +335,16 @@ namespace kamite::mods
                 patches += added;
             }
         }
-        // Textures: the lowest mod first; then the player's pack; then the extra folders (characters, the port's own).
+        // Textures: the lowest mod first; then the Texture Pack Folder; then the extra folders (characters, the port's
+        // own). hd_textures::install adds the pack and decides whether they are on (the live switch).
         for (auto it = g_mods.rbegin(); it != g_mods.rend(); ++it)
-            if (it->enabled && it->hasTextures)
-                first += (first.empty() ? "" : "|") + native(it->path / "textures");
+            if (it->enabled)
+                for (const fs::path &folder : it->textureFolders)
+                    first += (first.empty() ? "" : "|") + native(folder);
         if (!first.empty())
         {
             setEnv("PS2X_PCSX2_TEXTURE_FIRST", first);
-            KM_INFO(Boot, "mods: texture folders ahead of the texture pack: " << first);
+            KM_INFO(Boot, "mods: texture folders: " << first);
         }
         return patches;
     }

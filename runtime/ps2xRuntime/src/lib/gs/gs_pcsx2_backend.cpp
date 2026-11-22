@@ -992,37 +992,28 @@ bool GSPcsx2Backend::EnsureOpen()
         if (value)
             options += std::string(option.key) + "=" + value + ";";
     }
-    // HD textures (PS2X_PCSX2_TEXTURES=0 turns them off): PCSX2's replacement packs, from PS2X_PCSX2_TEXTURE_DIR (the
-    // folder holding replacements/) or textures/SLUS-21503 next to GHR.exe or up to three folders above it (the
-    // repository's textures/ when GHR.exe runs from build/port/bin, as with game/).
+    // HD textures (PS2X_PCSX2_TEXTURES=0 turns them off): a PCSX2 replacement pack from PS2X_PCSX2_TEXTURE_DIR (the
+    // folder holding replacements/). The game layer (kamite hd_textures.cpp) finds its packs itself (mods, the Texture
+    // Pack Folder) and hands them over as PS2X_PCSX2_TEXTURE_FIRST, so it can switch them while running.
     if (envInt("PS2X_PCSX2_TEXTURES", 1) != 0)
     {
         const char *textureDir = std::getenv("PS2X_PCSX2_TEXTURE_DIR");
-        std::filesystem::path folder = (textureDir && *textureDir) ? std::filesystem::path(textureDir)
-                                                                 : dir / "textures" / "SLUS-21503";
-        if (!(textureDir && *textureDir))
+        if (textureDir && *textureDir)
         {
-            std::filesystem::path base = dir;
-            for (int up = 0; up < 4; ++up, base = base.parent_path())
-            {
-                if (std::filesystem::is_directory(base / "textures" / "SLUS-21503" / "replacements", ec))
-                {
-                    folder = base / "textures" / "SLUS-21503";
-                    break;
-                }
-            }
+            const std::filesystem::path folder(reinterpret_cast<const char8_t *>(textureDir));
+            if (std::filesystem::is_directory(folder / "replacements", ec))
+                options += "texture_dir=" + utf8(folder) + ";";
+            else
+                std::fprintf(stderr, "[gs] PS2X_PCSX2_TEXTURE_DIR: no replacements folder in %s\n", utf8(folder).c_str());
         }
-        if (std::filesystem::is_directory(folder / "replacements", ec))
-            options += "texture_dir=" + utf8(folder) + ";";
-        else if (textureDir && *textureDir)
-            std::fprintf(stderr, "[gs] PS2X_PCSX2_TEXTURE_DIR: no replacements folder in %s\n", utf8(folder).c_str());
     }
     // PS2X_PCSX2_TEXTURE_EXTRA: more replacement folders ('|' between), e.g. a character mod's own textures (kamite
     // sets it for [Mods] Character); used with or without a texture pack.
     if (const char *extra = std::getenv("PS2X_PCSX2_TEXTURE_EXTRA"); extra && *extra)
         options += std::string("texture_extra=") + extra + ";";
-    // PS2X_PCSX2_TEXTURE_FIRST: folders searched before the texture pack ('|' between, the winner first): the enabled
-    // mods' textures/ (kamite mods.cpp), so a mod's image wins over the pack's of the same name.
+    // PS2X_PCSX2_TEXTURE_FIRST: folders searched before the texture pack ('|' between, the winner first): the texture
+    // folders of the enabled mods, then the Texture Pack Folder (kamite hd_textures.cpp); switched live with the
+    // "texture_first" option (SetOption).
     if (const char *first = std::getenv("PS2X_PCSX2_TEXTURE_FIRST"); first && *first)
         options += std::string("texture_first=") + first + ";";
     params.options = options.c_str();

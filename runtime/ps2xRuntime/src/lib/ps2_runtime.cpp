@@ -3746,6 +3746,10 @@ void PS2Runtime::run()
             ps2x::timecontrol::step();
         if (!shortcutsOff && ps2x::hotkeys::pressed(Action::HudLayout))
             ps2x::hotkeys::fire(Action::HudLayout); // the game layer's HUD module takes it on the game thread
+        if (!shortcutsOff && ps2x::hotkeys::pressed(Action::ToggleTextures))
+            ps2x::hotkeys::fire(Action::ToggleTextures); // the game layer switches the texture folders (kamite hd_textures)
+        if (!shortcutsOff && ps2x::hotkeys::pressed(Action::ReloadTextures))
+            ps2x::hotkeys::fire(Action::ReloadTextures);
         if (!shortcutsOff && ps2x::hotkeys::pressed(Action::Dump2D))
             ps2x::hotkeys::fire(Action::Dump2D);
         if (!shortcutsOff && ps2x::hotkeys::pressed(Action::RecordCase))

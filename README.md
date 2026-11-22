@@ -179,7 +179,7 @@ Defaults for new installs. Everything is rebindable in **Options > Controls** in
 
 In menus the keyboard works as you'd expect: arrows or WASD to move, Enter / Space to confirm, Esc / Backspace to go
 back, Q / E to switch tabs. **F2** opens the developer menu (live camera, poses, debug switches); **F3** the FPS counter;
-**F11** fullscreen.
+**T** replacement textures on / off (**Shift+T** reloads them); **F11** fullscreen.
 
 ## Options
 
@@ -198,12 +198,14 @@ Every option, with the same help text you'll see in the launcher and in game.
   - **Camera Tilt:** At a wider field of view, the camera also rises and looks down at Gene by this much: more of the floor ahead, less sky. *None / 5 degrees / 10 degrees / 15 degrees*
 - **Steady Idle Cam:** Whether the camera bobs with Gene. (F2 > Camera switches it while playing)
 - **See Through:** Instead of removing walls, the camera sees through them around Gene and enemies. (F2 > Camera sizes it while playing) `Rearmed+`
+- **Invert Camera Y-Axis:** Freecam: push up or move the mouse up to look down. Brawling dodges stay as they are.
 
 **Controller**
 
 - **Vibration:** Controller rumble. Girls know what it's for.
 - **Left Stick Deadzone:** How far the left stick must move before it counts. Raise it if Gene walks on his own. *0% to 50%*
 - **Right Stick Deadzone:** How far the right stick must move before it counts. Raise it if the camera drifts or Gene dodges on his own. *0% to 50%*
+- **Swap Sticks:** For lefties: the right stick moves Gene, the left one dodges and aims. Stick presses: swap them in Button Mapping.
 - **Menu Controls:** Western: bottom button confirms; right cancels. Japanese: right button confirms; bottom cancels. *Western / Japanese / Classic*
 
 </details>
@@ -333,7 +335,7 @@ Every option, with the same help text you'll see in the launcher and in game.
 
 **Texture Packs**
 
-- **Replacement Textures:** HD texture packs in PCSX2's format.
+- **Replacement Textures:** Textures from your mods and texture packs. Press [T] in game to switch them on or off.
 
 </details>
 <!-- END GENERATED: options -->
@@ -358,8 +360,10 @@ The exe isn't signed (certificates cost money; this is free). **More info > Run 
 Yes, natively: the AppImage or the tar.gz ([Linux and Steam Deck](#linux-and-steam-deck)). No Proton needed.
 
 **Will my PCSX2 texture pack work?**
-Yes: packs in PCSX2's format (a `replacements` folder). Put it in `textures/SLUS-21503` next to GHR.exe, or point the
-launcher's **Mods > Texture Packs** at it.
+Yes: packs in PCSX2's format (a `replacements` folder). A texture pack is a mod: put its folder in `mods` next to
+GHR.exe as it comes (or **Install from zip** on the launcher's Mods tab), then switch it on or off in the Mods list.
+Loose images go in `mods/Loose Textures/textures`. Press **T** in game to switch all replacement textures on or off,
+**Shift+T** to reload them after editing one. A pack kept elsewhere: point **Mods > Texture Pack Folder** at it.
 
 **Can I bring my PCSX2 saves?**
 The port keeps its own memory card in `memcards\mc0`.

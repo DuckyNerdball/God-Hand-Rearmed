@@ -154,6 +154,7 @@ namespace kamite::settings
         // Modifiers.
         constexpr Setting live(Setting s) { return s.live = true, s; }
         constexpr Setting gameList(Setting s) { return s.gameList = true, s; }
+        constexpr Setting gameOnly(Setting s) { return s.gameOnly = true, s; }
         // A second row for one key (its own id), e.g. a sub-option whose text differs by its parent's value.
         constexpr Setting withId(Setting s, const char *id) { return s.id = id, s; }
         constexpr Setting note(Setting s, const char *text) { return s.note = text, s; }
@@ -266,6 +267,12 @@ namespace kamite::settings
                                      "1x: 448p | 2x: 896p | 3x: 1344p | 4x: 1792p", "Video", "InternalResolution", "3",
                                      kResolutions),
                               kOnLeaveNote))),
+        // The mods' and texture packs' textures, switched live (K, Nov 22; the T hotkey: "[T]" shows its binding). The
+        // launcher keeps it on its Mods tab, with the Texture Pack Folder.
+        live(gameOnly(withId(toggle(Tab::Graphics, "Textures", "Replacement Textures",
+                                    "Textures from your mods and texture packs.\nPress [T] in game to switch them on or off.",
+                                    "Runtime", "PS2X_PCSX2_TEXTURES", true),
+                             "ReplacementTextures"))),
         // Help texts: K's (Nov 17).
         live(gameList(choice(Tab::Graphics, "Textures", "Texture Filtering",
                              "PS2: the game's original texture smoothing.\nCrunchy: unfiltered 3D. | Dangerously Crunchy: the UI too.",
@@ -425,7 +432,8 @@ namespace kamite::settings
         custom("Character", Tab::Mods, "Character", "Character",
                "Who you play as. Currently, other characters use Gene's moves and his God Hand."),
         custom("Costume", Tab::Mods, "Character", "Costume", "What your character wears."),
-        custom("Textures", Tab::Mods, "Texture Packs", "Replacement Textures", "HD texture packs in PCSX2's format."),
+        custom("Textures", Tab::Mods, "Texture Packs", "Replacement Textures",
+               "Textures from your mods and texture packs.\nPress [T] in game to switch them on or off."),
     };
     const size_t kSettingCount = std::size(kSettings);
 

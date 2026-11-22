@@ -13,6 +13,7 @@
 // the character (a disc overlay). The aspect ratio, display mode, internal resolution and post effects change in the
 // OPTIONS screen (Nov 13). The Gameplay enhancements are all live (Nov 13; Wild Curry Funk from the next room).
 #include "kamite/dev_menu.h"
+#include "kamite/hd_textures.h"
 #include "kamite/buck_breaker.h"
 #include "kamite/frame_patches.h"
 #include "kamite/game_options.h"
@@ -143,7 +144,7 @@ namespace kamite::dev_menu
             launcherOnly(ui, "Graphics API", env("PS2X_PCSX2_API", "vulkan") != "dx11" ? "Vulkan" : "Direct3D 11");
             inOptions(ui, "Internal resolution", env("PS2X_GS_SCALE", "3") + "x");
             launcherOnly(ui, "Post effects", env("PS2X_PCSX2_NATIVE_SCALING", "upscaled"));
-            launcherOnly(ui, "HD textures", envOn("PS2X_PCSX2_TEXTURES", true) ? "on, " + env("PS2X_PCSX2_TEXTURE_DIR", "textures/SLUS-21503") : "off");
+            inOptions(ui, "Replacement textures", std::string(hd_textures::packOn() ? "on, " : "off, ") + hd_textures::summary());
             launcherOnly(ui, "Character", env("KAMITE_CHARACTER", "gene"));
         }
 

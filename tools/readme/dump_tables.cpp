@@ -44,10 +44,14 @@ int main()
         std::printf(",\"band\":"), str(presets::kText[p].band), std::putchar('}');
     }
     std::printf("],\"settings\":[");
+    bool firstSetting = true;
     for (size_t i = 0; i < settings::kSettingCount; ++i)
     {
         const settings::Setting &s = settings::kSettings[i];
-        std::printf(i ? ",\n{" : "\n{");
+        if (s.gameOnly)
+            continue; // listed where the launcher shows it (Replacement Textures: the Mods tab)
+        std::printf(firstSetting ? "\n{" : ",\n{");
+        firstSetting = false;
         std::printf("\"id\":"), str(s.id);
         std::printf(",\"tab\":"), str(settings::tabName(s.tab));
         std::printf(",\"category\":"), str(s.category);

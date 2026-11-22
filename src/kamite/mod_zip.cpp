@@ -274,8 +274,20 @@ namespace kamite::mod_zip
                 outer.push_back(r);
         if (outer.empty())
         {
-            plan.error = "has no mod.ini: it isn't a GHR mod (a mod's zip holds a mod.ini beside its files)";
-            return plan;
+            // A texture pack as PCSX2 packs come (K, Nov 22: a texture pack is a mod): a replacements/ folder somewhere
+            // (SLUS-21503/replacements/, Some Pack/replacements/ ...) makes the whole zip one mod, named after the zip;
+            // mod_list finds its texture folder (mod_list.h).
+            const bool pack = std::any_of(entries.begin(), entries.end(), [](const Entry &e) {
+                const std::string name = lower(e.name);
+                return name.rfind("replacements/", 0) == 0 || name.find("/replacements/") != std::string::npos;
+            });
+            if (!pack)
+            {
+                plan.error = "has no mod.ini: it isn't a GHR mod or a texture pack (a mod's zip holds a mod.ini beside "
+                             "its files, a texture pack's a replacements folder)";
+                return plan;
+            }
+            outer.push_back(std::string());
         }
         std::sort(outer.begin(), outer.end());
         std::map<std::string, std::string> installed; // lower case -> as on disk
@@ -293,6 +305,17 @@ namespace kamite::mod_zip
             m.folder = folder;
             std::vector<uint8_t> text;
             std::string error;
+            if (!ini.count(root)) // a texture pack without one: named after the zip
+            {
+                m.name = m.folder;
+                if (const auto it = installed.find(lower(m.folder)); it != installed.end())
+                {
+                    m.exists = true;
+                    m.folder = it->second;
+                }
+                plan.mods.push_back(std::move(m));
+                continue;
+            }
             if (ini[root]->flags & 1u)
             {
                 plan.error = "is encrypted (a password-protected zip)";

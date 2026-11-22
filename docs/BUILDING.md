@@ -152,8 +152,8 @@ the Blender pipeline that put Xavier onto Gene's skeleton (`tools/models/xavier/
 
 ### HD textures
 
-Any PCSX2 texture pack for the game (USA, SLUS-21503) works: set its folder in Graphics, or put it at `textures/SLUS-21503/`
-next to `GHR.exe`.
+Any PCSX2 texture pack for the game (USA, SLUS-21503) works: put it in `mods/` as a mod (its folder as it comes), or set
+**Mods > Texture Pack Folder**. A dev build run from `build/port/bin` also finds the repository's `textures/SLUS-21503/`.
 
 ---
 

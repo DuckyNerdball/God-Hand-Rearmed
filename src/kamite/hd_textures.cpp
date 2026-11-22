@@ -2,6 +2,8 @@
 #include "kamite/hd_textures.h"
 
 #include "kamite/log.h"
+#include "runtime/gs/gs_pcsx2_backend.h"
+#include "runtime/ps2_game_menu.h"
 
 // raylib's PNG reader/writer (stb_image, already in the exe through the runtime's window). Its global ::Image is a
 // different type from hd_textures::Image.
@@ -12,6 +14,8 @@
 #include "../../thirdparty/pcsx2/3rdparty/include/xxhash.h"
 
 #include <algorithm>
+#include <atomic>
+#include <mutex>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -28,7 +32,10 @@ namespace kamite::hd_textures
     {
         bool g_enabled = false;
         fs::path g_generated, g_exeDir;
-        std::unordered_map<std::string, fs::path> g_pack; // lower-case stem -> file
+        std::unordered_map<std::string, fs::path> g_pack; // lower-case stem -> file (the winning layer's)
+        std::vector<fs::path> g_layers;                   // the winner first
+        std::string g_layersText;                         // '|' between: the GS's texture_first while on
+        std::atomic<bool> g_packOn{true};
 
         std::string utf8(const fs::path &p)
         {
@@ -97,34 +104,55 @@ namespace kamite::hd_textures
     void install(const fs::path &exeDir)
     {
         g_exeDir = exeDir;
-        // The port's own images (the button prompts) are always used; "Use replacement textures" off only leaves the
-        // texture pack out (K, Nov 1: the prompts the port drew at the PS2's resolution are gone).
+        // The port's own images (the button prompts) are always used; "Replacement Textures" off only leaves the mods'
+        // and packs' out (K, Nov 1 and Nov 22).
         const char *textures = std::getenv("PS2X_PCSX2_TEXTURES");
-        const bool packOn = !(textures && *textures == '0');
+        g_packOn.store(!(textures && *textures == '0'), std::memory_order_relaxed);
         std::error_code ec;
-        g_generated = exeDir / "cache" / "hd-textures";
-        fs::create_directories(g_generated, ec);
-        if (!fs::is_directory(g_generated, ec))
-        {
-            KM_WARN(Boot, "hd textures: could not create " << utf8(g_generated));
-            return;
-        }
-        // The port's images are written again each start; old ones (another binding, another version) go.
-        for (const auto &entry : fs::directory_iterator(g_generated, ec))
-            if (entry.is_regular_file(ec))
-                fs::remove(entry.path(), ec);
-        g_enabled = true;
-        const char *extra = std::getenv("PS2X_PCSX2_TEXTURE_EXTRA");
-        std::string folders = extra ? extra : "";
-        folders += (folders.empty() ? "" : "|") + utf8(g_generated);
-        setEnv("PS2X_PCSX2_TEXTURE_EXTRA", folders);
 
-        const char *dir = std::getenv("PS2X_PCSX2_TEXTURE_DIR");
-        const fs::path pack = packOn && dir && *dir ? fs::path(reinterpret_cast<const char8_t *>(dir)) / "replacements" : fs::path();
-        size_t files = 0;
-        if (!pack.empty() && fs::is_directory(pack, ec))
+        // The layers: the mods' texture folders (mods.cpp, the winner first), then the Texture Pack Folder.
+        if (const char *first = std::getenv("PS2X_PCSX2_TEXTURE_FIRST"); first && *first)
         {
-            for (auto it = fs::recursive_directory_iterator(pack, fs::directory_options::skip_permission_denied, ec);
+            const std::string text = first;
+            for (size_t start = 0; start <= text.size();)
+            {
+                const size_t bar = text.find('|', start);
+                const std::string folder = text.substr(start, bar == std::string::npos ? std::string::npos : bar - start);
+                if (!folder.empty())
+                    g_layers.emplace_back(reinterpret_cast<const char8_t *>(folder.c_str()));
+                if (bar == std::string::npos)
+                    break;
+                start = bar + 1;
+            }
+        }
+        fs::path pack;
+        if (const char *dir = std::getenv("PS2X_PCSX2_TEXTURE_DIR"); dir && *dir)
+        {
+            const fs::path folder(reinterpret_cast<const char8_t *>(dir));
+            pack = fs::is_directory(folder / "replacements", ec) ? folder / "replacements" : folder;
+            if (!fs::is_directory(pack, ec))
+            {
+                KM_WARN(Boot, "hd textures: the Texture Pack Folder " << utf8(folder) << " is not there");
+                pack.clear();
+            }
+        }
+        else
+        {
+            fs::path base = exeDir;
+            for (int up = 0; up < 4 && !base.empty(); ++up, base = base.parent_path())
+                if (fs::is_directory(base / "textures" / "SLUS-21503" / "replacements", ec))
+                {
+                    pack = base / "textures" / "SLUS-21503" / "replacements";
+                    break;
+                }
+        }
+        if (!pack.empty())
+            g_layers.push_back(pack);
+        size_t files = 0;
+        for (const fs::path &layer : g_layers)
+        {
+            g_layersText += (g_layersText.empty() ? "" : "|") + utf8(layer);
+            for (auto it = fs::recursive_directory_iterator(layer, fs::directory_options::skip_permission_denied, ec);
                  !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
             {
                 if (!it->is_regular_file(ec))
@@ -132,12 +160,64 @@ namespace kamite::hd_textures
                 const std::string ext = lower(utf8(it->path().extension()));
                 if (ext != ".png" && ext != ".dds")
                     continue;
-                g_pack.emplace(lower(utf8(it->path().stem())), it->path());
-                ++files;
+                if (g_pack.emplace(lower(utf8(it->path().stem())), it->path()).second)
+                    ++files;
             }
         }
-        KM_INFO(Boot, "hd textures: " << files << " images in the texture pack" << (files ? "" : packOn ? " (none: no pack set or found)" : " (replacement textures off)")
+        // The GS's folders for the start: the layers while on, none while off; PCSX2's own pack folder never (the
+        // layers hold it).
+        setEnv("PS2X_PCSX2_TEXTURE_FIRST", g_packOn.load(std::memory_order_relaxed) ? g_layersText : std::string());
+        setEnv("PS2X_PCSX2_TEXTURE_DIR", "");
+
+        g_generated = exeDir / "cache" / "hd-textures";
+        fs::create_directories(g_generated, ec);
+        if (!fs::is_directory(g_generated, ec))
+            KM_WARN(Boot, "hd textures: could not create " << utf8(g_generated));
+        else
+        {
+            // The port's images are written again each start; old ones (another binding, another version) go.
+            for (const auto &entry : fs::directory_iterator(g_generated, ec))
+                if (entry.is_regular_file(ec))
+                    fs::remove(entry.path(), ec);
+            g_enabled = true;
+            const char *extra = std::getenv("PS2X_PCSX2_TEXTURE_EXTRA");
+            std::string folders = extra ? extra : "";
+            folders += (folders.empty() ? "" : "|") + utf8(g_generated);
+            setEnv("PS2X_PCSX2_TEXTURE_EXTRA", folders);
+        }
+        KM_INFO(Boot, "hd textures: " << summary() << (g_packOn.load(std::memory_order_relaxed) ? ", on" : ", off (Replacement Textures)")
                                       << "; the port's own in " << utf8(g_generated));
+    }
+
+    bool packOn()
+    {
+        return g_packOn.load(std::memory_order_relaxed);
+    }
+
+    void setPackOn(bool on)
+    {
+        g_packOn.store(on, std::memory_order_relaxed);
+        const bool sent = GSPcsx2Backend::SetOption("texture_first", on ? g_layersText.c_str() : "");
+        KM_INFO(Game, "hd textures: replacement textures " << (on ? "on" : "off") << (sent ? "" : " (the GS is not up: from its start)"));
+        ps2x::menu::notify(on ? "Replacement textures: ON" : "Replacement textures: OFF", 2.0f);
+    }
+
+    void reload()
+    {
+        if (!g_packOn.load(std::memory_order_relaxed))
+        {
+            ps2x::menu::notify("Replacement textures are off", 2.0f);
+            return;
+        }
+        GSPcsx2Backend::SetOption("texture_reload", "1");
+        KM_INFO(Game, "hd textures: replacement textures read again");
+        ps2x::menu::notify("Replacement textures reloaded", 2.0f);
+    }
+
+    std::string summary()
+    {
+        return std::to_string(g_layers.size()) + " folder" + (g_layers.size() == 1u ? "" : "s") + ", " + std::to_string(g_pack.size()) +
+               " image" + (g_pack.size() == 1u ? "" : "s");
     }
 
     bool enabled()

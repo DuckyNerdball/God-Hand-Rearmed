@@ -39,6 +39,7 @@
 #include "kamite/function_hooks.h"
 #include "kamite/game_layout.h"
 #include "kamite/hd_textures.h"
+#include "runtime/ps2_hotkeys.h"
 #include "kamite/game_options.h"
 #include "kamite/hud_layout.h"
 #include "kamite/ini_file.h"
@@ -954,6 +955,11 @@ namespace kamite::options_screen
                 setSwayBar(on);
             else if (id == "FpsCounter")
                 ps2_host_display::setFpsCounter(on);
+            else if (id == "ReplacementTextures")
+            {
+                if (on != hd_textures::packOn())
+                    hd_textures::setPackOn(on);
+            }
             else if (id == "ButtonPrompts")
             {
                 prompt_hd::setChoice(static_cast<prompt_hd::Choice>(std::max(settings::choiceIndex(s, value), 0)));
@@ -2495,6 +2501,19 @@ namespace kamite::options_screen
         if (!g_ram)
             return;
         pickupRecordBack(); // the voice preview's line back to the game's pickup sound
+        if (ps2x::hotkeys::take(ps2x::hotkeys::Action::ToggleTextures))
+        {
+            // T: kept as the Replacement Textures option, as if its row had changed (K, Nov 22).
+            if (!g_iniPath.empty())
+                g_ini.load(g_iniPath);
+            const bool on = !hd_textures::packOn();
+            g_ini.setBool("Runtime", "PS2X_PCSX2_TEXTURES", on);
+            if (!g_ini.save())
+                KM_WARN(Game, "options screen: could not write GHR.ini");
+            hd_textures::setPackOn(on);
+        }
+        if (ps2x::hotkeys::take(ps2x::hotkeys::Action::ReloadTextures))
+            hd_textures::reload();
         // A graphics API switch that ended outside the screen's fade (the screen closed with it waiting).
         if (g_apiWatch && !GSPcsx2Backend::GraphicsApiBusy())
             graphicsApiSwitched();

@@ -884,6 +884,29 @@
       }
     },
     {
+      "id": "ReplacementTextures",
+      "label": "Replacement Textures",
+      "help": "Textures from your mods and texture packs. Press [T] in game to switch them on or off.",
+      "group": "Textures",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "Runtime/PS2X_PCSX2_TEXTURES": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "Runtime/PS2X_PCSX2_TEXTURES": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "Runtime/PS2X_PCSX2_TEXTURES": "1"
+      }
+    },
+    {
       "id": "TextureFiltering",
       "label": "Texture Filtering",
       "help": "PS2: the game's original texture smoothing. Crunchy: unfiltered 3D. | Dangerously Crunchy: the UI too.",
