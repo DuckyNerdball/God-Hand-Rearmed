@@ -161,6 +161,10 @@ namespace kamite::hud
         // Measured on K's screenshots (16:9, 1333 px high: 2.98 px a unit): outer radius 55.8 units, the yellow edge
         // at 0.776 of it; a letter at 0.65 about 15 units high, 10 wide.
         constexpr uint32_t kRadarLetters = 0xF0000005u;            // the indicator's own group (radar anchor)
+        // cCockMiddleBoss (bars 0x1406CC, portrait 0x1406FC) as one group: its bars cascade 6 units right per bar (the
+        // Mad Midget Five: bars at x 64, 70, 76, 82, 88), so bars 4 and 5 began past hugsLeft's 15% and went to the
+        // centre while 1-3 kept to the edge (issue #26, K's F6 dump Nov 22). Together they start at the portrait.
+        constexpr uint32_t kMiddleBoss = 0xF0000006u;
         constexpr float kRadarNudgeX = 0.0f, kRadarNudgeY = 8.0f;   // the minimap and the counter
         constexpr float kMoneyExtraY = 8.0f;                       // the counter, past that
         constexpr float kMoneyMinY = 80.0f;                        // the counter's draws (the action prompt above: y < 50)
@@ -656,9 +660,10 @@ namespace kamite::hud
                 return;
             }
             const uint32_t layout = GPR_U32(ctx, 18) & PS2_RAM_MASK;
+            const uint32_t key = caller == 0x001406CCu || caller == 0x001406FCu ? kMiddleBoss : layout;
             const float width = screenWidth(rdram);
             float fallback = 0.5f * width;
-            if (g_last.find(layout) == g_last.end() && g_seen.find(layout) == g_seen.end() && g_known.find(layout) == g_known.end())
+            if (g_last.find(key) == g_last.end() && g_seen.find(key) == g_seen.end() && g_known.find(key) == g_known.end())
             {
                 const int32_t count = static_cast<int32_t>(read32(rdram, layout + idb::kEntNum));
                 const uint32_t entries = read32(rdram, layout + idb::kEnt);
@@ -676,7 +681,7 @@ namespace kamite::hud
                 if (x0 <= x1)
                     fallback = anchorFromExtent(x0, x1, width);
             }
-            g_ctx = Context{true, layout, anchorFor(layout, fallback, width)};
+            g_ctx = Context{true, key, anchorFor(key, fallback, width)};
             g_lastEntry = g_ctx;
         }
 
