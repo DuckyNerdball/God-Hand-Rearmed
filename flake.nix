@@ -55,6 +55,7 @@
             buildInputs = libsFor pkgs;
             nativeBuildInputs = toolsFor pkgs;
           } // args);
+          tfxcc = import ./nix/tfxcc.nix { inherit pkgs lib deps; };
           portable = ghr { portable = true; };
           native = ghr { portable = false; buildTests = true; };
           runtime = runtimeFor pkgs;
@@ -161,6 +162,20 @@
             touch $out
           '';
 
+          # tfx.glsl, the Vulkan renderer's main shader, in the variants tools/linux/check_tfx_variants.py derives from
+          # GSDeviceVK.cpp and the selector structs, compiled by the game's own shaderc build (nix/tfxcc.nix), as a
+          # release build compiles them and again as with UseDebugDevice (--debug).
+          # $out is the report without its "time:" line, so a --rebuild gives the same bytes.
+          tfxVariants = pkgs.runCommand "ghr-tfx-variants" { nativeBuildInputs = [ pkgs.python3 tfxcc ]; } ''
+            rc=0
+            timeout 1800 python3 -I ${src}/tools/linux/check_tfx_variants.py --compiler tfxcc --debug \
+              --jobs ''${NIX_BUILD_CORES:-0} > report.txt 2>&1 || rc=$?
+            cat report.txt
+            [ $rc -ne 124 ] || echo "tfx-variants: no result after 30 minutes (it takes under a minute); stopped"
+            grep -v '^time: ' report.txt > $out
+            exit $rc
+          '';
+
           # GHR's own binaries must need nothing newer than glibc 2.31 and no library the package lacks.
           portableCheck = pkgs.runCommand "ghr-portable-check" { nativeBuildInputs = [ pkgs.python3 ]; } ''
             cd ${src}
@@ -173,7 +188,7 @@
         in
         {
           packages = {
-            inherit portable native;
+            inherit portable native tfxcc;
             linux-stub = linuxStub;
             appimage-runtime = runtime;
             default = linuxStub;
@@ -187,6 +202,7 @@
             packaging-tests = packagingTests;
             flatpak-bundle = flatpakBundle;
             portable-binary = portableCheck;
+            tfx-variants = tfxVariants;
           };
           apps.package = {
             type = "app";
