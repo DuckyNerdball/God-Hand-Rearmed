@@ -1913,6 +1913,8 @@ namespace kamite::native::packet
                     return;
                 }
                 std::memcpy(out, env.at(at, size), size);
+                if (count == 0u) // nothing written yet: RAM is the answer (most reads of a hit path)
+                    return;
                 bool hit = false;
                 for (uint32_t g = at >> 3; g <= (at + size - 1u) >> 3; ++g)
                     hit = hit || written(g);
