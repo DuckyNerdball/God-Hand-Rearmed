@@ -2,6 +2,10 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 22, 2026
+
+- Performance: queueing each model's draw packet and building the UV-scroll packets run as native code.
+
 ## November 21, 2026
 
 - Linux: a Flatpak (GHR-v<version>-Linux-x64.flatpak) next to the AppImage and the tar.gz.

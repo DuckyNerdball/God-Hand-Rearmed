@@ -1801,26 +1801,39 @@ namespace kamite::native::packet
         // manager w (type 2 from w + 0x3D2F0, type 1 from w + 0x3DC50, else from w + 0x3C990; 16-byte entries Ent
         // {name, b, c, v} walked down to a name of -1): a hit returns its VRAM block (e->v). A miss inserts the entry
         // and builds the upload (func_00151990 / 151CC0 / 151688 / 151FA0, texture_slots' hook inside 0x151990), or
-        // returns 0 on a full table: this native takes the hits (every call after a texture's first) and declines a
-        // miss, which the original then runs. The code compares the whole registers: type and name as 64-bit values
-        // (an entry's name sign-extended by its lw), the sentinel -1 the same way.
+        // returns 0 on a full table: this native takes the hits and the full table (nothing written: v0 = 0)
+        // and declines a miss with room (the original runs).
+        // The code compares the whole registers: type and name as 64-bit values (an entry's name sign-extended by its
+        // lw), the sentinel -1 the same way.
         constexpr uint32_t kTextureLookup = 0x151398u;
         constexpr uint32_t kTextureLookupFrame = 0x70u;
         constexpr int kTextureLookupLimit = 256; // entries walked before declining (each table holds 0x95)
 
-        // The hit: v = the entry's VRAM block; backEdges = the loop's backward branches taken (one cycle charge each:
-        // bne at 0x151414 / 0x151484 / 0x1514E4). False on a miss (the original inserts or returns 0) or an unreadable
-        // / endless table.
+        // A hit: v = the entry's VRAM block. A full table (the walk ends on the kind's last entry, still the -1 end:
+        // no room to insert): v = 0, nothing written. backEdges = the loop's backward branches taken, one cycle charge
+        // each (bne at 0x151414 / 0x151484 / 0x1514E4; the default kind's full return is a backward beq at 0x1514F4 too,
+        // types 2 and 1 branch forward). False on a miss with room (the original inserts and builds the upload) or an
+        // unreadable / endless table.
         template <class Env>
         bool textureHit(Reader<Env> &rd, uint32_t w, uint64_t name, uint64_t type, int32_t &v, int &backEdges)
         {
             uint32_t entry = w + (type == 2u ? 0x3D2F0u : type == 1u ? 0x3DC50u : 0x3C990u);
+            const uint32_t last = w + (type == 2u ? 0x3C9A0u : type == 1u ? 0x3D300u : 0x3C040u);
             auto nameAt = [&](uint32_t at) { return static_cast<uint64_t>(static_cast<int64_t>(rd.s32(at))); };
             constexpr uint64_t kEnd = ~0ull; // Ent.name 0xFFFFFFFF
+            auto full = [&] {
+                v = 0;
+                if (type != 2u && type != 1u)
+                    ++backEdges;
+                return rd.ok;
+            };
+            backEdges = 0;
             uint64_t current = nameAt(entry);
-            if (current == kEnd || !rd.ok)
-                return false; // an empty table: a miss
-            for (backEdges = 0;; ++backEdges)
+            if (!rd.ok)
+                return false;
+            if (current == kEnd)
+                return entry == last ? full() : false; // an empty table: a miss with room
+            for (;; ++backEdges)
             {
                 if (current == name)
                 {
@@ -1829,8 +1842,10 @@ namespace kamite::native::packet
                 }
                 entry -= 0x10u;
                 current = nameAt(entry);
-                if (!rd.ok || current == kEnd || backEdges + 1 >= kTextureLookupLimit)
+                if (!rd.ok || backEdges + 1 >= kTextureLookupLimit)
                     return false;
+                if (current == kEnd)
+                    return entry == last ? full() : false;
             }
         }
 
@@ -1857,7 +1872,7 @@ namespace kamite::native::packet
 
         // ---- func_00148BD8: a mesh node's texture registers (decomp src/cod/00148bd8.c) --------------------------
         // void func_00148BD8(cModelNode *node, int type, int name, int mode): the texture `name` of kind `type` from the
-        // texture manager D_004664A0 (func_00151398: inline, its hit path; a miss declines before anything is
+        // texture manager D_004664A0 (func_00151398: inline, its hit / full-table paths; a miss with room declines before anything is
         // written), then for each of the node's meshes (data->+0xA of them, data = node->data) whose entry byte +0x16
         // isn't 0xFF: its packet word (node + 0x300, 16 per frame half) + 0x20 gets the manager's 64-bit register for
         // that texture (func_00151368: the table at D_004664A0 + 0x3DC88, by half and texture) with the TBP field
@@ -2146,18 +2161,20 @@ namespace kamite::native::packet
         add("cModel_nodeLayerScreen", kNodeLayer, &nodeLayer<RealEnv>, &nodeLayer<ShadowEnv>);
 
         // Batches 3-4 (the new method): readable natives from the decomp's C, kRenderPath | kChargeAtEnd, unchecked
-        // (dev replays shadow them; play runs the originals) until K's builds prove them.
-        auto addReadable = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
+        // (dev replays shadow them; play runs the originals) until K's builds prove them. Proven: 0x14C5A0 and 0x14B9A0
+        // (K's 05:35 build of 02ab933: 437K / 6.6K calls shadowed, 0 mismatches, 0 declines). Still shadowed: 0x151398
+        // (its full-table path is new; its hits matched 3.1M times) and 0x148BD8 (no replay calls it yet).
+        auto addReadable = [](const char *name, uint32_t address, bool checked, bool (*real)(RealEnv &, R5900Context *),
                               bool (*shadow)(ShadowEnv &, R5900Context *), uint32_t returns) {
-            NativeFunction fn{name, address, "packet", false, real, shadow, nullptr};
+            NativeFunction fn{name, address, "packet", checked, real, shadow, nullptr};
             fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
             fn.returns = returns;
             registerFunction(fn);
         };
-        addReadable("func_0014C5A0", kQueueModel, &queueModel<RealEnv>, &queueModel<ShadowEnv>, 0u);
-        addReadable("func_00151398", kTextureLookup, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,
+        addReadable("func_0014C5A0", kQueueModel, true, &queueModel<RealEnv>, &queueModel<ShadowEnv>, 0u);
+        addReadable("func_00151398", kTextureLookup, false, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,
                     NativeFunction::kReturnsV0);
-        addReadable("func_00148BD8", kMeshTextures, &meshTextures<RealEnv>, &meshTextures<ShadowEnv>, 0u);
-        addReadable("func_0014B9A0", kScrollPacket, &scrollPacket<RealEnv>, &scrollPacket<ShadowEnv>, 0u);
+        addReadable("func_00148BD8", kMeshTextures, false, &meshTextures<RealEnv>, &meshTextures<ShadowEnv>, 0u);
+        addReadable("func_0014B9A0", kScrollPacket, true, &scrollPacket<RealEnv>, &scrollPacket<ShadowEnv>, 0u);
     }
 }
