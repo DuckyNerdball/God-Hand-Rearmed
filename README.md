@@ -386,7 +386,7 @@ you saw.
 
 ## Coming Soon
 
-- **Android and Mac.**
+- **Linux, Android and Mac!**
 - **Photo mode** with a free camera.
 - **Subtitles** for the cutscenes.
 - **More playable characters.**
