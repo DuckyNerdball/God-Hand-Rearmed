@@ -55,6 +55,7 @@ set(KAMITE_HOST_SOURCES
     kamite/style_sfx.cpp
     kamite/style_pose.cpp
     kamite/buck_breaker.cpp
+    kamite/mash_assist.cpp
     kamite/punish_fit.cpp
     kamite/texture_slots.cpp
     kamite/model_detail.cpp

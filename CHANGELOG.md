@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 22, 2026
 
+- Mash Assistic (Controls > Controller, off): in grabs and Gene's stun, a held face button mashes and a held stick waggles; in Pummel and the other mash moves, a held Circle (B) mashes.
 - Release, build and tester zips name their folders with '/', so they unpack on Linux too (#25).
 - Launcher: backslashes and underscores no longer show the font's credit stamp.
 - Vulkan: a GPU lost while presenting through DXGI switches to Vulkan's own presenting instead of closing the game, and stays so on that GPU and driver (#22).

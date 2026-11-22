@@ -677,6 +677,118 @@ flag = "roulette_no_orbs"
 address = "0x00125B84"
 hook = "km_roulette_grey_no_orbs"
 flag = "roulette_no_orbs"
+# [Game] MashAssist (mash_assist.cpp): just before the first load of the pressed-buttons word (GameWork +0x08) in each
+# read of a struggle (the eleven enemy grabs on Gene + his stun mash-out: held face buttons and the stick) and of a
+# mash move (Gene's eleven mash states: held Circle). Not 0x2DB770 / 0x2DB7A8 (the prompts every one of them calls):
+# func_00236190 prompts after its read.
+[[patches.hooks]] # Gene's stun mash-out func_0011B5F8, its first frame
+address = "0x0011B780"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_0011B5F8, every frame after
+address = "0x0011B874"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_00235DB8
+address = "0x00235F78"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_00236190 (reads at the top of its frame, prompts at the end)
+address = "0x002362C8"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_002363E8
+address = "0x00236520"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_002363E8, its second branch
+address = "0x002365D4"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_002367C0
+address = "0x00236928"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_002367C0, its second branch
+address = "0x002369E0"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_00237078
+address = "0x0023723C"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_002373B0
+address = "0x00237580"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_002380D0
+address = "0x00238290"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_00238898
+address = "0x00238A98"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_00238F10
+address = "0x00239088"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_00239240
+address = "0x002393EC"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_002397C0
+address = "0x00239960"
+hook = "km_mash_assist_struggle"
+flag = "mash_assist"
+[[patches.hooks]] # func_0010F720
+address = "0x0010FCA4"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
+[[patches.hooks]] # func_001162C0 (the spin)
+address = "0x001164E4"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
+[[patches.hooks]] # func_00116A88 (Pummel)
+address = "0x00116CD4"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
+[[patches.hooks]] # func_00116A88 (Pummel), its second step
+address = "0x00117068"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
+[[patches.hooks]] # func_001179C8 (Stinger)
+address = "0x00117C1C"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
+[[patches.hooks]] # func_00118158 (Cobra Twist)
+address = "0x0011835C"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
+[[patches.hooks]] # func_00118690 (Spanking)
+address = "0x00118898"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
+[[patches.hooks]] # func_00118B68
+address = "0x00118DC4"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
+[[patches.hooks]] # func_001191A0
+address = "0x001194B4"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
+[[patches.hooks]] # func_00119750
+address = "0x0011995C"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
+[[patches.hooks]] # func_00119BF0
+address = "0x00119DFC"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
+[[patches.hooks]] # func_0011FD10
+address = "0x001201C8"
+hook = "km_mash_assist_move"
+flag = "mash_assist"
 # [Game] TensionPlacable / OffTheCuff (game_options.cpp): Gene's R2 check in his action chooser func_00123938. The
 # heat mode byte (0x5CB010, non-zero while unleashed) read at 0x123AF4 skips the full-meter test; read as 0 for a
 # placable R2 so the test (cHeatSys_GetHeatLv, wrapped) runs and its branch takes the game's own end: phase 9 instead

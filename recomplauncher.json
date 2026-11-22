@@ -649,6 +649,29 @@
       }
     },
     {
+      "id": "MashAssist",
+      "label": "Mash Assistic",
+      "help": "Are ya winning, dad? Waggle and mash events are easier.",
+      "group": "Controller",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "Game/MashAssist": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "Game/MashAssist": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/MashAssist": "0"
+      }
+    },
+    {
       "id": "MenuButtons",
       "label": "Menu Controls",
       "help": "Western: bottom button confirms; right cancels. Japanese: right button confirms; bottom cancels.",

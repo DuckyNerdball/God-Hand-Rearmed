@@ -46,6 +46,7 @@ def build(work):
     subprocess.check_call(['g++', '-std=c++20', '-O2', '-DIMGUI_USER_CONFIG="pcsx2gs_imconfig.h"', '-I' + work,
                            '-I' + os.path.join(ROOT, 'thirdparty/pcsx2-gs/compat'), '-I' + os.path.join(IMGUI, 'include'),
                            '-I' + os.path.join(ROOT, 'thirdparty/pcsx2-gs/include'), '-I' + os.path.join(ROOT, 'src'),
+                           '-I' + os.path.join(ROOT, 'runtime/ps2xRuntime/include'),
                            '-o', exe, os.path.join(ROOT, 'tools/options/overlay_preview.cpp')] +
                           [os.path.join(ROOT, 'src/kamite', f) for f in ('options_overlay.cpp', 'options_pages.cpp',
                                                                          'settings_table.cpp', 'ini_file.cpp',

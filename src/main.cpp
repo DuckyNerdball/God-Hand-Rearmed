@@ -25,6 +25,7 @@
 #include "kamite/options_screen.h"
 #include "kamite/style_presets.h"
 #include "kamite/buck_breaker.h"
+#include "kamite/mash_assist.h"
 #include "kamite/punish_fit.h"
 #include "kamite/npc_poses.h"
 #include "kamite/sprint_traversal.h"
@@ -462,6 +463,7 @@ namespace
         {"game", "leftstickdeadzone", "PS2X_LEFT_STICK_DEADZONE"},
         {"game", "rightstickdeadzone", "PS2X_RIGHT_STICK_DEADZONE"},
         {"game", "swapsticks", "PS2X_SWAP_STICKS"},
+        {"game", "mashassist", "KAMITE_MASH_ASSIST"},
         {"game", "kbmcontrolstyle", "KAMITE_KBM_CONTROL_STYLE"},
         {"game", "kbmmodernauto", "KAMITE_KBM_MODERN_AUTO"},
         {"game", "cameraspeed", "KAMITE_CAMERA_SPEED"},
@@ -1232,6 +1234,7 @@ int main(int argc, char *argv[])
         kamite::hotkeys::install(exeDir / "GHR.ini"); // [Hotkeys]: the port's shortcut keys
         kamite::dev_menu::install(exeDir / "GHR.ini"); // F2: the dev menu's tab order, Display and Gameplay
         kamite::style_presets::install(runtime); // style presets: d-pad swaps in play, the Techniques screen's style row and L2 / R2
+        kamite::mash_assist::install(runtime);   // [Game] MashAssist: held input mashes in struggles and mash moves
         kamite::buck_breaker::install(runtime);  // [Game] BuckBreaker: the stun punish per style (the Techniques screen's punish slot)
         kamite::punish_fit::install(runtime, exeDir); // with it: the punishes fitted to every body (resources/punish_fit.txt)
         kamite::npc_tools::install(runtime);       // F2: NPCs > Enemies, Target enemy (first: above Pose NPC; dev-only)

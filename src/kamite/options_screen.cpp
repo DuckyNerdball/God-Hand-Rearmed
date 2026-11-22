@@ -46,6 +46,7 @@
 #include "kamite/log.h"
 #include "kamite/keys_page.h"
 #include "kamite/mapping_page.h"
+#include "kamite/mash_assist.h"
 #include "kamite/menu_buttons.h"
 #include "kamite/modern_controls.h"
 #include "kamite/npc_poses.h"
@@ -978,6 +979,8 @@ namespace kamite::options_screen
                 ps2_host_input::setStickDeadzone(id == "LeftStickDeadzone" ? 0 : 1, std::atoi(value.c_str()));
             else if (id == "SwapSticks")
                 ps2_host_input::setSwapSticks(on);
+            else if (id == "MashAssist")
+                mash_assist::setEnabled(on);
             else if (id == "HoldMode")
                 modern::setHoldCam(value == "cam");
             else if (id == "ModernAuto" || id == "ModernAutoHold")

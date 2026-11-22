@@ -20,6 +20,16 @@
 #include <utility>
 #include <vector>
 
+#include "runtime/ps2_hotkeys.h"
+
+// options_pages.cpp names the textures hotkey in its help text (6a74a6b); the real ps2_hotkeys.cpp needs the host
+// backend, so the preview shows the default.
+namespace ps2x::hotkeys
+{
+    Binding binding(Action) { return Binding{84}; } // KEY_T
+    std::string text(Binding) { return "T"; }
+}
+
 namespace
 {
     float g_presentRect[4] = {};
