@@ -92,6 +92,7 @@ KM_RECOMPILED(func_00151FA0_0x151fa0)
 KM_RECOMPILED(func_00309C30_0x309c30)
 KM_RECOMPILED(ps2___muldi3_0x31de10)
 KM_RECOMPILED(func_00148D30_0x148d30)
+KM_RECOMPILED(func_00148690_0x148690)
 KM_RECOMPILED(SearchDataByTwoNames_0x31cdc0)
 KM_RECOMPILED(cIDBase_getSlotPtr_0x1522c0)
 #undef KM_RECOMPILED
@@ -1099,6 +1100,82 @@ namespace
             setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
             return;
         }
+        case 0x148690u: // batches 3-4b: a node's material textures (node at base; +0x400 a name / file / pack by variant)
+        {
+            const uint32_t w = 0x4664A0u;
+            textureManager(w);
+            setU16(w + 0x3F8A8u, static_cast<uint16_t>(g_rng() % 64u));
+            for (uint32_t row = 0; row < 128u * 16u + 8u; row += 4u)
+                setU32(w + 0x3DC88u + row, static_cast<uint32_t>(g_rng()));
+            const uint64_t kind = textureType();
+            const uint32_t start = w + (kind == 2u ? 0x3D2F0u : kind == 1u ? 0x3DC50u : 0x3C990u);
+            uint32_t entries = 0;
+            auto cache = [&](uint32_t name) {
+                setU32(start - 0x10u * entries, name), setU32(start - 0x10u * entries + 12u, static_cast<uint32_t>(g_rng() % 64u));
+                ++entries;
+            };
+            for (uint32_t i = g_rng() % 6u; i > 0; --i)
+                cache(static_cast<uint32_t>(g_rng() % 0x7FFFFu) | 0x100000u);
+            const uint32_t how = static_cast<uint32_t>(g_rng() % 4u); // 0 / 3: one lookup, 1: getSlotPtr, 2: SearchDataByTwoNames
+            const bool misses = g_rng() % 2u == 0u;
+            uint32_t named;
+            if (how == 2u)
+            {
+                named = 0xC8000u + 0x100u * static_cast<uint32_t>(g_rng() % 8u);
+                const uint32_t count = g_rng() % 16u == 0u ? 0u : 1u + static_cast<uint32_t>(g_rng() % 6u);
+                setU32(named, count);
+                for (uint32_t i = 1; i <= count; ++i)
+                {
+                    const uint32_t f = 0xD0000u + 0x800u * ((i - 1u) % 16u);
+                    textureFile(static_cast<int>(g_rng() % 3u), f);
+                    setU32(named + 4u * i, f - named);
+                    const uint32_t pick = static_cast<uint32_t>(g_rng() % 3u);
+                    setU32(named + 4u * (count + i), pick == 0 ? 0x00323354u : pick == 1 ? 0x00324D54u : static_cast<uint32_t>(g_rng()));
+                    if (!misses || g_rng() % 2u)
+                        cache(f);
+                }
+                cache(0u);
+            }
+            else
+            {
+                named = textureFileAt();
+                const int fileKind = how == 1u ? static_cast<int>(g_rng() % 4u) : static_cast<int>(g_rng() % 3u);
+                textureFile(fileKind, named);
+                if (fileKind == 3)
+                    for (uint32_t i = 0; i < 8u; ++i)
+                        cache(named + 0x400u + 0x40u * i);
+                else if (!misses)
+                    cache(named);
+            }
+            setU32(start - 0x10u * entries, 0xFFFFFFFFu);
+            const uint32_t variant = how == 0u ? 0x04000000u : how == 1u ? 0x08000000u : how == 2u ? 0x02000000u : 0u;
+            setU32(base + 0x380u, (static_cast<uint32_t>(g_rng()) & ~0x0E000004u) | variant | (g_rng() % 8u == 0u ? 4u : 0u));
+            setU32(base + 0x400u, named);
+            setU32(base + 0x410u, g_rng() % 4u == 0u ? 0x40000000u : static_cast<uint32_t>(g_rng()) & ~0x40000000u);
+            setByte(base + 0x387u, static_cast<uint8_t>(g_rng()));
+            const uint32_t remap = g_rng() % 2u ? 0u : 0xC9000u + 0x100u * static_cast<uint32_t>(g_rng() % 4u);
+            if (remap)
+                for (uint32_t i = 0; i < 256u; ++i)
+                    setByte(remap + i, g_rng() % 6u == 0u ? 0xFFu : static_cast<uint8_t>(g_rng() % 8u));
+            const uint32_t data = 0x70000u + 0x100u * static_cast<uint32_t>(g_rng() % 32u);
+            const uint32_t n = g_rng() % 8u == 0u ? 0u : 1u + static_cast<uint32_t>(g_rng() % 8u);
+            setU32(base + 0x388u, data | seg);
+            setU32(data + 8u, (n << 16) | static_cast<uint32_t>(g_rng() % 0x10000u));
+            for (uint32_t i = 0; i < 16u; ++i)
+            {
+                const uint32_t entry = 0x100u + 0x20u * static_cast<uint32_t>(g_rng() % 64u);
+                setU32(data + 0x20u + 4u * i, entry);
+                setByte(data + entry + 0x16u, g_rng() % 5u == 0u ? 0xFFu : static_cast<uint8_t>(g_rng() % 8u));
+                for (uint32_t h = 0; h < 2u; ++h)
+                    setU32(base + 0x300u + 0x40u * h + 4u * i, (0x60000u + 0x40u * static_cast<uint32_t>(g_rng() % 256u)) | mirror);
+            }
+            setGpr(ctx, 4, base | seg);
+            setGpr64(ctx, 5, kind);
+            setGpr64(ctx, 6, remap ? remap | (g_rng() % 4u == 0u ? 0x20000000u : 0u) : (g_rng() % 4u == 0u ? 0u : 0u));
+            setGpr64(ctx, 7, g_rng());
+            setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
+            return;
+        }
         default:
             return;
         }
@@ -2015,7 +2092,8 @@ int main(int argc, char **argv)
         {0x148BD8u, &func_00148BD8_0x148bd8},    {0x14B9A0u, &func_0014B9A0_0x14b9a0},
         {0x151630u, &func_00151630_0x151630},    {0x151990u, &func_00151990_0x151990},
         {0x151CC0u, &func_00151CC0_0x151cc0},    {0x151688u, &func_00151688_0x151688},
-        {0x151FA0u, &func_00151FA0_0x151fa0},    {0x148D30u, &func_00148D30_0x148d30}};
+        {0x151FA0u, &func_00151FA0_0x151fa0},    {0x148D30u, &func_00148D30_0x148d30},
+        {0x148690u, &func_00148690_0x148690}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &func_00309C30_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});

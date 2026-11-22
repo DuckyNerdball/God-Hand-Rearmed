@@ -53,3 +53,4 @@ func_00151990,0x00151990,asm,,,,,batch 3-4b: the TIM2 loader (unmatched at 75cb1
 func_00151CC0,0x00151CC0,asm,,,,,batch 3-4b: the TIM3 loader (unmatched at 75cb123); on a Txn; 0x309C30 / 0x151168 / 0x150F68 inline
 func_00151FA0,0x00151FA0,asm,,,,,batch 3-4b: the TM loader (unmatched at 75cb123); on a Txn; 0x151168 / 0x309C30 / 0x150F68 inline
 func_00148D30,0x00148D30,asm,,,,,batch 3-4b: a node's textures by mesh (unmatched at 75cb123); on a Txn; SearchDataByTwoNames (0031cdc0.c) / cIDBase_getSlotPtr (0012b5c0.c) / 0x151398 / 0x151368 inline
+func_00148690,0x00148690,asm,,,,,batch 3-4b: a node's material textures, four variants (unmatched at 75cb123); on a Txn; 0x151398 / 0x1522C0 / 0x31CDC0 / 0x151368 inline

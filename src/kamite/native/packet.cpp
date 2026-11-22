@@ -2916,6 +2916,113 @@ namespace kamite::native::packet
             return true;
         }
 
+        // func_00151398 inline on a Txn (the jal, the walk's loop charges; a miss inserts and builds): v = the block.
+        template <class Env>
+        bool txnLookup(Txn<Env> &t, uint64_t name, uint64_t kind, int32_t &v)
+        {
+            int backEdges;
+            uint32_t missAt = 0u;
+            t.env.call(); // jal 0x151398
+            const bool hit = textureHit(t, kTextureManager, name, kind, v, backEdges, &missAt);
+            if (!hit && (!t.ok || missAt == 0u))
+                return false;
+            for (int k = 0; k < backEdges; ++k)
+                t.env.checkpoint(32u);
+            return hit || txnMiss(t, kTextureManager, name, kind, missAt, v);
+        }
+
+        // ---- func_00148690: a node's material textures (unmatched at 75cb123; batches 3-4b) ------------------------
+        // void func_00148690(cModelNode *node, int kind, u8 *remap, int mode): per mesh, its texture index t (entry byte
+        // +0x16; through `remap` when given and its byte isn't 0xFF, unless the node's +0x410 has 0x40000000; 0 when
+        // dispFlags has 4; 0xFF skips the mesh), the texture by dispFlags: 0x04000000 or none of 0x0A000000: one lookup of
+        // the node's name (+0x400) for the node, the mesh's block = that + t; 0x08000000: cIDBase_getSlotPtr(manager,
+        // +0x400, t) per mesh; 0x02000000: SearchDataByTwoNames(+0x400, "T32", "TM2", t) per mesh. Then the row
+        // (func_00151368) into the mesh's packet word + 0x20, written again with its CBP moved by the node's block offset
+        // (+0x387) and bits 35-36 = mode & 3 (as func_00148BD8). On a Txn.
+        constexpr uint32_t kNodeMaterial = 0x148690u;
+        constexpr uint32_t kNodeMaterialWindow = 0xC0u + kTextureLookupFrame + kBuilderWindow;
+
+        template <class Env>
+        bool nodeMaterial(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kNodeMaterialWindow, kNodeMaterialWindow, stackTop))
+                return false;
+            Txn<Env> t{env, stackTop, stackTop + kNodeMaterialWindow};
+            const uint32_t node = e::u32(ctx, e::a0);
+            const uint64_t kind = e::u64(ctx, e::a1);
+            const uint64_t remap = e::u64(ctx, e::a2);
+            const uint64_t mode = (e::u64(ctx, e::a3) & 3u) << 35;
+            const uint32_t data = t.u32(node + 0x388u);
+            const uint32_t flags = t.u32(node + model::kNodeDispFlags);
+            const uint32_t n = t.u16(data + 0xAu);
+            // 0: one lookup for the node; 1: cIDBase_getSlotPtr per mesh; 2: SearchDataByTwoNames per mesh
+            const int how = (flags & 0x04000000u) ? 0 : (flags & 0x08000000u) ? 1 : (flags & 0x02000000u) ? 2 : 0;
+            int32_t base = 0;
+            if (how == 0 && !txnLookup(t, sx32(t.u32(node + 0x400u)), kind, base))
+                return false;
+            const uint32_t half = t.u32(model::kFrameParity) & 1u;
+            if (n > static_cast<uint32_t>(kMeshTexturesLimit) * 32u)
+                return false;
+            for (uint32_t i = 0; i < n && t.ok; ++i)
+            {
+                if (i != 0u)
+                    env.checkpoint(32u); // bnez at 0x1487F8 / 0x148938 / 0x148A68 / 0x148BA0
+                const uint32_t entry = t.u32(data + 0x20u + 4u * i) + data;
+                uint32_t slot = t.u8(entry + 0x16u);
+                if (remap != 0u)
+                {
+                    const uint32_t at = static_cast<uint32_t>(remap) + slot;
+                    if (t.u8(at) != 0xFFu && (t.u32(node + 0x410u) & 0x40000000u) == 0u)
+                        slot = t.u8(at);
+                }
+                if (t.u32(node + model::kNodeDispFlags) & 4u)
+                    slot = 0u;
+                if (slot == 0xFFu)
+                    continue;
+                const uint32_t word = node + 0x300u + (half << 6) + 4u * i;
+                uint32_t packet;
+                int32_t texture;
+                if (how == 0)
+                {
+                    packet = t.u32(word);
+                    texture = static_cast<int32_t>(static_cast<uint32_t>(base) + slot);
+                }
+                else
+                {
+                    const uint64_t obj = sx32(t.u32(node + 0x400u));
+                    packet = t.u32(word);
+                    uint64_t name;
+                    env.call(); // jal 0x1522C0 / 0x31CDC0
+                    if (how == 1)
+                    {
+                        env.call(); // its jal 0x151630
+                        const uint32_t o = static_cast<uint32_t>(obj);
+                        name = textureClass(t, o) == 3 ? sx32(t.u32(o + (slot << 2) + 0x10u) + o) : obj;
+                    }
+                    else if (!txnSearchTwo(t, obj, kNameT32, kNameTM2, slot, name))
+                        return false;
+                    if (!txnLookup(t, name, kind, texture))
+                        return false;
+                }
+                env.call(); // jal 0x151368
+                const uint32_t row = kTextureManager + 0x3DC88u + ((t.u32(model::kFrameParity) & 1u) << 3) +
+                                     (static_cast<uint32_t>(texture) << 4);
+                const uint64_t reg = t.u64(row);
+                t.w64(packet + 0x20u, reg);
+                const uint64_t block = (((reg >> 37) & 0x3FFFu) + static_cast<uint64_t>(static_cast<int64_t>(t.s8(node + 0x387u)))) & 0x3FFFu;
+                t.w64(packet + 0x20u, (((reg & 0xFFF8001FFFFFFFFFull) | (block << 37)) & 0xFFFFFFE7FFFFFFFFull) | mode);
+            }
+            if (!t.ok)
+                return false;
+            t.commit();
+            returnToCaller(ctx);
+            return true;
+        }
+
         // ---- func_0014B9A0: a node's UV-scroll packet (decomp src/cod/0014b9a0.c) --------------------------------
         // void func_0014B9A0(cModel *self, cModelNode *node, short id): the model's slot tags (func_00155BE8: kind 2,
         // or 0x14 for a CMODEL_F_LATE model), then a 0x120-byte packet from the frame allocator (PostInc; full: return):
@@ -3146,5 +3253,6 @@ namespace kamite::native::packet
         addReadable("func_00151688", kUploadPack, false, &builderNative<RealEnv, 2>, &builderNative<ShadowEnv, 2>, 0u);
         addReadable("func_00151FA0", kUploadTm, false, &builderNative<RealEnv, 3>, &builderNative<ShadowEnv, 3>, 0u);
         addReadable("func_00148D30", kNodeTextures, false, &nodeTextures<RealEnv>, &nodeTextures<ShadowEnv>, 0u);
+        addReadable("func_00148690", kNodeMaterial, false, &nodeMaterial<RealEnv>, &nodeMaterial<ShadowEnv>, 0u);
     }
 }
