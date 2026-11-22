@@ -1802,7 +1802,8 @@ namespace kamite::native::packet
         // {name, b, c, v} walked down to a name of -1): a hit returns its VRAM block (e->v). A miss inserts the entry
         // and builds the upload (func_00151990 / 151CC0 / 151688 / 151FA0, texture_slots' hook inside 0x151990), or
         // returns 0 on a full table: this native takes the hits and the full table (nothing written: v0 = 0)
-        // and declines a miss with room (the original runs).
+        // and declines a miss with room (the original runs). The cache lives one frame (func_00150AA8 sets every name
+        // to -1 and the VRAM cursor to 0), so a texture's first lookup in a frame is always a miss.
         // The code compares the whole registers: type and name as 64-bit values (an entry's name sign-extended by its
         // lw), the sentinel -1 the same way.
         constexpr uint32_t kTextureLookup = 0x151398u;
@@ -2162,8 +2163,10 @@ namespace kamite::native::packet
 
         // Batches 3-4 (the new method): readable natives from the decomp's C, kRenderPath | kChargeAtEnd, unchecked
         // (dev replays shadow them; play runs the originals) until K's builds prove them. Proven: 0x14C5A0 and 0x14B9A0
-        // (K's 05:35 build of 02ab933: 437K / 6.6K calls shadowed, 0 mismatches, 0 declines). Still shadowed: 0x151398
-        // (its full-table path is new; its hits matched 3.1M times) and 0x148BD8 (no replay calls it yet).
+        // (K's 05:35 build of 02ab933: 437K / 6.6K calls shadowed, 0 mismatches, 0 declines) and 0x151398 (K's 06:50
+        // build of 9d10281: 3.3M calls matched; its declines, a third, are each texture's first lookup in a frame:
+        // func_00150AA8 empties the cache every frame). Still shadowed: 0x148BD8 (TEST_407's env-map pass: one call a
+        // frame, always the ENV texture's first lookup, a miss: it runs native once the upload builders do).
         auto addReadable = [](const char *name, uint32_t address, bool checked, bool (*real)(RealEnv &, R5900Context *),
                               bool (*shadow)(ShadowEnv &, R5900Context *), uint32_t returns) {
             NativeFunction fn{name, address, "packet", checked, real, shadow, nullptr};
@@ -2172,7 +2175,7 @@ namespace kamite::native::packet
             registerFunction(fn);
         };
         addReadable("func_0014C5A0", kQueueModel, true, &queueModel<RealEnv>, &queueModel<ShadowEnv>, 0u);
-        addReadable("func_00151398", kTextureLookup, false, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,
+        addReadable("func_00151398", kTextureLookup, true, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,
                     NativeFunction::kReturnsV0);
         addReadable("func_00148BD8", kMeshTextures, false, &meshTextures<RealEnv>, &meshTextures<ShadowEnv>, 0u);
         addReadable("func_0014B9A0", kScrollPacket, true, &scrollPacket<RealEnv>, &scrollPacket<ShadowEnv>, 0u);
