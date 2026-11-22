@@ -62,6 +62,7 @@
 #include "ps2x/iop/iop_pad.h"
 #include "runtime/ee_scheduler.h"
 #include "runtime/gs/gs_pcsx2_backend.h"
+#include "runtime/ps2_audio.h"
 #include "runtime/ps2_game_menu.h"
 #include "runtime/ps2_input_options.h"
 
@@ -845,6 +846,7 @@ namespace kamite::options_screen
                 ps2_host_display::setFpsCounter(settings::on(g_ini, *s));
             const settings::Setting *mode = settings::find("Mode");
             g_soundModeWanted = soundModeIndex(mode ? settings::value(g_ini, *mode) : "stereo");
+            ps2x::audio::setProLogicDecode(g_soundModeWanted == 2); // decoded for 4+ speakers (issue #18)
             applyVolumes();
         }
 

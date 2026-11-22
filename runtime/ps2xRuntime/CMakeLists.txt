@@ -433,6 +433,7 @@ add_library(ps2_runtime STATIC
     src/lib/game_overrides.cpp
     src/lib/gs/ps2_gif_arbiter.cpp
     src/lib/ps2_audio.cpp
+    src/lib/ps2_audio_surround.cpp
     src/lib/ps2_pnach.cpp
     src/lib/ps2_game_menu.cpp
     src/lib/ps2_hotkeys.cpp
@@ -582,6 +583,12 @@ target_include_directories(ps2_runtime PUBLIC
 # FFmpeg is used only inside the runtime (Kernel/Stubs/MPEG.cpp). Linking it PRIVATE keeps its include directories
 # out of the generated game code's compile lines, so toggling PS2X_ENABLE_FFMPEG does not rebuild ~8,000 files.
 target_link_libraries(ps2_runtime PUBLIC ps2_host_backend ps2_iop)
+# The Pro Logic II surround output (ps2_audio_surround.cpp) opens its own device through the miniaudio compiled into
+# raylib: only miniaudio's header is needed. Not with the Vita's prebuilt raylib (stereo only there).
+if(DEFINED raylib_SOURCE_DIR AND EXISTS "${raylib_SOURCE_DIR}/src/external/miniaudio.h")
+    target_include_directories(ps2_runtime PRIVATE "${raylib_SOURCE_DIR}/src/external")
+    target_compile_definitions(ps2_runtime PRIVATE PS2X_HAS_MINIAUDIO=1)
+endif()
 target_link_libraries(ps2_runtime PRIVATE ffmpeg)
 
 # libchdr (BSD-3, with its own lzma / miniz / zstd): CHD disc images (ps2_cd_image.cpp). Static, no tests.
@@ -733,6 +740,16 @@ if(KAMITE_BUILD_TESTS)
         target_compile_options(audio_stretch_test PRIVATE /W3 /utf-8)
     endif()
     add_test(NAME audio_stretch_test COMMAND audio_stretch_test)
+
+    # Dolby Pro Logic II decoding for surround speakers (runtime/prologic_decoder.h, issue #18): where encoded sounds
+    # land on 4.0 / 5.1 / 7.1. Header-only: nothing else is linked.
+    add_executable(prologic_decoder_test test/prologic_decoder_test.cpp)
+    target_include_directories(prologic_decoder_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    set_target_properties(prologic_decoder_test PROPERTIES EXCLUDE_FROM_ALL FALSE)
+    if(MSVC)
+        target_compile_options(prologic_decoder_test PRIVATE /W3 /utf-8)
+    endif()
+    add_test(NAME prologic_decoder_test COMMAND prologic_decoder_test)
 
     # The PCSX2 GS's "Preparing shaders" notice (runtime/gs/gs_shader_notice.h): when it shows, its text and bar, the
     # shader count read from PCSX2's cache index files. Header-only: nothing else is linked.

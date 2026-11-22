@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 22, 2026
 
+- Sound: Dolby Pro Logic II is decoded for 4.0 / 5.1 / 7.1 speakers, so sounds behind the camera play on the rear speakers (#18).
 - Performance: queueing each model's draw packet and building the UV-scroll packets run as native code.
 
 ## November 21, 2026

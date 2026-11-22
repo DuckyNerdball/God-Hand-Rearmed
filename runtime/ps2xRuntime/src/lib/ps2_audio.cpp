@@ -3,6 +3,7 @@
 #include "ps2_host_backend.h"
 #include "runtime/ps2_time_control.h"
 #include "runtime/audio_stretch_control.h"
+#include "ps2_audio_surround.h"
 #include <atomic>
 #include <algorithm>
 #include <cmath>
@@ -12,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace
@@ -196,6 +198,13 @@ namespace
     };
 }
 
+namespace
+{
+    // The game in Dolby Pro Logic II mode (ps2x::audio::setProLogicDecode): decode it for surround speakers when the
+    // output device has them (ps2_audio_surround.h, issue #18).
+    std::atomic<bool> g_proLogicWanted{false};
+}
+
 namespace ps2_vag
 {
     bool decode(const uint8_t *data, uint32_t sizeBytes,
@@ -241,6 +250,11 @@ struct PS2AudioBackend::Impl
     std::mutex pcmMutex;
     AudioStream stream{};
     bool streamReady = false;
+    // Pro Logic II decoding: the second, multichannel device (ps2_audio_surround.h) plays the queue instead of the
+    // stream while it is open. surroundApplied: the wish last acted on (re-checked on every submit, cheaply).
+    ps2x::audio_surround::Output surround;
+    std::mutex surroundMutex;
+    std::atomic<bool> surroundApplied{false};
     std::FILE *dump = nullptr;
     uint32_t dumpBytes = 0u;
     // PS2X_AUDIO_OUT_DUMP=<file>: raw PCM (s16le stereo 48 kHz, no header) of exactly what the callback hands the sound
@@ -343,6 +357,49 @@ struct PS2AudioBackend::Impl
         }
     }
 
+    static void surroundSource(int16_t *stereo, unsigned frames) { audioCallback(stereo, frames); }
+
+    // Opens or closes the surround output to match the game's sound mode. The device opens at its own channel count:
+    // with fewer than 4 (headphones, a TV, a receiver on optical that decodes Pro Logic II itself) the stereo stream
+    // stays. Not with pcmMutex held: closing waits for the device's callback, which takes it.
+    void applySurround()
+    {
+        const bool wanted = g_proLogicWanted.load(std::memory_order_relaxed);
+        if (surroundApplied.load(std::memory_order_relaxed) == wanted)
+            return;
+        std::lock_guard<std::mutex> lock(surroundMutex);
+        if (surroundApplied.load(std::memory_order_relaxed) == wanted || !streamReady)
+            return;
+        surroundApplied.store(wanted, std::memory_order_relaxed);
+#if !defined(PLATFORM_VITA)
+        if (wanted)
+        {
+            std::string about;
+            if (surround.open(&surroundSource, about))
+            {
+                PauseAudioStream(stream);
+                std::fprintf(stderr, "[audio] Dolby Pro Logic II decoded for surround speakers: %s\n", about.c_str());
+            }
+            else
+                std::fprintf(stderr, "[audio] Dolby Pro Logic II left as stereo (%s): a receiver or the device decodes it\n",
+                             about.c_str());
+        }
+        else if (surround.isOpen())
+        {
+            surround.close();
+            ResumeAudioStream(stream);
+            std::fprintf(stderr, "[audio] surround decoding off: stereo\n");
+        }
+#endif
+    }
+
+    void closeSurround()
+    {
+        std::lock_guard<std::mutex> lock(surroundMutex);
+        surround.close();
+        surroundApplied.store(false, std::memory_order_relaxed);
+    }
+
     void finishDump()
     {
         if (!dump)
@@ -406,6 +463,7 @@ void PS2AudioBackend::setAudioReady(bool ready)
             Impl::streamOwner = m_impl.get();
             SetAudioStreamCallback(m_impl->stream, &Impl::audioCallback);
             PlayAudioStream(m_impl->stream);
+            m_impl->applySurround();
         }
         const char *path = std::getenv("PS2X_AUDIO_DUMP");
         if (path && *path)
@@ -421,6 +479,7 @@ void PS2AudioBackend::setAudioReady(bool ready)
     }
     else
     {
+        m_impl->closeSurround();
         if (m_impl->streamReady)
         {
             StopAudioStream(m_impl->stream);
@@ -467,6 +526,8 @@ void PS2AudioBackend::resetPcm()
 
 void PS2AudioBackend::submitPcm(std::span<const int16_t> samples)
 {
+    if (m_impl->streamReady)
+        m_impl->applySurround();
     std::lock_guard<std::mutex> lock(m_impl->pcmMutex);
     if (m_impl->dump && samples.size_bytes() <= 0xFFFFFF00u - m_impl->dumpBytes)
     {
@@ -872,4 +933,9 @@ void ps2x::timecontrol::setMuted(bool muted)
 bool ps2x::timecontrol::muted()
 {
     return g_audioMuted.load(std::memory_order_relaxed);
+}
+
+void ps2x::audio::setProLogicDecode(bool on)
+{
+    g_proLogicWanted.store(on, std::memory_order_relaxed);
 }

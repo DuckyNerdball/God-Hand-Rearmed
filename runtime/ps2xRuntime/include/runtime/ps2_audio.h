@@ -49,4 +49,12 @@ private:
     void pruneFinishedSounds();
 };
 
+namespace ps2x::audio
+{
+    // The game's sound mode is Dolby Pro Logic II: decode it to the output device's speakers when it has 4 or more
+    // channels (issue #18; a stereo device keeps the stereo, for a receiver to decode). Any thread; applied with the
+    // next audio the game makes.
+    void setProLogicDecode(bool on);
+}
+
 #endif
