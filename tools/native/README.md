@@ -27,7 +27,7 @@ with kamite/git_commit.h):
        func_0014B9A0_0x14b9a0 func_00151630_0x151630 func_00151688_0x151688 func_00151990_0x151990
        func_00151CC0_0x151cc0 func_00151FA0_0x151fa0 func_00309C30_0x309c30 ps2___muldi3_0x31de10
        func_00148D30_0x148d30 func_00148690_0x148690 SearchDataByTwoNames_0x31cdc0 cIDBase_getSlotPtr_0x1522c0
-       cModel_setNodeMaterial_0x14b4d0 ForwardAttackByMode_14B5D8_0x14b5d8"
+       cModel_setNodeMaterial_0x14b4d0 ForwardAttackByMode_14B5D8_0x14b5d8 func_00154240_0x154240"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -35,6 +35,7 @@ with kamite/git_commit.h):
         src/kamite/texture_slots.cpp runtime/ps2xRuntime/src/lib/ps2_ee_float.cpp /tmp/nt/*.o -o /tmp/nt/shadow_test
     /tmp/nt/shadow_test 20000 /tmp/nt/vectors.bin    # natives, footprints, invisibility, detection; writes vectors
     /tmp/nt/shadow_test bench                        # ns per call (GCC: a hint only)
+    KM_ONLY=<name> KM_BENCH_SETUPS=30 /tmp/nt/shadow_test bench   # one native, the mean over 30 setups (its paths)
     /tmp/nt/shadow_test rerun <case>.<rate>.native.bin   # a replay's saved mismatches, again here
     /tmp/nt/shadow_test vectors /tmp/nt/vectors.bin      # the maths vectors alone
     KM_ONLY=<name> KM_DIFF=1 /tmp/nt/shadow_test 3000   # one native's checks only, with the differing fields
@@ -102,3 +103,16 @@ txnNodeMaterial) plus thin wrappers that open their own. cModel_setNodeMaterial 
 cModel_alpha (setNodeMaterial's mode 3) uses divScalar / mulScalar for |tint.w| < 2^126 and declines outside, as
 cModel_nodeLayerScreen does. shadow_test sets them up through their callees' setups (the special pass, or the other
 path with the node's flag or D_00747AA8 clear, so a random name never reaches the cache).
+
+## func_00154240, a node's lighting block (rung 3 step a, Nov 22)
+
+Unmatched in the decomp (baee8f4): our C++ from the disassembly, its seven callees' bodies inline (the light rows by
+four paths: fixed, MulVector, func_002D8008, func_002D7E50 with NormalLightMatrix; the env pass with two capVu0Length;
+CopyMatrix; func_002D8070). It writes only the node's 0xD0-byte block and one packet word, so it runs on a `BlockTxn`
+(packet.cpp): a snapshot of the block taking the writes, a halfword mask for commit, a quick plainRam answer for RAM
+below the I/O range; the general Txn's per-write hashing made it slower than the original (GCC bench 410 vs 232 ns;
+BlockTxn: 206 vs 457 ns over 30 setups; callgrind 22.5G vs 41.7G instructions). Its maths: `ExactOps` declines any op
+past FLT_MAX - 1 ulp or a divide outside exponents 1-254 (the runtime's ps2ee cases); constants 1.0 / -1.0 go through a
+volatile (`registerConstant`), else GCC folds x * 1.0 and a denormal escapes the flush (the first sandbox mismatch).
+shadow_test's setup picks the four paths evenly, the env pass half the time (colour w = 1.0), all branches of the
+packet tail; 17 planted bugs (one per path / branch, the cycles) all caught.

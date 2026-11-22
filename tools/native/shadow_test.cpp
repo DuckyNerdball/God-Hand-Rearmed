@@ -95,6 +95,7 @@ KM_RECOMPILED(func_00148D30_0x148d30)
 KM_RECOMPILED(func_00148690_0x148690)
 KM_RECOMPILED(cModel_setNodeMaterial_0x14b4d0)
 KM_RECOMPILED(ForwardAttackByMode_14B5D8_0x14b5d8)
+KM_RECOMPILED(func_00154240_0x154240)
 KM_RECOMPILED(SearchDataByTwoNames_0x31cdc0)
 KM_RECOMPILED(cIDBase_getSlotPtr_0x1522c0)
 #undef KM_RECOMPILED
@@ -267,7 +268,9 @@ namespace
     // 0x7476B0 / 0x747A2C / 0x747AA8, the order table's descriptors 0x755780...
     constexpr Region kRegions[] = {{0u, 1u << 20}, {0x3C3C00u, 0x100u}, {0x466000u, 0x40590u}, {0x566E00u, 0x20u},
                                    {0x5CAFF0u, 0x10u}, {0x747600u, 0x500u}, {0x755700u, 0x100u},
-                                   {0x4F8000u, 0x18000u}}; // batch 3: the frame allocator's areas around 0x506E10
+                                   {0x4F8000u, 0x18000u}, // batch 3: the frame allocator's areas around 0x506E10
+                                   // step a: func_00154240's constants (D_003BD870..89F, D_004A6940) and the light set
+                                   {0x3BD800u, 0x100u}, {0x4A6900u, 0x100u}, {0x604700u, 0x60u}, {0x61A800u, 0x200u}};
     constexpr uint32_t usedBytes()
     {
         uint32_t total = 0;
@@ -1240,6 +1243,89 @@ namespace
             setGpr(ctx, 5, base | seg);
             return;
         }
+        case 0x154240u: // step a: a node's lighting block (model at 0x38000.., node at base; the paths picked evenly)
+        {
+            const uint32_t model = 0x38000u + 0x400u * static_cast<uint32_t>(g_rng() % 8u);
+            randomBytes(model, 0x2E4u);
+            randomBytes(base + 0x380u, 0x98u);
+            const uint32_t path = static_cast<uint32_t>(g_rng() % 4u); // 0x800000, 0x410's bit, 2D8008, 2D7E50
+            uint32_t flags = static_cast<uint32_t>(g_rng()) & ~0x800001u;
+            if (g_rng() % 16u == 0u)
+                flags |= 1u; // hidden
+            if (path == 0u)
+                flags |= 0x800000u;
+            if (g_rng() % 4u == 0u)
+                flags |= 0x200000u;
+            setU32(base + 0x380u, flags);
+            uint32_t n410 = static_cast<uint32_t>(g_rng()) & ~0x20000000u;
+            setU32(base + 0x410u, path == 1u || (path == 0u && g_rng() % 2u) ? n410 | 0x20000000u : n410);
+            uint32_t m250 = static_cast<uint32_t>(g_rng()) & ~0x882000u;
+            if (path == 2u || (path < 2u && g_rng() % 2u))
+                m250 |= 0x800000u;
+            if (g_rng() % 4u == 0u)
+                m250 |= 0x80000u;
+            if (g_rng() % 4u == 0u)
+                m250 |= 0x2000u;
+            setU32(model + 0x250u, m250);
+            // the colour: sometimes w exactly 1.0 (the env pass)
+            for (uint32_t o : {0x240u, 0x244u, 0x248u, 0x24Cu})
+                setU32(model + o, inputFloat(wild));
+            for (uint32_t o : {0x3A0u, 0x3A4u, 0x3A8u, 0x3ACu, 0x38Cu, 0x390u})
+                setU32(base + o, inputFloat(wild));
+            if (g_rng() % 2u)
+            {
+                setU32(model + 0x24Cu, 0x3F800000u);
+                setU32(base + 0x3ACu, 0x3F800000u);
+                setByte(model + 0x2B6u, 255u);
+                setByte(model + 0x2B7u, 255u);
+                setByte(model + 0x2BCu, 255u);
+            }
+            // pointers: the model's position, the camera, the mesh info, this frame's packets
+            const uint32_t pos = 0x3C000u + 0x10u * static_cast<uint32_t>(g_rng() % 64u);
+            floatsAt(pos, 4, wild);
+            if (g_rng() % 8u == 0u)
+                floatsAt(0x3C800u + (pos & 0x3F0u), 4, wild); // unused here
+            setU32(model + 0xF0u, (g_rng() % 16u == 0u ? 0x3D210u : pos) | seg); // sometimes the eye itself
+            const uint32_t view = 0x3D000u + 0x10u * static_cast<uint32_t>(g_rng() % 16u);
+            floatsAt(view + 0x210u, 4, wild);
+            setU32(0x5CAFF0u, view | seg);
+            const uint32_t info = 0x3A800u + 0x40u * static_cast<uint32_t>(g_rng() % 16u);
+            randomBytes(info + 0x58u, 2u);
+            setU32(base + 0x414u, info | seg);
+            for (uint32_t h = 0; h < 2u; ++h)
+                setU32(model + 0x220u + 4u * h, (0x3E000u + 0x40u * static_cast<uint32_t>(g_rng() % 32u)) | seg);
+            const uint32_t idPick = static_cast<uint32_t>(g_rng() % 4u);
+            const uint16_t id = idPick == 0 ? 0u : idPick == 1 ? static_cast<uint16_t>(g_rng() % 200u)
+                                : idPick == 2 ? static_cast<uint16_t>(-static_cast<int>(g_rng() % 200u)) : static_cast<uint16_t>(g_rng());
+            setByte(model + 0x2ACu, static_cast<uint8_t>(id));
+            setByte(model + 0x2ADu, static_cast<uint8_t>(id >> 8));
+            setU32(0x7476B0u, static_cast<uint32_t>(g_rng()));
+            setU32(0x747A2Cu, g_rng() % 3u == 0u ? 0x1000u : static_cast<uint32_t>(g_rng()) & ~0x1000u);
+            setU32(0x747AA8u, g_rng() % 2u ? 0u : static_cast<uint32_t>(g_rng()) | 1u);
+            // the light set and the constants
+            floatsAt(0x604730u, 8, wild);
+            floatsAt(0x61A850u, 0xD0u / 4u, wild);
+            const uint32_t near = inputFloat(false), far = inputFloat(false);
+            setU32(0x61A850u, near);
+            setU32(0x61A854u, g_rng() % 8u == 0u ? near : far); // a zero range sometimes (declines)
+            for (uint32_t k = 0; k < 3u; ++k)
+            {
+                const float c = static_cast<float>(static_cast<int>(g_rng() % 400u) - 60) * 0.75f;
+                uint32_t bits;
+                std::memcpy(&bits, &c, 4);
+                setU32(0x61A858u + 4u * k, wild ? inputFloat(true) : bits);
+            }
+            for (uint32_t v = 0x61A8A0u; v <= 0x61A8C0u && g_rng() % 2u; v += 0x10u)
+                setU32(v + 12u, 0u); // light w lanes as the game has them
+            floatsAt(0x3BD870u, 12, wild);
+            floatsAt(0x4A6940u, 16, wild);
+            if (g_rng() % 32u == 0u)
+                std::memset(&ctx.vu0_vf[0], 0, 16); // a broken vf0: declines
+            setGpr(ctx, 4, model | seg);
+            setGpr(ctx, 5, base | seg);
+            setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
+            return;
+        }
         default:
             return;
         }
@@ -2016,39 +2102,46 @@ namespace
         return std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / n;
     }
 
+    // KM_BENCH_SETUPS=n: the mean over n setups the native takes (its paths mixed as the setup picks them), else one.
     void bench(const NativeFunction &fn, Recompiled recompiled)
     {
-        Call call;
-        do
+        const char *setups = std::getenv("KM_BENCH_SETUPS");
+        const int n = setups ? std::max(1, std::atoi(setups)) : 1;
+        double original = 0.0, native = 0.0, copy = 0.0;
+        for (int i = 0; i < n; ++i)
         {
-            setupCall(fn, call, false);
-            if (fn.footprint) // the rung-2 six: fixed, ordinary arguments
+            Call call;
+            do
             {
-                setGpr(call.ctx, 4, 0x30000u), setGpr(call.ctx, 5, 0x30100u), setGpr(call.ctx, 6, 0x30200u);
-                fillFloats(g_ramA, 0x30100u, 32, false);
-            }
-            copyRam(g_ramB, g_ramA);
+                setupCall(fn, call, false);
+                if (fn.footprint) // the rung-2 six: fixed, ordinary arguments
+                {
+                    setGpr(call.ctx, 4, 0x30000u), setGpr(call.ctx, 5, 0x30100u), setGpr(call.ctx, 6, 0x30200u);
+                    fillFloats(g_ramA, 0x30100u, 32, false);
+                }
+                copyRam(g_ramB, g_ramA);
+                g_dueAt = 0;
+                R5900Context probe;
+                std::memcpy(static_cast<void *>(&probe), &call.ctx, sizeof(probe));
+                kamite::native::RealEnv env{g_ramB, g_rt};
+                if (kamite::native::runNative(fn, fn.runReal, env, &probe))
+                    break; // a call the native takes
+            } while (true);
             g_dueAt = 0;
-            R5900Context probe;
-            std::memcpy(static_cast<void *>(&probe), &call.ctx, sizeof(probe));
-            kamite::native::RealEnv env{g_ramB, g_rt};
-            if (kamite::native::runNative(fn, fn.runReal, env, &probe))
-                break; // a call the native takes
-        } while (true);
-        g_dueAt = 0;
-        R5900Context ctx;
-        const double original = nsPerCall([&] {
-            std::memcpy(static_cast<void *>(&ctx), &call.ctx, sizeof(ctx));
-            recompiled(g_ramA, &ctx, g_rt);
-        });
-        const double native = nsPerCall([&] {
-            std::memcpy(static_cast<void *>(&ctx), &call.ctx, sizeof(ctx));
-            kamite::native::RealEnv env{g_ramA, g_rt};
-            kamite::native::runNative(fn, fn.runReal, env, &ctx);
-        });
-        const double copy = nsPerCall([&] { std::memcpy(static_cast<void *>(&ctx), &call.ctx, sizeof(ctx)); });
+            R5900Context ctx;
+            original += nsPerCall([&] {
+                std::memcpy(static_cast<void *>(&ctx), &call.ctx, sizeof(ctx));
+                recompiled(g_ramA, &ctx, g_rt);
+            });
+            native += nsPerCall([&] {
+                std::memcpy(static_cast<void *>(&ctx), &call.ctx, sizeof(ctx));
+                kamite::native::RealEnv env{g_ramA, g_rt};
+                kamite::native::runNative(fn, fn.runReal, env, &ctx);
+            });
+            copy += nsPerCall([&] { std::memcpy(static_cast<void *>(&ctx), &call.ctx, sizeof(ctx)); });
+        }
         std::printf("%-20s recompiled %.1f ns, native %.1f ns (context copy %.1f ns subtracted)\n", fn.name,
-                    original - copy, native - copy, copy);
+                    (original - copy) / n, (native - copy) / n, copy / n);
     }
 }
 
@@ -2158,7 +2251,7 @@ int main(int argc, char **argv)
         {0x151CC0u, &func_00151CC0_0x151cc0},    {0x151688u, &func_00151688_0x151688},
         {0x151FA0u, &func_00151FA0_0x151fa0},    {0x148D30u, &func_00148D30_0x148d30},
         {0x148690u, &func_00148690_0x148690},    {0x14B4D0u, &cModel_setNodeMaterial_0x14b4d0},
-        {0x14B5D8u, &ForwardAttackByMode_14B5D8_0x14b5d8}};
+        {0x14B5D8u, &ForwardAttackByMode_14B5D8_0x14b5d8}, {0x154240u, &func_00154240_0x154240}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &func_00309C30_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
@@ -2183,8 +2276,10 @@ int main(int argc, char **argv)
         return rerun(argv[2], recompiled);
     if (argc > 1 && std::strcmp(argv[1], "bench") == 0)
     {
+        const char *only = std::getenv("KM_ONLY"); // one native's bench only
         for (const NativeFunction &fn : g_natives)
-            bench(fn, recompiledOf(fn));
+            if (!only || std::strcmp(fn.name, only) == 0)
+                bench(fn, recompiledOf(fn));
         return 0;
     }
     const int calls = argc > 1 ? std::atoi(argv[1]) : 20000;
@@ -2221,7 +2316,8 @@ int main(int argc, char **argv)
     g_nestedCalls = true;
     for (const NativeFunction &fn : g_natives)
         for (uint32_t caller : {0x30A8C8u, 0x30A978u, 0x147528u, 0x147548u, 0x101E28u, 0x31A650u, 0x31A600u, 0x14D768u,
-                                0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u})
+                                0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u,
+                                0x154240u})
             if (fn.address == caller)
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;
