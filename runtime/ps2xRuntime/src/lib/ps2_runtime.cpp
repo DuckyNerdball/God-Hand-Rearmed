@@ -3201,6 +3201,11 @@ extern uint64_t g_ps2xEeDeferred;
 extern std::atomic<uint64_t> g_ps2xEeDeferBudget;
 extern uint32_t g_ps2xEeLoopCycles;
 
+bool PS2Runtime::eeEventWithin(uint64_t cycles) const noexcept
+{
+    return m_eeScheduler->eventWithin(cycles);
+}
+
 bool PS2Runtime::eeCheckpointDue(uint32_t cycles) noexcept
 {
     return !eeCheckpointQuiet(cycles) && eeCheckpointFull(cycles);
