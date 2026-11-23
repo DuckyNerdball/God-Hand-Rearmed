@@ -3846,6 +3846,466 @@ namespace kamite::native::packet
             returnToCaller(ctx);
             return true;
         }
+
+        // ---- tanf 0x3A1AE8 (libm: fdlibm's float s_tanf / __kernel_tanf / __ieee754_rem_pio2f; rung 3 step a) ------------
+        // The game's code op for op (never the host's tanf: not bit-exact). |x| <= 0x3F490FDA: __kernel_tanf(x, 0, 1);
+        // |x| <= 0x4016CBE3 (< 3pi/4): rem_pio2f's n = +-1 path, then __kernel_tanf(y0, y1, -1). Past that (rem_pio2f's
+        // medium / huge paths, kernel_rem_pio2f, x - x past FLT_MAX) the native declines: tanf's callers pass half a field
+        // of view in radians, so that is a FOV of 270 degrees and up. T[0..12] are read from the ELF's table at 0x45EFF0.
+        constexpr uint32_t kTanf = 0x3A1AE8u, kTanTable = 0x45EFF0u;
+        struct TanTable
+        {
+            float t[13];
+        };
+        template <class Env>
+        bool tanTable(Env &env, TanTable &tt)
+        {
+            uint32_t off;
+            if (!plainRam(kTanTable, 52u, off))
+                return false;
+            std::memcpy(tt.t, env.at(off, 52u), 52u);
+            return true;
+        }
+        inline float negBits(float f) { return bitsFloat(floatBits(f) ^ 0x80000000u); } // neg.s
+        inline float maskLow12(float f) { return bitsFloat(floatBits(f) & 0xFFFFF000u); }
+
+        // __kernel_tanf 0x3A4830 (x, y, iy = +-1)
+        inline float kernelTanf(const TanTable &tt, ExactOps &x, float xf, float yf, int iy)
+        {
+            const float *T = tt.t;
+            const uint32_t hx = floatBits(xf), ix = hx & 0x7FFFFFFFu;
+            if (ix < 0x31800000u) // |x| < 2^-28: cvt.w.s gives 0, so the tiny path always
+            {
+                if (iy == 1)
+                    return xf;
+                if (ix == 0u)
+                    x.ok = false; // 1 / fabsf(x): a guest call and a zero divisor
+                return x.div(bitsFloat(0xBF800000u), xf);
+            }
+            const bool big = ix > 0x3F2CA13Fu; // |x| >= 0.6744
+            if (big)
+            {
+                if (static_cast<int32_t>(hx) < 0)
+                {
+                    xf = negBits(xf);
+                    yf = negBits(yf);
+                }
+                const float z0 = x.sub(bitsFloat(0x3F490FDAu), xf); // pio4 - x
+                const float w0 = x.sub(bitsFloat(0x33222168u), yf); // pio4lo - y
+                xf = x.add(z0, w0);
+                yf = bitsFloat(0u);
+            }
+            const float z = x.mul(xf, xf);
+            const float w = x.mul(z, z);
+            const float s = x.mul(z, xf);
+            const float t0s = x.mul(T[0], s);
+            // the two Horner chains as the original interleaves them (evens from T12, odds from T11)
+            float ev = x.add(T[10], x.mul(w, T[12]));
+            float od = x.add(T[9], x.mul(w, T[11]));
+            ev = x.add(T[8], x.mul(w, ev));
+            od = x.add(T[7], x.mul(w, od));
+            ev = x.add(T[6], x.mul(w, ev));
+            od = x.add(T[5], x.mul(w, od));
+            ev = x.add(T[4], x.mul(w, ev));
+            od = x.add(T[3], x.mul(w, od));
+            ev = x.add(T[2], x.mul(w, ev));
+            float r = x.add(T[1], x.mul(w, od));
+            const float v = x.mul(z, ev);
+            float u = x.mul(s, x.add(r, v));
+            u = x.mul(z, x.add(u, yf));
+            r = x.add(x.add(yf, u), t0s);
+            const float wv = x.add(xf, r);
+            if (big)
+            {
+                const float fy = fpuFromSmallWord(iy);
+                const float sign = fpuFromSmallWord(1 - ((static_cast<int32_t>(hx) >> 30) & 2));
+                float q = x.div(x.mul(wv, wv), x.add(wv, fy));
+                q = x.sub(xf, x.sub(q, r));
+                q = x.add(q, q); // 2.0 * q as the original has it: add.s q, q
+                return x.mul(sign, x.sub(fy, q));
+            }
+            if (iy == 1)
+                return wv;
+            const float z2 = maskLow12(wv);
+            const float v2 = x.sub(z2, xf);
+            const float a = x.div(bitsFloat(0xBF800000u), wv);
+            const float rv = x.sub(r, v2);
+            const float t = maskLow12(a);
+            const float s2 = x.add(x.mul(t, z2), registerConstant(1.0f));
+            return x.add(t, x.mul(a, x.add(s2, x.mul(t, rv))));
+        }
+
+        // tanf's body: calls = the guest calls it makes (kernel_tanf, and rem_pio2f past pi/4)
+        inline float tanfBody(const TanTable &tt, ExactOps &x, float a, int &calls)
+        {
+            const uint32_t hx = floatBits(a), ix = hx & 0x7FFFFFFFu;
+            calls = 1;
+            if (ix <= 0x3F490FDAu)
+                return kernelTanf(tt, x, a, bitsFloat(0u), 1);
+            if (ix > 0x4016CBE3u)
+            {
+                x.ok = false;
+                return a;
+            }
+            calls = 2;
+            // __ieee754_rem_pio2f's n = +-1 path (pio2_1 / pio2_1t, or pio2_2 / pio2_2t near pi/2)
+            const bool positive = static_cast<int32_t>(hx) > 0;
+            const bool nearHalfPi = (ix & 0xFFFFFFF0u) == 0x3FC90FD0u;
+            const float pio2_1 = bitsFloat(0x3FC90F80u);
+            float z = positive ? x.sub(a, pio2_1) : x.add(a, pio2_1);
+            float tail = bitsFloat(0x37354443u);
+            if (nearHalfPi)
+            {
+                const float pio2_2 = bitsFloat(0x37354400u);
+                z = positive ? x.sub(z, pio2_2) : x.add(z, pio2_2);
+                tail = bitsFloat(0x2E85A308u);
+            }
+            const float y0 = positive ? x.sub(z, tail) : x.add(z, tail);
+            const float d = x.sub(z, y0);
+            const float y1 = positive ? x.sub(d, tail) : x.add(d, tail);
+            return kernelTanf(tt, x, y0, y1, -1);
+        }
+
+        template <class Env>
+        bool tanfNative(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            TanTable tt;
+            if (!tanTable(env, tt))
+                return false;
+            ExactOps x;
+            int calls = 0;
+            const float r = tanfBody(tt, x, ctx->f[12], calls);
+            if (!x.ok)
+                return false;
+            for (int i = 0; i < calls; ++i)
+                env.call();
+            e::setFBits(ctx, 0, floatBits(r));
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // ---- sceVu0ViewScreenMatrix 0x30AA40 (a0 = m; f12 scrz, f13 ax, f14 ay, f15 cx, f16 cy, f17 zmin, f18 zmax,
+        // f19 nearz, farz = the caller's 0(sp)) ----------------------------------------------------------------------------
+        // d = -nearz + farz; A = ((farz * nearz) * (-zmin + zmax)) / d; B = ((-zmax * nearz) + (zmin * farz)) / d.
+        // m = Unit with [0][0] = [1][1] = scrz, [2][2] = [3][3] = 0, [2][3] = [3][2] = 1; tmp (its frame) = Unit with
+        // [0][0] = ax, [1][1] = ay, [2][2] = A, [3] = (cx, cy, B, 1); MulMatrix(m, tmp, m). Calls: UnitMatrix x2, MulMatrix
+        // (its three back-edges). Void; f20-f26 / s0 / ra saved and restored (untouched here).
+        constexpr uint32_t kViewScreen = 0x30AA40u;
+        struct Matrix
+        {
+            Vec4 r[4];
+        };
+        inline bool finiteRows(const Matrix &m)
+        {
+            return libvu0::finiteInputs(m.r[0]) && libvu0::finiteInputs(m.r[1]) && libvu0::finiteInputs(m.r[2]) &&
+                   libvu0::finiteInputs(m.r[3]);
+        }
+        // sceVu0MulMatrix (a0 = out, a1 = A, a2 = B): out row k = A's rows by B row k (VU0: mula x, madda y, madda z,
+        // madd w). Exact for rows under 2^62 (finiteInputs); false otherwise (the native declines).
+        inline bool mulMatrixRows(const Matrix &a, const Matrix &b, Matrix &out)
+        {
+            if (!finiteRows(a) || !finiteRows(b))
+                return false;
+            Matrix o;
+            for (int k = 0; k < 4; ++k)
+                o.r[k] = libvu0::mulRow(a.r[0], a.r[1], a.r[2], a.r[3], b.r[k]).r;
+            out = o;
+            return true;
+        }
+        inline bool viewScreenBody(ExactOps &x, float scrz, float ax, float ay, float cx, float cy, float zmin, float zmax,
+                                   float nearz, float farz, Matrix &m)
+        {
+            const float dz = x.add(negBits(zmin), zmax);
+            float A = x.mul(farz, nearz);
+            float B = x.mul(negBits(zmax), nearz);
+            const float zf = x.mul(zmin, farz);
+            const float d = x.add(negBits(nearz), farz);
+            A = x.mul(A, dz);
+            B = x.add(B, zf);
+            A = x.div(A, d);
+            B = x.div(B, d);
+            constexpr uint32_t one = 0x3F800000u;
+            const uint32_t s = floatBits(scrz);
+            const Matrix mm{{bitsOf(s, 0u, 0u, 0u), bitsOf(0u, s, 0u, 0u), bitsOf(0u, 0u, 0u, one), bitsOf(0u, 0u, one, 0u)}};
+            const Matrix tmp{{bitsOf(floatBits(ax), 0u, 0u, 0u), bitsOf(0u, floatBits(ay), 0u, 0u),
+                              bitsOf(0u, 0u, floatBits(A), 0u), bitsOf(floatBits(cx), floatBits(cy), floatBits(B), one)}};
+            return mulMatrixRows(tmp, mm, m);
+        }
+        constexpr int kViewScreenCalls = 3, kMulMatrixBacks = 3;
+
+        template <class Env>
+        bool viewScreenNative(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp), mAddr = e::u32(ctx, e::a0);
+            uint32_t frame, farzAt, m;
+            if (!e::vf0Constant(ctx) || (sp & 0xFu) != 0u || (mAddr & 0xFu) != 0u || !plainRam(sp - 0xA0u, 0xA0u, frame) ||
+                !plainRam(sp, 4u, farzAt) || !plainRam(mAddr, 64u, m) || e::overlaps(m, 64u, frame, 0xA0u))
+                return false;
+            ExactOps x;
+            Matrix out;
+            if (!viewScreenBody(x, ctx->f[12], ctx->f[13], ctx->f[14], ctx->f[15], ctx->f[16], ctx->f[17], ctx->f[18],
+                                ctx->f[19], bitsFloat(e::read32(env, farzAt)), out) ||
+                !x.ok)
+                return false;
+            for (int i = 0; i < kViewScreenCalls; ++i)
+                env.call();
+            for (int i = 0; i < kMulMatrixBacks; ++i)
+                env.checkpoint(32u);
+            uint8_t *dst = env.at(m, 64u);
+            for (int k = 0; k < 4; ++k)
+                store(dst + 16 * k, out.r[k]);
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // ---- func_0014C7E8: a model's per-frame matrices (rung 3 step a; unmatched in the decomp; our C++ from the
+        // disassembly, the callees' bodies inline) -------------------------------------------------------------------------
+        // void func_0014C7E8(cModel *self), called by cModel_Tag_set_rate. idx = D_007476B0 & 1; buf = self->[552 + 4 idx]
+        // (+16 the view matrix, +80 the second, +272 the third); cam = D_005CAFF0. buf+16 = cam's matrix, buf+272 = Unit,
+        // buf+80 = cam +192 (D_004A6900 with flags 0x2000; flags = self +592). Flags 0x80000: a fixed camera at z = 50
+        // (half 1); then flags 0x1000000: the same at z = 145 times self's two matrices (half 2; both can run, the second
+        // overwrites). Each half: C = CameraMatrix((0,0,z,1), (0,0,-1,1), (0,1,0,1)) (constant inputs: its result below,
+        // as the recompiled function gives it: shadow_test camera); t = tanf(fov * pi / 360); scrz = ((D_003C1190 /
+        // D_00586B88) * 0.5) / t; V = ViewScreenMatrix(scrz, (float)D_003C1180 / 640, D_00586B88, self +304 + 2048,
+        // self +308 + 2048, 1, 65535, 0.1, 600) with [0][0] and [1][1] negated; buf+16 = MtxMultiply(V, C) (half 2: then
+        // MulMatrix(buf+16, self, buf+16) and MulMatrix(buf+16, self +128, buf+16), inline VU0); q = 160 / scrz (tanf runs
+        // twice: same input, same result); P = Unit, [0][0] = [1][1] = -(0.2 / (q + q)), [2] = (0,0,0x3F800AEC,1),
+        // [3] = (0,0,0xBE4CD58A,0); P = MulMatrix(P, C); (InversMatrix(sp+320, P): dead, overwritten); buf+80 =
+        // MulMatrix(self +128, P) (inline); buf+272 = Unit with [0][0] = ((scrz * ax) * q) / 0.1, [1][1] =
+        // ((scrz * ay) * q) / 0.1, [2][2] = -32767, [3] = (2048, 2048, 32768, 1). Then for the n = self +692 nodes from
+        // **(self +632) along node +324: func_001503B8(node, self->[560 + 4 idx] + 16 + 64 k) = node +0x80's matrix times a
+        // Unit with row 3's xyz = node +0xC0..C8. n = 0 (the do-while would run 2^32 times) declines.
+        // Everything is read before anything is written: the native declines when a write would land on anything read
+        // (or on another write, or the stack window), so the original's order of loads and stores can't show. Void.
+        constexpr uint32_t kModelMatrices = 0x14C7E8u;
+        // its frame (0x2C0) + the deepest callee chain (CameraMatrix 0xB0, tanf 0x20 + rem_pio2f 0x50 + kernel_tanf 0x10,
+        // ViewScreenMatrix 0xA0, func_001503B8 0x50 + MtxMultiply 0x10): 0x100 covers each
+        constexpr uint32_t kModelMatricesWindow = 0x2C0u + 0x100u;
+        // CameraMatrix((0, 0, z, 1), (0, 0, -1, 1), (0, 1, 0, 1)) for z = 50 and z = 145, row by row (x, y, z, w)
+        constexpr uint32_t kFixedCamera[2][16] = {
+            {0xBF800000u, 0u, 0u, 0u, 0u, 0x3F800000u, 0u, 0u, 0u, 0u, 0xBF800000u, 0u, 0u, 0u, 0x42480000u, 0x3F800000u},
+            {0xBF800000u, 0u, 0u, 0u, 0u, 0x3F800000u, 0u, 0u, 0u, 0u, 0xBF800000u, 0u, 0u, 0u, 0x43110000u, 0x3F800000u}};
+        inline Matrix fixedCamera(int half)
+        {
+            const uint32_t *c = kFixedCamera[half];
+            return Matrix{{bitsOf(c[0], c[1], c[2], c[3]), bitsOf(c[4], c[5], c[6], c[7]), bitsOf(c[8], c[9], c[10], c[11]),
+                           bitsOf(c[12], c[13], c[14], c[15])}};
+        }
+        inline Matrix unitMatrix()
+        {
+            constexpr uint32_t one = 0x3F800000u;
+            return Matrix{{bitsOf(one, 0u, 0u, 0u), bitsOf(0u, one, 0u, 0u), bitsOf(0u, 0u, one, 0u), bitsOf(0u, 0u, 0u, one)}};
+        }
+        inline Vec4 negLanes01(Vec4 v, int lane) // neg.s of one lane (0 = x, 1 = y)
+        {
+            alignas(16) uint32_t w[4];
+            store(w, v);
+            w[lane] ^= 0x80000000u;
+            return bitsOf(w[0], w[1], w[2], w[3]);
+        }
+
+        // The reads: plain RAM, 16-aligned where the original uses lq / lqc2 (it masks; the native wants no masking),
+        // clear of the stack window; their ranges kept for the overlap check against the writes.
+        template <class Env>
+        struct MatricesReads
+        {
+            Env &env;
+            uint32_t stackLow;
+            bool ok = true;
+            uint32_t at[24], size[24];
+            int count = 0;
+            bool span(uint32_t address, uint32_t n, uint32_t &off)
+            {
+                if (!ok || !plainRam(address, n, off) || e::overlaps(off, n, stackLow, kModelMatricesWindow))
+                    return ok = false;
+                return true;
+            }
+            bool keep(uint32_t address, uint32_t n, uint32_t &off)
+            {
+                if (!span(address, n, off))
+                    return false;
+                if (count == 24)
+                    return ok = false;
+                at[count] = off;
+                size[count++] = n;
+                return true;
+            }
+            uint32_t u32(uint32_t address)
+            {
+                uint32_t off;
+                return keep(address, 4u, off) ? e::read32(env, off) : 0u;
+            }
+            float f32(uint32_t address) { return bitsFloat(u32(address)); }
+            uint8_t u8(uint32_t address)
+            {
+                uint32_t off;
+                return keep(address, 1u, off) ? *env.at(off, 1u) : 0u;
+            }
+            Matrix rows(uint32_t address)
+            {
+                Matrix m{};
+                uint32_t off;
+                if ((address & 0xFu) != 0u)
+                    ok = false;
+                else if (keep(address, 64u, off))
+                {
+                    const uint8_t *p = env.at(off, 64u);
+                    for (int k = 0; k < 4; ++k)
+                        m.r[k] = load(p + 16 * k);
+                }
+                return m;
+            }
+        };
+
+        template <class Env>
+        bool modelMatrices(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackLow;
+            // vf0 = (0, 0, 0, 1): the unit matrices (UnitMatrix, func_001503B8's frame) come from it
+            if (!e::vf0Constant(ctx) || (sp & 0xFu) != 0u ||
+                !plainRam(sp - kModelMatricesWindow, kModelMatricesWindow, stackLow))
+                return false;
+            MatricesReads<Env> rd{env, stackLow};
+            ExactOps x;
+            int calls = 0, backs = 0;
+            const uint32_t self = e::u32(ctx, e::a0);
+            const uint32_t idx = rd.u32(0x7476B0u) & 1u;
+            const uint32_t buf = rd.u32(self + 552u + 4u * idx);
+            const uint32_t cam = rd.u32(kViewPointer);
+            Matrix view = rd.rows(cam);      // buf+16
+            Matrix third = unitMatrix();     // buf+272
+            Matrix second = rd.rows(cam + 192u); // buf+80
+            const uint32_t flags = rd.u32(self + 592u);
+            calls += 3;
+            if (flags & 0x2000u)
+            {
+                second = rd.rows(0x4A6900u);
+                calls += 1;
+            }
+            if (!rd.ok)
+                return false;
+
+            if (flags & 0x1080000u)
+            {
+                TanTable tt;
+                uint32_t tableOff;
+                if (!rd.keep(kTanTable, 52u, tableOff))
+                    return false;
+                std::memcpy(tt.t, env.at(tableOff, 52u), 52u);
+                const float fov = rd.f32(cam + 592u);
+                const float f1190 = rd.f32(0x3C1190u), f6b88 = rd.f32(0x586B88u);
+                const int32_t i1180 = static_cast<int32_t>(rd.u32(0x3C1180u));
+                const float cxIn = rd.f32(self + 304u), cyIn = rd.f32(self + 308u);
+                const Matrix m128 = rd.rows(self + 128u);
+                const Matrix m0 = (flags & 0x1000000u) ? rd.rows(self) : Matrix{};
+                if (!rd.ok || i1180 >= (1 << 24) || i1180 <= -(1 << 24))
+                    return false;
+                // the halves' shared scalars (each half computes them the same way, from the same inputs)
+                const float a = x.div(x.mul(fov, bitsFloat(0x40490FDBu)), bitsFloat(0x43B40000u));
+                int tanCalls = 0;
+                const float t = tanfBody(tt, x, a, tanCalls);
+                const float scrz = x.div(x.mul(x.div(f1190, f6b88), bitsFloat(0x3F000000u)), t);
+                const float ax = x.div(fpuFromSmallWord(i1180), bitsFloat(0x44200000u));
+                const float cx = x.add(cxIn, bitsFloat(0x45000000u)), cy = x.add(cyIn, bitsFloat(0x45000000u));
+                const float q = x.div(bitsFloat(0x43200000u), scrz);
+                const float p = negBits(x.div(bitsFloat(0x3E4CCCCDu), x.add(q, q)));
+                const float tenth = bitsFloat(0x3DCCCCCDu);
+                const float qx = x.div(x.mul(x.mul(scrz, ax), q), tenth);
+                const float qy = x.div(x.mul(x.mul(scrz, f6b88), q), tenth);
+                Matrix vs;
+                if (!viewScreenBody(x, scrz, ax, f6b88, cx, cy, registerConstant(1.0f), bitsFloat(0x477FFF00u), tenth,
+                                    bitsFloat(0x44160000u), vs))
+                    return false;
+                vs.r[0] = negLanes01(vs.r[0], 0);
+                vs.r[1] = negLanes01(vs.r[1], 1);
+                const uint32_t pb = floatBits(p);
+                const Matrix pm{{bitsOf(pb, 0u, 0u, 0u), bitsOf(0u, pb, 0u, 0u), bitsOf(0u, 0u, 0x3F800AECu, 0x3F800000u),
+                                 bitsOf(0u, 0u, 0xBE4CD58Au, 0u)}};
+                const Matrix qm{{bitsOf(floatBits(qx), 0u, 0u, 0u), bitsOf(0u, floatBits(qy), 0u, 0u),
+                                 bitsOf(0u, 0u, 0xC6FFFE00u, 0u), bitsOf(0x45000000u, 0x45000000u, 0x47000000u, 0x3F800000u)}};
+                for (int half = 0; half < 2; ++half)
+                {
+                    if (!(flags & (half == 0 ? 0x80000u : 0x1000000u)))
+                        continue;
+                    const Matrix c = fixedCamera(half);
+                    Matrix pc;
+                    if (!mulMatrixRows(vs, c, view) || !mulMatrixRows(pm, c, pc) || !mulMatrixRows(pc, m128, second))
+                        return false;
+                    if (half == 1 && (!mulMatrixRows(m0, view, view) || !mulMatrixRows(view, m128, view)))
+                        return false;
+                    third = qm;
+                    // CameraMatrix 1 + 7, tanf x2, ViewScreenMatrix 1 + 3, MtxMultiply 2, CopyMatrix, MtxCopy 2, UnitMatrix,
+                    // MulMatrix, InversMatrix, UnitMatrix, CopyMatrix; three MulMatrix loops
+                    calls += 22 + 2 * (1 + tanCalls);
+                    backs += 3 * kMulMatrixBacks;
+                }
+            }
+
+            // the node list: func_001503B8 per node (jal, its MtxMultiply jal, MulMatrix jal and loop), the loop back-edges
+            const uint32_t n = rd.u8(self + 692u);
+            const uint32_t outs = rd.u32(self + 560u + 4u * idx);
+            uint32_t node = n ? rd.u32(rd.u32(self + 632u)) : 0u;
+            uint32_t bufOff, outsOff;
+            if (!rd.ok || n == 0u || (buf & 0xFu) != 0u || (outs & 0xFu) != 0u || !x.ok ||
+                !rd.span(buf + 16u, 0x140u, bufOff) || !rd.span(outs + 16u, 64u * n, outsOff) ||
+                e::overlaps(bufOff, 0x140u, outsOff, 64u * n))
+                return false;
+            // writes: buf +16..+144 and +272..+336 (the 0x140 span checked whole), outs +16.. (64 n)
+            auto hitsWrites = [&](uint32_t off, uint32_t size) {
+                return e::overlaps(off, size, bufOff, 0x80u) || e::overlaps(off, size, bufOff + 0x100u, 0x40u) ||
+                       e::overlaps(off, size, outsOff, 64u * n);
+            };
+            for (int i = 0; i < rd.count; ++i)
+                if (hitsWrites(rd.at[i], rd.size[i]))
+                    return false;
+            // each node's product into a buffer first: nothing lands until every node is checked
+            constexpr uint32_t one = 0x3F800000u;
+            alignas(16) uint8_t nodeOut[255u * 64u];
+            for (uint32_t k = 0; k < n; ++k)
+            {
+                uint32_t mOff, fOff, linkOff;
+                if ((node & 0xFu) != 0u || !rd.span(node + 0x80u, 64u, mOff) || !rd.span(node + 0xC0u, 12u, fOff) ||
+                    !rd.span(node + 324u, 4u, linkOff) || hitsWrites(mOff, 64u) || hitsWrites(fOff, 12u) ||
+                    hitsWrites(linkOff, 4u))
+                    return false;
+                const uint8_t *pm = env.at(mOff, 64u);
+                const Matrix nm{{load(pm), load(pm + 16), load(pm + 32), load(pm + 48)}};
+                const uint32_t f0 = e::read32(env, fOff), f1 = e::read32(env, fOff + 4u), f2 = e::read32(env, fOff + 8u);
+                if (!libvu0::finiteInputs(bitsOf(f0, f1, f2, 0u)))
+                    return false;
+                const Matrix fm{{bitsOf(one, 0u, 0u, 0u), bitsOf(0u, one, 0u, 0u), bitsOf(0u, 0u, one, 0u), bitsOf(f0, f1, f2, one)}};
+                Matrix r;
+                if (!mulMatrixRows(nm, fm, r))
+                    return false;
+                for (int j = 0; j < 4; ++j)
+                    store(nodeOut + 64u * k + 16u * j, r.r[j]);
+                node = e::read32(env, linkOff);
+                calls += 3;
+                backs += kMulMatrixBacks + (k + 1u < n ? 1 : 0);
+            }
+            // every check passed: the writes (disjoint spans, so their order can't show)
+            uint8_t *b = env.at(bufOff, 0x140u);
+            for (int k = 0; k < 4; ++k)
+            {
+                store(b + 16 * k, view.r[k]);
+                store(b + 0x40 + 16 * k, second.r[k]);
+                store(b + 0x100 + 16 * k, third.r[k]);
+            }
+            std::memcpy(env.at(outsOff, 64u * n), nodeOut, 64u * n);
+            for (int i = 0; i < calls; ++i)
+                env.call();
+            for (int i = 0; i < backs; ++i)
+                env.checkpoint(32u);
+            returnToCaller(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -3918,5 +4378,10 @@ namespace kamite::native::packet
         // func_00154240, a node's lighting block (its callees inline on one BlockTxn). Checked on K's 14:30 build of
         // ed4a13e (every replay shadowed: 1.41M calls, 0 mismatches, 0 declines; every .ram.bin the reference's).
         addReadable("func_00154240", kNodeLighting, true, &nodeLighting<RealEnv>, &nodeLighting<ShadowEnv>, 0u);
+        // Rung 3 step a, the 0x14C7E8 batch (Nov 23): tanf, func_0030AA40 (= sceVu0ViewScreenMatrix) and func_0014C7E8
+        // composing them with the matrix natives' maths (reads first, then the writes). Unchecked: dev replays shadow them.
+        addReadable("tanf", kTanf, false, &tanfNative<RealEnv>, &tanfNative<ShadowEnv>, NativeFunction::kReturnsF0);
+        addReadable("func_0030AA40", kViewScreen, false, &viewScreenNative<RealEnv>, &viewScreenNative<ShadowEnv>, 0u);
+        addReadable("func_0014C7E8", kModelMatrices, false, &modelMatrices<RealEnv>, &modelMatrices<ShadowEnv>, 0u);
     }
 }

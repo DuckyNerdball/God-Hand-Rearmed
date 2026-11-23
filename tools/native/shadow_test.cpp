@@ -96,6 +96,16 @@ KM_RECOMPILED(func_00148690_0x148690)
 KM_RECOMPILED(cModel_setNodeMaterial_0x14b4d0)
 KM_RECOMPILED(ForwardAttackByMode_14B5D8_0x14b5d8)
 KM_RECOMPILED(func_00154240_0x154240)
+KM_RECOMPILED(tanf_0x3a1ae8)
+KM_RECOMPILED(ps2___kernel_tanf_0x3a4830)
+KM_RECOMPILED(ps2___ieee754_rem_pio2f_0x3a3768)
+KM_RECOMPILED(ps2___kernel_rem_pio2f_0x3a3dd8)
+KM_RECOMPILED(func_003A19D8_0x3a19d8)
+KM_RECOMPILED(scalbnf_0x3a4e28)
+KM_RECOMPILED(floorf_0x3a4d18)
+KM_RECOMPILED(copysignf_0x3a4f88)
+KM_RECOMPILED(func_0030AA40_0x30aa40)
+KM_RECOMPILED(func_0014C7E8_0x14c7e8)
 KM_RECOMPILED(SearchDataByTwoNames_0x31cdc0)
 KM_RECOMPILED(cIDBase_getSlotPtr_0x1522c0)
 #undef KM_RECOMPILED
@@ -270,7 +280,9 @@ namespace
                                    {0x5CAFF0u, 0x10u}, {0x747600u, 0x500u}, {0x755700u, 0x100u},
                                    {0x4F8000u, 0x18000u}, // batch 3: the frame allocator's areas around 0x506E10
                                    // step a: func_00154240's constants (D_003BD870..89F, D_004A6940) and the light set
-                                   {0x3BD800u, 0x100u}, {0x4A6900u, 0x100u}, {0x604700u, 0x60u}, {0x61A800u, 0x200u}};
+                                   {0x3BD800u, 0x100u}, {0x4A6900u, 0x100u}, {0x604700u, 0x60u}, {0x61A800u, 0x200u},
+                                   // the 0x14C7E8 batch: tanf's T table, the screen values D_003C1180 / 1190, D_00586B88
+                                   {0x45EF00u, 0x100u}, {0x3C1100u, 0x100u}, {0x586B00u, 0x100u}};
     constexpr uint32_t usedBytes()
     {
         uint32_t total = 0;
@@ -1326,6 +1338,145 @@ namespace
             setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
             return;
         }
+        case 0x3A1AE8u: // the 0x14C7E8 batch: tanf (f12; the ELF's T table, sometimes wild)
+        case 0x30AA40u: // func_0030AA40 = sceVu0ViewScreenMatrix (a0 = m, f12-f19, farz at the caller's 0(sp))
+        case 0x14C7E8u: // func_0014C7E8: a model's per-frame matrices (model at 0x38000.., its node list at 0x48000..)
+        {
+            static constexpr uint32_t kT[13] = {0x3EAAAAABu, 0x3E088889u, 0x3D5D0DD1u, 0x3CB327A4u, 0x3C11371Fu,
+                                                0x3B6B6916u, 0x3ABEDE48u, 0x3A1A26C8u, 0x398137B9u, 0x38A3F445u,
+                                                0x3895C07Au, 0xB79BAE5Fu, 0x37D95384u};
+            for (uint32_t k = 0; k < 13u; ++k)
+                setU32(0x45EFF0u + 4u * k, g_rng() % 16u == 0u ? inputFloat(true) : kT[k]);
+            const uint32_t spAt = 0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u);
+            setGpr(ctx, 29, spAt | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
+            auto floatBits = [](float f) {
+                uint32_t b;
+                std::memcpy(&b, &f, 4);
+                return b;
+            };
+            auto halfAngle = [&]() -> uint32_t { // tanf's argument: its paths and their edges
+                const uint32_t pick = static_cast<uint32_t>(g_rng() % 16u);
+                const uint32_t sign = (g_rng() % 4u == 0u) ? 0x80000000u : 0u;
+                if (pick < 6u)
+                    return floatBits(static_cast<float>(g_rng() % 785398u) / 1000000.0f) | sign; // under pi/4
+                if (pick < 9u)
+                    return floatBits(0.7853982f + static_cast<float>(g_rng() % 1570796u) / 1000000.0f) | sign; // pi/4..3pi/4
+                if (pick == 9u)
+                    return (0x3F490FD8u + static_cast<uint32_t>(g_rng() % 6u)) | sign; // pi/4 either side
+                if (pick == 10u)
+                    return (0x3FC90FC8u + static_cast<uint32_t>(g_rng() % 0x20u)) | sign; // near pi/2 (pio2_2)
+                if (pick == 11u)
+                    return (0x3F2CA138u + static_cast<uint32_t>(g_rng() % 0x10u)) | sign; // kernel_tanf's 0.6744 edge
+                if (pick == 12u)
+                    return (static_cast<uint32_t>(g_rng()) % 0x31900000u) | sign; // tiny, denormal, 0
+                if (pick == 13u)
+                    return (0x4016CBE0u + static_cast<uint32_t>(g_rng() % 8u)) | sign; // 3pi/4 either side
+                return inputFloat(true);
+            };
+            if (fn.address == 0x3A1AE8u)
+            {
+                const uint32_t a = halfAngle();
+                std::memcpy(&ctx.f[12], &a, 4);
+                return;
+            }
+            if (fn.address == 0x30AA40u)
+            {
+                uint32_t m = base + 0x40u * static_cast<uint32_t>(g_rng() % 8u);
+                if (g_rng() % 32u == 0u)
+                    m += 4u; // unaligned: declines
+                if (g_rng() % 32u == 0u)
+                    m = spAt - 0x60u; // in its own frame: declines
+                setGpr(ctx, 4, m | mirror);
+                for (int r = 12; r <= 19; ++r)
+                {
+                    const uint32_t v = inputFloat(wild && g_rng() % 4u == 0u);
+                    std::memcpy(&ctx.f[r], &v, 4);
+                }
+                if (g_rng() % 2u) // the game's own arguments (zmin 1, zmax 65535, nearz 0.1, farz 600)
+                {
+                    ctx.f[17] = 1.0f;
+                    ctx.f[18] = 65535.0f;
+                    ctx.f[19] = 0.1f;
+                }
+                setU32(spAt, g_rng() % 2u ? floatBits(600.0f) : inputFloat(wild));
+                return;
+            }
+            // func_0014C7E8
+            const uint32_t self = 0x38000u + 0x400u * static_cast<uint32_t>(g_rng() % 8u);
+            randomBytes(self, 0x2B8u);
+            floatsAt(self, 16, wild);
+            floatsAt(self + 128u, 16, wild);
+            floatsAt(self + 304u, 2, wild);
+            const uint32_t idx = static_cast<uint32_t>(g_rng() % 2u);
+            setU32(0x7476B0u, static_cast<uint32_t>(g_rng() << 1) | idx);
+            uint32_t buf = 0x3E000u + 0x200u * static_cast<uint32_t>(g_rng() % 8u);
+            const uint32_t outs = 0x70000u + 0x10u * static_cast<uint32_t>(g_rng() % 64u); // clear of the nodes (0x48000..0x68000)
+            const uint32_t view = 0x3D000u + 0x10u * static_cast<uint32_t>(g_rng() % 16u);
+            floatsAt(view, 16, wild);
+            floatsAt(view + 192u, 16, wild);
+            floatsAt(0x4A6900u, 16, wild);
+            uint32_t fov = floatBits(static_cast<float>(10u + g_rng() % 110u) + static_cast<float>(g_rng() % 1000u) / 1000.0f);
+            const uint32_t fovPick = static_cast<uint32_t>(g_rng() % 16u);
+            if (fovPick == 0u)
+                fov = floatBits(90.0f);
+            else if (fovPick == 1u)
+                fov = floatBits(static_cast<float>(120u + g_rng() % 200u)); // past 270: tanf declines
+            else if (fovPick == 2u)
+                fov = inputFloat(true);
+            setU32(view + 592u, fov);
+            setU32(0x5CAFF0u, (view | (g_rng() % 64u == 0u ? 4u : 0u)) | seg); // sometimes unaligned: declines
+            setU32(0x3C1190u, g_rng() % 4u ? floatBits(static_cast<float>(224u + g_rng() % 300u)) : inputFloat(wild));
+            setU32(0x586B88u, g_rng() % 4u ? floatBits(0.75f + static_cast<float>(g_rng() % 1000u) / 1000.0f) : inputFloat(wild));
+            const uint32_t widthPick = static_cast<uint32_t>(g_rng() % 16u);
+            setU32(0x3C1180u, widthPick == 0u ? static_cast<uint32_t>(g_rng()) : widthPick < 8u ? 640u : static_cast<uint32_t>(g_rng() % 2048u));
+            uint32_t flags = static_cast<uint32_t>(g_rng()) & ~0x1082000u;
+            for (uint32_t bit : {0x2000u, 0x80000u, 0x1000000u})
+                if (g_rng() % 2u)
+                    flags |= bit;
+            setU32(self + 592u, flags);
+            // the node list: n nodes at 0x48000 + 0x200 i in a shuffled order
+            const uint32_t nPick = static_cast<uint32_t>(g_rng() % 32u);
+            uint32_t n = nPick == 0u ? 255u : nPick < 4u ? 1u : 1u + static_cast<uint32_t>(g_rng() % 24u);
+            if (nPick == 31u && call.dueAt)
+                n = 0u; // the do-while would spin 2^32 times: only when a checkpoint stops the original early
+            setByte(self + 692u, static_cast<uint8_t>(n));
+            uint32_t order[255];
+            for (uint32_t i = 0; i < 255u; ++i)
+                order[i] = i;
+            for (uint32_t i = n ? n - 1u : 0u; i > 0u; --i)
+                std::swap(order[i], order[g_rng() % (i + 1u)]);
+            for (uint32_t i = 0; i < n; ++i)
+            {
+                const uint32_t node = 0x48000u + 0x200u * order[i];
+                floatsAt(node + 0x80u, 16, wild && g_rng() % 4u == 0u);
+                floatsAt(node + 0xC0u, 3, wild && g_rng() % 4u == 0u);
+                setU32(node + 324u, (i + 1u < n ? 0x48000u + 0x200u * order[i + 1u] : static_cast<uint32_t>(g_rng())) | seg);
+            }
+            const uint32_t head = 0x3F000u + 4u * static_cast<uint32_t>(g_rng() % 16u);
+            setU32(head, (0x48000u + 0x200u * order[0]) | seg);
+            setU32(self + 632u, head | seg);
+            // aliasing: the outputs over an input (each declines)
+            uint32_t outsAt = outs;
+            const uint32_t alias = static_cast<uint32_t>(g_rng() % 48u);
+            if (alias == 0u && n == 1u)
+                outsAt = 0x48000u + 0x200u * order[0] + 0x70u; // the output over the node's own matrix
+            else if (alias == 1u)
+                buf = view - 0x10u; // buf+16 = the camera's matrix
+            else if (alias == 2u)
+                outsAt = buf + 0x100u; // the node outputs over buf+272
+            else if (alias == 3u)
+                buf |= 8u; // unaligned
+            else if (alias == 4u)
+                buf = spAt - 0x200u; // in the stack window
+            setU32(self + 552u + 4u * idx, buf | seg);
+            setU32(self + 560u + 4u * idx, outsAt | seg);
+            setU32(self + 552u + 4u * (idx ^ 1u), static_cast<uint32_t>(g_rng()));
+            setU32(self + 560u + 4u * (idx ^ 1u), static_cast<uint32_t>(g_rng()));
+            if (g_rng() % 32u == 0u)
+                std::memset(&ctx.vu0_vf[0], 0, 16); // a broken vf0 (the original's UnitMatrix reads it)
+            setGpr(ctx, 4, self | seg);
+            return;
+        }
         default:
             return;
         }
@@ -2251,12 +2402,19 @@ int main(int argc, char **argv)
         {0x151CC0u, &func_00151CC0_0x151cc0},    {0x151688u, &func_00151688_0x151688},
         {0x151FA0u, &func_00151FA0_0x151fa0},    {0x148D30u, &func_00148D30_0x148d30},
         {0x148690u, &func_00148690_0x148690},    {0x14B4D0u, &cModel_setNodeMaterial_0x14b4d0},
-        {0x14B5D8u, &ForwardAttackByMode_14B5D8_0x14b5d8}, {0x154240u, &func_00154240_0x154240}};
+        {0x14B5D8u, &ForwardAttackByMode_14B5D8_0x14b5d8}, {0x154240u, &func_00154240_0x154240},
+        {0x3A1AE8u, &tanf_0x3a1ae8},             {0x30AA40u, &func_0030AA40_0x30aa40},
+        {0x14C7E8u, &func_0014C7E8_0x14c7e8}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &func_00309C30_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
     g_callees.push_back({0x31CDC0u, &SearchDataByTwoNames_0x31cdc0});
     g_callees.push_back({0x1522C0u, &cIDBase_getSlotPtr_0x1522c0});
+    for (const auto &[address, f] : std::initializer_list<std::pair<uint32_t, void (*)(uint8_t *, R5900Context *, PS2Runtime *)>>{
+             {0x3A4830u, &ps2___kernel_tanf_0x3a4830}, {0x3A3768u, &ps2___ieee754_rem_pio2f_0x3a3768},
+             {0x3A3DD8u, &ps2___kernel_rem_pio2f_0x3a3dd8}, {0x3A19D8u, &func_003A19D8_0x3a19d8},
+             {0x3A4E28u, &scalbnf_0x3a4e28}, {0x3A4D18u, &floorf_0x3a4d18}, {0x3A4F88u, &copysignf_0x3a4f88}})
+        g_callees.push_back({address, f}); // tanf's libm callees (no natives)
     kamite::texture_slots::install(); // its hook in the TIM2 loader (the setups switch the flag per call)
     for (const auto &[address, f] : recompiled)
         g_callees.push_back({address, f});
@@ -2267,6 +2425,31 @@ int main(int argc, char **argv)
         std::printf("no recompiled function for %s\n", fn.name);
         std::exit(2);
     };
+    if (argc > 1 && std::strcmp(argv[1], "camera") == 0) // func_0014C7E8's fixed cameras, from the recompiled CameraMatrix
+    {
+        for (float z : {50.0f, 145.0f})
+        {
+            R5900Context ctx;
+            randomContext(ctx);
+            const float in[12] = {0.0f, 0.0f, z, 1.0f, 0.0f, 0.0f, -1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f};
+            std::memcpy(g_ramA + 0x3C010u, in, sizeof(in));
+            setGpr(ctx, 4, 0x3C100u);
+            setGpr(ctx, 5, 0x3C010u);
+            setGpr(ctx, 6, 0x3C020u);
+            setGpr(ctx, 7, 0x3C030u);
+            setGpr(ctx, 29, 0xF0000u);
+            setGpr(ctx, 31, 0x00123450u);
+            ctx.pc = 0x30A8C8u;
+            sceVu0CameraMatrix_0x30a8c8(g_ramA, &ctx, g_rt);
+            for (uint32_t k = 0; k < 16u; ++k)
+            {
+                uint32_t w;
+                std::memcpy(&w, g_ramA + 0x3C100u + 4u * k, 4);
+                std::printf("0x%08Xu,%s", w, k % 8u == 7u ? "\n" : " ");
+            }
+        }
+        return 0;
+    }
     if (argc > 2 && std::strcmp(argv[1], "vectors") == 0) // the maths vectors alone
     {
         writeVectors(argv[2], 20000);
@@ -2317,7 +2500,7 @@ int main(int argc, char **argv)
     for (const NativeFunction &fn : g_natives)
         for (uint32_t caller : {0x30A8C8u, 0x30A978u, 0x147528u, 0x147548u, 0x101E28u, 0x31A650u, 0x31A600u, 0x14D768u,
                                 0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u,
-                                0x154240u})
+                                0x154240u, 0x30AA40u, 0x14C7E8u})
             if (fn.address == caller)
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;

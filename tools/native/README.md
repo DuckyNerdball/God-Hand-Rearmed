@@ -27,7 +27,10 @@ with kamite/git_commit.h):
        func_0014B9A0_0x14b9a0 func_00151630_0x151630 func_00151688_0x151688 func_00151990_0x151990
        func_00151CC0_0x151cc0 func_00151FA0_0x151fa0 func_00309C30_0x309c30 ps2___muldi3_0x31de10
        func_00148D30_0x148d30 func_00148690_0x148690 SearchDataByTwoNames_0x31cdc0 cIDBase_getSlotPtr_0x1522c0
-       cModel_setNodeMaterial_0x14b4d0 ForwardAttackByMode_14B5D8_0x14b5d8 func_00154240_0x154240"
+       cModel_setNodeMaterial_0x14b4d0 ForwardAttackByMode_14B5D8_0x14b5d8 func_00154240_0x154240
+       tanf_0x3a1ae8 ps2___kernel_tanf_0x3a4830 ps2___ieee754_rem_pio2f_0x3a3768 ps2___kernel_rem_pio2f_0x3a3dd8
+       func_003A19D8_0x3a19d8 scalbnf_0x3a4e28 floorf_0x3a4d18 copysignf_0x3a4f88 func_0030AA40_0x30aa40
+       func_0014C7E8_0x14c7e8"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -116,3 +119,15 @@ past FLT_MAX - 1 ulp or a divide outside exponents 1-254 (the runtime's ps2ee ca
 volatile (`registerConstant`), else GCC folds x * 1.0 and a denormal escapes the flush (the first sandbox mismatch).
 shadow_test's setup picks the four paths evenly, the env pass half the time (colour w = 1.0), all branches of the
 packet tail; 17 planted bugs (one per path / branch, the cycles) all caught.
+
+## tanf, func_0030AA40 and func_0014C7E8 (rung 3 step a, Nov 23)
+
+tanf is the game's fdlibm float code op for op on ExactOps (never the host's tanf); rem_pio2f's medium / huge paths
+(|x| past 3pi/4, a FOV of 270 degrees and up) decline. func_0014C7E8 reads everything first, computes into locals (the
+node list into a buffer) and writes at the end; it declines when a write would land on anything it read, on another
+write or on the stack window, so the original's order of loads and stores can't show. Its two fixed CameraMatrix results
+are constants: `shadow_test camera` prints them from the recompiled function. shadow_test's setups: tanf's argument at
+each path's edges (pi/4, 0.6744, near pi/2, 3pi/4, tiny / denormal), the ELF's T table (sometimes wild); the model's
+flags (0x2000 / 0x80000 / 0x1000000 each half the time), FOVs (90 exactly, past 270), 1-255 nodes in a shuffled chain,
+outputs aliased over an input, unaligned or in the stack window (each declines).
+
