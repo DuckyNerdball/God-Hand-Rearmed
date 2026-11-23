@@ -2,6 +2,10 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 23, 2026
+
+- Performance: each model's per-frame matrices (and the game's tangent and view-screen helpers) run as native code; each node's lighting runs the original code again while a rendering difference is checked.
+
 ## November 22, 2026
 
 - 16:9 HUD: all five Mad Midget Five health bars keep to the left edge (the last two went to the middle) (#26).

@@ -162,12 +162,6 @@ namespace kamite::native
             atEnd = false;
             owed = loops = 0;
         }
-        // atEnd, before a native's first write (all its cycles counted): false when charging them would reach an EE
-        // event (EeScheduler::eventWithin). The original would take that event part-way through (an interrupt, a thread
-        // switch, the VIF1 kick it may start); the native declines and the original runs, the event landing where it
-        // always did. A charged-at-end native that commits only when this holds is timing-exact (K's 07:25 Nov 23
-        // replays: func_00154240 live moved 8 cases' chain digests while every .ram.bin stayed the reference's).
-        bool commitOk() const { return !atEnd || !runtime->eeEventWithin(owed + loops * eeLoopCycles()); }
         uint8_t *at(uint32_t offset, uint32_t) { return ram + offset; }
         // An observed function run inline: its observers first, on the real RAM and context (ctx at its entry).
         void observe(uint32_t address, R5900Context *ctx) { runEntryObservers(address, ram, ctx, runtime); }
@@ -227,7 +221,6 @@ namespace kamite::native
             atEnd = false;
             owed = 0;
         }
-        bool commitOk() const { return true; } // the shadow compares values; RealEnv's timing check is the play side
         // The shadow run leaves observers to the real call (they act on the real RAM).
         void observe(uint32_t, R5900Context *) {}
     };

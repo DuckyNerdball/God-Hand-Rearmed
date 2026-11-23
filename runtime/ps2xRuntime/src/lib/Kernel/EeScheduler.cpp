@@ -811,25 +811,6 @@ void EeScheduler::postEvent(EeEvent event)
     m_eventCv.notify_one();
 }
 
-bool EeScheduler::eventWithin(uint64_t cycles) const noexcept
-{
-    if (m_checkpointPending.load(std::memory_order_acquire) || m_stopRequested.load(std::memory_order_acquire))
-        return true;
-    const uint64_t ahead = g_ps2xEeDeferred + cycles;
-    const uint64_t at = m_eeCycle + ahead;
-    const uint64_t deadline = m_nextDeadlineCycle.load(std::memory_order_acquire);
-    if (deadline != 0u && at >= deadline)
-        return true;
-    if (at >= m_sliceEndCycle)
-    {
-        const GuestThread *running = currentThread();
-        if (running != nullptr && hasReadyAtOrAbovePriority(running->currentPriority))
-            return true;
-    }
-    const PS2Memory &memory = m_runtime.memory();
-    return memory.m_gifStatWritten || memory.m_eeTimerEventBudget <= memory.m_eeTimerPendingCycles + ahead;
-}
-
 bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
 {
     // PS2X_EE_DEFER_CYCLES (default 256; 0 = account at every checkpoint as before): the checkpoints of generated code

@@ -2540,8 +2540,6 @@ namespace kamite::native::packet
             if (!t.ok || !txnBuild(t, Kind, e::u32(ctx, e::a0), e::u32(ctx, e::a1), e::u32(ctx, e::a2), e::u32(ctx, e::a3),
                                    e::u64(ctx, e::t0)))
                 return false;
-            if (!env.commitOk())
-                return false;
             t.commit();
             returnToCaller(ctx);
             return true;
@@ -2627,8 +2625,6 @@ namespace kamite::native::packet
             for (int i = 0; i < backEdges; ++i)
                 env.checkpoint(32u);
             if (!txnMiss(t, w, name, type, missAt, v))
-                return false;
-            if (!env.commitOk())
                 return false;
             t.commit();
             e::setS32(ctx, e::v0, static_cast<uint32_t>(v));
@@ -2726,8 +2722,6 @@ namespace kamite::native::packet
             Txn<Env> t{env, stackTop, stackTop + kMeshTexturesMissWindow};
             if (!t.ok ||
                 !txnMeshTextures(t, e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u64(ctx, e::a2), e::u64(ctx, e::a3)))
-                return false;
-            if (!env.commitOk())
                 return false;
             t.commit();
             returnToCaller(ctx);
@@ -2940,8 +2934,6 @@ namespace kamite::native::packet
             Txn<Env> t{env, stackTop, stackTop + kNodeTexturesWindow};
             if (!t.ok || !txnNodeTextures(t, e::u32(ctx, e::a0), e::u64(ctx, e::a1)))
                 return false;
-            if (!env.commitOk())
-                return false;
             t.commit();
             returnToCaller(ctx);
             return true;
@@ -3056,8 +3048,6 @@ namespace kamite::native::packet
             Txn<Env> t{env, stackTop, stackTop + kNodeMaterialWindow};
             if (!t.ok || !txnNodeMaterial(t, e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u64(ctx, e::a2), e::u64(ctx, e::a3)))
                 return false;
-            if (!env.commitOk())
-                return false;
             t.commit();
             returnToCaller(ctx);
             return true;
@@ -3146,8 +3136,6 @@ namespace kamite::native::packet
             }
             if (!done || !t.ok)
                 return false;
-            if (!env.commitOk())
-                return false;
             t.commit();
             returnToCaller(ctx);
             return true;
@@ -3174,8 +3162,6 @@ namespace kamite::native::packet
             else
                 done = txnNodeTextures(t, node, prio);
             if (!done || !t.ok)
-                return false;
-            if (!env.commitOk())
                 return false;
             t.commit();
             returnToCaller(ctx);
@@ -3856,8 +3842,6 @@ namespace kamite::native::packet
             }
             if (!t.ok || !x.ok)
                 return false;
-            if (!env.commitOk())
-                return false;
             t.commit();
             returnToCaller(ctx);
             return true;
@@ -3997,8 +3981,6 @@ namespace kamite::native::packet
                 return false;
             for (int i = 0; i < calls; ++i)
                 env.call();
-            if (!env.commitOk())
-                return false;
             e::setFBits(ctx, 0, floatBits(r));
             returnToCaller(ctx);
             return true;
@@ -4073,8 +4055,6 @@ namespace kamite::native::packet
                 env.call();
             for (int i = 0; i < kMulMatrixBacks; ++i)
                 env.checkpoint(32u);
-            if (!env.commitOk())
-                return false;
             uint8_t *dst = env.at(m, 64u);
             for (int k = 0; k < 4; ++k)
                 store(dst + 16 * k, out.r[k]);
@@ -4310,12 +4290,6 @@ namespace kamite::native::packet
                 calls += 3;
                 backs += kMulMatrixBacks + (k + 1u < n ? 1 : 0);
             }
-            for (int i = 0; i < calls; ++i)
-                env.call();
-            for (int i = 0; i < backs; ++i)
-                env.checkpoint(32u);
-            if (!env.commitOk())
-                return false;
             // every check passed: the writes (disjoint spans, so their order can't show)
             uint8_t *b = env.at(bufOff, 0x140u);
             for (int k = 0; k < 4; ++k)
@@ -4325,6 +4299,10 @@ namespace kamite::native::packet
                 store(b + 0x100 + 16 * k, third.r[k]);
             }
             std::memcpy(env.at(outsOff, 64u * n), nodeOut, 64u * n);
+            for (int i = 0; i < calls; ++i)
+                env.call();
+            for (int i = 0; i < backs; ++i)
+                env.checkpoint(32u);
             returnToCaller(ctx);
             return true;
         }
@@ -4399,11 +4377,15 @@ namespace kamite::native::packet
                     &forwardAttack<ShadowEnv>, 0u);
         // func_00154240, a node's lighting block (its callees inline on one BlockTxn). Checked on K's 14:30 build of
         // ed4a13e (every replay shadowed: 1.41M calls, 0 mismatches, 0 declines; every .ram.bin the reference's).
-        addReadable("func_00154240", kNodeLighting, true, &nodeLighting<RealEnv>, &nodeLighting<ShadowEnv>, 0u);
+        // func_00154240: back to shadowed (Nov 23). Live, it moved 8 cases' VIF1 chain digests (frames on to a scene's
+        // end; every .ram.bin and CSV the reference's, every shadowed call matched); not timing (8cf5eca, reverted,
+        // changed nothing). What differs is still open: claude/rung3-step-a-handoff.md "K's 07:25 replays".
+        addReadable("func_00154240", kNodeLighting, false, &nodeLighting<RealEnv>, &nodeLighting<ShadowEnv>, 0u);
         // Rung 3 step a, the 0x14C7E8 batch (Nov 23): tanf, func_0030AA40 (= sceVu0ViewScreenMatrix) and func_0014C7E8
-        // composing them with the matrix natives' maths (reads first, then the writes). Unchecked: dev replays shadow them.
-        addReadable("tanf", kTanf, false, &tanfNative<RealEnv>, &tanfNative<ShadowEnv>, NativeFunction::kReturnsF0);
-        addReadable("func_0030AA40", kViewScreen, false, &viewScreenNative<RealEnv>, &viewScreenNative<ShadowEnv>, 0u);
-        addReadable("func_0014C7E8", kModelMatrices, false, &modelMatrices<RealEnv>, &modelMatrices<ShadowEnv>, 0u);
+        // composing them with the matrix natives' maths (reads first, then the writes). Checked: K's 07:25 and 09:45
+        // replays of Nov 23 shadowed 448,001 / 148,646 / 29,858 calls each, 0 mismatches, 0 declines.
+        addReadable("tanf", kTanf, true, &tanfNative<RealEnv>, &tanfNative<ShadowEnv>, NativeFunction::kReturnsF0);
+        addReadable("func_0030AA40", kViewScreen, true, &viewScreenNative<RealEnv>, &viewScreenNative<ShadowEnv>, 0u);
+        addReadable("func_0014C7E8", kModelMatrices, true, &modelMatrices<RealEnv>, &modelMatrices<ShadowEnv>, 0u);
     }
 }

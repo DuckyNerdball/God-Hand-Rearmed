@@ -124,10 +124,6 @@ bool PS2Runtime::eeCheckpointDue(uint32_t cycles) noexcept
     g_charged += cycles == 32u ? 32u : cycles;
     return ++g_checkpointCalls == g_dueAt;
 }
-bool PS2Runtime::eeEventWithin(uint64_t) const noexcept
-{
-    return false; // RealEnv::commitOk: the harness's RealEnv runs see no events (its due checkpoints stop the original)
-}
 __m128i PS2Runtime::Load128(uint8_t *, R5900Context *, uint32_t)
 {
     std::fprintf(stderr, "unexpected Load128 (special address)\n");

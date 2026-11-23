@@ -293,11 +293,6 @@ public:
     void requestStop();
     void postEvent(EeEvent event);
     [[nodiscard]] bool checkpointDue(uint32_t cycles = kGeneratedCheckpointCycles) noexcept;
-    // Would `cycles` more EE cycles (on top of the deferred ones) reach anything checkpointDue acts on: a pending event,
-    // the next deadline, the time slice's end with a thread ready to take over, the next EE timer event, a GIF_STAT
-    // write? Conservative (true can mean nothing comes due). Natives charged at their end decline then (Kamite's
-    // RealEnv::commitOk), so an event the original would take part-way through it still lands there.
-    [[nodiscard]] bool eventWithin(uint64_t cycles) const noexcept;
     void accountCycles(uint32_t cycles) noexcept;
     uint64_t skipIdleCycles() noexcept;
     [[nodiscard]] bool isExecutingGuest() const noexcept;

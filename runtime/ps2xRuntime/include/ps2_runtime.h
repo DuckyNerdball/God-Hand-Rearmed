@@ -398,7 +398,6 @@ public:
     const EeScheduler &eeScheduler() const;
     void postEeEvent(EeEvent event);
     bool eeCheckpointDue(uint32_t cycles = 32u) noexcept;
-    bool eeEventWithin(uint64_t cycles) const noexcept; // EeScheduler::eventWithin
     // The two halves of eeCheckpointDue for the register-locals generated code (ps2_cg.h), which writes its registers
     // back to ctx only when the full checkpoint runs: eeCheckpointDue(c) == !eeCheckpointQuiet(c) && eeCheckpointFull(c).
     bool eeCheckpointQuiet(uint32_t cycles = 32u) noexcept;
