@@ -773,7 +773,10 @@ namespace
         {
             const uint32_t half = static_cast<uint32_t>(g_rng());
             setU32(0x7476B0u, half);
-            setU32(0x566E10u, 0x506E10u + (half & 1u) * 0x60000u + static_cast<uint32_t>(g_rng() % 0x60010u));
+            // the pointer below this half's limit (0x506E10 / 0x566E10) by up to 0x60000: room for most sizes, full for
+            // some (Nov 23: it sat at or past the limit, so nearly every call was "full" and a wrong size went unseen)
+            const uint32_t limit = 0x506E10u + (half & 1u) * 0x60000u;
+            setU32(0x566E10u, limit - static_cast<uint32_t>(g_rng() % 0x60010u));
             setGpr(ctx, 4, (g_rng() % 8u == 0u) ? static_cast<uint32_t>(g_rng()) : static_cast<uint32_t>(g_rng() % 0x2000u));
             return;
         }
