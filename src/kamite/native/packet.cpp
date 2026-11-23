@@ -74,15 +74,6 @@ namespace kamite::native::packet
             e::jrRa(ctx, 0x14FF50u, target, true);
         }
 
-        template <class Env>
-        bool link(Env &env, R5900Context *ctx)
-        {
-            Link plan;
-            if (!linkPlan(env, e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u32(ctx, e::a3), plan))
-                return false;
-            linkOn(env, ctx, plan);
-            return true;
-        }
 
         // ---- func_0031A650 / func_0031A600: queue a packet into bucket a1 (< 10) of the frame's table a0 ----------
         // The frame's half (the word at 0x7476B0 & 1) picks the descriptor at a0 + 0xB00 + a1 * 8 + half * 4; then
@@ -90,29 +81,10 @@ namespace kamite::native::packet
         // (a2 = the index, a3 = the packet and its last tag).
         constexpr uint32_t kQueue = 0x31A650u, kQueueOne = 0x31A600u, kFrameHalf = 0x7476B0u;
 
-        // The frame's [sp - 16, sp) slot: plain and clear of what the link touches.
-        bool queueFrame(const R5900Context *ctx, uint32_t &frame)
-        {
-            return plainRam(e::u32(ctx, e::sp) - 16u, 8u, frame);
-        }
         bool clearOf(uint32_t frame, const Link &link)
         {
             return !e::overlaps(frame, 8u, link.desc0, 4u) && !e::overlaps(frame, 8u, link.desc20, 4u) &&
                    !e::overlaps(frame, 8u, link.slot, 8u) && !e::overlaps(frame, 8u, link.tail, 8u);
-        }
-        // The descriptor: the lw in the jal's delay slot, at a0 + 0xB00 + half * 4 + a1 * 8 (the code's 32-bit sums).
-        // Both reads come after the frame's sd ra: keep them clear of it.
-        template <class Env>
-        bool descriptorOf(Env &env, uint32_t frame, uint32_t a0, uint32_t a1, uint32_t &descriptor)
-        {
-            uint32_t half, at;
-            if (!plainRam(kFrameHalf, 4u, half) || e::overlaps(frame, 8u, half, 4u))
-                return false;
-            const uint32_t where = a0 + (((e::read32(env, half) & 1u) << 2) + (a1 << 3));
-            if (!plainRam(where + 0xB00u, 4u, at) || e::overlaps(frame, 8u, at, 4u))
-                return false;
-            descriptor = e::read32(env, at);
-            return true;
         }
         template <class Env>
         void leaveQueue(Env &env, R5900Context *ctx, uint32_t frame, uint32_t jrSite)
@@ -202,62 +174,7 @@ namespace kamite::native::packet
             return true;
         }
 
-        template <class Env>
-        bool queue(Env &env, R5900Context *ctx)
-        {
-            QueuePlan q;
-            if (!queuePlan(env, e::u32(ctx, e::sp), e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u64(ctx, e::a2),
-                           e::u32(ctx, e::a3), e::u64(ctx, e::t0), q))
-                return false;
-            queueBody(env, ctx, q);
-            return true;
-        }
 
-        template <class Env>
-        bool queueOne(Env &env, R5900Context *ctx)
-        {
-            uint32_t frame;
-            if (!queueFrame(ctx, frame))
-                return false;
-            const bool inRange = e::s64(ctx, e::a1) < 10;
-            Link plan{};
-            if (inRange)
-            {
-                // 0x14FF00 gets a0 = the descriptor, a1 = a2, a2 = a3, a3 = a3
-                uint32_t descriptor;
-                if (!descriptorOf(env, frame, e::u32(ctx, e::a0), e::u32(ctx, e::a1), descriptor))
-                    return false;
-                if (!linkPlan(env, descriptor, e::u64(ctx, e::a2), e::u32(ctx, e::a3), plan) || !clearOf(frame, plan))
-                    return false;
-            }
-            e::setS32(ctx, e::sp, e::u32(ctx, e::sp) - 16u);
-            e::move(ctx, e::t0, e::a2);
-            e::write64(env, frame, e::u64(ctx, e::ra));
-            e::move(ctx, e::t1, e::a0);
-            e::setLow64(ctx, e::v0, inRange ? 1u : 0u);
-            e::move(ctx, e::a2, e::a3); // the beqz's delay slot
-            e::delaySlot(ctx, 0x31A614u);
-            if (!inRange)
-            {
-                leaveQueue(env, ctx, frame, 0x31A648u);
-                return true;
-            }
-            e::setS32(ctx, e::v0, 0x00740000u);
-            e::setS32(ctx, e::a0, e::u32(ctx, e::a1) << 3);
-            e::setS32(ctx, e::v1, e::read32(env, kFrameHalf & PS2_RAM_MASK));
-            e::move(ctx, e::a1, e::t0);
-            e::setLow64(ctx, e::v1, e::u64(ctx, e::v1) & 1u);
-            e::setS32(ctx, e::v1, e::u32(ctx, e::v1) << 2);
-            e::setS32(ctx, e::v1, e::u32(ctx, e::v1) + e::u32(ctx, e::a0));
-            e::setS32(ctx, e::v1, e::u32(ctx, e::t1) + e::u32(ctx, e::v1));
-            e::jal(ctx, 0x31A63Cu, kLink, true);
-            e::setS32(ctx, e::a0, e::read32(env, (e::u32(ctx, e::v1) + 0xB00u) & PS2_RAM_MASK));
-            if (env.call())
-                return true;
-            linkOn(env, ctx, plan);
-            leaveQueue(env, ctx, frame, 0x31A648u);
-            return true;
-        }
 
         // ==== batch 2 (the batch-2 chat, Nov 21): Tag_set_rate's small helpers, the texture packets ===================
         // Each body is the disassembly, one op:: helper per instruction (ee_ctx.h), after entry checks that prove every
@@ -275,19 +192,8 @@ namespace kamite::native::packet
         // ---- func_00155D60 (a0 = node, a1 = value, a2 = index): an empty countdown on the byte at +0x385, then
         // *(a0 + a2 * 0xB0 + 0x30) = a1. A byte of 0 counts from -1 (~4G backward branches): declined.
         constexpr uint32_t kCountdown = 0x155D60u;
-        uint32_t countdownTarget(const R5900Context *ctx)
-        {
-            return e::u32(ctx, e::a2) * 0xB0u + e::u32(ctx, e::a0) + 0x30u; // mult's low word + addu
-        }
-        template <class Env>
-        bool countdownCheck(Env &env, const R5900Context *ctx)
-        {
-            uint32_t count;
-            if (!plainRam(e::u32(ctx, e::a0) + 0x385u, 1u, count) || !plain(countdownTarget(ctx), 8u))
-                return false;
-            return *env.at(count, 1u) != 0u;
-        }
-        // From the entry, with the checks passed; false = stopped at a checkpoint (ctx left there).
+        // The asm body ForwardNodeUpdate's asm version runs inline (the standalone native is countdownReadable, R1);
+        // false = stopped at a checkpoint (ctx left there).
         template <class Env>
         bool countdownOn(Env &env, R5900Context *ctx)
         {
@@ -312,45 +218,13 @@ namespace kamite::native::packet
             e::jrRa(ctx, 0x155D8Cu, target, true);
             return true;
         }
-        template <class Env>
-        bool countdown(Env &env, R5900Context *ctx)
-        {
-            if (!countdownCheck(env, ctx))
-                return false;
-            countdownOn(env, ctx);
-            return true;
-        }
 
         // ---- cModel_getMeshPtr 0x14B6F8 (a0 = model, a1 = index): the mesh list (+0x25C, next +0x404), the a1-th mesh
         // (the first one past the list's end). Observed (body_detail, bone_tweaks, olivia_coat): natives run behind the
         // observers; a native caller runs them itself (env.observe).
         constexpr uint32_t kGetMeshPtr = 0x14B6F8u;
         constexpr int kMaxMeshes = 4096;
-        // The walk the code will make, reads only: false when an address is outside plain RAM or the list runs past
-        // kMaxMeshes.
-        template <class Env>
-        bool meshCheck(Env &env, uint32_t model, uint64_t index)
-        {
-            uint32_t head;
-            if (!plainRam(model + 0x25Cu, 4u, head))
-                return false;
-            if (index == 0u)
-                return true;
-            uint32_t node = e::read32(env, head), at;
-            uint32_t v1 = static_cast<uint32_t>(index) - 1u;
-            for (int i = 0; i < kMaxMeshes; ++i)
-            {
-                if (!plainRam(node + 0x404u, 4u, at))
-                    return false;
-                node = e::read32(env, at);
-                if (node == 0u)
-                    return true;
-                v1 -= 1u;
-                if (v1 == 0xFFFFFFFFu)
-                    return true;
-            }
-            return false;
-        }
+        // The asm walk ForwardNodeUpdate's asm version runs inline (the standalone native is meshReadable, R1).
         template <class Env>
         bool meshOn(Env &env, R5900Context *ctx)
         {
@@ -388,14 +262,6 @@ namespace kamite::native::packet
                 if (env.checkpoint(32u))
                     return false;
             }
-        }
-        template <class Env>
-        bool getMeshPtr(Env &env, R5900Context *ctx)
-        {
-            if (!meshCheck(env, e::u32(ctx, e::a0), e::u64(ctx, e::a1)))
-                return false;
-            meshOn(env, ctx);
-            return true;
         }
 
         // ---- ForwardNodeUpdate_14D768 (a0 = model, a1, a2): for every mesh node from getMeshPtr(model, 0): 0x155D60(
@@ -503,171 +369,19 @@ namespace kamite::native::packet
 
         // ---- PostInc 0x15B0F0 (a0 = size): the frame's bump allocator (pointer at 0x566E10, the frame half's 0x60000
         // bytes at 0x506E10): v0 = the old pointer and the pointer moves, or v0 = 0 when the block won't fit.
-        constexpr uint32_t kPostInc = 0x15B0F0u;
-        template <class Env>
-        bool postInc(Env &env, R5900Context *ctx)
-        {
-            lui(ctx, e::v1, 0x74);
-            lui(ctx, e::a1, 0x6);
-            lw(env, ctx, e::v0, e::v1, 0x76B0);
-            lui(ctx, e::a3, 0x56);
-            lw(env, ctx, e::a2, e::a3, 0x6E10);
-            lui(ctx, e::v1, 0x50);
-            andi(ctx, e::v0, e::v0, 0x1);
-            addiu(ctx, e::v1, e::v1, 0x6E10);
-            e::mult(ctx, e::v0, e::v0, e::a1);
-            addu(ctx, e::a0, e::a2, e::a0);
-            addu(ctx, e::v0, e::v0, e::v1);
-            sltu(ctx, e::v0, e::v0, e::a0);
-            const bool full = e::u64(ctx, e::v0) != 0u;
-            daddu(ctx, e::v0, e::a2, e::zero); // the bnez's delay slot
-            e::delaySlot(ctx, 0x15B120u);
-            const uint32_t target = e::u32(ctx, e::ra);
-            if (full)
-            {
-                daddu(ctx, e::v0, e::zero, e::zero);
-                e::jrRa(ctx, 0x15B130u, target, true);
-                return true;
-            }
-            sw(env, ctx, e::a0, e::a3, 0x6E10);
-            e::jrRa(ctx, 0x15B128u, target, true);
-            return true;
-        }
+        constexpr uint32_t kPostInc = 0x15B0F0u; // the native: postIncReadable (R2)
 
-        // The pair of GS table words packed as the code does: (entry.hi | 0x30000000) low, (entry.lo & 0x0FFFFFFF) high;
-        // these three bodies spell it out op by op.
+        // The pair of GS table words packed as the code does: (entry.hi | 0x30000000) low, (entry.lo & 0x0FFFFFFF) high
+        // (gsTagOf). 0x155AE8 / 0x155BE8 run readable (R2 below); 0x155C68's asm body stays until its readable one is
+        // checked.
 
         // ---- func_00155AE8 (a0 = base, a1 = index, a2 = record): two tags into record a2 of base (+0x70 / +0x80, records
         // 0xB0 bytes): entries index / index + 1 of the GS table, or a 0x10000000 tag first when index < 0.
         constexpr uint32_t kTwoTags = 0x155AE8u;
-        template <class Env>
-        bool twoTags(Env &env, R5900Context *ctx)
-        {
-            const uint32_t record = e::u32(ctx, e::a0) + e::u32(ctx, e::a2) * 0xB0u; // LO's low word after the madd
-            if (!gsTablePlain() || !plain(record + 0x70u, 8u) || !plain(record + 0x80u, 8u))
-                return false;
-            ctx->lo = e::u64(ctx, e::a0); // mtlo
-            daddu(ctx, e::t3, e::a1, e::zero);
-            const bool negative = e::s64(ctx, e::t3) < 0;
-            daddu(ctx, e::t4, e::a2, e::zero); // the bltz's delay slot
-            e::delaySlot(ctx, 0x155AF0u);
-            if (!negative)
-            {
-                andi(ctx, e::t3, e::t3, 0xFF);
-                lui(ctx, e::a3, 0x4A);
-                addiu(ctx, e::a3, e::a3, 0x5D80);
-                sll(ctx, e::v1, e::t3, 3);
-                addu(ctx, e::a0, e::v1, e::a3);
-                addiu(ctx, e::t0, e::a3, 0x4);
-                addu(ctx, e::v1, e::v1, e::t0);
-                lw(env, ctx, e::a1, e::a0, 0);
-                lw(env, ctx, e::v0, e::v1, 0);
-                lui(ctx, e::t2, 0x3000);
-                addiu(ctx, e::t1, e::zero, 0xB0);
-                lui(ctx, e::a2, 0xFFF);
-                ori(ctx, e::a2, e::a2, 0xFFFF);
-                e::madd(ctx, e::t1, e::t4, e::t1);
-                or_(ctx, e::v0, e::v0, e::t2);
-                and_(ctx, e::a1, e::a1, e::a2);
-                dsll32(ctx, e::v0, e::v0, 0);
-                dsll32(ctx, e::a1, e::a1, 0);
-                dsrl32(ctx, e::v0, e::v0, 0);
-                addiu(ctx, e::v1, e::t3, 0x1);
-                or_(ctx, e::v0, e::v0, e::a1);
-                sll(ctx, e::v1, e::v1, 3);
-                sd(env, ctx, e::v0, e::t1, 0x70);
-                addu(ctx, e::t0, e::v1, e::t0);
-                addu(ctx, e::v1, e::v1, e::a3);
-                lw(env, ctx, e::v0, e::t0, 0);
-                lw(env, ctx, e::a0, e::v1, 0);
-                or_(ctx, e::v0, e::v0, e::t2);
-                and_(ctx, e::a0, e::a0, e::a2);
-                dsll32(ctx, e::v0, e::v0, 0);
-                dsrl32(ctx, e::v0, e::v0, 0);
-                dsll32(ctx, e::a0, e::a0, 0);
-                or_(ctx, e::v0, e::v0, e::a0);
-                const uint32_t target = e::u32(ctx, e::ra);
-                sd(env, ctx, e::v0, e::t1, 0x80);
-                e::jrRa(ctx, 0x155B7Cu, target, true);
-                return true;
-            }
-            addiu(ctx, e::a2, e::zero, 0xB0);
-            andi(ctx, e::t3, e::t3, 0xFF);
-            e::madd(ctx, e::a2, e::t4, e::a2);
-            addiu(ctx, e::a1, e::t3, 0x1);
-            lui(ctx, e::v0, 0x4A);
-            lui(ctx, e::a0, 0x1000);
-            addiu(ctx, e::v0, e::v0, 0x5D80);
-            sll(ctx, e::a1, e::a1, 3);
-            addu(ctx, e::v1, e::v0, e::a1);
-            lui(ctx, e::a3, 0x3000);
-            sd(env, ctx, e::a0, e::a2, 0x70);
-            addu(ctx, e::a1, e::a1, e::v0);
-            lui(ctx, e::a0, 0xFFF);
-            lw(env, ctx, e::v0, e::v1, 0x4);
-            ori(ctx, e::a0, e::a0, 0xFFFF);
-            lw(env, ctx, e::v1, e::a1, 0);
-            or_(ctx, e::v0, e::v0, e::a3);
-            and_(ctx, e::v1, e::v1, e::a0);
-            dsll32(ctx, e::v0, e::v0, 0);
-            dsrl32(ctx, e::v0, e::v0, 0);
-            dsll32(ctx, e::v1, e::v1, 0);
-            or_(ctx, e::v0, e::v0, e::v1);
-            const uint32_t target = e::u32(ctx, e::ra);
-            sd(env, ctx, e::v0, e::a2, 0x80);
-            e::jrRa(ctx, 0x155BDCu, target, true);
-            return true;
-        }
 
         // ---- func_00155BE8 (a0 = object, a1 = index, a2 = slot): the slot's packet (*(a0 + a2 * 4 + 0x220)) gets
         // +0x60 = 0x10000000 and +0x50 = the index's GS table pair (0x10000000 when index < 0).
         constexpr uint32_t kSlotTags = 0x155BE8u;
-        template <class Env>
-        bool slotTags(Env &env, R5900Context *ctx)
-        {
-            uint32_t slot;
-            if (!gsTablePlain() || !plainRam(e::u32(ctx, e::a0) + (e::u32(ctx, e::a2) << 2) + 0x220u, 4u, slot))
-                return false;
-            const uint32_t packet = e::read32(env, slot);
-            if (!plain(packet + 0x50u, 8u) || !plain(packet + 0x60u, 8u))
-                return false;
-            sll(ctx, e::a2, e::a2, 2);
-            addu(ctx, e::a0, e::a0, e::a2);
-            const bool negative = e::s64(ctx, e::a1) < 0;
-            lw(env, ctx, e::a3, e::a0, 0x220); // the bltz's delay slot
-            e::delaySlot(ctx, 0x155BF0u);
-            const uint32_t target = e::u32(ctx, e::ra);
-            if (!negative)
-            {
-                andi(ctx, e::a1, e::a1, 0xFF);
-                lui(ctx, e::v0, 0x4A);
-                addiu(ctx, e::v0, e::v0, 0x5D80);
-                sll(ctx, e::a0, e::a1, 3);
-                addu(ctx, e::a1, e::v0, e::a0);
-                lui(ctx, e::a2, 0x3000);
-                lw(env, ctx, e::v1, e::a1, 0x4);
-                addu(ctx, e::a0, e::a0, e::v0);
-                lw(env, ctx, e::a1, e::a0, 0);
-                lui(ctx, e::v0, 0xFFF);
-                ori(ctx, e::v0, e::v0, 0xFFFF);
-                or_(ctx, e::v1, e::v1, e::a2);
-                and_(ctx, e::a1, e::a1, e::v0);
-                dsll32(ctx, e::v1, e::v1, 0);
-                dsrl32(ctx, e::v1, e::v1, 0);
-                dsll32(ctx, e::a1, e::a1, 0);
-                or_(ctx, e::v1, e::v1, e::a1);
-                lui(ctx, e::v0, 0x1000);
-                sd(env, ctx, e::v0, e::a3, 0x60);
-                sd(env, ctx, e::v1, e::a3, 0x50);
-                e::jrRa(ctx, 0x155C44u, target, true);
-                return true;
-            }
-            lui(ctx, e::v0, 0x1000);
-            sd(env, ctx, e::v0, e::a3, 0x60);
-            sd(env, ctx, e::v0, e::a3, 0x50);
-            e::jrRa(ctx, 0x155C54u, target, true);
-            return true;
-        }
 
         // ---- func_00155C68 (a0 = first tag, a1 = second tag, a2 = index): *a0 = the index's GS table pair (0x10000000
         // when index < 0), *a1 = index + 1's.

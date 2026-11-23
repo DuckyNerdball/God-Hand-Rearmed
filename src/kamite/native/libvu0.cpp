@@ -1071,50 +1071,8 @@ namespace kamite::native::libvu0
         }
 
         // ---- func_002D8008 (a0, a1, a2 = out, t0): a1 +0x3C = 1.0; out +0x30 = MulVector(a0 + 0x30, t0) (through the
-        // frame). A 0x30 frame: the product at sp, ra at +0x10, s0 at +0x20.
+        // frame). A 0x30 frame: the product at sp, ra at +0x10, s0 at +0x20. The native: lightColourReadable (R3).
         constexpr uint32_t kLightColour = 0x2D8008u;
-        template <class Env>
-        bool lightColour(Env &env, R5900Context *ctx)
-        {
-            const uint32_t sp0 = e::u32(ctx, e::sp);
-            uint32_t frame, one, va, vb, dst;
-            const uint32_t aAddr = e::u32(ctx, e::a0) + 0x30u, bAddr = e::u32(ctx, e::t0);
-            if ((sp0 & 0xFu) != 0u || !plainSpan(sp0 - 0x30u, 0x30u, frame) || !plainSpan(e::u32(ctx, e::a1) + 0x3Cu, 4u, one) ||
-                !plain16(aAddr, va) || !plain16(bAddr, vb) || !plainSpan(e::u32(ctx, e::a2) + 0x30u, 16u, dst))
-                return false;
-            // MulVector reads a / b after the frame's sq / sd and the 1.0: clear of both
-            if (e::overlaps(va, 16u, frame, 0x30u) || e::overlaps(vb, 16u, frame, 0x30u) || e::overlaps(va, 16u, one, 4u) ||
-                e::overlaps(vb, 16u, one, 4u) || !mulVectorCheck(env, sp0 - 0x30u, aAddr, bAddr))
-                return false;
-
-            addiu(ctx, e::sp, e::sp, -0x30);
-            lui(ctx, e::at, 0x3F80);
-            e::mtc1(ctx, e::at, 0);
-            sqOp(env, ctx, e::s0, e::sp, 0x20);
-            addiu(ctx, e::v0, e::a0, 0x30);
-            sd(env, ctx, e::ra, e::sp, 0x10);
-            daddu(ctx, e::s0, e::a2, e::zero);
-            swc1(env, ctx, 0, e::a1, 0x3C);
-            daddu(ctx, e::a0, e::sp, e::zero);
-            daddu(ctx, e::a1, e::v0, e::zero);
-            e::jal(ctx, 0x2D8030u, kMulVector, true);
-            daddu(ctx, e::a2, e::t0, e::zero);
-            if (env.call())
-                return true;
-            mulVectorOn(env, ctx);
-            addiu(ctx, e::a0, e::zero, -1);
-            addiu(ctx, e::s0, e::s0, 0x30);
-            addiu(ctx, e::v1, e::zero, 0x3);
-            daddu(ctx, e::v0, e::sp, e::zero);
-            if (!copyFour(env, ctx, e::v0, e::v1, e::s0, e::a0, 0x2D8058u, 0x2D8048u))
-                return true;
-            lqOp(env, ctx, e::s0, e::sp, 0x20);
-            ld(env, ctx, e::ra, e::sp, 0x10);
-            const uint32_t target = e::u32(ctx, e::ra);
-            addiu(ctx, e::sp, e::sp, 0x30);
-            e::jrRa(ctx, 0x2D8068u, target, true);
-            return true;
-        }
 
         // ==== the REWRITE natives, R3 (Nov 23): func_001503B8 and func_002D8008 from the decomp's C (4607c68) ==========
         // kRenderPath | kChargeAtEnd (their only callers ignore v0: 0x14C7E8 for 0x1503B8; 0x153B00 / 0x154240 reload it
