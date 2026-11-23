@@ -14,8 +14,8 @@
 // press anyway (the counter only drops on one), so nothing else sees input a human masher wouldn't have given.
 //
 // Cadence: on game frames (+0x210 counts main loops; at 60 FPS, +0x569 == 1, two make a 30 FPS frame), so 30 and 60
-// FPS mash alike: a face press at least every 3 frames (10 a second; 15 looked wrong in a pummel, K, Nov 22), a
-// stick flick at least every 4. Kept as the last
+// FPS mash alike: 7 face presses a second (K, Nov 23; 15 then 10 looked too fast), a stick flick every 4 frames. 7 is
+// 30/7 frames apart, so presses fall 4 or 5 frames apart (the remainder carried, under one frame). Kept as the last
 // frame given, not a phase, so a state that reads only on some vblanks (held frames at 60) still gets its presses.
 #include "kamite/mash_assist.h"
 
@@ -46,7 +46,8 @@ namespace kamite::mash_assist
         constexpr int kStickOffCentre = 16; // of 128: drift is the stick deadzone's job; anything past this is held
         // The direction bits as func_0031B560 sets them (lui 0x80 / 0x40 / 0x10 / 0x20 at 0x31B7A8..0x31B7FC).
         constexpr uint32_t kStickRight = 0x800000u, kStickLeft = 0x400000u, kStickUp = 0x100000u, kStickDown = 0x200000u;
-        constexpr uint32_t kFaceEvery = 3u, kStickEvery = 4u; // game frames (30 FPS ones): 10 presses a second (K)
+        // Spacing in 30 FPS game frames as num / den: face 30/7 (7 presses a second, K), stick 4.
+        constexpr uint32_t kFaceNum = 30u, kFaceDen = 7u, kStickNum = 4u, kStickDen = 1u;
 
         std::atomic<bool> g_on{false};
         // The last press given (EE thread only): its 30 FPS frame (the spacing) and its main loop (other reads in the
@@ -55,6 +56,7 @@ namespace kamite::mash_assist
         {
             bool any = false;
             uint32_t frame = 0u, loop = 0u;
+            uint64_t next = 0u; // the next press's time in 1/den frames
         };
         Given g_face, g_stick;
 
@@ -70,17 +72,21 @@ namespace kamite::mash_assist
             std::memcpy(rdram + (address & PS2_RAM_MASK), &value, sizeof(value));
         }
 
-        // Due when `every` 30 FPS frames have passed since the last press given; a count that went back (a save state,
-        // a live switch of the rate) counts as due. Other reads in the vblank it was given in see the same press.
-        bool due(const uint8_t *rdram, Given &given, uint32_t every)
+        // Due when num / den 30 FPS frames have passed since the last press given (a late press carries less than a
+        // frame of its lateness into the next); a count that went back (a save state, a live switch of the rate)
+        // counts as due. Other reads in the vblank it was given in see the same press.
+        bool due(const uint8_t *rdram, Given &given, uint32_t num, uint32_t den)
         {
             const uint32_t loop = rd32(rdram, GameWork::address(GameWork::kFrameCount)); // main loops: vblanks at 60
             const uint32_t frame = rdram[GameWork::address(GameWork::kVblankDivider) & PS2_RAM_MASK] == 1u ? loop >> 1 : loop;
             if (given.any && loop == given.loop)
                 return true;
-            if (!given.any || frame < given.frame || loop < given.loop || frame - given.frame >= every)
+            const uint64_t t = static_cast<uint64_t>(frame) * den;
+            const bool fresh = !given.any || frame < given.frame || loop < given.loop;
+            if (fresh || t >= given.next)
             {
-                given = Given{true, frame, loop};
+                const uint64_t late = fresh ? 0u : (t - given.next < den ? t - given.next : den - 1u);
+                given = Given{true, frame, loop, t - late + num};
                 return true;
             }
             return false;
@@ -104,9 +110,9 @@ namespace kamite::mash_assist
         {
             const uint32_t held = rd32(rdram, GameWork::address(GameWork::kPadHeld));
             uint32_t add = 0u;
-            if ((held & kFaceButtons) != 0u && due(rdram, g_face, kFaceEvery))
+            if ((held & kFaceButtons) != 0u && due(rdram, g_face, kFaceNum, kFaceDen))
                 add |= held & kFaceButtons;
-            if (const uint32_t bit = stickBit(rdram); bit != 0u && due(rdram, g_stick, kStickEvery))
+            if (const uint32_t bit = stickBit(rdram); bit != 0u && due(rdram, g_stick, kStickNum, kStickDen))
                 add |= bit;
             if (add != 0u)
             {
@@ -120,7 +126,7 @@ namespace kamite::mash_assist
         {
             if ((rd32(rdram, GameWork::address(GameWork::kPadHeld)) & kCircle) == 0u)
                 return;
-            if (!due(rdram, g_face, kFaceEvery))
+            if (!due(rdram, g_face, kFaceNum, kFaceDen))
                 return;
             const uint32_t pressed = GameWork::address(GameWork::kPadBtn);
             wr32(rdram, pressed, rd32(rdram, pressed) | kCircle);

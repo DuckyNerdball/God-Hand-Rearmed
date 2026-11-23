@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 23, 2026
 
+- Mash Assistic mashes at 7 presses a second (was 10).
 - Linux / Steam Deck: Match Screen (the Deck's default aspect) fills the screen instead of showing 4:3.
 - Steam Deck: a new install renders at 2x internal resolution (3x maxed out the Deck's GPU).
 - Fewer stutters: the first start builds the game's shaders up front ("Preparing shaders"), so attacks and effects no longer hitch the first time they show.
