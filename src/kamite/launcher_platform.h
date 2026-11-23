@@ -10,7 +10,8 @@
 namespace kamite::launcher::platform
 {
     // A file (folder = false: disc images) or folder picker over the window. Empty if cancelled or not available.
-    // Linux: zenity, else kdialog (separate programs, run without a shell); neither installed: empty.
+    // Linux: in a Flatpak the desktop's file chooser portal (kamite/portal_file_chooser.h); elsewhere zenity, else
+    // kdialog (separate programs, run without a shell), else the portal; none there: empty.
     std::filesystem::path pick(void *window, bool folder);
     // A mod's zip (Install from zip on the Mods tab). Empty if cancelled or not available.
     std::filesystem::path pickZip(void *window);

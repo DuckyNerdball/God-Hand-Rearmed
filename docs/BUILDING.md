@@ -253,5 +253,8 @@ options were on (60 FPS, aspect ratio, character).
   Flathub. Its permissions are in `tools/package.py` (`FLATPAK_CONTEXT`, each with its reason): the X11 socket (the
   window is X11 even on Wayland), Wayland and two D-Bus names only for keeping the screen awake, PulseAudio, every
   device (SDL reads controllers through `/dev/hidraw*`), the network for the release check, and read-only `~/Games`,
-  `~/Downloads` and `/run/media`, where GHR looks for a disc image by itself. The bundle's bytes are the same on
+  `~/Downloads` and `/run/media`, where GHR looks for a disc image by itself. A disc image, mod zip or texture pack
+  anywhere else comes through the desktop's file chooser portal (`src/kamite/portal_file_chooser.h`; outside a Flatpak
+  the launcher tries zenity, then kdialog, then the portal), which lets the sandbox read the chosen file for good;
+  `tests/unit/portal_bus.py` checks it against a fake portal. The bundle's bytes are the same on
   every run: build-bundle's own time is replaced with `SOURCE_DATE_EPOCH`.

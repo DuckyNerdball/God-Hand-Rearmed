@@ -2,6 +2,7 @@
 // tar.gz, Steam's shortcut list). One plain program, no framework: each CHECK prints the failures, the exit code is
 // the number of them. Needs neither the game code nor a display. Run: ctest (or the ghr_unit_tests program itself).
 #include "kamite/paths.h"
+#include "kamite/portal_file_chooser.h"
 #include "kamite/steam_deck.h"
 #include "kamite/steam_shortcuts.h"
 #include "kamite/update_archive.h"
@@ -187,6 +188,44 @@ namespace
     }
 
     // ---- update downloads -------------------------------------------------------------------------------------------
+    // The file chooser portal's pure pieces (portal_file_chooser.h): the request path it answers on, the chosen file's
+    // path from its URI, the parent window. The D-Bus side: tests/unit/portal_bus.py against a fake portal.
+    void testPortalFileChooser()
+    {
+        namespace portal = kamite::launcher::portal;
+        CHECK_EQ(portal::requestPath(":1.42", "ghr7_1"), std::string("/org/freedesktop/portal/desktop/request/1_42/ghr7_1"));
+        CHECK_EQ(portal::requestPath(":1.2.3", "t"), std::string("/org/freedesktop/portal/desktop/request/1_2_3/t"));
+
+        fs::path out;
+        CHECK(portal::pathFromUri("file:///home/deck/Games/God%20Hand.iso", out));
+        CHECK_EQ(out.string(), std::string("/home/deck/Games/God Hand.iso"));
+        CHECK(portal::pathFromUri("file://localhost/srv/a.iso", out));
+        CHECK_EQ(out.string(), std::string("/srv/a.iso"));
+        // The document portal's path, as a Flatpak gets it.
+        CHECK(portal::pathFromUri("file:///run/user/1000/doc/3f2a1b9c/God%20Hand%20%28USA%29.iso", out));
+        CHECK_EQ(out.string(), std::string("/run/user/1000/doc/3f2a1b9c/God Hand (USA).iso"));
+#if !defined(_WIN32) // a narrow fs::path is the ANSI code page on Windows; the portal is Linux's
+        // UTF-8, escaped byte by byte; either case of hex digit.
+        CHECK(portal::pathFromUri("file:///m%C3%BCsic/%e2%9c%93.zip", out));
+        CHECK_EQ(out.string(), std::string("/m\xc3\xbcsic/\xe2\x9c\x93.zip"));
+#endif
+        out = "/unchanged";
+        CHECK(!portal::pathFromUri("https://example.com/a.iso", out));
+        CHECK(!portal::pathFromUri("file://otherhost/a.iso", out)); // another machine's file
+        CHECK(!portal::pathFromUri("file:", out));
+        CHECK(!portal::pathFromUri("file://", out));
+        CHECK(!portal::pathFromUri("file:///a%2", out)); // an escape cut short
+        CHECK(!portal::pathFromUri("file:///a%", out));
+        CHECK(!portal::pathFromUri("file:///a%zz", out));
+        CHECK(!portal::pathFromUri("file:///a%00b", out)); // a NUL would cut the path short
+        CHECK(!portal::pathFromUri("file:///a.iso?x=1", out));
+        CHECK(!portal::pathFromUri("FILE:///a.iso", out)); // the portal writes the scheme lowercase
+        CHECK_EQ(out.string(), std::string("/unchanged")); // a refused URI leaves the path alone
+
+        CHECK_EQ(portal::x11Parent(0x1a00004), std::string("x11:1a00004"));
+        CHECK_EQ(portal::x11Parent(0), std::string());
+    }
+
     void testPickAsset()
     {
         using archive::Package;
@@ -458,6 +497,7 @@ int main()
         {"disc search folders", testDiscSearchFolders},
         {"steam deck", testSteamDeck},
         {"update asset selection", testPickAsset},
+        {"file chooser portal", testPortalFileChooser},
         {"tar.gz extraction", testTarGz},
         {"steam shortcuts.vdf", testSteamShortcuts},
     };
