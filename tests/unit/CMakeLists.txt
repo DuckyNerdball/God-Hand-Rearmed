@@ -33,6 +33,7 @@ add_executable(ghr_unit_tests
     unit_tests.cpp
     sinfl_impl.c
     "${KAMITE_UNIT_ROOT}/src/kamite/paths.cpp"
+    "${KAMITE_UNIT_ROOT}/src/kamite/portal_file_chooser.cpp"
     "${KAMITE_UNIT_ROOT}/src/kamite/steam_deck.cpp"
     "${KAMITE_UNIT_ROOT}/src/kamite/steam_shortcuts.cpp"
     "${KAMITE_UNIT_ROOT}/src/kamite/update_archive.cpp")
@@ -46,3 +47,23 @@ else()
 endif()
 
 add_test(NAME ghr_unit_tests COMMAND ghr_unit_tests)
+
+# The file chooser portal's D-Bus side (src/kamite/portal_file_chooser.cpp, the Flatpak's picker): portal_pick_test asks
+# through libdbus-1 as the launcher does, against a fake org.freedesktop.portal.Desktop on a private dbus-daemon
+# (portal_bus.py, python3 + jeepney). Skipped (77) without dbus-daemon or jeepney; a failure under
+# KAMITE_REQUIRE_ALL_TESTS=1 (the Nix check).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+    add_executable(portal_pick_test portal_pick_test.cpp "${KAMITE_UNIT_ROOT}/src/kamite/portal_file_chooser.cpp")
+    target_include_directories(portal_pick_test PRIVATE "${KAMITE_UNIT_ROOT}/src")
+    target_compile_options(portal_pick_test PRIVATE -Wall -Wextra)
+    target_link_libraries(portal_pick_test PRIVATE ${CMAKE_DL_LIBS})
+    target_link_libraries(ghr_unit_tests PRIVATE ${CMAKE_DL_LIBS})
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME portal_bus
+            COMMAND "${Python3_EXECUTABLE}" -I "${CMAKE_CURRENT_LIST_DIR}/portal_bus.py" "$<TARGET_FILE:portal_pick_test>")
+    else() # registered all the same: a skip, or a failure where every test must run
+        add_test(NAME portal_bus COMMAND portal_pick_test missing-python)
+    endif()
+    set_tests_properties(portal_bus PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180)
+endif()

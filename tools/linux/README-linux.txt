@@ -30,9 +30,10 @@ The Flatpak (GHR-v{version}-Linux-x64.flatpak):
     flatpak install --user GHR-v{version}-Linux-x64.flatpak
     flatpak run io.github.God_Hand_Rearmed.GHR
   The first install also fetches the Freedesktop runtime from Flathub. It runs in Flatpak's sandbox: settings and
-  saves go to ~/.var/app/io.github.God_Hand_Rearmed.GHR/data/GodHandRearmed, and it can read your disc image only from
-  ~/Games, ~/Downloads or an SD card / USB drive (it has no file chooser yet: it finds the image there by itself). For
-  a disc image elsewhere:
+  saves go to ~/.var/app/io.github.God_Hand_Rearmed.GHR/data/GodHandRearmed. It finds a disc image by itself in
+  ~/Games, ~/Downloads or on an SD card / USB drive; anywhere else, choose it with "Choose disc image..." (your
+  desktop's own file chooser, which lets the sandbox read that one file from then on). On a system without a desktop
+  portal (xdg-desktop-portal) the chooser can't open; there:
     flatpak override --user --filesystem=/path/to/its/folder:ro io.github.God_Hand_Rearmed.GHR
 
 The first start

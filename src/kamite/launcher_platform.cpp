@@ -16,6 +16,7 @@
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "winhttp.lib")
 #else
+#include "kamite/portal_file_chooser.h"
 #include "raylib.h"
 
 #include <algorithm>
@@ -31,6 +32,16 @@
 #include <unistd.h>
 
 extern char **environ;
+
+// The launcher's window is raylib's GLFW window (no GLFW headers on the include path): the two functions the portal's
+// parent_window needs, declared as GLFW does (as gs_pcsx2_backend.cpp does). glfwGetX11Window is weak: a GLFW built
+// without X11 leaves it null.
+extern "C"
+{
+    struct GLFWwindow;
+    int glfwGetPlatform(void);
+    unsigned long glfwGetX11Window(GLFWwindow *window) __attribute__((weak));
+}
 #endif
 
 namespace kamite::launcher::platform
@@ -387,22 +398,48 @@ namespace kamite::launcher::platform
             CoUninitialize();
         return result;
 #else
-        // zenity (GNOME, SteamOS) first, then kdialog (KDE); neither there: nothing (the disc search and the
-        // Install screen's path box still work). Both block until the player chooses, as the Windows dialog does.
-        (void)window;
+        // In a Flatpak: the desktop's file chooser portal (zenity and kdialog aren't in its runtime, and the portal
+        // hands the sandbox the chosen file). Elsewhere: zenity (GNOME, SteamOS) first, then kdialog (KDE), then the
+        // portal; none there: nothing (the disc search and the Install screen's path box still work). All block until
+        // the player chooses, as the Windows dialog does.
         const std::string start = homeFolder() + "/";
+        const char *title = folder ? "Choose the texture pack folder (the one holding replacements)"
+                            : kind == PickKind::Zip ? "Choose a mod's zip to install"
+                                                    : "Choose your disc image (USA, SLUS-21503)";
+        auto viaPortal = [&](portal::Result &result)
+        {
+            portal::Request request;
+            constexpr int kGlfwPlatformX11 = 0x00060004; // GLFW_PLATFORM_X11
+            if (window && glfwGetX11Window && glfwGetPlatform() == kGlfwPlatformX11)
+                request.parentWindow = portal::x11Parent(glfwGetX11Window(static_cast<GLFWwindow *>(window)));
+            request.title = title;
+            request.directory = folder;
+            if (kind == PickKind::Zip)
+                request.filters = {{"Mod (*.zip)", {"*.zip", "*.ZIP"}}, {"All files", {"*"}}};
+            else if (kind == PickKind::Disc)
+                request.filters = {{"PS2 disc image (*.iso, *.chd)", {"*.iso", "*.ISO", "*.chd", "*.CHD"}},
+                                   {"All files", {"*"}}};
+            request.currentFolder = start;
+            result = portal::openFile(request);
+            if (result.outcome == portal::Outcome::Unavailable || !result.error.empty())
+                std::fprintf(stderr, "[launcher] file chooser portal: %s\n",
+                             result.error.empty() ? "unavailable" : result.error.c_str());
+            return result.outcome != portal::Outcome::Unavailable; // answered: chosen or cancelled
+        };
+        const bool sandboxed = portal::insideFlatpak();
+        portal::Result asked;
+        if (sandboxed && viaPortal(asked))
+            return asked.path; // empty when cancelled
         const std::string zenity = findProgram("zenity");
         if (!zenity.empty())
         {
-            std::vector<std::string> args{"--file-selection"};
+            std::vector<std::string> args{"--file-selection", std::string("--title=") + title};
             if (folder)
-                args.insert(args.end(), {"--directory", "--title=Choose the texture pack folder (the one holding replacements)"});
+                args.push_back("--directory");
             else if (kind == PickKind::Zip)
-                args.insert(args.end(), {"--title=Choose a mod's zip to install", "--file-filter=Mod (*.zip) | *.zip *.ZIP",
-                                         "--file-filter=All files | *"});
+                args.insert(args.end(), {"--file-filter=Mod (*.zip) | *.zip *.ZIP", "--file-filter=All files | *"});
             else
-                args.insert(args.end(), {"--title=Choose your disc image (USA, SLUS-21503)",
-                                         "--file-filter=PS2 disc image (*.iso, *.chd) | *.iso *.ISO *.chd *.CHD",
+                args.insert(args.end(), {"--file-filter=PS2 disc image (*.iso, *.chd) | *.iso *.ISO *.chd *.CHD",
                                          "--file-filter=All files | *"});
             args.push_back("--filename=" + start);
             int code = -1;
@@ -419,11 +456,11 @@ namespace kamite::launcher::platform
         {
             std::vector<std::string> args;
             if (folder)
-                args = {"--title", "Choose the texture pack folder (the one holding replacements)", "--getexistingdirectory", start};
+                args = {"--title", title, "--getexistingdirectory", start};
             else if (kind == PickKind::Zip)
-                args = {"--title", "Choose a mod's zip to install", "--getopenfilename", start, "*.zip *.ZIP|Mod (*.zip)"};
+                args = {"--title", title, "--getopenfilename", start, "*.zip *.ZIP|Mod (*.zip)"};
             else
-                args = {"--title", "Choose your disc image (USA, SLUS-21503)", "--getopenfilename", start,
+                args = {"--title", title, "--getopenfilename", start,
                         "*.iso *.ISO *.chd *.CHD|PS2 disc image (*.iso, *.chd)"};
             int code = -1;
             std::string chosen = runAndRead(kdialog, args, code);
@@ -433,7 +470,9 @@ namespace kamite::launcher::platform
                 return std::filesystem::path(chosen);
             return {};
         }
-        std::fprintf(stderr, "[launcher] no file chooser: install zenity or kdialog, or type the path\n");
+        if (!sandboxed && viaPortal(asked))
+            return asked.path;
+        std::fprintf(stderr, "[launcher] no file chooser: install zenity or kdialog (or a desktop portal), or type the path\n");
         return {};
 #endif
     }

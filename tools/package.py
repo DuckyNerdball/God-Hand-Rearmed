@@ -173,8 +173,9 @@ FLATPAK_CONTEXT = (
     # lights, gyro), which only "all" exposes; "input" gives /dev/input alone (and needs flatpak 1.15.6+). all has dri.
     ("devices", ("all",)),
     # Read-only, exactly the places GHR looks for a disc image by itself (paths.cpp, discSearchFolders: ~/Games,
-    # ~/Downloads, the SD card or another drive under /run/media). The launcher's file chooser (zenity / kdialog) is
-    # not in the runtime: a disc image elsewhere needs `flatpak override --user --filesystem=<its folder>:ro`.
+    # ~/Downloads, the SD card or another drive under /run/media). A disc image elsewhere comes through the launcher's
+    # file chooser, the desktop's portal (src/kamite/portal_file_chooser.h; portals need no talk name), which hands the
+    # sandbox that one file; without a portal, `flatpak override --user --filesystem=<its folder>:ro`.
     # ~/Downloads by name, as GHR looks there, not xdg-download (the desktop's own Downloads folder, which may be
     # named otherwise, and is not mounted at all without a user-dirs.dirs).
     ("filesystems", ("~/Downloads:ro", "~/Games:ro", "/run/media:ro")),
