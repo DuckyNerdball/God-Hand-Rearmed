@@ -103,8 +103,12 @@ def main():
     else:
         ref_name = order[-2] if len(order) > 1 else None
         ref_build = builds.get(ref_name, {})
+    # the batch's own shadow files: a case no longer in cases/ leaves its last ones behind (Nov 23: 2026-11-03_14-53-38's
+    # from an older build showed up in the totals and the commit list)
+    natives = [p for p in glob.glob(os.path.join(CASES, "*.native.txt"))
+               if os.path.basename(p).rsplit(".", 3)[0] in cases]
     commits = set()
-    for p in glob.glob(os.path.join(CASES, "*.native.txt")):
+    for p in natives:
         head = open(p, encoding="utf-8", errors="replace").readline()
         if "commit=" in head:
             commits.add(head.split("commit=")[1].split()[0])
@@ -147,7 +151,7 @@ def main():
             print(f"{case[:48]:48} {rate}  {line}")
     print()
     totals = {}
-    for p in glob.glob(os.path.join(CASES, "*.native.txt")):
+    for p in natives:
         for line in open(p, encoding="utf-8", errors="replace"):
             if line.startswith("#"):
                 continue
