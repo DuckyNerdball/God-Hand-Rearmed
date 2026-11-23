@@ -9,20 +9,20 @@ MtxMultiply,0x00147548,decomp,MtxMultiply,src/cod/001b5160.c,4607c68,2b489fba4ea
 func_00148BD8,0x00148BD8,decomp,func_00148BD8,src/cod/00148bd8.c,75cb123,ababfb683163,batch 3 readable; 0x151398 inline (hits; a miss: insert + builder on a Txn) + 0x151368 inline; kRenderPath|kChargeAtEnd
 cModel_getMeshPtr,0x0014B6F8,decomp,cModel_getMeshPtr,src/cod/gfx/cModel.c,4607c68,b2166e19d086,REWRITE R1 (Nov 23): readable; kRenderPath|kChargeAtEnd
 func_0014B9A0,0x0014B9A0,decomp,func_0014B9A0,src/cod/0014b9a0.c,75cb123,03d8a0f79c6a,batch 3 readable; 0x155BE8 / PostInc / CopyMatrix / UnitMatrix / 0x155C68 / queue inline; kRenderPath|kChargeAtEnd
-cModel_nodeLayerScreen,0x0014BE38,asm,,,,,
+cModel_nodeLayerScreen,0x0014BE38,decomp,cModel_nodeLayerScreen,src/cod/0014b4d0.c,4607c68,44f7ceb3247a,REWRITE R2 (Nov 23): readable on a Txn; kRenderPath|kChargeAtEnd
 func_0014C5A0,0x0014C5A0,decomp,func_0014C5A0,src/cod/0012cc70.c,75cb123,f0f99a1b59cb,batch 3 readable; kRenderPath|kChargeAtEnd
 ForwardNodeUpdate_14D768,0x0014D768,decomp,ForwardNodeUpdate_14D768,src/cod/0014d700.c,4607c68,e0e598a4e973,REWRITE R1 (Nov 23): readable; kRenderPath|kChargeAtEnd
 func_0014FF00,0x0014FF00,decomp,func_0014FF00,src/cod/0014ff00.c,4607c68,75474d612af1,REWRITE R1 (Nov 23): readable; kRenderPath|kChargeAtEnd
 func_001503B8,0x001503B8,asm,,,,,
 func_00150DC8,0x00150DC8,asm,,,,,
 func_00150F68,0x00150F68,asm,,,,,
-func_00151168,0x00151168,asm,,,,,
+func_00151168,0x00151168,decomp,func_00151168,src/cod/00151168.c,4607c68,a50f86f3ed9f,REWRITE R2 (Nov 23): readable on a Txn; kRenderPath|kChargeAtEnd
 func_00151398,0x00151398,decomp,func_00151398,src/cod/00151398.c,75cb123,9023711aea26,batch 3 readable, hits + full table; a miss: insert + 0x151630 + the builder inline on a Txn (batch 3-4b); kRenderPath|kChargeAtEnd
-func_00155AE8,0x00155AE8,asm,,,,,
-func_00155BE8,0x00155BE8,asm,,,,,
-func_00155C68,0x00155C68,asm,,,,,
+func_00155AE8,0x00155AE8,decomp,func_00155AE8,src/cod/00155ae8.c,4607c68,f036f6eb43c3,REWRITE R2 (Nov 23): readable on a Txn; kRenderPath|kChargeAtEnd
+func_00155BE8,0x00155BE8,decomp,func_00155BE8,src/cod/00155be8.c,4607c68,bfea6a5ecee0,REWRITE R2 (Nov 23): readable on a Txn; kRenderPath|kChargeAtEnd
+func_00155C68,0x00155C68,decomp,func_00155C68,src/cod/00155c68.c,4607c68,d0ab8f598d79,REWRITE R2 (Nov 23): readable on a Txn; kRenderPath|kChargeAtEnd
 func_00155D60,0x00155D60,decomp,func_00155D60,src/cod/00155d60.c,4607c68,891661efffe8,REWRITE R1 (Nov 23): readable; kRenderPath|kChargeAtEnd
-PostInc_D_00566E10_0015B0F0_15B0F0,0x0015B0F0,asm,,,,,
+PostInc_D_00566E10_0015B0F0_15B0F0,0x0015B0F0,decomp,PostInc_D_00566E10_0015B0F0_15B0F0,src/cod/001004c8.c,4607c68,5adab02e7e68,REWRITE R2 (Nov 23): readable on a Txn; kRenderPath|kChargeAtEnd
 capVu0Length,0x001F7DF8,decomp,capVu0Length,src/cod/001f7df8.c,4607c68,aff7ec15eff3,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
 func_001F8DF8,0x001F8DF8,asm,,,,,
 func_002D7E50,0x002D7E50,asm,,,,,

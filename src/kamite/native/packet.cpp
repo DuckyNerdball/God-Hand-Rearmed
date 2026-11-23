@@ -5208,6 +5208,133 @@ namespace kamite::native::packet
             returnToCaller(ctx);
             return true;
         }
+
+        // ==== the REWRITE natives, R2 (Nov 23): batch 2's GS-tag writers, PostInc, nodeLayerScreen and the strip upload
+        // from the decomp's C (4607c68): standalone wrappers over the bodies the fused natives already run (twoTagsBody,
+        // gsTagOf, postIncBody, nodeLayerBody, txnStripUp), each on a Txn of its own (reads see the writes so far, a
+        // decline midway leaves RAM as it was). Leaves have no frame: an empty stack window.
+
+        // void func_00155AE8(MdlPktBuf *pkt, int id, int buf) (src/cod/00155ae8.c)
+        template <class Env>
+        bool twoTagsReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            Txn<Env> t{env, 0u, 0u};
+            if (!t.ok)
+                return false;
+            twoTagsBody(t, e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u32(ctx, e::a2));
+            if (!t.ok)
+                return false;
+            t.commit();
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // void func_00155BE8(char *obj, int id, int slot) (src/cod/00155be8.c): q = obj's packet[slot] (+0x220): q[0xA]
+        // (+0x50) = the id's GS tag (0x10000000 for a negative id), q[0xC] (+0x60) = 0x10000000.
+        template <class Env>
+        bool slotTagsReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            Txn<Env> t{env, 0u, 0u};
+            if (!t.ok)
+                return false;
+            const uint32_t q = t.u32(e::u32(ctx, e::a0) + (e::u32(ctx, e::a2) << 2) + 0x220u);
+            const bool negative = e::s64(ctx, e::a1) < 0;
+            const uint64_t tag = negative ? 0x10000000u : gsTagOf(t, e::u32(ctx, e::a1) & 0xFFu);
+            t.w64(q + 0x60u, 0x10000000u); // the code stores +0x60 first
+            t.w64(q + 0x50u, tag);
+            if (!t.ok)
+                return false;
+            t.commit();
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // void func_00155C68(u64 *a0, u64 *a1, int id) (src/cod/00155c68.c): *a0 = the id's GS tag (0x10000000 for a
+        // negative id), *a1 = id + 1's.
+        template <class Env>
+        bool tagPairReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            Txn<Env> t{env, 0u, 0u};
+            if (!t.ok)
+                return false;
+            const uint32_t first = e::u32(ctx, e::a0), second = e::u32(ctx, e::a1);
+            const uint32_t index = e::u32(ctx, e::a2) & 0xFFu;
+            t.w64(first, e::s64(ctx, e::a2) < 0 ? uint64_t{0x10000000u} : gsTagOf(t, index));
+            t.w64(second, gsTagOf(t, index + 1u)); // read after the first store, as the code does
+            if (!t.ok)
+                return false;
+            t.commit();
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // int PostInc_D_00566E10_0015B0F0_15B0F0(int size) (src/cod/001004c8.c)
+        template <class Env>
+        bool postIncReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            Txn<Env> t{env, 0u, 0u};
+            if (!t.ok)
+                return false;
+            const uint32_t v = postIncBody(t, e::u32(ctx, e::a0));
+            if (!t.ok)
+                return false;
+            t.commit();
+            e::setS32(ctx, e::v0, v);
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // int cModel_nodeLayerScreen(cModel *self, cModelNode *node) (src/cod/0014b4d0.c): reads only.
+        template <class Env>
+        bool nodeLayerReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            Txn<Env> t{env, 0u, 0u};
+            uint32_t layer;
+            if (!t.ok || !nodeLayerBody(t, e::u32(ctx, e::a0), e::u32(ctx, e::a1), layer) || !t.ok)
+                return false;
+            e::setS32(ctx, e::v0, layer);
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // int func_00151168(ImageUpList *list, src, psm, dbp, unused, width, height, mode, kind) (src/cod/00151168.c):
+        // -1 when mode >= 0 and the GS flag 0x800 is set or the list is full (0x280), else the strip's packet queued and
+        // 0. The kind is the stack word at the caller's sp. Its frame and 0x31A650's (0x10 each) are the window.
+        constexpr uint32_t kStripWindow = 0x20u;
+        template <class Env>
+        bool stripReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kStripWindow, kStripWindow, stackTop))
+                return false;
+            Txn<Env> t{env, stackTop, stackTop + kStripWindow};
+            if (!t.ok)
+                return false;
+            const uint32_t list = e::u32(ctx, e::a0);
+            const int64_t mode = e::s64(ctx, e::t3);
+            const uint64_t kind = sx32(t.u32(sp)); // lw t8, 0x10(sp) after its frame
+            const bool refused = (mode >= 0 && (t.u32(kGsFlag) & 0x800u) != 0u) || t.u32(list + 0x3Cu) == 0x280u;
+            if (!t.ok || !txnStripUp(t, list, e::u64(ctx, e::a1), e::u64(ctx, e::a2), e::u64(ctx, e::a3),
+                                     e::u64(ctx, e::t1), e::u64(ctx, e::t2), mode, kind))
+                return false;
+            t.commit();
+            e::setS32(ctx, e::v0, refused ? 0xFFFFFFFFu : 0u);
+            returnToCaller(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -5217,21 +5344,15 @@ namespace kamite::native::packet
         // (Nov 23: rewritten from the decomp's C as R1 below; these asm versions stay as the texture natives' inline parts.)
 
         // Step a, batch 2: checked since K's 21:42 build of 99e32b8 shadowed them in every replay (~42M calls, 0
-        // mismatches, 0 declines, 0 skipped; every .ram.bin the reference's). Recorded footprints. (Nov 23: three of them
-        // rewritten from the decomp's C as R1 below.)
+        // mismatches, 0 declines, 0 skipped; every .ram.bin the reference's). Recorded footprints. (Nov 23: nine of them
+        // rewritten from the decomp's C as R1 / R2 below; the rest have no matched C yet.)
         auto add = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
                       bool (*shadow)(ShadowEnv &, R5900Context *)) {
             registerFunction(NativeFunction{name, address, "packet", true, real, shadow, nullptr});
         };
-        add("PostInc_D_00566E10_0015B0F0_15B0F0", kPostInc, &postInc<RealEnv>, &postInc<ShadowEnv>);
-        add("func_00155AE8", kTwoTags, &twoTags<RealEnv>, &twoTags<ShadowEnv>);
-        add("func_00155BE8", kSlotTags, &slotTags<RealEnv>, &slotTags<ShadowEnv>);
-        add("func_00155C68", kTagPair, &tagPair<RealEnv>, &tagPair<ShadowEnv>);
         add("func_00150DC8", kTexture, &texture<RealEnv>, &texture<ShadowEnv>);
         add("func_00150F68", kTextureBlock, &textureBlock<RealEnv>, &textureBlock<ShadowEnv>);
-        add("func_00151168", kTextureStrip, &textureStrip<RealEnv>, &textureStrip<ShadowEnv>);
         add("func_002D8070", kLightFade, &lightFade<RealEnv>, &lightFade<ShadowEnv>);
-        add("cModel_nodeLayerScreen", kNodeLayer, &nodeLayer<RealEnv>, &nodeLayer<ShadowEnv>);
 
         // Batches 3-4 (the new method): readable natives from the decomp's C, kRenderPath | kChargeAtEnd, unchecked
         // (dev replays shadow them; play runs the originals) until K's builds prove them. Proven: 0x14C5A0 and 0x14B9A0
@@ -5256,6 +5377,17 @@ namespace kamite::native::packet
         addReadable("ForwardNodeUpdate_14D768", kForwardNodes, false, &forwardReadable<RealEnv>,
                     &forwardReadable<ShadowEnv>, 0u);
         addReadable("func_00155D60", kCountdown, false, &countdownReadable<RealEnv>, &countdownReadable<ShadowEnv>,
+                    NativeFunction::kReturnsV0);
+        // R2 (Nov 23): batch 2's tag writers, PostInc, nodeLayerScreen and the strip upload, wrappers over the bodies the
+        // fused natives run. Unchecked until a K build shadows them.
+        addReadable("func_00155AE8", kTwoTags, false, &twoTagsReadable<RealEnv>, &twoTagsReadable<ShadowEnv>, 0u);
+        addReadable("func_00155BE8", kSlotTags, false, &slotTagsReadable<RealEnv>, &slotTagsReadable<ShadowEnv>, 0u);
+        addReadable("func_00155C68", kTagPair, false, &tagPairReadable<RealEnv>, &tagPairReadable<ShadowEnv>, 0u);
+        addReadable("PostInc_D_00566E10_0015B0F0_15B0F0", kPostInc, false, &postIncReadable<RealEnv>,
+                    &postIncReadable<ShadowEnv>, NativeFunction::kReturnsV0);
+        addReadable("cModel_nodeLayerScreen", kNodeLayer, false, &nodeLayerReadable<RealEnv>, &nodeLayerReadable<ShadowEnv>,
+                    NativeFunction::kReturnsV0);
+        addReadable("func_00151168", kTextureStrip, false, &stripReadable<RealEnv>, &stripReadable<ShadowEnv>,
                     NativeFunction::kReturnsV0);
         // 0x151398 with its miss path (insert + builders on a Txn): K's 08:32 build of 881a8dd shadowed 5.05M calls, 0
         // mismatches, 0 declines (the TM builder's branch never ran in a replay: sandbox-proven only).
