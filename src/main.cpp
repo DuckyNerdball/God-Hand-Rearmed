@@ -593,7 +593,7 @@ namespace
 #if defined(KAMITE_RELEASE)
         // A release zip carries no GHR.ini, so an update unpacked over the folder (RecompLauncher's, or by hand) never
         // replaces the player's: the settings added since theirs was written come from the built-in defaults instead.
-        // Release builds only: a developer build's built-in GHR.ini has the hidden test runs' values (Headless=1).
+        // Release builds only: a developer build's built-in GHR.ini is the developers' template.
         else
         {
             kamite::IniFile ini;
@@ -639,6 +639,16 @@ namespace
                     notes.push_back("unknown setting [" + section + "] " + key + " (ignored)");
                 continue;
             }
+#if defined(KAMITE_RELEASE)
+            // Release builds: hidden runs only from the command line (--headless, --time-limit). A GHR.ini a developer
+            // build wrote (Headless=1) must never hide a player's game (the Deck, Nov 23: the dev AppImage's file in
+            // ~/.local/share/GodHandRearmed kept the release hidden).
+            if (variable == "KAMITE_HEADLESS" || variable == "KAMITE_TIME_LIMIT_SECONDS" || variable == "KAMITE_DUMP_ON_TIME_LIMIT")
+            {
+                notes.push_back("[" + section + "] " + key + " ignored in a release (command line only)");
+                continue;
+            }
+#endif
             // Read again after the launcher changed the file: variables this file set before follow it (an emptied
             // value clears them); the real environment still wins.
             const bool ours = g_iniVariables.count(variable) != 0u;
