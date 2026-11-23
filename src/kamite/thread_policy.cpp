@@ -11,6 +11,14 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <dirent.h>
+#include <sched.h>
+#include <sys/prctl.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 #if defined(_WIN32)
 #define NOMINMAX
 #include <windows.h>
@@ -316,9 +324,217 @@ namespace kamite::threadpolicy
         SetThreadDescription(GetCurrentThread(), L"MainThread");
         std::thread(governor).detach();
     }
+#elif defined(__linux__) && !defined(__ANDROID__)
+    // Linux (the Deck, Nov 23): no ideal processors here, so "auto" / "spread" keep one physical core for GameThread
+    // alone (hard mask: the core and its SMT sibling) and let every helper float on the other cores; "ccx" also pins
+    // each helper to one core, as on Windows. Topology from sysfs (core siblings, the L3's CPUs); threads by name from
+    // /proc/self/task/<tid>/comm. Priorities need CAP_SYS_NICE, so they stay as they are. Off by default (GHR.ini), as
+    // on Windows, until a measurement says otherwise.
+    namespace
+    {
+        enum class Mode
+        {
+            Off,
+            Auto,
+            Spread,
+            Ccx,
+        };
+        Mode g_mode = Mode::Auto;
+        std::string g_sysRoot; // "" = the real /sys (a test's fake tree otherwise)
+
+        const char *const kGame = "GameThread";
+        const char *const kHelpers[] = {"VUThread", "GIFThread", "GSThread", "MainThread", "IOPThread"};
+
+        std::string readText(const std::string &path)
+        {
+            std::FILE *file = std::fopen(path.c_str(), "r");
+            if (!file)
+                return {};
+            char buffer[256] = {};
+            const size_t got = std::fread(buffer, 1, sizeof(buffer) - 1, file);
+            std::fclose(file);
+            std::string text(buffer, got);
+            while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' '))
+                text.pop_back();
+            return text;
+        }
+
+        // "0-3,8" -> CPU numbers.
+        std::vector<int> parseList(const std::string &text)
+        {
+            std::vector<int> cpus;
+            for (const char *c = text.c_str(); *c;)
+            {
+                char *end = nullptr;
+                const long lo = std::strtol(c, &end, 10);
+                if (end == c)
+                    break;
+                long hi = lo;
+                if (*end == '-')
+                    hi = std::strtol(end + 1, &end, 10);
+                for (long cpu = lo; cpu <= hi && cpu < CPU_SETSIZE; ++cpu)
+                    cpus.push_back(static_cast<int>(cpu));
+                c = *end == ',' ? end + 1 : end;
+            }
+            return cpus;
+        }
+
+        struct Core
+        {
+            std::vector<int> cpus; // this core's CPUs inside the process mask (SMT siblings)
+            std::string l3;        // its L3's CPU list (CCX)
+        };
+
+        // The physical cores inside the process's mask, in CPU order.
+        std::vector<Core> readCores(const cpu_set_t &process)
+        {
+            std::vector<Core> cores;
+            std::vector<std::string> seen;
+            for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu)
+            {
+                if (!CPU_ISSET(cpu, &process))
+                    continue;
+                const std::string base = g_sysRoot + "/sys/devices/system/cpu/cpu" + std::to_string(cpu);
+                std::string siblings = readText(base + "/topology/thread_siblings_list");
+                if (siblings.empty())
+                    siblings = std::to_string(cpu);
+                if (std::find(seen.begin(), seen.end(), siblings) != seen.end())
+                    continue;
+                seen.push_back(siblings);
+                Core core;
+                for (int sibling : parseList(siblings))
+                    if (CPU_ISSET(sibling, &process))
+                        core.cpus.push_back(sibling);
+                core.l3 = readText(base + "/cache/index3/shared_cpu_list");
+                if (!core.cpus.empty())
+                    cores.push_back(core);
+            }
+            return cores;
+        }
+
+        cpu_set_t setOf(const std::vector<const Core *> &cores)
+        {
+            cpu_set_t set;
+            CPU_ZERO(&set);
+            for (const Core *core : cores)
+                for (int cpu : core->cpus)
+                    CPU_SET(cpu, &set);
+            return set;
+        }
+
+        std::unordered_map<std::string, cpu_set_t> makePlan(const cpu_set_t &process)
+        {
+            std::unordered_map<std::string, cpu_set_t> plan;
+            const std::vector<Core> cores = readCores(process);
+            if (cores.size() < 3u) // a game core plus at least two for the rest, or the scheduler knows better
+            {
+                std::fprintf(stderr, "[thread-policy] %zu core(s) in the process mask: left to the scheduler\n", cores.size());
+                return plan;
+            }
+            // Game core: the first core without CPU 0 (interrupts land there most).
+            const Core *game = &cores[cores.size() > 1u && cores[0].cpus.front() == 0 ? 1 : 0];
+            std::vector<const Core *> helpers;
+            for (const Core &core : cores)
+                if (&core != game)
+                    helpers.push_back(&core);
+            plan[kGame] = setOf({game});
+            std::string text = "GameThread->core of CPU " + std::to_string(game->cpus.front());
+            if (g_mode == Mode::Ccx)
+            {
+                // One core per helper, the game core's L3 first, CPU 0's core last.
+                std::stable_sort(helpers.begin(), helpers.end(), [&](const Core *a, const Core *b) {
+                    const bool aNear = a->l3 == game->l3, bNear = b->l3 == game->l3;
+                    if (aNear != bNear)
+                        return aNear;
+                    return a->cpus.front() != 0 && b->cpus.front() == 0;
+                });
+                for (size_t i = 0u; i < std::size(kHelpers); ++i)
+                {
+                    const Core *core = helpers[i % helpers.size()];
+                    plan[kHelpers[i]] = setOf({core});
+                    text += std::string(" ") + kHelpers[i] + "->core of CPU " + std::to_string(core->cpus.front());
+                }
+            }
+            else
+            {
+                const cpu_set_t rest = setOf(helpers);
+                for (const char *name : kHelpers)
+                    plan[name] = rest;
+                text += ", helpers on the other " + std::to_string(helpers.size()) + " cores";
+            }
+            static const char *const modeNames[] = {"off", "auto", "spread", "ccx"};
+            std::fprintf(stderr, "[thread-policy] %s: %zu cores; %s\n", modeNames[static_cast<int>(g_mode)], cores.size(), text.c_str());
+            return plan;
+        }
+
+        void governor()
+        {
+            prctl(PR_SET_NAME, "ThreadPolicy", 0, 0, 0);
+            cpu_set_t process;
+            CPU_ZERO(&process);
+            if (sched_getaffinity(0, sizeof(process), &process) != 0)
+                return;
+            // Taken at start: the threads placed later narrow their own masks, never the process's.
+            const std::unordered_map<std::string, cpu_set_t> plan = makePlan(process);
+            if (plan.empty())
+                return;
+            std::unordered_map<pid_t, bool> applied; // thread id -> looked at
+            std::unordered_map<std::string, pid_t> placed;
+            for (;;)
+            {
+                if (DIR *tasks = opendir("/proc/self/task"))
+                {
+                    while (const dirent *entry = readdir(tasks))
+                    {
+                        const pid_t tid = static_cast<pid_t>(std::atoi(entry->d_name));
+                        if (tid <= 0 || applied.count(tid))
+                            continue;
+                        // The main thread keeps the process's name (renaming it would rename the process in ps / top).
+                        const std::string name = tid == getpid() ? std::string("MainThread")
+                                                                 : readText("/proc/self/task/" + std::string(entry->d_name) + "/comm");
+                        if (name.empty())
+                            continue; // still starting: looked at again next time
+                        const auto it = plan.find(name);
+                        if (it != plan.end())
+                        {
+                            if (sched_setaffinity(tid, sizeof(it->second), &it->second) != 0)
+                                std::fprintf(stderr, "[thread-policy] %s: affinity failed\n", name.c_str());
+                            placed[name] = tid;
+                        }
+                        // A thread named later (pthread_setname_np right after it starts) keeps the process's name
+                        // until then: only threads whose name is one of ours, or settled for a while, are done.
+                        if (it != plan.end() || name.rfind("GHR", 0) != 0)
+                            applied[tid] = true;
+                    }
+                    closedir(tasks);
+                }
+                // Every second until the named threads are placed, then every 15 s (threads may be recreated).
+                std::this_thread::sleep_for(std::chrono::seconds(placed.size() >= plan.size() - 1u ? 15 : 1));
+            }
+        }
+    }
+
+    void startFromEnvironment()
+    {
+        const char *mode = std::getenv("PS2X_THREAD_POLICY");
+        if (mode && *mode)
+        {
+            if (!std::strcmp(mode, "off") || !std::strcmp(mode, "0"))
+                g_mode = Mode::Off;
+            else if (!std::strcmp(mode, "spread"))
+                g_mode = Mode::Spread;
+            else if (!std::strcmp(mode, "ccx"))
+                g_mode = Mode::Ccx;
+        }
+        if (g_mode == Mode::Off)
+        {
+            std::fprintf(stderr, "[thread-policy] off (PS2X_THREAD_POLICY=off)\n");
+            return;
+        }
+        std::thread(governor).detach();
+    }
 #else
-    // Linux: no-op. The governor places the named threads on cores (ideal processor, affinity, priority) through
-    // Windows' thread APIs; the Linux scheduler spreads them by itself, so PS2X_THREAD_POLICY does nothing here.
+    // Other platforms: the scheduler places the threads (PS2X_THREAD_POLICY does nothing).
     void startFromEnvironment() {}
 #endif
 }

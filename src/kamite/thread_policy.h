@@ -15,6 +15,8 @@ namespace kamite::threadpolicy
     // masks (one physical core) on the two OpenGL threads, MainThread and GSThread (PS2X_THREAD_HARD=<names>|none);
     // spread = the same, VU/GIF first in other L3 groups; ccx = hard affinity masks on every thread.
     // PS2X_THREAD_PRIORITY=0 keeps every thread at normal priority. PS2X_PROCESS_AFFINITY=0-7 restricts the process.
+    // Linux: auto / spread give GameThread one physical core to itself and the helpers the other cores; ccx pins each
+    // helper to one core too (sched_setaffinity; priorities unchanged). Fewer than 3 cores: left to the scheduler.
     // Call from the main thread before the runtime starts: it names it "MainThread" and starts a small thread that looks
     // for the named threads every second or two and applies the policy to new ones.
     void startFromEnvironment();
