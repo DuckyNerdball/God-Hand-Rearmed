@@ -5099,10 +5099,12 @@ namespace kamite::native::packet
         addReadable("tanf", kTanf, true, &tanfNative<RealEnv>, &tanfNative<ShadowEnv>, NativeFunction::kReturnsF0);
         addReadable("func_0030AA40", kViewScreen, true, &viewScreenNative<RealEnv>, &viewScreenNative<ShadowEnv>, 0u);
         addReadable("func_0014C7E8", kModelMatrices, true, &modelMatrices<RealEnv>, &modelMatrices<ShadowEnv>, 0u);
-        // Rung 3 step a's last item (Nov 23): cModel_Tag_set_rate fused, its whole subtree inline on a Journal. Unchecked:
-        // dev replays shadow it (its recorded footprint runs to thousands of ranges: limits raised for it alone).
+        // Rung 3 step a's last item (Nov 23): cModel_Tag_set_rate fused, its whole subtree inline on a Journal (its
+        // recorded footprint runs to thousands of ranges: limits raised for it alone). Checked: K's 13:33 build of d7e4caa
+        // shadowed 442,765 calls (441,328 compared, 1,437 interrupted), 0 mismatches, 0 declines, 0 skipped; every
+        // .ram.bin and chain the reference's.
         {
-            auto fn = NativeFunction{"cModel_Tag_set_rate", kTagSetRate, "packet", false, &tagSetRate<RealEnv>,
+            auto fn = NativeFunction{"cModel_Tag_set_rate", kTagSetRate, "packet", true, &tagSetRate<RealEnv>,
                                      &tagSetRate<ShadowEnv>, nullptr};
             fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
             fn.returns = 0u; // void: its callers (cModel_Trans 0x14A83C, cModel_Trans_screen 0x14AA28) overwrite v0 / v1 first

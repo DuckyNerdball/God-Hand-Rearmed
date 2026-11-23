@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 23, 2026
 
+- Performance: tagging each model for drawing (its matrices, lighting, materials, visibility test and draw queue, all in one) runs as native code.
 - Performance: each model's per-frame matrices (and the game's tangent and view-screen helpers) run as native code.
 
 ## November 22, 2026
