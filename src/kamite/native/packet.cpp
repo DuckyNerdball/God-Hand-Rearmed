@@ -1992,8 +1992,8 @@ namespace kamite::native::packet
         // work in the original's order): a bucket below 10 picks this half's descriptor; the slot (the order clamped to
         // the descriptor's first) becomes a NEXT tag to the packet, the packet's last tag (tail; the packet when the
         // tail register is 0) a NEXT to what the slot linked before.
-        template <class Env>
-        void txnQueue(Txn<Env> &t, uint64_t bucket, uint64_t order, uint32_t packet, uint32_t tail)
+        template <class T>
+        void txnQueue(T &t, uint64_t bucket, uint64_t order, uint32_t packet, uint32_t tail)
         {
             t.env.call(); // jal 0x31A650
             if (static_cast<int64_t>(bucket) >= 10)
@@ -2013,8 +2013,8 @@ namespace kamite::native::packet
         }
         // The three upload functions' queue: kind 0 / 3 bucket 1 order 0xE, 2: 6 / 8, 1: 1 / 2, else none (a 64-bit
         // compare of the kind register).
-        template <class Env>
-        void txnQueueKind(Txn<Env> &t, uint64_t kind, uint32_t record)
+        template <class T>
+        void txnQueueKind(T &t, uint64_t kind, uint32_t record)
         {
             uint32_t bucket = 0, order = 0;
             if (kind == 0u || kind == 3u)
@@ -2028,8 +2028,8 @@ namespace kamite::native::packet
         }
         // The upload functions' head: -1 when the GS flag 0x800 is set (unless `sign` < 0) or the object's 0x280
         // records are used up; else the record (object + 0x40 + n * 0x180, this half's 0xC0 in) and the counter moved.
-        template <class Env>
-        bool uploadRecord(Txn<Env> &t, uint32_t object, int64_t sign, uint32_t &record)
+        template <class T>
+        bool uploadRecord(T &t, uint32_t object, int64_t sign, uint32_t &record)
         {
             if (sign >= 0 && (t.u32(kGsFlag) & 0x800u) != 0u)
                 return false;
@@ -2045,8 +2045,8 @@ namespace kamite::native::packet
         // func_00150F68: an image upload (a1 = the source, a2 = the PSM: 0x13, 0x14 or 0 build a packet; a3 = DBP, t0 =
         // DBW, t1 = width, t2 = height, t3 = sign, the stack word = the kind). Returns v0 (-1 / 0); false = decline (its
         // `break 7`, a zero transfer width).
-        template <class Env>
-        bool txnImageUp(Txn<Env> &t, uint32_t object, uint64_t src, uint64_t psm, uint64_t dbp, uint64_t dbw,
+        template <class T>
+        bool txnImageUp(T &t, uint32_t object, uint64_t src, uint64_t psm, uint64_t dbp, uint64_t dbw,
                         uint64_t width, uint64_t height, int64_t sign, uint64_t kind)
         {
             uint32_t r;
@@ -2086,8 +2086,8 @@ namespace kamite::native::packet
 
         // func_00151168: a strip upload (decomp 00151168.c: a1 = src, a2 = psm, a3 = dbp, t1 = width, t2 = height,
         // t3 = mode, the stack word = the kind; width halved, height quartered for 0x14 / halved for 0x13).
-        template <class Env>
-        bool txnStripUp(Txn<Env> &t, uint32_t object, uint64_t src, uint64_t psm, uint64_t dbp, uint64_t width,
+        template <class T>
+        bool txnStripUp(T &t, uint32_t object, uint64_t src, uint64_t psm, uint64_t dbp, uint64_t width,
                         uint64_t height, int64_t mode, uint64_t kind)
         {
             uint32_t r;
@@ -2122,8 +2122,8 @@ namespace kamite::native::packet
 
         // func_00150DC8: an upload from a prepared GS packet (a1 = its holder, +4 the packet; a2 = the VRAM base: added
         // to the packet's BITBLTBUF word, or (a3 odd, a CLUT) or-ed with 0x10000 in its place; t0 = the kind).
-        template <class Env>
-        bool txnPacketUp(Txn<Env> &t, uint32_t object, uint32_t holder, uint64_t base, int64_t sign, uint64_t kind)
+        template <class T>
+        bool txnPacketUp(T &t, uint32_t object, uint32_t holder, uint64_t base, int64_t sign, uint64_t kind)
         {
             uint32_t r;
             if (!uploadRecord(t, object, sign, r))
@@ -2150,8 +2150,8 @@ namespace kamite::native::packet
         // Tim2CalcBufWidth(psm, width) (0x309C30): TBW, the buffer width in 64-texel units (even for 0x13 / 0x14), 0 for a PSM it
         // doesn't know (decomp 00309c30.c). Its jump table (0x4502E0) read like the code reads it: a target this
         // doesn't know declines.
-        template <class Env>
-        bool txnBufferWidth(Txn<Env> &t, uint64_t psm, uint32_t width, uint32_t &tbw)
+        template <class T>
+        bool txnBufferWidth(T &t, uint64_t psm, uint32_t width, uint32_t &tbw)
         {
             tbw = 0u;
             if (psm >= 0x3Bu) // sltiu: the whole register
@@ -2184,8 +2184,8 @@ namespace kamite::native::packet
                                                    // +0x78AA / +0x78AB the image / CLUT uploads (bytes)
         constexpr uint32_t kTim2Formats = 0x41ED68u, kTim3Formats = 0x41ED80u, kTmFormats = 0x41ED98u;
 
-        template <class Env>
-        void txnBump8(Txn<Env> &t, uint32_t at) { t.w8(at, static_cast<uint8_t>(t.u8(at) + 1u)); }
+        template <class T>
+        void txnBump8(T &t, uint32_t at) { t.w8(at, static_cast<uint8_t>(t.u8(at) + 1u)); }
 
         // The texture_slots fix (texture_slots.h) where its hook sits in the TIM2 loader (0x151C70): the picture's size
         // grown to its real footprint, while the flag is on.
@@ -2197,8 +2197,8 @@ namespace kamite::native::packet
 
         // A CLUT upload after a TIM picture: 16 x 16 for 8-bit pictures (type 5) and any CLUT not 0x40 bytes, else 8 x 2
         // (`small`: the TM loader's 8 x 8).
-        template <class Env>
-        bool txnClut(Txn<Env> &t, uint32_t w, uint32_t src, uint32_t cbp, uint64_t type, bool big, uint64_t smallH)
+        template <class T>
+        bool txnClut(T &t, uint32_t w, uint32_t src, uint32_t cbp, uint64_t type, bool big, uint64_t smallH)
         {
             t.env.call(); // jal 0x150F68
             return big ? txnImageUp(t, w, src, 0u, sx32(cbp), 1u, 0x10u, 0x10u, 0, sx32(static_cast<uint32_t>(type)))
@@ -2209,8 +2209,8 @@ namespace kamite::native::packet
         // pictures (+0x6 of them) from +0x10 (+0x80 when byte 5 is set), 0x30 apart.
         constexpr uint32_t kUploadTim2 = 0x151990u, kUploadTim3 = 0x151CC0u, kUploadPack = 0x151688u, kUploadTm = 0x151FA0u;
         constexpr int kTextureLoopLimit = 4096; // pictures / entries before declining
-        template <class Env>
-        bool txnTim2(Txn<Env> &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
+        template <class T>
+        bool txnTim2(T &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
         {
             const uint32_t n = t.u16(name + 6u);
             uint32_t s5 = t.u8(name + 5u) == 0u ? name + 0x10u : name + 0x80u;
@@ -2263,8 +2263,8 @@ namespace kamite::native::packet
         }
 
         // func_00151CC0, the TIM3 loader (one picture at +0x10, its strip upload func_00151168, its formats table).
-        template <class Env>
-        bool txnTim3(Txn<Env> &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
+        template <class T>
+        bool txnTim3(T &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
         {
             const uint32_t s6 = name + 0x10u;
             const uint32_t format = t.u8(s6 + 0x13u);
@@ -2304,8 +2304,8 @@ namespace kamite::native::packet
 
         // func_00151FA0, the TM loader: one T4 strip of the whole image block (128 wide), then per picture (the low byte
         // of +4; 0 = 256) its TEX0 and CLUT, the pictures' offsets from +0x10.
-        template <class Env>
-        bool txnTm(Txn<Env> &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
+        template <class T>
+        bool txnTm(T &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
         {
             const uint32_t s5 = name;
             const uint32_t base = s5 + 0x10u;
@@ -2368,8 +2368,8 @@ namespace kamite::native::packet
         // the image and CLUT holders' offsets (+0x10 / +0x12 of them, 0x10 each), entries of 0x18 from +0x18 (+8 a
         // TEX0 whose TBP / CBP are offsets from the cursors). It moves the cursors first, writes each entry's TEX0,
         // relocates the holders' packet pointers once, then uploads every image and CLUT packet (func_00150DC8).
-        template <class Env>
-        bool txnPack(Txn<Env> &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
+        template <class T>
+        bool txnPack(T &t, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
         {
             const uint32_t s2 = name;
             const uint32_t cur = t.u32(pa);
@@ -2478,8 +2478,8 @@ namespace kamite::native::packet
             }
             return 2;
         }
-        template <class Env>
-        bool txnBuild(Txn<Env> &t, int kind, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
+        template <class T>
+        bool txnBuild(T &t, int kind, uint32_t w, uint32_t name, uint32_t pa, uint32_t pb, uint64_t type)
         {
             switch (kind)
             {
@@ -2493,8 +2493,8 @@ namespace kamite::native::packet
 
         // func_00151398's miss with room: the entry {name, *pa, *pb, cursor} at `entry`, then the builder; v = the
         // cursor before (lhu).
-        template <class Env>
-        bool txnMiss(Txn<Env> &t, uint32_t w, uint64_t name, uint64_t type, uint32_t entry, int32_t &v)
+        template <class T>
+        bool txnMiss(T &t, uint32_t w, uint64_t name, uint64_t type, uint32_t entry, int32_t &v)
         {
             const uint32_t pa = w + (type == 2u ? 0x3DC6Cu : type == 1u ? 0x3DC78u : 0x3DC60u);
             const uint32_t pb = pa + 4u;
@@ -2670,10 +2670,10 @@ namespace kamite::native::packet
         // ForwardAttackByMode, run it inline): the lookup (a hit, or a miss with room: insert + builder, which writes
         // the register rows the meshes then read), then the meshes, in the original's order. type / name / a3 as the
         // registers hold them. False = decline (nothing reaches RAM: the caller's Txn isn't committed).
-        template <class Env>
-        bool txnMeshTextures(Txn<Env> &t, uint32_t node, uint64_t type, uint64_t name, uint64_t a3)
+        template <class T>
+        bool txnMeshTextures(T &t, uint32_t node, uint64_t type, uint64_t name, uint64_t a3)
         {
-            Env &env = t.env;
+            auto &env = t.env;
             const uint32_t data = t.u32(node + 0x388u);
             const int n = t.u16(data + 0xAu);
             int32_t texture;
@@ -2822,8 +2822,8 @@ namespace kamite::native::packet
         // SearchDataByTwoNames(pack, nameA, nameB, nth) (decomp 0031cdc0.c): the nth entry named *nameA or *nameB
         // (*nameA read once, *nameB per entry not matching it), its data (pack + offset); 0 if none. A found entry
         // leaves by a backward branch (one loop charge), each entry after the first by the loop's.
-        template <class Env>
-        bool txnSearchTwo(Txn<Env> &t, uint64_t pack64, uint32_t nameA, uint32_t nameB, uint64_t nth, uint64_t &v)
+        template <class T>
+        bool txnSearchTwo(T &t, uint64_t pack64, uint32_t nameA, uint32_t nameB, uint64_t nth, uint64_t &v)
         {
             v = 0u;
             if (pack64 == 0u)
@@ -2861,10 +2861,10 @@ namespace kamite::native::packet
         }
 
         // func_00148D30's body on a caller's Txn (ForwardAttackByMode runs it inline). False = decline.
-        template <class Env>
-        bool txnNodeTextures(Txn<Env> &t, uint32_t node, uint64_t kind)
+        template <class T>
+        bool txnNodeTextures(T &t, uint32_t node, uint64_t kind)
         {
-            Env &env = t.env;
+            auto &env = t.env;
             if (t.u32(kRoomPack) != 0u)
             {
                 const bool named = (t.u32(node + model::kNodeDispFlags) & 0x02000000u) != 0u;
@@ -2940,8 +2940,8 @@ namespace kamite::native::packet
         }
 
         // func_00151398 inline on a Txn (the jal, the walk's loop charges; a miss inserts and builds): v = the block.
-        template <class Env>
-        bool txnLookup(Txn<Env> &t, uint64_t name, uint64_t kind, int32_t &v)
+        template <class T>
+        bool txnLookup(T &t, uint64_t name, uint64_t kind, int32_t &v)
         {
             int backEdges;
             uint32_t missAt = 0u;
@@ -2967,10 +2967,10 @@ namespace kamite::native::packet
 
         // func_00148690's body on a caller's Txn (cModel_setNodeMaterial runs it inline): kind / remap / a3 as the
         // registers hold them. False = decline.
-        template <class Env>
-        bool txnNodeMaterial(Txn<Env> &t, uint32_t node, uint64_t kind, uint64_t remap, uint64_t a3)
+        template <class T>
+        bool txnNodeMaterial(T &t, uint32_t node, uint64_t kind, uint64_t remap, uint64_t a3)
         {
-            Env &env = t.env;
+            auto &env = t.env;
             const uint64_t mode = (a3 & 3u) << 35;
             const uint32_t data = t.u32(node + 0x388u);
             const uint32_t flags = t.u32(node + model::kNodeDispFlags);
@@ -3098,17 +3098,10 @@ namespace kamite::native::packet
             return e::fpuKey(floatBits(p)) == e::fpuKey(0x3F800000u);
         }
 
-        template <class Env>
-        bool setNodeMaterial(Env &env, R5900Context *ctx)
+        // The two bodies on a caller's store (their own Txn below, or cModel_Tag_set_rate's Journal): false = decline.
+        template <class T>
+        bool setNodeMaterialBody(T &t, uint32_t self, uint32_t node)
         {
-            if (!env.atEnd)
-                return false;
-            const uint32_t sp = e::u32(ctx, e::sp);
-            uint32_t stackTop;
-            if (!plainRam(sp - kNodeCallerWindow, kNodeCallerWindow, stackTop))
-                return false;
-            Txn<Env> t{env, stackTop, stackTop + kNodeCallerWindow};
-            const uint32_t self = e::u32(ctx, e::a0), node = e::u32(ctx, e::a1);
             uint64_t mode = 0u;
             if (t.u32(node + model::kNodeDispFlags) & kNodeAlpha)
             {
@@ -3124,17 +3117,44 @@ namespace kamite::native::packet
             {
                 const uint64_t pass = sx32(t.u32(kSpecialPass));
                 const uint64_t prio = sx32(t.u32(self + kModelDrawPrio));
-                env.call(); // jal 0x148BD8
+                t.env.call(); // jal 0x148BD8
                 done = txnMeshTextures(t, node, prio, pass, mode);
             }
             else
             {
                 const uint64_t remap = (t.u32(self + kModelTexFlags) & kTexExchange) ? sx32(self + kModelTexSlot) : 0u;
                 const uint64_t prio = sx32(t.u32(self + kModelDrawPrio));
-                env.call(); // jal 0x148690
+                t.env.call(); // jal 0x148690
                 done = txnNodeMaterial(t, node, prio, remap, mode);
             }
-            if (!done || !t.ok)
+            return done && t.ok;
+        }
+        template <class T>
+        bool forwardAttackBody(T &t, uint32_t self, uint32_t node)
+        {
+            bool done;
+            const uint32_t info = t.u32(node + 0x414u);
+            const uint32_t pass = (t.u32(info + 0x34u) & kMeshSpecial) ? t.u32(kSpecialPass) : 0u;
+            const uint64_t prio = sx32(t.u32(self + kModelDrawPrio));
+            t.env.call(); // jal 0x148BD8 / 0x148D30
+            if (pass != 0u)
+                done = txnMeshTextures(t, node, prio, sx32(pass), 0u);
+            else
+                done = txnNodeTextures(t, node, prio);
+            return done && t.ok;
+        }
+
+        template <class Env>
+        bool setNodeMaterial(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kNodeCallerWindow, kNodeCallerWindow, stackTop))
+                return false;
+            Txn<Env> t{env, stackTop, stackTop + kNodeCallerWindow};
+            if (!setNodeMaterialBody(t, e::u32(ctx, e::a0), e::u32(ctx, e::a1)))
                 return false;
             t.commit();
             returnToCaller(ctx);
@@ -3151,17 +3171,7 @@ namespace kamite::native::packet
             if (!plainRam(sp - kNodeCallerWindow, kNodeCallerWindow, stackTop))
                 return false;
             Txn<Env> t{env, stackTop, stackTop + kNodeCallerWindow};
-            const uint32_t self = e::u32(ctx, e::a0), node = e::u32(ctx, e::a1);
-            bool done;
-            const uint32_t info = t.u32(node + 0x414u);
-            const uint32_t pass = (t.u32(info + 0x34u) & kMeshSpecial) ? t.u32(kSpecialPass) : 0u;
-            const uint64_t prio = sx32(t.u32(self + kModelDrawPrio));
-            env.call(); // jal 0x148BD8 / 0x148D30
-            if (pass != 0u)
-                done = txnMeshTextures(t, node, prio, sx32(pass), 0u);
-            else
-                done = txnNodeTextures(t, node, prio);
-            if (!done || !t.ok)
+            if (!forwardAttackBody(t, e::u32(ctx, e::a0), e::u32(ctx, e::a1)))
                 return false;
             t.commit();
             returnToCaller(ctx);
@@ -3189,24 +3199,35 @@ namespace kamite::native::packet
             return static_cast<uint64_t>(w1 | 0x30000000u) | (static_cast<uint64_t>(w0 & 0x0FFFFFFFu) << 32);
         }
 
+        // The writes of the natives below that plan first (by RAM offset): straight to RAM, or a fused caller's Journal.
         template <class Env>
-        bool scrollPacket(Env &env, R5900Context *ctx)
+        struct DirectWrites
         {
-            if (!env.atEnd)
-                return false;
-            alignas(16) const uint32_t unitW[4] = {0u, 0u, 0u, 0x3F800000u};
-            if (std::memcmp(&ctx->vu0_vf[0], unitW, 16) != 0)
-                return false;
-            const uint32_t sp = e::u32(ctx, e::sp);
-            uint32_t stackTop;
-            if (!plainRam(sp - kScrollPacketFrame, kScrollPacketFrame, stackTop))
-                return false;
+            Env &env;
+            void write32(uint32_t off, uint32_t v) { e::write32(env, off, v); }
+            void write64(uint32_t off, uint64_t v) { e::write64(env, off, v); }
+            void bytes(uint32_t off, const void *p, uint32_t n) { std::memcpy(env.at(off, n), p, n); }
+        };
+        // linkPacket's work with the writes through w (the reads see them: they are in RAM at once).
+        template <class Env, class W>
+        void linkPacketThrough(Env &env, W &w, const Link &link, uint32_t packet)
+        {
+            const uint64_t before = e::read32(env, (link.slot + 4u) & PS2_RAM_MASK); // lwu: the slot's old address
+            w.write64(link.slot, (static_cast<uint64_t>(packet) << 32) | 0x20000000u);
+            const uint64_t tag = e::read64(env, link.tail);
+            w.write64(link.tail, (tag & 0x0FFFFFFFu) | 0x20000000u | (before << 32));
+        }
+
+        // The body: sp = its own sp at entry, [stackTop, stackTop + window) the stack the original's frames write (a fused
+        // caller's is larger); writes through out. False = decline (nothing written). The caller checks vf0 = (0, 0, 0, 1).
+        template <class Env, class W>
+        bool scrollPacketBody(Env &env, W &out, uint32_t sp, uint32_t self, uint32_t node, int64_t id, uint32_t stackTop,
+                              uint32_t window)
+        {
             Footprint::Range reads[96]; // ~70: the eight copies and CopyMatrix's source read by the word
-            Reader<Env> rd{env, stackTop, stackTop + kScrollPacketFrame};
+            Reader<Env> rd{env, stackTop, stackTop + window};
             rd.log = reads;
             rd.logCap = 96;
-            const uint32_t self = e::u32(ctx, e::a0), node = e::u32(ctx, e::a1);
-            const int64_t id = static_cast<int16_t>(e::u32(ctx, e::a2));
 
             // the plan, in the original's order
             const uint32_t half = rd.u32(model::kFrameParity) & 1u;
@@ -3283,14 +3304,14 @@ namespace kamite::native::packet
                     !queuePlan(env, sp - 0xD0u, 0x754C80u, static_cast<uint64_t>(bucket), static_cast<uint64_t>(index),
                                pkt, static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(last))), q))
                     return false;
-                if (e::overlaps(pktAt, 0x120u, stackTop, kScrollPacketFrame))
+                if (e::overlaps(pktAt, 0x120u, stackTop, window))
                     return false;
-                if (q.inRange && (e::overlaps(q.half, 4u, stackTop, kScrollPacketFrame) ||
-                                  e::overlaps(q.at, 4u, stackTop, kScrollPacketFrame) ||
-                                  e::overlaps(q.plan.desc0, 4u, stackTop, kScrollPacketFrame) ||
-                                  e::overlaps(q.plan.desc20, 4u, stackTop, kScrollPacketFrame) ||
-                                  e::overlaps(q.plan.slot, 8u, stackTop, kScrollPacketFrame) ||
-                                  e::overlaps(q.plan.tail, 8u, stackTop, kScrollPacketFrame) ||
+                if (q.inRange && (e::overlaps(q.half, 4u, stackTop, window) ||
+                                  e::overlaps(q.at, 4u, stackTop, window) ||
+                                  e::overlaps(q.plan.desc0, 4u, stackTop, window) ||
+                                  e::overlaps(q.plan.desc20, 4u, stackTop, window) ||
+                                  e::overlaps(q.plan.slot, 8u, stackTop, window) ||
+                                  e::overlaps(q.plan.tail, 8u, stackTop, window) ||
                                   e::overlaps(q.half, 4u, pktAt, 0x120u) || e::overlaps(q.at, 4u, pktAt, 0x120u) ||
                                   e::overlaps(q.plan.desc0, 4u, pktAt, 0x120u) ||
                                   e::overlaps(q.plan.desc20, 4u, pktAt, 0x120u)))
@@ -3302,7 +3323,7 @@ namespace kamite::native::packet
             {
                 if (w.size == 0u)
                     continue;
-                if (e::overlaps(w.address, w.size, stackTop, kScrollPacketFrame))
+                if (e::overlaps(w.address, w.size, stackTop, window))
                     return false;
                 for (int r = 0; r < rd.logCount; ++r)
                     if (e::overlaps(w.address, w.size, reads[r].address, reads[r].size))
@@ -3315,11 +3336,11 @@ namespace kamite::native::packet
 
             // the writes and the cycles, in the original's order
             env.call(); // func_00155BE8
-            e::write64(env, slotAt, slotTag);
-            e::write64(env, slotAt + 0x10u, 0x10000000u);
+            out.write64(slotAt, slotTag);
+            out.write64(slotAt + 0x10u, 0x10000000u);
             env.call(); // PostInc
             if (!full)
-                e::write32(env, allocAt, next);
+                out.write32(allocAt, next);
             if (pkt != 0u)
             {
                 for (int loop = 0; loop < 8 * 3; ++loop) // the eight 4-float copies' back-edges
@@ -3328,15 +3349,34 @@ namespace kamite::native::packet
                 env.call(); // UnitMatrix
                 for (int loop = 0; loop < 3; ++loop) // the last row's copy
                     env.checkpoint(32u);
-                std::memcpy(env.at(pktAt, 0x120u), packet, 0x120u);
+                out.bytes(pktAt, packet, 0x120u);
                 env.call(); // func_00155C68
                 env.call(); // 0x31A650
                 if (q.inRange)
                 {
                     env.call(); // its 0x14FF00
-                    linkPacket(env, q.plan, pkt);
+                    linkPacketThrough(env, out, q.plan, pkt);
                 }
             }
+            return true;
+        }
+
+        template <class Env>
+        bool scrollPacket(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            alignas(16) const uint32_t unitW[4] = {0u, 0u, 0u, 0x3F800000u};
+            if (std::memcmp(&ctx->vu0_vf[0], unitW, 16) != 0)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kScrollPacketFrame, kScrollPacketFrame, stackTop))
+                return false;
+            DirectWrites<Env> w{env};
+            if (!scrollPacketBody(env, w, sp, e::u32(ctx, e::a0), e::u32(ctx, e::a1),
+                                  static_cast<int16_t>(e::u32(ctx, e::a2)), stackTop, kScrollPacketFrame))
+                return false;
             returnToCaller(ctx);
             return true;
         }
@@ -3622,27 +3662,19 @@ namespace kamite::native::packet
                           floatBits(x.mul(lane<2>(v), inv)), laneBits<3>(v));
         }
 
-        template <class Env>
-        bool nodeLighting(Env &env, R5900Context *ctx)
+        // The body on a caller's store (its BlockTxn below, or cModel_Tag_set_rate's Journal): false = decline. vf0 must
+        // be (0, 0, 0, 1) (the caller checks).
+        template <class T>
+        bool nodeLightingBody(T &t, uint32_t self, uint32_t node)
         {
-            if (!env.atEnd || !e::vf0Constant(ctx))
-                return false;
-            const uint32_t sp = e::u32(ctx, e::sp);
-            uint32_t stackTop;
-            if (!plainRam(sp - kNodeLightingWindow, kNodeLightingWindow, stackTop))
-                return false;
-            BlockTxn<Env> t{env, stackTop, stackTop + kNodeLightingWindow};
+            auto &env = t.env;
             ExactOps x;
-            const uint32_t self = e::u32(ctx, e::a0), node = e::u32(ctx, e::a1);
             const uint32_t flags = t.u32(node + 0x380u);
             const uint32_t half = t.u32(model::kFrameParity) & 1u;
             if (!t.ok)
                 return false;
             if (flags & 1u)
-            {
-                returnToCaller(ctx);
                 return true;
-            }
             const uint32_t block = node + 0x160u + half * 0xD0u;
             t.setBlock(block);
 
@@ -3840,7 +3872,20 @@ namespace kamite::native::packet
                     fade = 255.0f;
                 t.w32(block + 0x2Cu, floatBits(fade));
             }
-            if (!t.ok || !x.ok)
+            return t.ok && x.ok;
+        }
+
+        template <class Env>
+        bool nodeLighting(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd || !e::vf0Constant(ctx))
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kNodeLightingWindow, kNodeLightingWindow, stackTop))
+                return false;
+            BlockTxn<Env> t{env, stackTop, stackTop + kNodeLightingWindow};
+            if (!nodeLightingBody(t, e::u32(ctx, e::a0), e::u32(ctx, e::a1)))
                 return false;
             t.commit();
             returnToCaller(ctx);
@@ -4115,12 +4160,13 @@ namespace kamite::native::packet
         {
             Env &env;
             uint32_t stackLow;
+            uint32_t window = kModelMatricesWindow; // the stack window's size (a fused caller's is larger)
             bool ok = true;
             uint32_t at[24], size[24];
             int count = 0;
             bool span(uint32_t address, uint32_t n, uint32_t &off)
             {
-                if (!ok || !plainRam(address, n, off) || e::overlaps(off, n, stackLow, kModelMatricesWindow))
+                if (!ok || !plainRam(address, n, off) || e::overlaps(off, n, stackLow, window))
                     return ok = false;
                 return true;
             }
@@ -4161,21 +4207,15 @@ namespace kamite::native::packet
             }
         };
 
-        template <class Env>
-        bool modelMatrices(Env &env, R5900Context *ctx)
+        // The body: reads through env (a fused caller's earlier writes are in RAM already), every check before the
+        // first write, then put(offset, size, bytes) for the three spans and the cycles. False = decline (nothing put).
+        // The caller checks vf0 = (0, 0, 0, 1) (the unit matrices, func_001503B8's frame come from it).
+        template <class Env, class Put>
+        bool modelMatricesBody(Env &env, uint32_t self, uint32_t stackLow, uint32_t window, Put &&put)
         {
-            if (!env.atEnd)
-                return false;
-            const uint32_t sp = e::u32(ctx, e::sp);
-            uint32_t stackLow;
-            // vf0 = (0, 0, 0, 1): the unit matrices (UnitMatrix, func_001503B8's frame) come from it
-            if (!e::vf0Constant(ctx) || (sp & 0xFu) != 0u ||
-                !plainRam(sp - kModelMatricesWindow, kModelMatricesWindow, stackLow))
-                return false;
-            MatricesReads<Env> rd{env, stackLow};
+            MatricesReads<Env> rd{env, stackLow, window};
             ExactOps x;
             int calls = 0, backs = 0;
-            const uint32_t self = e::u32(ctx, e::a0);
             const uint32_t idx = rd.u32(0x7476B0u) & 1u;
             const uint32_t buf = rd.u32(self + 552u + 4u * idx);
             const uint32_t cam = rd.u32(kViewPointer);
@@ -4291,18 +4331,690 @@ namespace kamite::native::packet
                 backs += kMulMatrixBacks + (k + 1u < n ? 1 : 0);
             }
             // every check passed: the writes (disjoint spans, so their order can't show)
-            uint8_t *b = env.at(bufOff, 0x140u);
+            alignas(16) uint8_t b[0x80], third3[0x40];
             for (int k = 0; k < 4; ++k)
             {
                 store(b + 16 * k, view.r[k]);
                 store(b + 0x40 + 16 * k, second.r[k]);
-                store(b + 0x100 + 16 * k, third.r[k]);
+                store(third3 + 16 * k, third.r[k]);
             }
-            std::memcpy(env.at(outsOff, 64u * n), nodeOut, 64u * n);
+            put(bufOff, 0x80u, b);
+            put(bufOff + 0x100u, 0x40u, third3);
+            put(outsOff, 64u * n, nodeOut);
             for (int i = 0; i < calls; ++i)
                 env.call();
             for (int i = 0; i < backs; ++i)
                 env.checkpoint(32u);
+            return true;
+        }
+
+        template <class Env>
+        bool modelMatrices(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackLow;
+            // vf0 = (0, 0, 0, 1): the unit matrices (UnitMatrix, func_001503B8's frame) come from it
+            if (!e::vf0Constant(ctx) || (sp & 0xFu) != 0u ||
+                !plainRam(sp - kModelMatricesWindow, kModelMatricesWindow, stackLow))
+                return false;
+            if (!modelMatricesBody(env, e::u32(ctx, e::a0), stackLow, kModelMatricesWindow,
+                                   [&env](uint32_t off, uint32_t size, const uint8_t *bytes) {
+                                       std::memcpy(env.at(off, size), bytes, size);
+                                   }))
+                return false;
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // ==== cModel_Tag_set_rate fused (rung 3 step a's last item, Nov 23) =========================================
+        // A model's per-frame tagging, its whole subtree as one native: our C++ from the disassembly (unmatched in the
+        // decomp at 4607c68; the map: claude/rung3-step-a-handoff.md "cModel_Tag_set_rate map"), every callee's body
+        // inline (no guest call), its cycles the original's (8 per jal, PS2X_EE_LOOP_CYCLES per taken back-edge)
+        // charged at the end. The callees read what earlier ones wrote (the queue's links, the texture cache, the frame
+        // allocator, the nodes' packets), so it runs on a Journal.
+
+        // The Journal: every write goes to RAM at once, in the original's order, its old bytes kept; a decline rolls
+        // them back newest first (the destructor, unless commit() ran), so RAM is as it was. Reads see RAM, and so every
+        // write made so far, with no lookup (the general Txn's per-write hashing cost more than the work). Every access
+        // plain RAM and clear of [stackLow, stackHigh) (the bytes below the entry sp that the original's frames write),
+        // else ok = false and the native declines. Its interface is Txn's and BlockTxn's, so their bodies run on it.
+        constexpr uint32_t kOneBits = 0x3F800000u;
+
+        struct JournalStore
+        {
+            struct Entry
+            {
+                uint32_t at;
+                uint32_t size;
+                alignas(16) uint8_t old[16];
+            };
+            static constexpr uint32_t kEntries = 1u << 16;
+            std::vector<Entry> entries;
+            bool busy = false;
+        };
+        inline JournalStore &journalStore()
+        {
+            thread_local JournalStore store;
+            if (store.entries.empty())
+                store.entries.resize(JournalStore::kEntries);
+            return store;
+        }
+        template <class Env>
+        struct Journal
+        {
+            Env &env;
+            uint32_t stackLow, stackHigh;
+            bool ok = true;
+            JournalStore *store = nullptr;
+            uint32_t count = 0;
+            bool kept = false;
+            Journal(Env &e, uint32_t low, uint32_t high) : env(e), stackLow(low), stackHigh(high)
+            {
+                JournalStore &s = journalStore();
+                if (s.busy)
+                    ok = false;
+                else
+                    s.busy = true, store = &s;
+            }
+            ~Journal()
+            {
+                if (!store)
+                    return;
+                if (!kept)
+                    for (uint32_t i = count; i-- > 0u;)
+                    {
+                        const JournalStore::Entry &w = store->entries[i];
+                        std::memcpy(env.at(w.at, w.size), w.old, w.size);
+                    }
+                store->busy = false;
+            }
+            Journal(const Journal &) = delete;
+            Journal &operator=(const Journal &) = delete;
+            void commit() { kept = true; }
+
+            KM_NATIVE_INLINE bool span(uint32_t address, uint32_t size, uint32_t &offset)
+            {
+                if (!ok)
+                    return false;
+                // plainRam's answer, quickly for RAM below the I/O range (KUSEG, KSEG0 / KSEG1)
+                const uint32_t phys = address - 0x80000000u < 0x40000000u ? address & 0x1FFFFFFFu : address;
+                if (phys < PS2_IO_BASE && phys + size <= PS2_IO_BASE)
+                {
+                    offset = address & PS2_RAM_MASK;
+                    if (offset + size > PS2_RAM_MASK + 1u)
+                        return ok = false;
+                }
+                else if (!plainRam(address, size, offset))
+                    return ok = false;
+                if (e::overlaps(offset, size, stackLow, stackHigh - stackLow))
+                    return ok = false;
+                return true;
+            }
+            // a write at a RAM offset already proved plain and clear of the stack window (a plan's), in pieces of 16
+            void putOffset(uint32_t at, uint32_t size, const void *in)
+            {
+                const uint8_t *src = static_cast<const uint8_t *>(in);
+                while (size != 0u && ok)
+                {
+                    const uint32_t n = size < 16u ? size : 16u;
+                    if (count == JournalStore::kEntries)
+                    {
+                        ok = false;
+                        return;
+                    }
+                    JournalStore::Entry &w = store->entries[count++];
+                    uint8_t *p = env.at(at, n);
+                    w.at = at;
+                    w.size = n;
+                    std::memcpy(w.old, p, n);
+                    std::memcpy(p, src, n);
+                    at += n, src += n, size -= n;
+                }
+            }
+            void read(uint32_t address, uint32_t size, void *out)
+            {
+                uint32_t at;
+                if (!span(address, size, at))
+                {
+                    std::memset(out, 0, size);
+                    return;
+                }
+                std::memcpy(out, env.at(at, size), size);
+            }
+            void write(uint32_t address, uint32_t size, const void *in)
+            {
+                uint32_t at;
+                if (span(address, size, at))
+                    putOffset(at, size, in);
+            }
+            template <uint32_t N>
+            KM_NATIVE_INLINE void read(uint32_t address, void *out) { read(address, N, out); }
+            template <uint32_t N>
+            KM_NATIVE_INLINE void write(uint32_t address, const void *in) { write(address, N, in); }
+            template <class V>
+            KM_NATIVE_INLINE V get(uint32_t address)
+            {
+                V v;
+                read(address, sizeof(V), &v);
+                return v;
+            }
+            uint8_t u8(uint32_t a) { return get<uint8_t>(a); }
+            int8_t s8(uint32_t a) { return static_cast<int8_t>(get<uint8_t>(a)); }
+            uint16_t u16(uint32_t a) { return get<uint16_t>(a); }
+            int16_t s16(uint32_t a) { return static_cast<int16_t>(get<uint16_t>(a)); }
+            uint32_t u32(uint32_t a) { return get<uint32_t>(a); }
+            int32_t s32(uint32_t a) { return static_cast<int32_t>(get<uint32_t>(a)); }
+            uint64_t u64(uint32_t a) { return get<uint64_t>(a); }
+            void w8(uint32_t a, uint8_t v) { write(a, 1u, &v); }
+            void w16(uint32_t a, uint16_t v) { write(a, 2u, &v); }
+            void w32(uint32_t a, uint32_t v) { write(a, 4u, &v); }
+            void w64(uint32_t a, uint64_t v) { write(a, 8u, &v); }
+            // lq / sq: the address's low 4 bits cleared
+            void lq(uint32_t a, uint8_t (&v)[16]) { read(a & ~0xFu, 16u, v); }
+            void sq(uint32_t a, const uint8_t (&v)[16]) { write(a & ~0xFu, 16u, v); }
+            // BlockTxn's: func_00154240's block (it declines one that is odd or not plain), and its packet word
+            void setBlock(uint32_t address)
+            {
+                uint32_t at;
+                if ((address & 1u) != 0u || !span(address, BlockTxn<Env>::kBlock, at))
+                    ok = false;
+            }
+            void writeExtra(uint32_t address, uint64_t v) { w64(address, v); }
+        };
+        // The plan-first bodies' writes (DirectWrites' interface) into a Journal
+        template <class Env>
+        struct JournalWrites
+        {
+            Journal<Env> &t;
+            void write32(uint32_t off, uint32_t v) { t.putOffset(off, 4u, &v); }
+            void write64(uint32_t off, uint64_t v) { t.putOffset(off, 8u, &v); }
+            void bytes(uint32_t off, const void *p, uint32_t n) { t.putOffset(off, n, p); }
+        };
+
+        constexpr uint32_t kTagSetRate = 0x14AC90u;
+        constexpr uint32_t kTagFrame = 0xB0u;
+        constexpr uint32_t kBoxTestWindow = 0x140u + 0x10u; // func_001F8DF8's frame + MtxCopy's (ApplyMatrix, CopyMatrix: none)
+        // its frame + the deepest callee's window (func_0014C7E8's)
+        constexpr uint32_t kTagWindow =
+            kTagFrame + std::max({kModelMatricesWindow, kNodeCallerWindow, kNodeLightingWindow, kScrollPacketFrame,
+                                  kBoxTestWindow, kQueueModelFrame, 0x40u /* ForwardNodeUpdate */, 0x10u /* the queue */});
+        constexpr int kTagNodeLimit = 256; // nodes walked per list before declining (a cyclic list: the original spins)
+        constexpr uint32_t kLightThresholds = 0x604700u; // the light set: +0x14 / +0x68 / +0x1C / +0x24 the box test's f12
+        constexpr uint32_t kFrameBuffer = 0x3C1180u;      // D_003C1180: the frame's width (FRAME_1's FBW = it / 64)
+
+        // no_lod (model_detail.h) where its hook km_no_lod sits, the entry: a far flag is cleared when the model has a near
+        // mesh. The hook's own reads (address & PS2_RAM_MASK, 0 past the end), before anything else runs.
+        inline bool noLodOn()
+        {
+            static const uint32_t mask = ps2xPatchFlagMask("no_lod");
+            return (g_ps2xPatchFlags.load(std::memory_order_relaxed) & mask) != 0u;
+        }
+        template <class Env>
+        uint32_t noLodFar(Env &env, uint32_t self, uint32_t far)
+        {
+            if (far == 0u)
+                return far;
+            auto r32 = [&env](uint32_t a) -> uint32_t {
+                a &= PS2_RAM_MASK;
+                return a > PS2_RDRAM_SIZE - 4u ? 0u : e::read32(env, a);
+            };
+            uint32_t node = r32(self + model::kMeshHead);
+            for (uint32_t n = 0; node != 0u && n < 256u; ++n)
+            {
+                const uint32_t info = r32(node + 0x414u);
+                if (info != 0u && (r32(info + 0x34u) & 0x01000000u) == 0u)
+                    return 0u;
+                node = r32(node + 0x404u);
+            }
+            return far;
+        }
+
+        // cModel_getMeshPtr(self, 0) where Tag_set_rate and its callees call it: its entry observers with the context
+        // they'd see (a0 = self, a1 = 0, ra = the return site, sp = the caller's frame), then ctx back as it was.
+        template <class Env>
+        void observeMeshPtr(Env &env, R5900Context *ctx, uint32_t ra, uint32_t sp)
+        {
+            alignas(16) uint8_t a1[16], raReg[16], spReg[16];
+            std::memcpy(a1, &ctx->r[e::a1], 16);
+            std::memcpy(raReg, &ctx->r[e::ra], 16);
+            std::memcpy(spReg, &ctx->r[e::sp], 16);
+            const uint32_t pc = ctx->pc;
+            e::setLow64(ctx, e::a1, 0u);
+            e::setS32(ctx, e::ra, ra);
+            e::setS32(ctx, e::sp, sp);
+            ctx->pc = kGetMeshPtr;
+            env.observe(kGetMeshPtr, ctx);
+            std::memcpy(&ctx->r[e::a1], a1, 16);
+            std::memcpy(&ctx->r[e::ra], raReg, 16);
+            std::memcpy(&ctx->r[e::sp], spReg, 16);
+            ctx->pc = pc;
+        }
+
+        // func_00155D60(node, value, half): (byte +0x385) - 1 empty back-edges, then node + half * 0xB0 + 0x30 = value.
+        // A byte of 0 would spin 2^32 times: decline.
+        template <class T>
+        bool countdownBody(T &t, uint32_t node, uint64_t value, uint32_t half)
+        {
+            const uint32_t c = t.u8(node + 0x385u);
+            if (c == 0u)
+                return false;
+            for (uint32_t k = 1u; k < c; ++k)
+                t.env.checkpoint(32u);
+            t.w64(node + half * 0xB0u + 0x30u, value);
+            return true;
+        }
+
+        // func_00155AE8(node, layer, half): node + half * 0xB0 +0x70 / +0x80 = the GS table's tags for layer & 0xFF and
+        // the next (a negative layer: +0x70 = 0x10000000, the next's only).
+        template <class T>
+        uint64_t gsTagOf(T &t, uint32_t index)
+        {
+            const uint32_t w0 = t.u32(kGsTable + index * 8u), w1 = t.u32(kGsTable + index * 8u + 4u);
+            return static_cast<uint64_t>(w1 | 0x30000000u) | (static_cast<uint64_t>(w0 & 0x0FFFFFFFu) << 32);
+        }
+        template <class T>
+        void twoTagsBody(T &t, uint32_t node, uint64_t layer, uint32_t half)
+        {
+            const uint32_t at = node + half * 0xB0u, index = static_cast<uint32_t>(layer) & 0xFFu;
+            if (static_cast<int64_t>(layer) < 0)
+                t.w64(at + 0x70u, 0x10000000u);
+            else
+                t.w64(at + 0x70u, gsTagOf(t, index));
+            t.w64(at + 0x80u, gsTagOf(t, index + 1u));
+        }
+
+        // cModel_nodeLayerScreen(self, node): 2 (0x14 for a CMODEL_F_LATE model); 0x1E when the node blends with the model
+        // alpha and cModel_alpha is 1.0; 0x20 for a special node in the special pass. False: the alpha outside the host's
+        // exact range (as its own native declines).
+        template <class T>
+        bool nodeLayerBody(T &t, uint32_t self, uint32_t node, uint32_t &layer)
+        {
+            layer = (t.u32(self + kObjFlags) & kLate) ? 0x14u : 2u;
+            if (t.u32(node + model::kNodeDispFlags) & kNodeAlpha)
+            {
+                bool exact;
+                const bool one = modelAlphaOne(t, self, exact);
+                if (!exact)
+                    return false;
+                if (one)
+                    layer = 0x1Eu;
+            }
+            if ((t.u32(node + model::kNodeDispFlags) & kNodeSpecial) && t.u32(kSpecialPass) != 0u)
+                layer = 0x20u;
+            return true;
+        }
+
+        // PostInc(size): this half's 0x60000-byte area from D_00506E10; v = the old pointer and the pointer moves, or 0
+        // when the block won't fit.
+        template <class T>
+        uint32_t postIncBody(T &t, uint32_t size)
+        {
+            const uint32_t half = t.u32(model::kFrameParity) & 1u;
+            const uint32_t cur = t.u32(kFrameAllocator), next = cur + size;
+            if (half * 0x60000u + 0x506E10u < next)
+                return 0u;
+            t.w32(kFrameAllocator, next);
+            return cur;
+        }
+
+        // The queue where a packet goes by the model's kind (func_0014C5A0's rule): a per-node model by the node's sorted
+        // flag (bucket 2 with id, else 1 / 0xD), any other by its drawKind and model id. A tail of 0 takes 0x31A600: the
+        // same link (its tail register is the packet then), the same two jals.
+        template <class T>
+        void queueByKind(T &t, uint32_t self, uint32_t nodeFlags, int64_t id, uint32_t packet, uint32_t tail)
+        {
+            const int32_t kind = t.s32(self + model::kDrawKind);
+            int64_t bucket, order;
+            if (kind == model::kKindPerNode)
+            {
+                const bool sorted = (nodeFlags & model::kNodeSorted) != 0u;
+                bucket = sorted ? 2 : 1;
+                order = sorted ? id : 0xD;
+            }
+            else
+            {
+                bucket = kind;
+                order = t.s16(self + model::kId);
+            }
+            txnQueue(t, static_cast<uint64_t>(bucket), static_cast<uint64_t>(order), packet, tail);
+        }
+
+        // func_001F8DF8(box (centre, half sizes), m (the world matrix), f12) (Tag_set_rate: self +0x260, +0x80): the eight
+        // corners through the world matrix with its translation row's xyz zeroed (the frame's copy of m: the corner
+        // stores at +0x60..+0x6B land on its last row) plus the centre's transform, then the view matrix (*D_005CAFF0);
+        // 1 unless the smallest w (c.lt.s order) is above f12. The maths and its domain as its own native's (libvu0.cpp
+        // boxTest); its frame is dead. False: an input outside the exact range.
+        template <class T>
+        bool boxTestBody(T &t, uint32_t box, uint32_t m, uint32_t f12, bool &visible)
+        {
+            Vec4 mr[4], gr[4];
+            for (uint32_t k = 0; k < 4u; ++k)
+                mr[k] = txnQuad(t, m + 16u * k);
+            const uint32_t cx = t.u32(box), cy = t.u32(box + 4u), cz = t.u32(box + 8u);
+            const uint32_t hx = t.u32(box + 0xCu), hy = t.u32(box + 0x10u), hz = t.u32(box + 0x14u);
+            const uint32_t view = t.u32(kViewPointer);
+            for (uint32_t k = 0; k < 4u; ++k)
+                gr[k] = txnQuad(t, view + 16u * k);
+            if (!t.ok)
+                return false;
+            for (uint32_t k = 0; k < 4u; ++k)
+                if (!libvu0::finiteInputs(mr[k]) || !libvu0::finiteInputs(gr[k]))
+                    return false;
+            const Vec4 centre = bitsOf(cx, cy, cz, kOneBits);
+            if (!libvu0::finiteInputs(centre) || !libvu0::finiteInputs(bitsOf(hx, hy, hz, kOneBits)))
+                return false;
+            const Vec4 c = libvu0::mulRow(mr[0], mr[1], mr[2], mr[3], centre).r;
+            const Vec4 shift = blend<8>(c, splat(1.0f)); // the centre row in its frame: its xyz, w still 1.0
+            // the corners go through the frame's copy of m, whose last row's xyz the corner stores at +0x60..+0x6B zero
+            const Vec4 m3 = blend<7>(mr[3], splat(0.0f));
+            uint32_t lowest = 0u;
+            for (int k = 0; k < 8; ++k)
+            {
+                const uint32_t sx = (k & 1) ? hx : hx ^ 0x80000000u, sy = (k & 4) ? hy ^ 0x80000000u : hy,
+                               sz = (k & 2) ? hz : hz ^ 0x80000000u;
+                const Vec4 p = libvu0::mulRow(mr[0], mr[1], mr[2], m3, bitsOf(sx, sy, sz, kOneBits)).r;
+                const Vec4 q = blend<7>(p, add(p, shift));
+                if (!libvu0::finiteInputs(q))
+                    return false; // the second transform's input (and no sum past FLT_MAX)
+                const uint32_t w = laneBits<3>(libvu0::mulRow(gr[0], gr[1], gr[2], gr[3], q).r);
+                if (k == 0 || e::fpuKey(w) < e::fpuKey(lowest))
+                    lowest = w;
+            }
+            visible = !(e::fpuKey(f12) < e::fpuKey(lowest));
+            // ApplyMatrix: the centre, then two per corner; MtxCopy and its CopyMatrix; the corner loop's back-edges
+            for (int i = 0; i < 1 + 2 + 16; ++i)
+                t.env.call();
+            for (int i = 0; i < 7; ++i)
+                t.env.checkpoint(32u);
+            return true;
+        }
+
+        // func_0014C5A0(self, id) on the Journal (its own native plans first; here the writes are already in order)
+        template <class Env>
+        void queueModelBody(Journal<Env> &t, R5900Context *ctx, uint32_t self, int64_t id, uint32_t sp)
+        {
+            const uint32_t parity = t.u32(model::kFrameParity) & 1u;
+            t.env.call(); // jal cModel_getMeshPtr
+            observeMeshPtr(t.env, ctx, 0x14C5D4u, sp - 0x40u);
+            const uint32_t node = t.u32(self + model::kMeshHead);
+            const uint32_t flags = t.u32(node + model::kNodeDispFlags);
+            const uint32_t start = t.u32(self + model::kPacket + parity * 4u);
+            queueByKind(t, self, flags, id, start, start + 0x70u);
+        }
+
+        // Is the node drawn in this pass: not hidden, and (unless the model has no far meshes, objFlags 0x400) its mesh's
+        // far bit (cMeshInfo +0x34 0x01000000) the pass's far flag.
+        template <class T>
+        bool nodeInPass(T &t, uint32_t self, uint32_t node, uint32_t far)
+        {
+            if (t.u32(node + model::kNodeDispFlags) & 1u)
+                return false;
+            if (t.u32(self + kObjFlags) & 0x400u)
+                return true;
+            const uint32_t info = t.u32(node + 0x414u);
+            const uint32_t isFar = (t.u32(info + 0x34u) & 0x01000000u) != 0u ? 1u : 0u;
+            return far == isFar;
+        }
+
+        template <class Env>
+        bool tagSetRate(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            // vf0 = (0, 0, 0, 1): func_00154240 / 0014C7E8 / 0014B9A0's unit matrices come from it
+            alignas(16) const uint32_t unitW[4] = {0u, 0u, 0u, kOneBits};
+            if (std::memcmp(&ctx->vu0_vf[0], unitW, 16) != 0)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackLow;
+            if ((sp & 0xFu) != 0u || !plainRam(sp - kTagWindow, kTagWindow, stackLow))
+                return false;
+            const uint32_t self = e::u32(ctx, e::a0);
+            const int64_t id = static_cast<int16_t>(e::u32(ctx, e::a1)); // sll / sra 16
+            uint32_t far = e::u32(ctx, e::a2);                            // kept at its sp + 0 (a word)
+            if (noLodOn())
+                far = noLodFar(env, self, far);
+            const uint32_t inner = sp - kTagFrame; // the callees' sp
+            Journal<Env> t{env, stackLow, stackLow + kTagWindow};
+
+            // the countdown value: cvt.w.s(cModel_alpha * 128) - 1, 0 unless positive
+            ExactOps x;
+            const float k255 = 255.0f;
+            const float qa = x.div(fpuFromSmallWord(t.u8(self + 0x2B6u)), k255);
+            const float qb = x.div(fpuFromSmallWord(t.u8(self + 0x2B7u)), k255);
+            const float qc = x.div(fpuFromSmallWord(t.u8(self + 0x2BCu)), k255);
+            float alpha = x.mul(bitsFloat(t.u32(self + kModelTint)), qa);
+            alpha = x.mul(alpha, qb);
+            alpha = x.mul(alpha, qc);
+            alpha = x.mul(alpha, bitsFloat(0x43000000u)); // 128.0
+            const uint32_t less = static_cast<uint32_t>(fpuToWord(alpha)) - 1u;
+            const uint64_t count = static_cast<int32_t>(less) > 0 ? static_cast<uint64_t>(static_cast<int32_t>(less)) : 0u;
+            const uint32_t objFlags = t.u32(self + kObjFlags);
+            const uint32_t half = t.u32(model::kFrameParity) & 1u;
+            if (!t.ok || !x.ok)
+                return false;
+
+            // the nodes' countdowns: ForwardNodeUpdate (objFlags 0x10), or its own walk (getMeshPtr twice: the head's
+            // byte +0x380 bit 7 picks between two identical calls)
+            {
+                const bool forward = (objFlags & 0x10u) != 0u;
+                env.call(); // jal ForwardNodeUpdate / cModel_getMeshPtr
+                if (forward)
+                {
+                    env.call(); // its jal cModel_getMeshPtr
+                    observeMeshPtr(env, ctx, 0x14D78Cu, inner - 0x40u);
+                }
+                else
+                {
+                    observeMeshPtr(env, ctx, 0x14ADA4u, inner);
+                    env.call();
+                    observeMeshPtr(env, ctx, 0x14ADBCu, inner);
+                }
+                const uint64_t value = (count << 4) | (forward ? 0x5000Du : 0x5100Du);
+                uint32_t node = t.u32(self + model::kMeshHead);
+                for (int n = 0; node != 0u; ++n)
+                {
+                    env.call(); // jal 0x155D60
+                    if (n == kTagNodeLimit || !countdownBody(t, node, value, half))
+                        return false;
+                    node = t.u32(node + 0x404u);
+                    if (node != 0u)
+                        env.checkpoint(32u);
+                }
+            }
+
+            // func_0014C7E8: the model's matrices
+            env.call();
+            if (!modelMatricesBody(env, self, stackLow, kTagWindow,
+                                   [&t](uint32_t off, uint32_t size, const uint8_t *bytes) { t.putOffset(off, size, bytes); }) ||
+                !t.ok)
+                return false;
+
+            // func_00154240 per node not hidden: the lighting blocks
+            env.call();
+            observeMeshPtr(env, ctx, 0x14AE20u, inner);
+            {
+                uint32_t node = t.u32(self + model::kMeshHead);
+                for (int n = 0; node != 0u; ++n)
+                {
+                    if (n == kTagNodeLimit)
+                        return false;
+                    if (!(t.u8(node + model::kNodeDispFlags) & 1u))
+                    {
+                        env.call();
+                        if (!nodeLightingBody(t, self, node))
+                            return false;
+                    }
+                    node = t.u32(node + 0x404u);
+                    if (node != 0u)
+                        env.checkpoint(32u);
+                }
+            }
+
+            // func_00155BE8(self, negative, half): the model's slot tags off
+            env.call();
+            {
+                const uint32_t packet = t.u32(self + model::kPacket + half * 4u);
+                t.w64(packet + 0x60u, 0x10000000u);
+                t.w64(packet + 0x50u, 0x10000000u);
+            }
+
+            // the main pass: per node drawn, the box test, the materials, the layer's tags, the node's packet queued
+            env.call();
+            observeMeshPtr(env, ctx, 0x14AE78u, inner);
+            {
+                uint32_t last = 0u;      // the last node tagged (s3) and its layer (s6)
+                uint64_t lastLayer = 0u;
+                uint32_t node = t.u32(self + model::kMeshHead);
+                for (int n = 0; node != 0u; ++n)
+                {
+                    if (n == kTagNodeLimit)
+                        return false;
+                    bool drawn = nodeInPass(t, self, node, far);
+                    const uint32_t flags = t.u32(node + model::kNodeDispFlags);
+                    if (drawn && !(flags & 0x200000u))
+                    {
+                        uint32_t f12 = t.u32(kLightThresholds + 0x14u);
+                        if (flags & 0x20000u)
+                            f12 = t.u32(kLightThresholds + 0x68u);
+                        if (flags & 2u)
+                            f12 = t.u32(kLightThresholds + 0x1Cu);
+                        if (flags & 0x40000u)
+                            f12 = t.u32(kLightThresholds + 0x24u);
+                        env.call(); // jal 0x1F8DF8
+                        if (!boxTestBody(t, self + 0x260u, self + 0x80u, f12, drawn))
+                            return false;
+                    }
+                    if (drawn)
+                    {
+                        if (!(t.u32(self + kObjFlags) & 0x80u))
+                        {
+                            env.call(); // jal cModel_setNodeMaterial
+                            if (!setNodeMaterialBody(t, self, node))
+                                return false;
+                        }
+                        if (t.u32(self + kObjFlags) & 0x400000u)
+                        {
+                            env.call(); // jal ForwardAttackByMode
+                            if (!forwardAttackBody(t, self, node))
+                                return false;
+                        }
+                        uint32_t layer;
+                        env.call(); // jal cModel_nodeLayerScreen
+                        if (!nodeLayerBody(t, self, node, layer))
+                            return false;
+                        env.call(); // jal 0x155AE8
+                        twoTagsBody(t, node, layer | 0xFFFFFFFF80000000ull, half);
+                        if (lastLayer != layer && last != 0u)
+                        {
+                            env.call();
+                            twoTagsBody(t, last, lastLayer, half);
+                        }
+                        last = node, lastLayer = layer;
+                        const uint32_t packet = node + half * 0xB0u;
+                        queueByKind(t, self, t.u32(node + model::kNodeDispFlags), id, packet, packet + 0xA0u);
+                    }
+                    node = t.u32(node + 0x404u);
+                    if (node != 0u)
+                        env.checkpoint(32u);
+                }
+                if (last != 0u)
+                {
+                    env.call();
+                    twoTagsBody(t, last, lastLayer, half);
+                }
+            }
+
+            // func_0014C5A0(self, id): the model's own packet
+            env.call();
+            queueModelBody(t, ctx, self, id, inner);
+
+            // objFlags 0x10: the UV-scroll pass
+            if (t.u32(self + kObjFlags) & 0x10u)
+            {
+                auto frameWidth = [&t](uint64_t mask) { // FRAME_1: FBW = D_003C1180 / 64 (toward zero), FBP 0x70
+                    const int32_t width = t.s32(kFrameBuffer);
+                    const int32_t up = width > -1 ? width : static_cast<int32_t>(static_cast<uint32_t>(width) + 0x3Fu);
+                    return (static_cast<uint64_t>(static_cast<int64_t>(up >> 6)) << 16) | mask;
+                };
+                env.call(); // PostInc(0x30)
+                const uint32_t first = postIncBody(t, 0x30u);
+                t.w64(first, 2u); // CNT 2
+                t.w32(first + 8u, 0x11000000u);
+                t.w32(first + 0xCu, 0x50000002u);
+                t.w64(first + 0x10u, 0x1000000000008001ull); // a GIF tag: NLOOP 1, EOP, A+D
+                t.w32(first + 0x18u, 0xEu);
+                t.w32(first + 0x1Cu, 0u);
+                const uint64_t frame1 = frameWidth(0x70u);
+                t.w64(first + 0x28u, 0x4Cu);
+                t.w64(first + 0x20u, frame1);
+                env.call(); // jal cModel_getMeshPtr
+                observeMeshPtr(env, ctx, 0x14B11Cu, inner);
+                {
+                    const uint32_t head = t.u32(self + model::kMeshHead);
+                    queueByKind(t, self, t.u32(head + model::kNodeDispFlags), id, first, 0u); // 0x31A600
+                }
+
+                env.call(); // jal cModel_getMeshPtr
+                observeMeshPtr(env, ctx, 0x14B18Cu, inner);
+                uint32_t node = t.u32(self + model::kMeshHead);
+                for (int n = 0; node != 0u; ++n)
+                {
+                    if (n == kTagNodeLimit)
+                        return false;
+                    if (nodeInPass(t, self, node, far))
+                    {
+                        env.call(); // jal 0x14B9A0
+                        JournalWrites<Env> w{t};
+                        if (!scrollPacketBody(env, w, inner, self, node, id, stackLow, kTagWindow) || !t.ok)
+                            return false;
+                    }
+                    node = t.u32(node + 0x404u);
+                    if (node != 0u)
+                        env.checkpoint(32u);
+                }
+
+                env.call(); // PostInc(0x90)
+                const uint32_t second = postIncBody(t, 0x90u);
+                t.w64(second, 0x10000005u); // CNT 5
+                t.w32(second + 8u, 0x11000000u);
+                t.w32(second + 0xCu, 0x50000005u);
+                t.w64(second + 0x10u, 0x1000000000008004ull); // a GIF tag: NLOOP 4, EOP, A+D
+                t.w32(second + 0x18u, 0xEu);
+                t.w32(second + 0x1Cu, 0u);
+                const uint64_t frame2 = frameWidth(0xFFFFFFFF00000070ull); // FBMSK all
+                t.w64(second + 0x28u, 0x4Cu);
+                t.w64(second + 0x20u, frame2);
+                t.w64(second + 0x38u, 0x14u);
+                t.w64(second + 0x30u, 0xFFFFFF3800000360ull);
+                t.w64(second + 0x48u, 0x47u);
+                t.w64(second + 0x40u, 0x507FDu);
+                t.w64(second + 0x58u, 0x42u);
+                t.w64(second + 0x50u, 0x8000000044ull);
+                const uint32_t parts = t.u8(self + 0x2B4u);
+                const uint32_t partPacket = t.u32(self + 0x230u + half * 4u);
+                t.w32(second + 0x68u, 0u);
+                t.w32(second + 0x6Cu, 0u);
+                const uint32_t lo60 = (0xA9u - ((0x2Au - parts) << 2)) | 0x30000000u;
+                t.w64(second + 0x60u, lo60 | (static_cast<uint64_t>(partPacket & 0x0FFFFFFFu) << 32));
+                const uint32_t tailPacket = t.u32(self + 0x228u + half * 4u);
+                t.w32(second + 0x78u, 0u);
+                t.w32(second + 0x7Cu, 0u);
+                t.w64(second + 0x70u, 0x30000015u | (static_cast<uint64_t>(tailPacket & 0x0FFFFFFFu) << 32));
+                t.w64(second + 0x80u, 0u);
+                t.w32(second + 0x88u, 0u);
+                t.w32(second + 0x8Cu, 0u);
+                env.call(); // jal cModel_getMeshPtr
+                observeMeshPtr(env, ctx, 0x14B37Cu, inner);
+                const uint32_t head = t.u32(self + model::kMeshHead);
+                queueByKind(t, self, t.u32(head + model::kNodeDispFlags), id, second, second + 0x80u);
+            }
+
+            if (!t.ok)
+                return false;
+            t.commit();
             returnToCaller(ctx);
             return true;
         }
@@ -4387,5 +5099,16 @@ namespace kamite::native::packet
         addReadable("tanf", kTanf, true, &tanfNative<RealEnv>, &tanfNative<ShadowEnv>, NativeFunction::kReturnsF0);
         addReadable("func_0030AA40", kViewScreen, true, &viewScreenNative<RealEnv>, &viewScreenNative<ShadowEnv>, 0u);
         addReadable("func_0014C7E8", kModelMatrices, true, &modelMatrices<RealEnv>, &modelMatrices<ShadowEnv>, 0u);
+        // Rung 3 step a's last item (Nov 23): cModel_Tag_set_rate fused, its whole subtree inline on a Journal. Unchecked:
+        // dev replays shadow it (its recorded footprint runs to thousands of ranges: limits raised for it alone).
+        {
+            auto fn = NativeFunction{"cModel_Tag_set_rate", kTagSetRate, "packet", false, &tagSetRate<RealEnv>,
+                                     &tagSetRate<ShadowEnv>, nullptr};
+            fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
+            fn.returns = 0u; // void: its callers (cModel_Trans 0x14A83C, cModel_Trans_screen 0x14AA28) overwrite v0 / v1 first
+            fn.maxBytes = 1u << 20;
+            fn.maxRanges = 16384u;
+            registerFunction(fn);
+        }
     }
 }

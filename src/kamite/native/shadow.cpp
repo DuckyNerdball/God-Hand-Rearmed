@@ -205,7 +205,7 @@ namespace kamite::native::shadow
                     std::memcpy(g_scratch + f.offsets[i], f.in.data() + at, f.ranges[i].size);
             else if (f.firstRun)
             {
-                f.rec.reset(f.realRam, slot.fn.maxBytes);
+                f.rec.reset(f.realRam, slot.fn.maxBytes, slot.fn.maxRanges);
                 rec = &f.rec;
             }
             else

@@ -30,15 +30,18 @@ with kamite/git_commit.h):
        cModel_setNodeMaterial_0x14b4d0 ForwardAttackByMode_14B5D8_0x14b5d8 func_00154240_0x154240
        tanf_0x3a1ae8 ps2___kernel_tanf_0x3a4830 ps2___ieee754_rem_pio2f_0x3a3768 ps2___kernel_rem_pio2f_0x3a3dd8
        func_003A19D8_0x3a19d8 scalbnf_0x3a4e28 floorf_0x3a4d18 copysignf_0x3a4f88 func_0030AA40_0x30aa40
-       func_0014C7E8_0x14c7e8"
+       func_0014C7E8_0x14c7e8 cModel_Tag_set_rate_0x14ac90"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
         src/kamite/native/libvu0.cpp src/kamite/native/packet.cpp src/kamite/native/recording.cpp \
-        src/kamite/texture_slots.cpp runtime/ps2xRuntime/src/lib/ps2_ee_float.cpp /tmp/nt/*.o -o /tmp/nt/shadow_test
+        src/kamite/texture_slots.cpp src/kamite/model_detail.cpp runtime/ps2xRuntime/src/lib/ps2_ee_float.cpp \
+        /tmp/nt/*.o -o /tmp/nt/shadow_test
     /tmp/nt/shadow_test 20000 /tmp/nt/vectors.bin    # natives, footprints, invisibility, detection; writes vectors
     /tmp/nt/shadow_test bench                        # ns per call (GCC: a hint only)
     KM_ONLY=<name> KM_BENCH_SETUPS=30 /tmp/nt/shadow_test bench   # one native, the mean over 30 setups (its paths)
+    KM_BENCH_CALLS=20000 ...                             # runs per setup (default 2M; cModel_Tag_set_rate: 20000)
+    KM_BENCH_NATIVE_CALLEES=1 ...                        # also the recompiled function with its callees' checked natives
     /tmp/nt/shadow_test rerun <case>.<rate>.native.bin   # a replay's saved mismatches, again here
     /tmp/nt/shadow_test vectors /tmp/nt/vectors.bin      # the maths vectors alone
     KM_ONLY=<name> KM_DIFF=1 /tmp/nt/shadow_test 3000   # one native's checks only, with the differing fields
@@ -130,4 +133,20 @@ are constants: `shadow_test camera` prints them from the recompiled function. sh
 each path's edges (pi/4, 0.6744, near pi/2, 3pi/4, tiny / denormal), the ELF's T table (sometimes wild); the model's
 flags (0x2000 / 0x80000 / 0x1000000 each half the time), FOVs (90 exactly, past 270), 1-255 nodes in a shuffled chain,
 outputs aliased over an input, unaligned or in the stack window (each declines).
+
+## cModel_Tag_set_rate fused (rung 3 step a's last item, Nov 23)
+
+A model's per-frame tagging with its whole subtree inline (no guest call): the countdowns (ForwardNodeUpdate /
+func_00155D60), func_0014C7E8, func_00154240 per node, func_00155BE8, per node the box test (func_001F8DF8),
+setNodeMaterial / ForwardAttackByMode, nodeLayerScreen, func_00155AE8 and the queue, func_0014C5A0, and the UV-scroll
+pass (PostInc, func_0014B9A0). The callees read what earlier ones wrote, so it runs on a `Journal` (packet.cpp): each
+write goes to RAM at once, in the original's order, with its old bytes kept; a decline rolls them back newest first.
+Reads need no lookup, and the Txn / BlockTxn bodies run on it unchanged (their bodies are templated on the store:
+setNodeMaterialBody, forwardAttackBody, nodeLightingBody; func_0014C7E8 / 0014B9A0 hand their writes to it). no_lod's
+hook (km_no_lod, at the entry) is carried inside; getMeshPtr's observers run where each call would have entered it.
+Its recorded footprint runs to thousands of ranges: NativeFunction::maxRanges raises the limit for it alone.
+shadow_test builds it from the material callee's setup (node 0, the texture manager), func_0014C7E8's (the model, its
+camera, its parts; ordinary screen values and the ELF's T table unless wild) and clones of node 0 (the same textures,
+each its own flags), with each pass's flags at random. A lesson from it: func_001F8DF8's corners go through the frame's
+copy of the world matrix, whose last row's xyz its own corner stores zero (+0x60..+0x6B).
 

@@ -60,3 +60,4 @@ func_00154240,0x00154240,asm,,,,,step a readable: a node's lighting block (unmat
 tanf,0x003A1AE8,asm,,,,,step a readable: fdlibm s_tanf / __kernel_tanf / rem_pio2f's n = +-1 path op for op (T from 0x45EFF0); |x| past 3pi/4 declines; kRenderPath|kChargeAtEnd
 func_0030AA40,0x0030AA40,asm,,,,,step a readable: sceVu0ViewScreenMatrix (SDK signature; UnitMatrix x2 + MulMatrix inline); kRenderPath|kChargeAtEnd
 func_0014C7E8,0x0014C7E8,asm,,,,,step a readable: a model's per-frame matrices (unmatched); tanf / ViewScreenMatrix / CameraMatrix (constant) / MtxMultiply / MulMatrix / func_001503B8 inline, reads first then writes; kRenderPath|kChargeAtEnd
+cModel_Tag_set_rate,0x0014AC90,asm,,,,,step a fused: a model's per-frame tagging (unmatched at 4607c68), its whole subtree inline on a Journal (no guest call); no_lod carried; kRenderPath|kChargeAtEnd

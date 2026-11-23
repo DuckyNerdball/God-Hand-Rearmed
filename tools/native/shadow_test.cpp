@@ -17,6 +17,7 @@
 #include "kamite/native/shadow.h"
 #include "kamite/native/libvu0_core.h"
 #include "kamite/texture_slots.h"
+#include "kamite/model_detail.h"
 #include "ps2_runtime_macros.h" // batch 2 vectors: the runtime's FPU / VU0 ops as the reference
 
 #include <chrono>
@@ -106,6 +107,7 @@ KM_RECOMPILED(floorf_0x3a4d18)
 KM_RECOMPILED(copysignf_0x3a4f88)
 KM_RECOMPILED(func_0030AA40_0x30aa40)
 KM_RECOMPILED(func_0014C7E8_0x14c7e8)
+KM_RECOMPILED(cModel_Tag_set_rate_0x14ac90)
 KM_RECOMPILED(SearchDataByTwoNames_0x31cdc0)
 KM_RECOMPILED(cIDBase_getSlotPtr_0x1522c0)
 #undef KM_RECOMPILED
@@ -230,6 +232,8 @@ PS2Runtime::RecompiledFunction ps2xHostHook(const char *name)
 using SlotFunction = PS2Runtime::RecompiledFunction;
 std::vector<std::pair<uint32_t, SlotFunction>> g_callees; // set in main: every recompiled function in the test
 bool g_nestedCalls = false;                               // route callees that have a shadow slot to shadow::entry
+bool g_nativeCallees = false; // bench: callees with a checked native run it (as in play), declines the recompiled code
+bool runCalleeNative(uint8_t *rdram, R5900Context *ctx, uint32_t targetPc); // below, by the registry
 SlotFunction g_ecossinSlot = &_sceVu0ecossin_0x30a5d0;    // the rung-2 nested test's switch
 bool PS2Runtime::callGuestFunction(uint8_t *rdram, R5900Context *ctx, uint32_t targetPc, uint32_t, uint32_t fallthroughPc)
 {
@@ -249,13 +253,25 @@ bool PS2Runtime::callGuestFunction(uint8_t *rdram, R5900Context *ctx, uint32_t t
     ctx->pc = targetPc;
     if (eeCheckpointDue(8u))
         return false;
-    fn(rdram, ctx, this);
+    if (!g_nativeCallees || !runCalleeNative(rdram, ctx, targetPc))
+        fn(rdram, ctx, this);
     return ctx->pc == fallthroughPc;
 }
 
 // native.cpp is not linked: collect the registrations here.
 static std::vector<kamite::native::NativeFunction> g_natives;
 void kamite::native::registerFunction(const NativeFunction &function) { g_natives.push_back(function); }
+bool runCalleeNative(uint8_t *rdram, R5900Context *ctx, uint32_t targetPc)
+{
+    for (const kamite::native::NativeFunction &fn : g_natives)
+        if (fn.address == targetPc && fn.checked)
+        {
+            alignas(64) static unsigned char storage[64]; // never dereferenced (eeCheckpointDue: the stub above)
+            kamite::native::RealEnv env{rdram, reinterpret_cast<PS2Runtime *>(storage)};
+            return kamite::native::runNative(fn, fn.runReal, env, ctx);
+        }
+    return false;
+}
 
 namespace
 {
@@ -280,7 +296,7 @@ namespace
                                    {0x5CAFF0u, 0x10u}, {0x747600u, 0x500u}, {0x755700u, 0x100u},
                                    {0x4F8000u, 0x18000u}, // batch 3: the frame allocator's areas around 0x506E10
                                    // step a: func_00154240's constants (D_003BD870..89F, D_004A6940) and the light set
-                                   {0x3BD800u, 0x100u}, {0x4A6900u, 0x100u}, {0x604700u, 0x60u}, {0x61A800u, 0x200u},
+                                   {0x3BD800u, 0x100u}, {0x4A6900u, 0x100u}, {0x604700u, 0x80u}, {0x61A800u, 0x200u},
                                    // the 0x14C7E8 batch: tanf's T table, the screen values D_003C1180 / 1190, D_00586B88
                                    {0x45EF00u, 0x100u}, {0x3C1100u, 0x100u}, {0x586B00u, 0x100u}};
     constexpr uint32_t usedBytes()
@@ -1477,6 +1493,181 @@ namespace
             setGpr(ctx, 4, self | seg);
             return;
         }
+        case 0x14AC90u: // step a's last item: cModel_Tag_set_rate fused (node 0 from the material callee's setup, the
+                        // model from func_0014C7E8's, the other nodes cloned from node 0; each pass's flags at random)
+        {
+            if (call.dueAt && g_rng() % 4u != 0u)
+                call.dueAt = 0; // mostly whole runs: its checkpoints are many (decided first: the setups below spin
+                                // the original 2^32 times only when a checkpoint stops it)
+            const uint32_t node0 = 0x80000u;
+            // 1. the material callee on node 0: the texture manager, its files, D_00747AA8, a model's material fields
+            NativeFunction sub = fn;
+            const bool forwardPath = g_rng() % 2u == 0u;
+            sub.address = forwardPath ? 0x14B5D8u : 0x14B4D0u;
+            setupBatch2(sub, call, wild, node0, seg);
+            uint32_t matModel;
+            std::memcpy(&matModel, &ctx.r[4], 4);
+            matModel &= 0x1FFFFFFu;
+            uint8_t material[0x2E4 + 0x100];
+            std::memcpy(material, g_ramA + matModel, sizeof(material));
+            orderTable(mirror); // (not every material path sets one; before the parts list, which may reach its slots)
+            // 2. the matrices' setup: the model, its camera, its parts, the buffers, the stack
+            sub.address = 0x14C7E8u;
+            setupBatch2(sub, call, wild, base, seg);
+            uint32_t self;
+            std::memcpy(&self, &ctx.r[4], 4);
+            self &= 0x1FFFFFFu;
+            // the node matrices' outputs in an area of their own (away from the material's mesh data at 0x70000.. and
+            // the order table's descriptors), and the buffer not in the stack (that setup's own-frame aliases land on
+            // Tag_set_rate's saved pointers here: the original would follow garbage)
+            {
+                uint32_t idx;
+                std::memcpy(&idx, g_ramA + 0x7476B0u, 4);
+                idx &= 1u;
+                uint32_t buf, outs;
+                std::memcpy(&buf, g_ramA + self + 552u + 4u * idx, 4);
+                std::memcpy(&outs, g_ramA + self + 560u + 4u * idx, 4);
+                if ((buf & 0x1FFFFFFu) >= 0xE0000u && (buf & 0x1FFFFFFu) < 0x100000u)
+                    setU32(self + 552u + 4u * idx, (0x3E000u + 0x200u * static_cast<uint32_t>(g_rng() % 8u)) | seg);
+                (void)outs; // (its aliases there would run the parts' outputs over the order table's descriptors)
+                setU32(self + 560u + 4u * idx, (0xA0000u + 0x10u * static_cast<uint32_t>(g_rng() % 64u)) | seg);
+            }
+            if (!wild) // that setup's screen values and FOV, wild a quarter of the time each: ordinary here (its own test
+                       // covers them; most calls here should reach the passes after it)
+            {
+                uint32_t view;
+                std::memcpy(&view, g_ramA + 0x5CAFF0u, 4);
+                setFloat((view & 0x1FFFFF0u) + 592u, static_cast<float>(10u + g_rng() % 110u) + static_cast<float>(g_rng() % 1000u) / 1000.0f);
+                setFloat(0x3C1190u, static_cast<float>(224u + g_rng() % 300u));
+                setFloat(0x586B88u, 0.75f + static_cast<float>(g_rng() % 1000u) / 1000.0f);
+                setU32(0x3C1180u, g_rng() % 2u ? 640u : static_cast<uint32_t>(g_rng() % 2048u));
+                static constexpr uint32_t kT[13] = {0x3EAAAAABu, 0x3E088889u, 0x3D5D0DD1u, 0x3CB327A4u, 0x3C11371Fu,
+                                                    0x3B6B6916u, 0x3ABEDE48u, 0x3A1A26C8u, 0x398137B9u, 0x38A3F445u,
+                                                    0x3895C07Au, 0xB79BAE5Fu, 0x37D95384u}; // tanf's T, the ELF's
+                for (uint32_t k = 0; k < 13u; ++k)
+                    setU32(0x45EFF0u + 4u * k, kT[k]);
+            }
+            // the material callee's model fields: tint.w, the alpha bytes, texFlags, drawPrio, the remap table
+            for (uint32_t o : {0x24Cu, 0x254u, 0x2C4u})
+            {
+                uint32_t v;
+                std::memcpy(&v, material + o, 4);
+                setU32(self + o, v);
+            }
+            for (uint32_t o : {0x2B6u, 0x2B7u, 0x2BCu})
+                setByte(self + o, material[o]);
+            for (uint32_t i = 0; i < 0x100u; ++i)
+                setByte(self + 0x2D4u + i, material[0x2D4u + i]);
+            // 3. the model's own fields
+            uint32_t objFlags;
+            std::memcpy(&objFlags, g_ramA + self + 0x250u, 4);
+            for (uint32_t bit : {0x10u, 0x400u, 0x800000u})
+                objFlags = g_rng() % 2u ? objFlags | bit : objFlags & ~bit;
+            // the material callees as node 0 was built for (another's node fields would name files at random addresses):
+            // setNodeMaterial (0x80 clear) or ForwardAttackByMode (0x400000), or (1 in 4) neither
+            objFlags = (objFlags | 0x80u) & ~0x400000u;
+            if (g_rng() % 4u != 0u)
+                objFlags = forwardPath ? objFlags | 0x400000u : objFlags & ~0x80u;
+            setU32(self + 0x250u, objFlags);
+            for (uint32_t o : {0x240u, 0x244u, 0x248u})
+                setU32(self + o, inputFloat(wild));
+            if (g_rng() % 4u == 0u) // alpha exactly 1.0 (the env pass, mode 3, layer 0x1E)
+            {
+                setU32(self + 0x24Cu, 0x3F800000u);
+                setByte(self + 0x2B6u, 255u), setByte(self + 0x2B7u, 255u), setByte(self + 0x2BCu, 255u);
+            }
+            for (uint32_t k = 0; k < 6u; ++k) // the box: centre, half sizes
+                setU32(self + 0x260u + 4u * k, inputFloat(wild && g_rng() % 4u == 0u));
+            const uint16_t id = static_cast<uint16_t>(g_rng() % 4u == 0u ? g_rng() : g_rng() % 200u);
+            setU16(self + 0x2ACu, id);
+            const uint32_t kinds = static_cast<uint32_t>(g_rng() % 8u);
+            setU32(self + 0x2C0u, kinds < 4 ? 0xAu : static_cast<uint32_t>(g_rng() % 12u));
+            for (uint32_t h = 0; h < 2u; ++h)
+            {
+                const uint32_t packet = 0x9A000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u);
+                setU32(self + 0x220u + 4u * h, packet | mirror);
+                randomBytes(packet + 0x30u, 0x50u); // the light word, the slot tags, the queue's tail tag
+            }
+            const uint32_t pos = 0x3C000u + 0x10u * static_cast<uint32_t>(g_rng() % 64u);
+            floatsAt(pos, 4, wild);
+            setU32(self + 0xF0u, pos | seg);
+            setByte(self + 0x2CCu, static_cast<uint8_t>(g_rng()));
+            // 4. the mesh nodes: node 0 as built, the others its clones (same textures), each its own flags and colours
+            const uint32_t nodes = g_rng() % 16u == 0u ? 0u : 1u + static_cast<uint32_t>(g_rng() % 5u);
+            setU32(self + 0x25Cu, nodes ? node0 | seg : 0u);
+            uint32_t flags0;
+            std::memcpy(&flags0, g_ramA + node0 + 0x380u, 4);
+            for (uint32_t i = 0; i < nodes; ++i)
+            {
+                const uint32_t node = node0 + 0x800u * i;
+                if (i > 0u)
+                {
+                    std::memcpy(g_ramA + node + 0x300u, g_ramA + node0 + 0x300u, 0x118u);
+                    std::memcpy(g_ramB + node + 0x300u, g_ramA + node0 + 0x300u, 0x118u);
+                    randomBytes(node, 0x300u); // its packets and lighting blocks' old bytes
+                }
+                uint32_t flags = (flags0 & 0x6E000004u) | (static_cast<uint32_t>(g_rng()) & ~0x6EE7C087u);
+                for (uint32_t bit : {0x1u, 0x2u, 0x80u, 0x4000u, 0x10000u, 0x20000u, 0x40000u, 0x200000u, 0x800000u})
+                    if (g_rng() % (bit == 1u ? 8u : bit == 0x200000u ? 4u : 2u) == 0u)
+                        flags |= bit;
+                setU32(node + 0x380u, flags);
+                setByte(node + 0x385u, (call.dueAt && g_rng() % 40u == 0u) ? 0u : static_cast<uint8_t>(1u + g_rng() % 4u));
+                setU32(node + 0x404u, i + 1u < nodes ? (node + 0x800u) | seg : 0u);
+                for (uint32_t o : {0x3A0u, 0x3A4u, 0x3A8u, 0x3ACu, 0x38Cu, 0x390u})
+                    setU32(node + o, inputFloat(wild));
+                if (g_rng() % 2u)
+                    setU32(node + 0x3ACu, 0x3F800000u);
+                setU32(node + 0x410u, static_cast<uint32_t>(g_rng()));
+                // its mesh info: node 0's flags (the forward path's special bit), its own far bit
+                uint32_t info0, mesh;
+                std::memcpy(&info0, g_ramA + node0 + 0x414u, 4);
+                std::memcpy(&mesh, g_ramA + (info0 & 0x1FFFFFFu) + 0x34u, 4);
+                const uint32_t info = 0x3A800u + 0x40u * i;
+                setU32(node + 0x414u, info | seg);
+                setU32(info + 0x34u, g_rng() % 2u ? mesh | 0x01000000u : mesh & ~0x01000000u);
+                randomBytes(info + 0x58u, 2u);
+            }
+            // 5. the light set, the box test's thresholds, the camera's eye, the constants
+            uint32_t view;
+            std::memcpy(&view, g_ramA + 0x5CAFF0u, 4);
+            view &= 0x1FFFFF0u;
+            floatsAt(view + 0x210u, 4, wild);
+            for (uint32_t o : {0x14u, 0x1Cu, 0x24u, 0x68u})
+                setU32(0x604700u + o, inputFloat(wild));
+            floatsAt(0x604730u, 8, wild);
+            floatsAt(0x61A850u, 0xD0u / 4u, wild);
+            const uint32_t nearV = inputFloat(false), farV = inputFloat(false);
+            setU32(0x61A850u, nearV);
+            setU32(0x61A854u, g_rng() % 8u == 0u ? nearV : farV);
+            for (uint32_t k = 0; k < 3u; ++k)
+                setFloat(0x61A858u + 4u * k, static_cast<float>(static_cast<int>(g_rng() % 400u) - 60) * 0.75f);
+            for (uint32_t v = 0x61A8A0u; v <= 0x61A8C0u && g_rng() % 2u; v += 0x10u)
+                setU32(v + 12u, 0u);
+            floatsAt(0x3BD860u, 16, wild);
+            floatsAt(0x4A6940u, 16, wild);
+            uint32_t gsFlag;
+            std::memcpy(&gsFlag, g_ramA + 0x747A2Cu, 4);
+            setU32(0x747A2Cu, g_rng() % 3u == 0u ? gsFlag | 0x1000u : gsFlag & ~0x1000u);
+            randomBytes(0x4A5D80u, 0x808u); // the GS table
+            // 6. the frame allocator: room in this half's area, or (1 in 4) about full (a packet then lands at 0..0x8F)
+            uint32_t half;
+            std::memcpy(&half, g_ramA + 0x7476B0u, 4);
+            half &= 1u;
+            const uint32_t limit = 0x506E10u + half * 0x60000u;
+            // (the edges: the first packet just fits or not, the last one just fits after it)
+            static constexpr uint32_t kEdges[6] = {0x20u, 0x30u, 0x40u, 0xB0u, 0xC0u, 0xD0u};
+            const uint32_t room = g_rng() % 4u == 0u ? kEdges[g_rng() % 6u] : 0x300u + 0x10u * static_cast<uint32_t>(g_rng() % 0x200u);
+            const uint32_t cur = half ? 0x506E10u + 0x10u * static_cast<uint32_t>(g_rng() % 0x100u) : limit - room;
+            setU32(0x566E10u, cur);
+            for (uint32_t k = 0; k < 0x300u && cur + k + 4u <= 0x510000u && cur >= 0x4F8000u; k += 4u)
+                setU32(cur + k, static_cast<uint32_t>(g_rng()));
+            randomBytes(0u, 0x100u); // where a full allocator's packets go
+            // 7. the arguments: id (only its low 16 bits count), the far flag, no_lod
+            setGpr64(ctx, 5, (g_rng() & ~0xFFFFull) | id);
+            setGpr64(ctx, 6, g_rng() % 8u == 0u ? g_rng() : g_rng() % 2u);
+            ps2xSetPatchFlag("no_lod", g_rng() % 2u == 0u);
+            return;
+        }
         default:
             return;
         }
@@ -1673,7 +1864,7 @@ namespace
             {
                 recorded = runFrom(call, [&](R5900Context *ctx) {
                     kamite::native::ShadowEnv env{g_ramC};
-                    rec.reset(g_ramB, fn.maxBytes);
+                    rec.reset(g_ramB, fn.maxBytes, fn.maxRanges);
                     env.record = &rec;
                     env.dueAt = call.dueAt;
                     recordedRan = kamite::native::runNative(fn, fn.runShadow, env, ctx);
@@ -2246,7 +2437,10 @@ namespace
     template <class Run>
     double nsPerCall(Run run)
     {
-        const int n = 2000000;
+        static const int n = [] { // KM_BENCH_CALLS: fewer runs for the big ones (cModel_Tag_set_rate: microseconds each)
+            const char *v = std::getenv("KM_BENCH_CALLS");
+            return v && *v ? std::max(1, std::atoi(v)) : 2000000;
+        }();
         const auto t0 = std::chrono::steady_clock::now();
         for (int i = 0; i < n; ++i)
             run();
@@ -2258,7 +2452,7 @@ namespace
     {
         const char *setups = std::getenv("KM_BENCH_SETUPS");
         const int n = setups ? std::max(1, std::atoi(setups)) : 1;
-        double original = 0.0, native = 0.0, copy = 0.0;
+        double original = 0.0, native = 0.0, copy = 0.0, withNatives = 0.0;
         for (int i = 0; i < n; ++i)
         {
             Call call;
@@ -2290,9 +2484,20 @@ namespace
                 kamite::native::runNative(fn, fn.runReal, env, &ctx);
             });
             copy += nsPerCall([&] { std::memcpy(static_cast<void *>(&ctx), &call.ctx, sizeof(ctx)); });
+            if (std::getenv("KM_BENCH_NATIVE_CALLEES")) // the recompiled function with its callees' checked natives (play)
+            {
+                g_nativeCallees = true;
+                withNatives += nsPerCall([&] {
+                    std::memcpy(static_cast<void *>(&ctx), &call.ctx, sizeof(ctx));
+                    recompiled(g_ramA, &ctx, g_rt);
+                });
+                g_nativeCallees = false;
+            }
         }
         std::printf("%-20s recompiled %.1f ns, native %.1f ns (context copy %.1f ns subtracted)\n", fn.name,
                     (original - copy) / n, (native - copy) / n, copy / n);
+        if (std::getenv("KM_BENCH_NATIVE_CALLEES"))
+            std::printf("%-20s recompiled with its callees' checked natives %.1f ns\n", "", (withNatives - copy) / n);
     }
 }
 
@@ -2404,7 +2609,7 @@ int main(int argc, char **argv)
         {0x148690u, &func_00148690_0x148690},    {0x14B4D0u, &cModel_setNodeMaterial_0x14b4d0},
         {0x14B5D8u, &ForwardAttackByMode_14B5D8_0x14b5d8}, {0x154240u, &func_00154240_0x154240},
         {0x3A1AE8u, &tanf_0x3a1ae8},             {0x30AA40u, &func_0030AA40_0x30aa40},
-        {0x14C7E8u, &func_0014C7E8_0x14c7e8}};
+        {0x14C7E8u, &func_0014C7E8_0x14c7e8},    {0x14AC90u, &cModel_Tag_set_rate_0x14ac90}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
@@ -2416,6 +2621,7 @@ int main(int argc, char **argv)
              {0x3A4E28u, &scalbnf_0x3a4e28}, {0x3A4D18u, &floorf_0x3a4d18}, {0x3A4F88u, &copysignf_0x3a4f88}})
         g_callees.push_back({address, f}); // tanf's libm callees (no natives)
     kamite::texture_slots::install(); // its hook in the TIM2 loader (the setups switch the flag per call)
+    kamite::model_detail::install();  // no_lod's hook at cModel_Tag_set_rate's entry (switched per call too)
     for (const auto &[address, f] : recompiled)
         g_callees.push_back({address, f});
     auto recompiledOf = [&](const NativeFunction &fn) {
@@ -2500,7 +2706,7 @@ int main(int argc, char **argv)
     for (const NativeFunction &fn : g_natives)
         for (uint32_t caller : {0x30A8C8u, 0x30A978u, 0x147528u, 0x147548u, 0x101E28u, 0x31A650u, 0x31A600u, 0x14D768u,
                                 0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u,
-                                0x154240u, 0x30AA40u, 0x14C7E8u})
+                                0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u})
             if (fn.address == caller)
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;

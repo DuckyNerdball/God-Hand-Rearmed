@@ -68,16 +68,18 @@ namespace kamite::native
         std::vector<uint8_t> in;        // each range's bytes as filled (the call's input), in range order
         const uint8_t *real = nullptr;  // the RAM to fill from; nullptr on a rerun
         uint32_t maxBytes = 0;
+        uint32_t maxRanges = 0;         // 0 = kMaxRecordedRanges
         uint32_t bytes = 0;
-        bool overflow = false;          // more than kMaxRecordedRanges ranges or maxBytes bytes: not checked
+        bool overflow = false;          // more than maxRanges ranges or maxBytes bytes: not checked
         bool strayed = false;           // a rerun touched a byte the first run hadn't
         static constexpr size_t kMaxRecordedRanges = 256;
-        void reset(const uint8_t *from, uint32_t limit)
+        void reset(const uint8_t *from, uint32_t limit, uint32_t rangeLimit = 0u)
         {
             ranges.clear();
             in.clear();
             real = from;
             maxBytes = limit;
+            maxRanges = rangeLimit;
             bytes = 0;
             overflow = strayed = false;
         }
@@ -250,6 +252,7 @@ namespace kamite::native
         uint32_t flags = 0;    // kRenderPath, kChargeAtEnd
         uint32_t deadStack = 0; // kRenderPath: the bytes below the entry sp that are dead after the call (0 = 64 KB)
         uint32_t returns = kReturnsV0 | kReturnsV1 | kReturnsF0; // kRenderPath: the return registers compared
+        uint32_t maxRanges = 0; // a recorded footprint's range limit (0 = Recording::kMaxRecordedRanges); more is skipped
 
         // K's answer 2 on the method (Nov 21), for render-path natives (packets, object fields: what the game keeps):
         //  - kRenderPath: the harness compares what lasts: guest RAM outside the call's dead stack, v0 / v1's low 64

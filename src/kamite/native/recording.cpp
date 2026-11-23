@@ -64,7 +64,8 @@ namespace kamite::native
                 else
                     ranges.push_back(Footprint::Range{at, length});
                 bytes += length;
-                if (ranges.size() > kMaxRecordedRanges || bytes > (maxBytes ? maxBytes : 64u * 1024u))
+                if (ranges.size() > (maxRanges ? maxRanges : kMaxRecordedRanges) ||
+                    bytes > (maxBytes ? maxBytes : 64u * 1024u))
                     overflow = true;
             }
             else
