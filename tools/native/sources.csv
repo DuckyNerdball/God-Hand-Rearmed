@@ -4,8 +4,8 @@
 # asm natives whose function is now matched C and decomp natives whose C changed.
 name,address,source,decomp_name,decomp_file,decomp_commit,decomp_hash,note
 Tramp_001F7DF8_00101E28,0x00101E28,asm,,,,,
-MtxCopy,0x00147528,asm,,,,,
-MtxMultiply,0x00147548,asm,,,,,
+MtxCopy,0x00147528,decomp,MtxCopy,src/cod/001b5160.c,4607c68,6bb432246475,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
+MtxMultiply,0x00147548,decomp,MtxMultiply,src/cod/001b5160.c,4607c68,2b489fba4ea8,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
 func_00148BD8,0x00148BD8,decomp,func_00148BD8,src/cod/00148bd8.c,75cb123,ababfb683163,batch 3 readable; 0x151398 inline (hits; a miss: insert + builder on a Txn) + 0x151368 inline; kRenderPath|kChargeAtEnd
 cModel_getMeshPtr,0x0014B6F8,asm,,,,,
 func_0014B9A0,0x0014B9A0,decomp,func_0014B9A0,src/cod/0014b9a0.c,75cb123,03d8a0f79c6a,batch 3 readable; 0x155BE8 / PostInc / CopyMatrix / UnitMatrix / 0x155C68 / queue inline; kRenderPath|kChargeAtEnd
@@ -23,28 +23,28 @@ func_00155BE8,0x00155BE8,asm,,,,,
 func_00155C68,0x00155C68,asm,,,,,
 func_00155D60,0x00155D60,asm,,,,,
 PostInc_D_00566E10_0015B0F0_15B0F0,0x0015B0F0,asm,,,,,
-capVu0Length,0x001F7DF8,asm,,,,,
+capVu0Length,0x001F7DF8,decomp,capVu0Length,src/cod/001f7df8.c,4607c68,aff7ec15eff3,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
 func_001F8DF8,0x001F8DF8,asm,,,,,
 func_002D7E50,0x002D7E50,asm,,,,,
 func_002D8008,0x002D8008,asm,,,,,
 func_002D8070,0x002D8070,asm,,,,,
-sceVu0ApplyMatrix,0x0030A2B0,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0ApplyMatrix,0x0030A2B0,decomp,sceVu0ApplyMatrix,src/cod/0030a2b0.c,4607c68,c895b9cf05e4,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
 sceVu0MulMatrix,0x0030A2E0,asm,,,,,Sony libvu0 (SDK); rung 2
-sceVu0OuterProduct,0x0030A328,asm,,,,,Sony libvu0 (SDK); rung 2
-sceVu0Normalize,0x0030A370,asm,,,,,Sony libvu0 (SDK); rung 2
-sceVu0TransposeMatrix,0x0030A3B0,asm,,,,,Sony libvu0 (SDK); rung 2
-sceVu0InversMatrix,0x0030A3F8,asm,,,,,Sony libvu0 (SDK); rung 2
-sceVu0MulVector,0x0030A4D0,asm,,,,,Sony libvu0 (SDK); rung 2
-sceVu0ScaleVector,0x0030A4E8,asm,,,,,Sony libvu0 (SDK); rung 2
-sceVu0TransMatrix,0x0030A508,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0OuterProduct,0x0030A328,decomp,sceVu0OuterProduct,src/cod/0030a328.c,4607c68,9a165108bf3e,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
+sceVu0Normalize,0x0030A370,decomp,sceVu0Normalize,src/cod/0030a370.c,4607c68,15873d2006c6,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
+sceVu0TransposeMatrix,0x0030A3B0,decomp,sceVu0TransposeMatrix,src/cod/0030a3b0.c,4607c68,3e23e836e1fe,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
+sceVu0InversMatrix,0x0030A3F8,decomp,sceVu0InversMatrix,src/cod/0030a3f8.c,4607c68,6832ac1e4b17,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
+sceVu0MulVector,0x0030A4D0,decomp,sceVu0MulVector,src/cod/0030a4d0.c,4607c68,991963603ab7,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
+sceVu0ScaleVector,0x0030A4E8,decomp,sceVu0ScaleVector,src/cod/0030a4e8.c,4607c68,e63275696024,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
+sceVu0TransMatrix,0x0030A508,decomp,sceVu0TransMatrix,src/cod/0030a508.c,4607c68,825c765593f5,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
 sceVu0CopyMatrix,0x0030A548,asm,,,,,Sony libvu0 (SDK); rung 2
-sceVu0UnitMatrix,0x0030A5A0,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0UnitMatrix,0x0030A5A0,decomp,sceVu0UnitMatrix,src/cod/0030a5a0.c,4607c68,afd9e6d18022,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
 _sceVu0ecossin,0x0030A5D0,asm,,,,,Sony libvu0 (SDK); rung 2
 sceVu0RotMatrixZ,0x0030A650,asm,,,,,Sony libvu0 (SDK); rung 2
 sceVu0RotMatrixX,0x0030A700,asm,,,,,Sony libvu0 (SDK); rung 2
 sceVu0RotMatrixY,0x0030A7B8,asm,,,,,Sony libvu0 (SDK); rung 2
-sceVu0CameraMatrix,0x0030A8C8,asm,,,,,Sony libvu0 (SDK); rung 2
-sceVu0NormalLightMatrix,0x0030A978,asm,,,,,Sony libvu0 (SDK); rung 2
+sceVu0CameraMatrix,0x0030A8C8,decomp,sceVu0CameraMatrix,src/cod/0030a8c8.c,4607c68,040b72d49ef6,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
+sceVu0NormalLightMatrix,0x0030A978,decomp,sceVu0NormalLightMatrix,src/cod/0030a978.c,4607c68,71d46ab00286,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
 func_0031A600,0x0031A600,asm,,,,,
 func_0031A650,0x0031A650,asm,,,,,
 func_00151630,0x00151630,decomp,func_00151630,src/cod/00151630.c,75cb123,faa11a504248,batch 3-4b readable: the texture file's class; kRenderPath|kChargeAtEnd
@@ -57,7 +57,7 @@ func_00148690,0x00148690,asm,,,,,batch 3-4b: a node's material textures, four va
 cModel_setNodeMaterial,0x0014B4D0,decomp,cModel_setNodeMaterial,src/cod/0014b4d0.c,baee8f4,4fdb0dcc62dc,step a readable: a Txn composition (cModel_alpha inline: divScalar / mulScalar for |tint.w| < 2^126) over func_00148BD8's / func_00148690's bodies; kRenderPath|kChargeAtEnd
 ForwardAttackByMode_14B5D8,0x0014B5D8,decomp,ForwardAttackByMode_14B5D8,src/cod/00137ae8.c,baee8f4,e7d854e80cb7,step a readable: a Txn composition over func_00148BD8's / func_00148D30's bodies; kRenderPath|kChargeAtEnd
 func_00154240,0x00154240,asm,,,,,step a readable: a node's lighting block (unmatched at baee8f4); func_002D7E50 / 2D8008 / 2D8070 / MulVector / NormalLightMatrix / capVu0Length / CopyMatrix inline on a BlockTxn; kRenderPath|kChargeAtEnd
-tanf,0x003A1AE8,asm,,,,,step a readable: fdlibm s_tanf / __kernel_tanf / rem_pio2f's n = +-1 path op for op (T from 0x45EFF0); |x| past 3pi/4 declines; kRenderPath|kChargeAtEnd
-func_0030AA40,0x0030AA40,asm,,,,,step a readable: sceVu0ViewScreenMatrix (SDK signature; UnitMatrix x2 + MulMatrix inline); kRenderPath|kChargeAtEnd
+tanf,0x003A1AE8,decomp,func_003A1AE8,src/cod/003a1ae8.c,4607c68,5343d85b18c8,record only (Nov 23): already readable (fdlibm tanf op for op, as the C); kRenderPath|kChargeAtEnd
+func_0030AA40,0x0030AA40,decomp,func_0030AA40,src/cod/0030aa40.c,4607c68,db5829e0eb43,record only (Nov 23): already readable; the C's zs / zo = the native's A / B; kRenderPath|kChargeAtEnd
 func_0014C7E8,0x0014C7E8,asm,,,,,step a readable: a model's per-frame matrices (unmatched); tanf / ViewScreenMatrix / CameraMatrix (constant) / MtxMultiply / MulMatrix / func_001503B8 inline, reads first then writes; kRenderPath|kChargeAtEnd
 cModel_Tag_set_rate,0x0014AC90,asm,,,,,step a fused: a model's per-frame tagging (unmatched at 4607c68), its whole subtree inline on a Journal (no guest call); no_lod carried; kRenderPath|kChargeAtEnd
