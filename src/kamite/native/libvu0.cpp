@@ -1116,6 +1116,89 @@ namespace kamite::native::libvu0
             return true;
         }
 
+        // ==== the REWRITE natives, R3 (Nov 23): func_001503B8 and func_002D8008 from the decomp's C (4607c68) ==========
+        // kRenderPath | kChargeAtEnd (their only callers ignore v0: 0x14C7E8 for 0x1503B8; 0x153B00 / 0x154240 reload it
+        // after 0x2D8008): the plan proves
+        // every access plain and clear of the frames the original writes before it reads, then the writes.
+
+        // void *func_001503B8(void *a0, void *a1) (src/cod/001503b8.c): buf = a unit matrix (vf0 rotated) with row 3's xyz
+        // = a0 +0xC0..+0xC8; MtxMultiply(a1, a0 + 0x80, buf) = MulMatrix: a1 row k = (a0 + 0x80)'s rows by buf row k. Its
+        // frame 0x50 (buf at sp), MtxMultiply's 0x10 below it. Calls: MtxMultiply, its MulMatrix; MulMatrix's 3 back-edges.
+        template <class Env>
+        bool modelMatrixReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp0 = e::u32(ctx, e::sp), model = e::u32(ctx, e::a0), outAddr = e::u32(ctx, e::a1);
+            uint32_t frame, wrap, fields, out, ma;
+            if ((sp0 & 0xFu) != 0u || !plainSpan(sp0 - 0x50u, 0x50u, frame) || !plainSpan(sp0 - 0x60u, 16u, wrap) ||
+                !plainSpan(model + 0xC0u, 12u, fields) || !e::vf0Constant(ctx) || e::overlaps(fields, 12u, frame, 0x50u) ||
+                !plainRam(outAddr & ~0xFu, 64u, out) || !plainRam((model + 0x80u) & ~0xFu, 64u, ma))
+                return false;
+            // MulMatrix's addi on a0 / a2 would trap past 2^31; A is read after both frames are written, out written
+            // while buf (the frame) is still read
+            if (addiOverflows(outAddr, 64u) || addiOverflows(sp0 - 0x50u, 64u) || e::overlaps(ma, 64u, frame, 0x50u) ||
+                e::overlaps(ma, 64u, wrap, 16u) || e::overlaps(out, 64u, frame, 0x50u) || e::overlaps(out, 64u, wrap, 16u))
+                return false;
+            const uint8_t *const a = env.at(ma, 64u);
+            const Vec4 a0 = load(a), a1 = load(a + 16), a2 = load(a + 32), a3 = load(a + 48);
+            const uint32_t x = e::read32(env, fields), y = e::read32(env, fields + 4u), z = e::read32(env, fields + 8u);
+            if (!finiteInputs(a0) || !finiteInputs(a1) || !finiteInputs(a2) || !finiteInputs(a3) ||
+                !finiteInputs(bitsOf(x, y, z, 0u)))
+                return false; // the unit rows are 0 / 1
+            const Vec4 v4 = e::vf(ctx, 0), v5 = rotateLanes(v4), v6 = rotateLanes(v5), v7 = rotateLanes(v6);
+            const Vec4 buf[4] = {v7, v6, v5, bitsOf(x, y, z, 0x3F800000u)}; // vf0.w = 1 (vf0Constant)
+            Vec4 rows[4];
+            for (int k = 0; k < 4; ++k)
+                rows[k] = mulRow(a0, a1, a2, a3, buf[k]).r;
+            env.call(); // jal MtxMultiply
+            env.call(); // its jal sceVu0MulMatrix
+            for (int k = 0; k < 3; ++k)
+                env.checkpoint(32u); // MulMatrix's back-edges
+            uint8_t *const dst = env.at(out, 64u);
+            for (int k = 0; k < 4; ++k)
+                store(dst + 16 * k, rows[k]);
+            ctx->pc = gpr32(ctx, 31);
+            ctx->in_delay_slot = false;
+            return true;
+        }
+
+        // void func_002D8008(void *a0, float *a1, float *a2, int a3, float *a4) (src/cod/00156488.c): a1[15] = 1.0f;
+        // tmp = sceVu0MulVector(a0 + 0x30, a4) (a4 = t0); a2 + 0x30 = tmp, word by word (3 back-edges). A 0x30 frame (tmp
+        // at sp).
+        template <class Env>
+        bool lightColourReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp0 = e::u32(ctx, e::sp);
+            const uint32_t aAddr = e::u32(ctx, e::a0) + 0x30u, bAddr = e::u32(ctx, e::t0);
+            uint32_t frame, one, va, vb, dst;
+            if ((sp0 & 0xFu) != 0u || !plainSpan(sp0 - 0x30u, 0x30u, frame) || !plainSpan(e::u32(ctx, e::a1) + 0x3Cu, 4u, one) ||
+                !plain16(aAddr, va) || !plain16(bAddr, vb) || !plainSpan(e::u32(ctx, e::a2) + 0x30u, 16u, dst))
+                return false;
+            // MulVector reads after the frame's stores and the 1.0; the copy reads tmp while writing dst
+            if (e::overlaps(va, 16u, frame, 0x30u) || e::overlaps(vb, 16u, frame, 0x30u) || e::overlaps(va, 16u, one, 4u) ||
+                e::overlaps(vb, 16u, one, 4u) || e::overlaps(dst, 16u, frame, 0x30u) ||
+                !mulVectorCheck(env, sp0 - 0x30u, aAddr, bAddr))
+                return false;
+            e::write32(env, one, 0x3F800000u);
+            alignas(16) uint8_t product[16];
+            store(product, mul(e::read128(env, va), e::read128(env, vb)));
+            env.call(); // jal sceVu0MulVector
+            for (int k = 0; k < 3; ++k)
+                env.checkpoint(32u); // the copy's back-edges
+            for (uint32_t i = 0; i < 16u; i += 4u)
+            {
+                uint32_t word;
+                std::memcpy(&word, product + i, 4);
+                e::write32(env, dst + i, word);
+            }
+            ctx->pc = gpr32(ctx, 31);
+            ctx->in_delay_slot = false;
+            return true;
+        }
+
         // ---- func_002D7E50 (a0 = light set, a2 = out, a3 = colours, t1 = ambient): out = NormalLightMatrix(the set's
         // three directions +0x161A0 / B0 / C0), out row 3 = the ambient; colours rows 0-2 = the set's +0x161D0 / E0 / F0,
         // row 3 = +0x40 (xyz * 1.0); every lane clamped to 0..1 (VMAX vf0.x, VMINI vf0.w). A 0x50 frame: ra at sp,
@@ -1503,9 +1586,18 @@ namespace kamite::native::libvu0
                             bool (*shadow)(ShadowEnv &, R5900Context *)) {
             registerFunction(NativeFunction{name, address, "packet", true, real, shadow, nullptr});
         };
-        addPacket("func_001503B8", kModelMatrix, &modelMatrix<RealEnv>, &modelMatrix<ShadowEnv>);
         addPacket("func_001F8DF8", kBoxTest, &boxTest<RealEnv>, &boxTest<ShadowEnv>);
         addPacket("func_002D7E50", kLightMatrix, &lightMatrix<RealEnv>, &lightMatrix<ShadowEnv>);
-        addPacket("func_002D8008", kLightColour, &lightColour<RealEnv>, &lightColour<ShadowEnv>);
+        // The REWRITE natives, R3 (Nov 23): rewritten from the decomp's C, kRenderPath | kChargeAtEnd (the asm versions
+        // above were checked); unchecked until a K build shadows them.
+        auto addReadable = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
+                              bool (*shadow)(ShadowEnv &, R5900Context *)) {
+            NativeFunction fn{name, address, "packet", false, real, shadow, nullptr};
+            fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
+            fn.returns = 0u; // void for their callers (see R3 above)
+            registerFunction(fn);
+        };
+        addReadable("func_001503B8", kModelMatrix, &modelMatrixReadable<RealEnv>, &modelMatrixReadable<ShadowEnv>);
+        addReadable("func_002D8008", kLightColour, &lightColourReadable<RealEnv>, &lightColourReadable<ShadowEnv>);
     }
 }
