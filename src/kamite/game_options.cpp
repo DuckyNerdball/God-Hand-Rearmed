@@ -35,7 +35,7 @@
 // func_00373FF0(node a0, category a1, volume f12) for a one-channel node, or func_003745C0(node a0, category a1,
 // channel a2, volume f12) for a node with 2+ channels (node+0x58 > 1; the stereo music takes this one, which the
 // first version of this option missed): volume x the cSnd category levels (0x5FEE00) -> the dB table at 0x3F2060 ->
-// ADXT_SetOutVol (0x32A9F0) / func_0032EC78 per channel. Music streams are the cSndBgmNode pool inside cSnd
+// ADXT_SetOutVol (0x32A9F0) / AIXP_SetTrackVol (0x32EC78) per channel. Music streams are the cSndBgmNode pool inside cSnd
 // (0x601180, 16 nodes of 0xDC bytes; decomp cSnd.h). The volume they reach (f20, 0..127, before the clamp to 127 and
 // the dB table) is scaled by Music (0 -> table[0] = -96.0 dB, silent), except bank 1, the cutscene streams (their
 // voices are in the same stream: they follow Voices, K). Every other stream node is a voice line (pl00.afs, the

@@ -13,7 +13,7 @@ Commands
                                header, layout regions, counts, code range, symbol/reloc/stream dumps
   summary [--csv FILE]         one line per module: code range, counts, imports resolved vs boot, checks
   link MOD --base ADDR [--bin FILE]
-                               emulate the game's loader (func_00394DD8 -> func_00394828) at ADDR
+                               emulate the game's loader (snDllLoaded (0x394DD8) -> func_00394828) at ADDR
   verify MOD --base ADDR --ram DUMP [--first N]
                                link, then compare with an EE RAM dump (32 MB, offset = address) per region
   emit MOD --base ADDR         ELF + function CSV + runtime-relocation CSV (+ data-slot CSV, link report JSON)

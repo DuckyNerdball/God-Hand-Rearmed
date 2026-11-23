@@ -5,7 +5,7 @@
 // an interrupt handler: D_00753D80 by the vblank-start handler func_0030B148, D_00753D88 by the timer-0 handler at
 // 0x30D190 (GameWork +0x578 == 1); the target is GameWork +0x569 (vblanks per game frame) or its copy at +0x570.
 // func_002B4BC0 is the movie manager's poll (include/godhand/cMovie.h): it runs the movie server (func_003466A8 ->
-// func_00325F20) only while a track plays (+0x14, set by func_002B4A50 each frame), and does nothing otherwise.
+// ADXM_WaitVsync (0x325F20)) only while a track plays (+0x14, set by func_002B4A50 each frame), and does nothing otherwise.
 //
 // So without a movie the spin can only end when an interrupt comes, and runs the guest code meanwhile for nothing: it
 // was 15-20% of the guest's PC samples and ~1/10 of the game thread's busy time (claude/perf-enemies.md, Nov 20). The

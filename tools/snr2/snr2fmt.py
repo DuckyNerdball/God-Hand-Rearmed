@@ -10,7 +10,7 @@ Read-only parsing. Every field below is read by the game's loader in SLUS_215.03
     0x0C funcs_off    symbol ("function") table, 12-byte entries      (+base, 0x39485C)
     0x10 func_count
     0x14 name_off     image name string, e.g. "..\\PS2_EE_Release\\McPort.elf" (+base, 0x39486C)
-    0x18 ctor_off     ctor routine; func_00394DD8 does jalr hdr[0x18] after linking (0x394EEC-0x394EF8)
+    0x18 ctor_off     ctor routine; snDllLoaded (0x394DD8) does jalr hdr[0x18] after linking (0x394EEC-0x394EF8)
     0x1C dtor_off     dtor routine                                    (+base)
     0x20 exports_off  table of export_count u32 pointers, each +base if nonzero (0x394B8C-0x394BB0)
     0x24 export_count (0 in all 81 DLLs and the boot ELF)

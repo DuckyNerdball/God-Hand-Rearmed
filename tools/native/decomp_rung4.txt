@@ -1,6 +1,6 @@
 # The rung-4 functions (motion, collision, cloth, effects; tools/perf/subsystems.py) the decomp had not
 # matched at this commit: tools/native/decomp_watch.py lists the ones matched since. --update rewrites it.
-# commit 75cb123
+# commit 4607c68
 0x00100530 func_00100530 cloth
 0x001067B8 func_001067B8 cloth
 0x00107360 func_00107360 cloth

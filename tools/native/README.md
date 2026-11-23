@@ -25,7 +25,7 @@ with kamite/git_commit.h):
        cModel_nodeLayerScreen_0x14be38 func_0014C5A0_0x14c5a0
        func_00151398_0x151398 func_00148BD8_0x148bd8 func_00151368_0x151368
        func_0014B9A0_0x14b9a0 func_00151630_0x151630 func_00151688_0x151688 func_00151990_0x151990
-       func_00151CC0_0x151cc0 func_00151FA0_0x151fa0 func_00309C30_0x309c30 ps2___muldi3_0x31de10
+       func_00151CC0_0x151cc0 func_00151FA0_0x151fa0 Tim2CalcBufWidth_0x309c30 ps2___muldi3_0x31de10
        func_00148D30_0x148d30 func_00148690_0x148690 SearchDataByTwoNames_0x31cdc0 cIDBase_getSlotPtr_0x1522c0
        cModel_setNodeMaterial_0x14b4d0 ForwardAttackByMode_14B5D8_0x14b5d8 func_00154240_0x154240
        tanf_0x3a1ae8 ps2___kernel_tanf_0x3a4830 ps2___ieee754_rem_pio2f_0x3a3768 ps2___kernel_rem_pio2f_0x3a3dd8
@@ -95,7 +95,7 @@ reads what it has just written (each queued upload's link reads the last link's 
 place), so those natives run on a `Txn` (packet.cpp): reads see the writes made so far, nothing reaches RAM until
 `commit()`, a decline midway changes nothing. shadow_test builds real TIM2 / TIM3 / TM / pack files and texture managers
 for them (textureFile, textureManager), switches texture_slots per call (its hook is registered through stubs of the
-runtime's patch flags), and fills func_00309C30's jump table and the format tables from the ELF's values. A recorded
+runtime's patch flags), and fills Tim2CalcBufWidth's (0x309C30) jump table and the format tables from the ELF's values. A recorded
 footprint past 256 ranges (a TM file of 256 pictures) is skipped, not compared.
 
 ## Txn compositions (rung 3 step a, Nov 22)

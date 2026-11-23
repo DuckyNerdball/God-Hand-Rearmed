@@ -2147,7 +2147,7 @@ namespace kamite::native::packet
             return t.ok;
         }
 
-        // func_00309C30(psm, width): TBW, the buffer width in 64-texel units (even for 0x13 / 0x14), 0 for a PSM it
+        // Tim2CalcBufWidth(psm, width) (0x309C30): TBW, the buffer width in 64-texel units (even for 0x13 / 0x14), 0 for a PSM it
         // doesn't know (decomp 00309c30.c). Its jump table (0x4502E0) read like the code reads it: a target this
         // doesn't know declines.
         template <class Env>

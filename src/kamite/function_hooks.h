@@ -64,7 +64,7 @@ namespace kamite
     // base address and size - to the console ([DLL] lines) and, with KAMITE_DLL_LOG=<file>, as CSV rows.
     //
     // SLUS_215.03 (checked against the ELF and recomp/out_B; see KAMITE_PORT_NOTES.md):
-    //   0x394DD8 func_00394DD8(a0 = SNR2 image in RAM, a1 = u32 *out or 0): the link step. It calls
+    //   0x394DD8 snDllLoaded(a0 = SNR2 image in RAM, a1 = u32 *out or 0): the link step. It calls
     //            0x393F80 func_00393F80(image), the header check (0 ok, 1 magic is not "SNR", 2 version not '1'/'2',
     //            4 image not aligned to header+0x28), then 0x394828 (relocation), then 0x394C18 (a0 = image name,
     //            a1 = image: registers it in the 12-byte entries at 0x3F5520), then the image's constructor runner

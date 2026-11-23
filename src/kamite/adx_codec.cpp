@@ -55,7 +55,7 @@ namespace kamite::adx
 
     void coefficients(uint32_t rate, int highPass, int &c1, int &c2)
     {
-        // func_0033E6B8, in single precision as the library does it (cvt.w.s truncates).
+        // ADX_GetCoefficient (0x33E6B8), in single precision as the library does it (cvt.w.s truncates).
         const float root2 = std::sqrt(2.0f);
         const float a = root2 - std::cos(6.2831850f * static_cast<float>(highPass) / static_cast<float>(rate));
         const float b = root2 - 1.0f;
@@ -79,7 +79,7 @@ namespace kamite::adx
         info.version = d[0x12];
         info.flags = d[0x13];
         info.dataStart = copyright + 4u;
-        // func_0033EBD0: the loop fields of version 4 at 0x20 (copyright offset >= 0x38), of version 3 at 0x14 (>= 0x2C).
+        // ADX_DecodeInfoExLoop (0x33EBD0): the loop fields of version 4 at 0x20 (copyright offset >= 0x38), of version 3 at 0x14 (>= 0x2C).
         const size_t at = info.version == 4 ? 0x20u : 0x14u, need = info.version == 4 ? 0x38u : 0x2Cu;
         if ((info.version == 3 || info.version == 4) && copyright >= need && size >= at + 0x18u && be16(d + at + 2) == 1u &&
             be16(d + at + 6) != 0u)

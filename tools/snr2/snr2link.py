@@ -1,4 +1,4 @@
-"""Static re-implementation of the game's SNR2 loader (boot ELF func_00394DD8 -> func_00394828), for one module.
+"""Static re-implementation of the game's SNR2 loader (boot ELF snDllLoaded (0x394DD8) -> func_00394828), for one module.
 
 Everything is emulated on a byte image laid out exactly as the game has it in EE RAM (module loaded at `base`, header at
 offset 0), so the result can be compared byte-for-byte with a RAM dump. Cross-module side effects (an export of this
@@ -195,7 +195,7 @@ class Linked:
 
 
 def link(module: Module, base: int, registry: Registry, check_align=True) -> Linked:
-    """func_00394DD8 up to (not including) the ctor call: validate, func_00394828 relocate, append to the list."""
+    """snDllLoaded (0x394DD8) up to (not including) the ctor call: validate, func_00394828 relocate, append to the list."""
     L = Linked(module, base)
     if check_align and L.validate_code:
         raise LinkError(L.validate_code, "func_00393F80 rejects %s at %#x" % (module.name, base))

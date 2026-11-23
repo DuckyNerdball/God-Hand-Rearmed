@@ -53,7 +53,7 @@ namespace kamite::texture_slots
         }
         if (width == 0u || height == 0u || width > 1024u || height > 1024u)
             return size;
-        // TBW as the game sets it (func_00309C30): 64-texel units, even for the palette formats.
+        // TBW as the game sets it (Tim2CalcBufWidth (0x309C30)): 64-texel units, even for the palette formats.
         uint32_t tbw = (width + 63u) / 64u;
         if ((psm == 0x13u || psm == 0x14u) && (tbw & 1u))
             ++tbw;

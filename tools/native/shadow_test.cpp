@@ -89,7 +89,7 @@ KM_RECOMPILED(func_00151688_0x151688)
 KM_RECOMPILED(func_00151990_0x151990)
 KM_RECOMPILED(func_00151CC0_0x151cc0)
 KM_RECOMPILED(func_00151FA0_0x151fa0)
-KM_RECOMPILED(func_00309C30_0x309c30)
+KM_RECOMPILED(Tim2CalcBufWidth_0x309c30)
 KM_RECOMPILED(ps2___muldi3_0x31de10)
 KM_RECOMPILED(func_00148D30_0x148d30)
 KM_RECOMPILED(func_00148690_0x148690)
@@ -568,7 +568,7 @@ namespace
         std::memcpy(g_ramB + at, &v, 2);
     }
     // The fixed tables the builders read: the TIM / TM formats -> PSM (0x41ED68 / 80 / 98, the ELF's: 2 1 0 0x14 0x13
-    // 0; a picture type of 0 or 7 reads either neighbour) and func_00309C30's jump table (0x4502E0).
+    // 0; a picture type of 0 or 7 reads either neighbour) and Tim2CalcBufWidth's (0x309C30) jump table (0x4502E0).
     void textureTables()
     {
         static const uint32_t jump[59] = {
@@ -2406,7 +2406,7 @@ int main(int argc, char **argv)
         {0x3A1AE8u, &tanf_0x3a1ae8},             {0x30AA40u, &func_0030AA40_0x30aa40},
         {0x14C7E8u, &func_0014C7E8_0x14c7e8}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
-    g_callees.push_back({0x309C30u, &func_00309C30_0x309c30});
+    g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
     g_callees.push_back({0x31CDC0u, &SearchDataByTwoNames_0x31cdc0});
     g_callees.push_back({0x1522C0u, &cIDBase_getSlotPtr_0x1522c0});

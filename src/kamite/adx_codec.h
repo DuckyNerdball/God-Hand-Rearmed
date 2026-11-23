@@ -9,12 +9,12 @@
 //   header 0x00 u16 0x8000, 0x02 u16 copyright offset (data at +4, "(c)CRI" 2 before it), 0x04 type 3, 0x05 frame
 //   bytes 18, 0x06 4 bits, 0x07 channels, 0x08 u32 rate, 0x0C u32 samples, 0x10 u16 high-pass Hz (500), 0x12 version 4,
 //   0x13 flags (the disc's are 8 = encrypted; 0 = plain: func_0033D090 takes no key below 8). Loop (version 4, copyright
-//   offset >= 0x38; func_0033EBD0): 0x20 u16 padding samples, 0x22 u16 1, 0x24 u16 0, 0x26 u16 1, 0x28 u32 loop start
+//   offset >= 0x38; ADX_DecodeInfoExLoop (0x33EBD0)): 0x20 u16 padding samples, 0x22 u16 1, 0x24 u16 0, 0x26 u16 1, 0x28 u32 loop start
 //   sample, 0x2C u32 its byte offset, 0x30 u32 loop end sample, 0x34 u32 its byte offset. The disc's looped files pad
 //   the start so the loop starts on a frame and place the data so its byte offset is on a 2048-byte sector; so do we.
 //   Data: frames of 32 samples per channel, interleaved by channel; a frame = u16 scale + 16 bytes of 4-bit samples
 //   (high nibble first). ADX_DecodeSte4AsSte: s = nibble * ((scale & 0x1FFF) + 1) + ((c1 * s1 + c2 * s2) >> 12),
-//   clamped; c1 / c2 from the high-pass frequency (func_0033E6B8). End: a frame with scale 0x8001.
+//   clamped; c1 / c2 from the high-pass frequency (ADX_GetCoefficient (0x33E6B8)). End: a frame with scale 0x8001.
 // Plain std: the boot and the host tests.
 namespace kamite::adx
 {

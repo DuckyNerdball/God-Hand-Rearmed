@@ -248,7 +248,7 @@ namespace kamite
     // ---------------------------------------------------------------------------------------------------------------
     namespace
     {
-        constexpr uint32_t kSnr2LinkEntry = 0x00394DD8u;     // func_00394DD8(image, out)
+        constexpr uint32_t kSnr2LinkEntry = 0x00394DD8u;     // snDllLoaded(image, out)
         constexpr uint32_t kSnr2RegisterEntry = 0x00394C18u; // (a0 = image name, a1 = image), after relocation
         // func_00394D00(a0 = image): removes the image from the 0x3F5520 registry. Only caller: the unlink step
         // func_00394F20 (jal at 0x394F90), right after the image's destructor runner (header+0x1C, jalr at 0x394F88).
@@ -267,9 +267,9 @@ namespace kamite
             uint32_t funcTable;   // 0x0C
             uint32_t funcCount;   // 0x10
             uint32_t imageName;   // 0x14 e.g. "..\PS2_EE_Release\Event.elf"
-            uint32_t ctors;       // 0x18 constructor runner; func_00394DD8 jalr's it after linking
+            uint32_t ctors;       // 0x18 constructor runner; snDllLoaded (0x394DD8) jalr's it after linking
             uint32_t dtors;       // 0x1C
-            uint32_t exports;     // 0x20 copied to *out by func_00394DD8 when the export count is not 0
+            uint32_t exports;     // 0x20 copied to *out by snDllLoaded (0x394DD8) when the export count is not 0
             uint32_t exportCount; // 0x24
             uint32_t align;       // 0x28 func_00393F80: ((align - 1) & image) must be 0
             uint32_t fileSize;    // 0x2C
