@@ -175,7 +175,7 @@ namespace
                                  "[Run]\nStartFullscreen=0";
         CHECK_EQ(kamite::steam_deck::withDeckDefaults(ini), want);
 
-        // The shipped GHR.ini still has the three keys in [Video] (a rename would make the Deck defaults silently do
+        // The shipped GHR.ini still has the four keys in [Video] (a rename would make the Deck defaults silently do
         // nothing).
         std::ifstream file(fs::path(KAMITE_SOURCE_DIR) / "GHR.ini", std::ios::binary);
         const std::string shipped((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -184,6 +184,7 @@ namespace
         CHECK(deck.find("\nAspectRatio=auto") != std::string::npos);
         CHECK(deck.find("\nStartFullscreen=1") != std::string::npos);
         CHECK(deck.find("\nStartMaximized=0") != std::string::npos);
+        CHECK(deck.find("\nInternalResolution=2") != std::string::npos);
         CHECK_EQ(deck.size(), shipped.size() - std::string("16:9").size() + std::string("auto").size());
     }
 

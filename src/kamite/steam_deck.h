@@ -15,6 +15,7 @@ namespace kamite::steam_deck
 
     // GHR.ini's text with the Deck's starting values in [Video]: borderless full screen (StartFullscreen=1,
     // StartMaximized=0) and the picture's shape matching the 16:10 screen (AspectRatio=auto, the launcher's "Match the
-    // screen"). Only the values of those keys change; comments, order and the other sections stay as they are.
+    // screen"), and 2x internal resolution (3x maxed the Deck's GPU). Only the values of those keys change; comments,
+    // order and the other sections stay as they are.
     std::string withDeckDefaults(const std::string &ini);
 }

@@ -66,7 +66,8 @@ namespace kamite::steam_deck
             const char *key; // lower case
             const char *value;
         };
-        static constexpr Value kVideo[] = {{"startfullscreen", "1"}, {"startmaximized", "0"}, {"aspectratio", "auto"}};
+        static constexpr Value kVideo[] = {{"startfullscreen", "1"}, {"startmaximized", "0"}, {"aspectratio", "auto"},
+                                             {"internalresolution", "2"}}; // 2x: the GPU maxed out at 3x (K, Nov 23)
         std::istringstream in(ini);
         std::string out, line, section;
         while (std::getline(in, line))

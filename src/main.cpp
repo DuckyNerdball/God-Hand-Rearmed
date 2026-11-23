@@ -588,7 +588,7 @@ namespace
             const bool deck = kamite::steam_deck::detected();
             std::ofstream(iniPath, std::ios::binary) << (deck ? kamite::steam_deck::withDeckDefaults(kamite::kDefaultIni)
                                                               : std::string(kamite::kDefaultIni));
-            notes.push_back("wrote the default " + iniPath.string() + (deck ? " (Steam Deck: full screen, AspectRatio=auto)" : ""));
+            notes.push_back("wrote the default " + iniPath.string() + (deck ? " (Steam Deck: full screen, AspectRatio=auto, 2x)" : ""));
         }
 #if defined(KAMITE_RELEASE)
         // A release zip carries no GHR.ini, so an update unpacked over the folder (RecompLauncher's, or by hand) never
@@ -975,7 +975,7 @@ int main(int argc, char *argv[])
     if (!kamite::paths::homeNote().empty()) // KAMITE_HOME set but not usable (never in a plain Windows install)
         KM_WARN(Boot, kamite::paths::homeNote());
     if (kamite::steam_deck::detected())
-        KM_INFO(Boot, "Steam Deck detected: a fresh GHR.ini starts in borderless full screen with AspectRatio=auto");
+        KM_INFO(Boot, "Steam Deck detected: a fresh GHR.ini starts in borderless full screen with AspectRatio=auto at 2x");
     if (!headless)
     {
         kamite::reportPreviousCrashes();
