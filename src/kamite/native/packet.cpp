@@ -1800,6 +1800,196 @@ namespace kamite::native::packet
             return true;
         }
 
+        // ==== the REWRITE natives (Nov 23): batches 1-2's asm natives again, from the decomp's C at 4607c68 ==========
+        // Same method as batches 3-4 (kRenderPath | kChargeAtEnd, a plan first, then the writes). The asm versions above
+        // stay: the texture natives run queueBody / linkOn inline, and they are the fallback until a K build checks these.
+        // R1: the queue (src/cod/0014ff00.c, 0031a650.c, 001c8f30.c) and the mesh walk (gfx/cModel.c, 0014d700.c,
+        // 00155d60.c).
+
+        // void func_0014FF00(list, index, packet, tail): slot = list's slots + (first - min(first, index)) * 16 becomes a
+        // NEXT tag to the packet; the tail tag a NEXT to the slot's old address (its QWC / flags kept).
+        template <class Env>
+        bool linkReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            Link plan;
+            if (!linkPlan(env, e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u32(ctx, e::a3), plan))
+                return false;
+            linkPacket(env, plan, e::u32(ctx, e::a2));
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // void func_0031A650(table, bucket, index, packet, tail): bucket < 10 picks the list at table + 0xB00 + bucket * 8
+        // + the frame's half * 4, then func_0014FF00(list, index, packet, tail ? tail : packet). func_0031A600 is the
+        // same with tail = packet. A 0x10 frame (ra only): dead stack once it returns.
+        template <class Env>
+        bool queueReadableOn(Env &env, R5900Context *ctx, uint64_t tail)
+        {
+            if (!env.atEnd)
+                return false;
+            QueuePlan q;
+            if (!queuePlan(env, e::u32(ctx, e::sp), e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u64(ctx, e::a2),
+                           e::u32(ctx, e::a3), tail, q))
+                return false;
+            if (q.inRange)
+            {
+                env.call(); // jal func_0014FF00
+                linkPacket(env, q.plan, e::u32(ctx, e::a3));
+            }
+            returnToCaller(ctx);
+            return true;
+        }
+        template <class Env>
+        bool queueReadable(Env &env, R5900Context *ctx)
+        {
+            return queueReadableOn(env, ctx, e::u64(ctx, e::t0));
+        }
+        template <class Env>
+        bool queueOneReadable(Env &env, R5900Context *ctx)
+        {
+            return queueReadableOn(env, ctx, 0u);
+        }
+
+        // cModelNode *cModel_getMeshPtr(cModel *self, int n): the n-th node of meshHead's list (next +0x404); the head
+        // again when the list ends first. Reads only; one backward branch per step past the first.
+        constexpr uint32_t kNodeNext = 0x404u; // cModelNode.next
+        template <class Env>
+        bool meshReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            uint32_t at;
+            if (!plainRam(e::u32(ctx, e::a0) + model::kMeshHead, 4u, at))
+                return false;
+            const uint32_t head = e::read32(env, at);
+            uint32_t node = head;
+            if (e::u64(ctx, e::a1) != 0u)
+            {
+                uint32_t i = e::u32(ctx, e::a1) - 1u; // int i = n - 1 (addiu: the low word)
+                for (int steps = 0;; ++steps)
+                {
+                    if (steps == kMaxMeshes || !plainRam(node + kNodeNext, 4u, at))
+                        return false;
+                    node = e::read32(env, at);
+                    if (node == 0u)
+                    {
+                        node = head;
+                        break;
+                    }
+                    if (i-- == 0u) // i--; while (i != -1)
+                        break;
+                    env.checkpoint(32u);
+                }
+            }
+            e::setS32(ctx, e::v0, node);
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // unsigned char *func_00155D60(node, val, idx): an empty countdown from node[0x385] - 1 (a byte of 0 counts from
+        // -1, ~4G backward branches: declined), then *(long *)(node + idx * 0xB0 + 0x30) = val; returns node + idx * 0xB0.
+        struct CountdownPlan
+        {
+            uint32_t loops, target; // target: the RAM offset of the 8-byte write
+        };
+        template <class Env>
+        bool countdownPlan(Env &env, uint32_t node, uint32_t idx, CountdownPlan &p)
+        {
+            uint32_t count;
+            if (!plainRam(node + 0x385u, 1u, count) || !plainRam(idx * 0xB0u + node + 0x30u, 8u, p.target))
+                return false;
+            const uint8_t n = *env.at(count, 1u);
+            p.loops = n - 1u;
+            return n != 0u;
+        }
+        template <class Env>
+        void countdownWrite(Env &env, const CountdownPlan &p, uint64_t val)
+        {
+            for (uint32_t i = 0; i < p.loops; ++i) // the bnez back to 0x155D68 (atEnd: summed, never due)
+                env.checkpoint(32u);
+            e::write64(env, p.target, val);
+        }
+        template <class Env>
+        bool countdownReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t node = e::u32(ctx, e::a0), idx = e::u32(ctx, e::a2);
+            CountdownPlan p;
+            if (!countdownPlan(env, node, idx, p))
+                return false;
+            countdownWrite(env, p, e::u64(ctx, e::a1));
+            e::setS32(ctx, e::v0, idx * 0xB0u + node); // mult's low word + addu
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // void ForwardNodeUpdate_14D768(cModel *self, a1, a2): for each node from cModel_getMeshPtr(self, 0) (= meshHead):
+        // func_00155D60(node, a1, a2). Its 0x40 frame (s0-s2, ra) is written first and read back last: no node field it
+        // reads and no write may lie in it, and no write may land on a later read (a node's count, next or the head).
+        template <class Env>
+        bool forwardReadable(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp0 = e::u32(ctx, e::sp);
+            uint32_t frame, head;
+            const uint32_t self = e::u32(ctx, e::a0), idx = e::u32(ctx, e::a2);
+            if ((sp0 & 0xFu) != 0u || !plainRam(sp0 - 0x40u, 0x40u, frame) ||
+                !plainRam(self + model::kMeshHead, 4u, head))
+                return false;
+            static thread_local Span reads[2 * kMaxNodes + 1];
+            static thread_local CountdownPlan plans[kMaxNodes];
+            int readCount = 0, count = 0;
+            reads[readCount++] = Span{head, 4u};
+            for (uint32_t node = e::read32(env, head); node != 0u; ++count)
+            {
+                uint32_t countAt, next;
+                if (count == kMaxNodes || !countdownPlan(env, node, idx, plans[count]) ||
+                    !plainRam(node + kNodeNext, 4u, next) || !plainRam(node + 0x385u, 1u, countAt))
+                    return false;
+                reads[readCount++] = Span{countAt, 1u};
+                reads[readCount++] = Span{next, 4u};
+                node = e::read32(env, next);
+            }
+            const Span frameSpan{frame, 0x40u};
+            if (overlapsAny(frameSpan, reads, readCount))
+                return false;
+            for (int i = 0; i < count; ++i)
+            {
+                const Span w{plans[i].target, 8u};
+                if (overlapsAny(w, &frameSpan, 1) || overlapsAny(w, reads, readCount))
+                    return false;
+            }
+
+            // cModel_getMeshPtr(self, 0): its entry observers with the context they'd see (a1 = 0, ra = 0x14D784, sp
+            // 0x40 lower; body_detail / bone_tweaks read ra and a0)
+            env.call();
+            {
+                const uint64_t a1 = e::u64(ctx, e::a1), ra = e::u64(ctx, e::ra);
+                e::setLow64(ctx, e::a1, 0u);
+                e::setS32(ctx, e::ra, 0x14D784u);
+                e::setS32(ctx, e::sp, sp0 - 0x40u);
+                ctx->pc = kGetMeshPtr;
+                env.observe(kGetMeshPtr, ctx);
+                e::setLow64(ctx, e::a1, a1);
+                e::setLow64(ctx, e::ra, ra);
+                e::setS32(ctx, e::sp, sp0);
+            }
+            const uint64_t val = e::u64(ctx, e::a1);
+            for (int i = 0; i < count; ++i)
+            {
+                env.call(); // jal func_00155D60
+                countdownWrite(env, plans[i], val);
+                if (i + 1 < count)
+                    env.checkpoint(32u); // the bnez back to 0x14D7A0
+            }
+            returnToCaller(ctx);
+            return true;
+        }
+
         // ==== batches 3-4b: the texture cache's misses (K's order, Nov 22) ======================================
         // A miss in func_00151398 inserts the texture's entry and builds its uploads: func_00151630 classifies the file
         // by its header ("TIM2", or "TIM3" with byte 5 != 6: the TIM2 loader func_00151990; "TIM3" with byte 5 = 6:
@@ -5024,20 +5214,15 @@ namespace kamite::native::packet
     {
         // Step a, batch 1: checked since K's 16:44 build of e881eeb (shadowed: 0 mismatches over ~20M calls, every
         // .ram.bin the reference's); recorded footprints.
-        registerFunction(NativeFunction{"func_0014FF00", kLink, "packet", true, &link<RealEnv>, &link<ShadowEnv>, nullptr});
-        registerFunction(NativeFunction{"func_0031A650", kQueue, "packet", true, &queue<RealEnv>, &queue<ShadowEnv>, nullptr});
-        registerFunction(NativeFunction{"func_0031A600", kQueueOne, "packet", true, &queueOne<RealEnv>, &queueOne<ShadowEnv>,
-                                        nullptr});
+        // (Nov 23: rewritten from the decomp's C as R1 below; these asm versions stay as the texture natives' inline parts.)
 
         // Step a, batch 2: checked since K's 21:42 build of 99e32b8 shadowed them in every replay (~42M calls, 0
-        // mismatches, 0 declines, 0 skipped; every .ram.bin the reference's). Recorded footprints.
+        // mismatches, 0 declines, 0 skipped; every .ram.bin the reference's). Recorded footprints. (Nov 23: three of them
+        // rewritten from the decomp's C as R1 below.)
         auto add = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
                       bool (*shadow)(ShadowEnv &, R5900Context *)) {
             registerFunction(NativeFunction{name, address, "packet", true, real, shadow, nullptr});
         };
-        add("func_00155D60", kCountdown, &countdown<RealEnv>, &countdown<ShadowEnv>);
-        add("cModel_getMeshPtr", kGetMeshPtr, &getMeshPtr<RealEnv>, &getMeshPtr<ShadowEnv>);
-        add("ForwardNodeUpdate_14D768", kForwardNodes, &forwardNodes<RealEnv>, &forwardNodes<ShadowEnv>);
         add("PostInc_D_00566E10_0015B0F0_15B0F0", kPostInc, &postInc<RealEnv>, &postInc<ShadowEnv>);
         add("func_00155AE8", kTwoTags, &twoTags<RealEnv>, &twoTags<ShadowEnv>);
         add("func_00155BE8", kSlotTags, &slotTags<RealEnv>, &slotTags<ShadowEnv>);
@@ -5061,6 +5246,17 @@ namespace kamite::native::packet
             registerFunction(fn);
         };
         addReadable("func_0014C5A0", kQueueModel, true, &queueModel<RealEnv>, &queueModel<ShadowEnv>, 0u);
+        // The REWRITE natives, R1 (Nov 23): batch 1's queue and batch 2's mesh walk from the decomp's C (4607c68), these
+        // readable bodies replacing the asm ones (checked since e881eeb / 99e32b8). Unchecked until a K build shadows them.
+        addReadable("func_0014FF00", kLink, false, &linkReadable<RealEnv>, &linkReadable<ShadowEnv>, 0u);
+        addReadable("func_0031A650", kQueue, false, &queueReadable<RealEnv>, &queueReadable<ShadowEnv>, 0u);
+        addReadable("func_0031A600", kQueueOne, false, &queueOneReadable<RealEnv>, &queueOneReadable<ShadowEnv>, 0u);
+        addReadable("cModel_getMeshPtr", kGetMeshPtr, false, &meshReadable<RealEnv>, &meshReadable<ShadowEnv>,
+                    NativeFunction::kReturnsV0);
+        addReadable("ForwardNodeUpdate_14D768", kForwardNodes, false, &forwardReadable<RealEnv>,
+                    &forwardReadable<ShadowEnv>, 0u);
+        addReadable("func_00155D60", kCountdown, false, &countdownReadable<RealEnv>, &countdownReadable<ShadowEnv>,
+                    NativeFunction::kReturnsV0);
         // 0x151398 with its miss path (insert + builders on a Txn): K's 08:32 build of 881a8dd shadowed 5.05M calls, 0
         // mismatches, 0 declines (the TM builder's branch never ran in a replay: sandbox-proven only).
         addReadable("func_00151398", kTextureLookup, true, &textureLookup<RealEnv>, &textureLookup<ShadowEnv>,

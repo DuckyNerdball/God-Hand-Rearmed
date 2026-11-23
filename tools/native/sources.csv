@@ -7,12 +7,12 @@ Tramp_001F7DF8_00101E28,0x00101E28,asm,,,,,
 MtxCopy,0x00147528,decomp,MtxCopy,src/cod/001b5160.c,4607c68,6bb432246475,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
 MtxMultiply,0x00147548,decomp,MtxMultiply,src/cod/001b5160.c,4607c68,2b489fba4ea8,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
 func_00148BD8,0x00148BD8,decomp,func_00148BD8,src/cod/00148bd8.c,75cb123,ababfb683163,batch 3 readable; 0x151398 inline (hits; a miss: insert + builder on a Txn) + 0x151368 inline; kRenderPath|kChargeAtEnd
-cModel_getMeshPtr,0x0014B6F8,asm,,,,,
+cModel_getMeshPtr,0x0014B6F8,decomp,cModel_getMeshPtr,src/cod/gfx/cModel.c,4607c68,b2166e19d086,REWRITE R1 (Nov 23): readable; kRenderPath|kChargeAtEnd
 func_0014B9A0,0x0014B9A0,decomp,func_0014B9A0,src/cod/0014b9a0.c,75cb123,03d8a0f79c6a,batch 3 readable; 0x155BE8 / PostInc / CopyMatrix / UnitMatrix / 0x155C68 / queue inline; kRenderPath|kChargeAtEnd
 cModel_nodeLayerScreen,0x0014BE38,asm,,,,,
 func_0014C5A0,0x0014C5A0,decomp,func_0014C5A0,src/cod/0012cc70.c,75cb123,f0f99a1b59cb,batch 3 readable; kRenderPath|kChargeAtEnd
-ForwardNodeUpdate_14D768,0x0014D768,asm,,,,,
-func_0014FF00,0x0014FF00,asm,,,,,
+ForwardNodeUpdate_14D768,0x0014D768,decomp,ForwardNodeUpdate_14D768,src/cod/0014d700.c,4607c68,e0e598a4e973,REWRITE R1 (Nov 23): readable; kRenderPath|kChargeAtEnd
+func_0014FF00,0x0014FF00,decomp,func_0014FF00,src/cod/0014ff00.c,4607c68,75474d612af1,REWRITE R1 (Nov 23): readable; kRenderPath|kChargeAtEnd
 func_001503B8,0x001503B8,asm,,,,,
 func_00150DC8,0x00150DC8,asm,,,,,
 func_00150F68,0x00150F68,asm,,,,,
@@ -21,7 +21,7 @@ func_00151398,0x00151398,decomp,func_00151398,src/cod/00151398.c,75cb123,9023711
 func_00155AE8,0x00155AE8,asm,,,,,
 func_00155BE8,0x00155BE8,asm,,,,,
 func_00155C68,0x00155C68,asm,,,,,
-func_00155D60,0x00155D60,asm,,,,,
+func_00155D60,0x00155D60,decomp,func_00155D60,src/cod/00155d60.c,4607c68,891661efffe8,REWRITE R1 (Nov 23): readable; kRenderPath|kChargeAtEnd
 PostInc_D_00566E10_0015B0F0_15B0F0,0x0015B0F0,asm,,,,,
 capVu0Length,0x001F7DF8,decomp,capVu0Length,src/cod/001f7df8.c,4607c68,aff7ec15eff3,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
 func_001F8DF8,0x001F8DF8,asm,,,,,
@@ -45,8 +45,8 @@ sceVu0RotMatrixX,0x0030A700,asm,,,,,Sony libvu0 (SDK); rung 2
 sceVu0RotMatrixY,0x0030A7B8,asm,,,,,Sony libvu0 (SDK); rung 2
 sceVu0CameraMatrix,0x0030A8C8,decomp,sceVu0CameraMatrix,src/cod/0030a8c8.c,4607c68,040b72d49ef6,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
 sceVu0NormalLightMatrix,0x0030A978,decomp,sceVu0NormalLightMatrix,src/cod/0030a978.c,4607c68,71d46ab00286,record only (Nov 23): the C is the VU0 op sequence the native already follows; exact bar kept (gameplay callers)
-func_0031A600,0x0031A600,asm,,,,,
-func_0031A650,0x0031A650,asm,,,,,
+func_0031A600,0x0031A600,decomp,func_0031A600,src/cod/001c8f30.c,4607c68,04f67d41c802,REWRITE R1 (Nov 23): readable; kRenderPath|kChargeAtEnd
+func_0031A650,0x0031A650,decomp,func_0031A650,src/cod/0031a650.c,4607c68,42402625e0d9,REWRITE R1 (Nov 23): readable; kRenderPath|kChargeAtEnd
 func_00151630,0x00151630,decomp,func_00151630,src/cod/00151630.c,75cb123,faa11a504248,batch 3-4b readable: the texture file's class; kRenderPath|kChargeAtEnd
 func_00151688,0x00151688,asm,,,,,batch 3-4b: the game's own texture pack (unmatched at 75cb123; decomp names); on a Txn; 0x150DC8 / __muldi3 inline
 func_00151990,0x00151990,asm,,,,,batch 3-4b: the TIM2 loader (unmatched at 75cb123); on a Txn; 0x309C30 / 0x150F68 / queue inline; texture_slots' fix (fittedSize) at its hook's place
