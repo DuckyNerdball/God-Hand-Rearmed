@@ -79,6 +79,8 @@ for %%f in (cases\*.case) do (
     echo ------------------------------------------------------------------------------------------------------------
 )) > cases\summary.txt 2>nul
 findstr /c:"extension RAM in use" logs\*.log > cases\xram.txt 2>nul
-echo Done. Reports: cases\summary.txt  Fingerprints: cases\fingerprints.txt
+rem One line per case against the accepted reference (cases\ref, set by replay_verdict.py --promote): the file a chat reads.
+python tools\fps60\replay_verdict.py > cases\verdict.txt 2>&1
+echo Done. Verdict: cases\verdict.txt  Reports: cases\summary.txt  Fingerprints: cases\fingerprints.txt
 :end
 if "%~1"=="" pause
