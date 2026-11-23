@@ -13,7 +13,9 @@ a build is accepted; without it the previous build's .prev files and fingerprint
               build: host-timing noise)
   runs        this build's run 1 = run 2 (ram, csv, chain); only with RUNS=2
   snap        snap_compare.py's verdict against the previous build (fingerprints.txt), when it ran
-Then the natives' shadow totals (all *.native.txt) and the commit range. Anything that moves: list every commit in the
+Then the natives' shadow totals (this batch's *.native.txt: a build that shadows nothing called writes none, and the
+older ones left in cases/ say nothing about it) and the commit (this batch's *.stacks.txt headers, written by every dev
+replay). Anything that moves: list every commit in the
 range (render, HUD and tools commits too, not only natives) before blaming one (Nov 23: a 16:9 HUD commit moved 8 cases'
 chains and was blamed on func_00154240 for two builds).
 """
@@ -78,6 +80,38 @@ def last_run(build, case):
     return build.get((case, runs[-1])) if runs else None
 
 
+def this_batch(path, case, rate):
+    """A per-replay file the last replay of <case> at <rate> wrote, not one an older build left behind (Nov 23: 2b12c70
+    shadowed nothing called, wrote no .native.txt, and the 13:33 build's showed up as its totals and commit). The replay
+    writes its .csv at the same end, so anything a batch older than that is stale."""
+    try:
+        return os.path.getmtime(path) >= os.path.getmtime(os.path.join(CASES, f"{case}.{rate}.csv")) - 120
+    except OSError:
+        return False
+
+
+def batch_files(cases, suffix):
+    out, stale = [], 0
+    for case in cases:
+        for rate in ("30", "60"):
+            p = os.path.join(CASES, f"{case}.{rate}.{suffix}")
+            if os.path.exists(p):
+                if this_batch(p, case, rate):
+                    out.append(p)
+                else:
+                    stale += 1
+    return out, stale
+
+
+def head_commit(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            head = f.readline()
+    except OSError:
+        return None
+    return head.split("commit=")[1].split()[0] if "commit=" in head else None
+
+
 def main():
     promote = "--promote" in sys.argv
     cases = sorted(os.path.basename(p) for p in glob.glob(os.path.join(CASES, "*.case")))
@@ -86,15 +120,31 @@ def main():
         sys.exit("no fingerprints yet")
     now = order[-1]
     if promote:
+        # Copy over the old reference first, then drop what no case of the batch wrote: a folder where deleting isn't
+        # allowed (Claude's shell on K's PC, Nov 23) still gets a whole new reference, and leftovers of cases no longer
+        # in cases/ are never read (the verdict walks cases/*.case).
         os.makedirs(REF, exist_ok=True)
-        for p in glob.glob(os.path.join(REF, "*")):
-            os.remove(p)
-        for p in glob.glob(os.path.join(CASES, "*.chain.bin")) + glob.glob(os.path.join(CASES, "*.chain.run1.bin")):
-            shutil.copy2(p, REF)
+        kept = {"ref-fingerprints.txt"}
+        for case in cases:
+            for rate in ("30", "60"):
+                for suffix in ("chain.bin", "chain.run1.bin"):
+                    p = os.path.join(CASES, f"{case}.{rate}.{suffix}")
+                    if os.path.exists(p):
+                        shutil.copy2(p, REF)
+                        kept.add(os.path.basename(p))
         with open(os.path.join(CASES, "fingerprints.txt"), encoding="utf-8", errors="replace") as f, \
                 open(os.path.join(REF, "ref-fingerprints.txt"), "w", encoding="utf-8") as out:
             out.writelines(line for line in f if line.startswith(now + ";"))
-        print(f"reference = {now}")
+        left = []
+        for p in glob.glob(os.path.join(REF, "*")):
+            if os.path.basename(p) not in kept:
+                try:
+                    os.remove(p)
+                except OSError:
+                    left.append(os.path.basename(p))
+        print(f"reference = {now} ({len(kept) - 1} chain files)")
+        if left:
+            print(f"left in cases/ref (no case of this batch; never read): {len(left)} files")
         return
     ref_fp = os.path.join(REF, "ref-fingerprints.txt")
     if os.path.exists(ref_fp):
@@ -103,15 +153,11 @@ def main():
     else:
         ref_name = order[-2] if len(order) > 1 else None
         ref_build = builds.get(ref_name, {})
-    # the batch's own shadow files: a case no longer in cases/ leaves its last ones behind (Nov 23: 2026-11-03_14-53-38's
-    # from an older build showed up in the totals and the commit list)
-    natives = [p for p in glob.glob(os.path.join(CASES, "*.native.txt"))
-               if os.path.basename(p).rsplit(".", 3)[0] in cases]
-    commits = set()
-    for p in natives:
-        head = open(p, encoding="utf-8", errors="replace").readline()
-        if "commit=" in head:
-            commits.add(head.split("commit=")[1].split()[0])
+    # this batch's own files: a case no longer in cases/ leaves its last ones behind (2026-11-03_14-53-38's), and a build
+    # that shadows nothing called writes no .native.txt, so the older build's stay (Nov 23, 2b12c70)
+    natives, stale_natives = batch_files(cases, "native.txt")
+    stacks, _ = batch_files(cases, "stacks.txt")
+    commits = {c for c in map(head_commit, stacks or natives) if c}
     print(f"build {now}  commit {', '.join(sorted(commits)) or '?'}")
     print(f"reference {ref_name or '-'} ({'cases/ref' if os.path.exists(ref_fp) else 'the previous build'})")
     print("list every commit between the reference's and this one before attributing anything that moved")
@@ -164,6 +210,10 @@ def main():
     print("shadowed natives: calls checked matched declined skipped mismatches")
     for name, t in sorted(totals.items()):
         print(f"  {name:28} {t[0]:>9} {t[1]:>9} {t[2]:>9} {t[3]:>6} {t[4]:>6} {t[5]:>5}{'  <-- MISMATCHES' if t[5] else ''}")
+    if not totals:
+        print("  none: this build shadowed nothing that was called")
+    if stale_natives:
+        print(f"  ({stale_natives} older .native.txt left out: an earlier batch's)")
     print()
     print(f"{moved} case/rate lines with ram, csv or chain != the reference")
     print("(csv ~ = differs but this build's own two runs differ too: host-timing columns; a few snap words per case")
