@@ -359,10 +359,14 @@ def parse_stages(cpp: str, stage_lines: dict[str, str] | None = None) -> list[St
     """Each GSDeviceVK::GetTFX*Shader: header, stage macro, AddMacro lines in order, then the shader text."""
     stage_lines = stage_lines or parse_stage_macros(cpp)
     recipes = []
-    for m in re.finditer(r"\w+ GSDeviceVK::(GetTFX\w+Shader)\((?:const )?GSHWDrawConfig::(\w+)&? sel\)", cpp):
-        function, selector = m.group(1), m.group(2)
+    builder = r"\w+ GSDeviceVK::(GetTFX\w+Shader)(Source)?\((?:const )?GSHWDrawConfig::(\w+)&? sel\)(?: const)?"
+    for m in re.finditer(builder, cpp):
+        function, split, selector = m.group(1), m.group(2), m.group(3)
+        if not split and f"GSDeviceVK::{function}Source(" in cpp:
+            continue  # the getter hands GetTFX*ShaderSource's text to the shader cache (the GS warm-up's split)
         body, line0 = function_body(cpp, re.escape(m.group(0)))
-        steps, macros, kind = [], [], None
+        steps, macros = [], []
+        kind = ("vert" if "Vertex" in function else "frag") if split else None
         for n, raw in enumerate(body.splitlines(), line0):
             s = raw.strip()
             where = f"{DEVICE_CPP}:{n}"
@@ -384,6 +388,8 @@ def parse_stages(cpp: str, stage_lines: dict[str, str] | None = None) -> list[St
                 steps.append("macro")
             elif s == "ss << m_tfx_source;":
                 steps.append("source")
+            elif split and s == "return ss.str();" and steps and steps[-1] == "source":
+                pass
             elif mm := re.search(r"g_vulkan_shader_cache->(\w+)\(ss\.str\(\)\)", s):
                 kind = KINDS.get(mm.group(1))
                 if kind is None:

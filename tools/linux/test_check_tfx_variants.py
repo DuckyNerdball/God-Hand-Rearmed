@@ -73,7 +73,7 @@ class RealSources(unittest.TestCase):
     def test_macros_in_the_order_gsdevicevk_adds_them(self):
         cpp = (ROOT / ctv.DEVICE_CPP).read_text()
         for stage, function in (("vert", "GetTFXVertexShader"), ("frag", "GetTFXFragmentShader")):
-            body = cpp[cpp.index(f"GSDeviceVK::{function}("):]
+            body = cpp[cpp.index(f"GSDeviceVK::{function}Source("):]  # the source split out for the GS warm-up
             body = body[:body.index("ss << m_tfx_source;")]
             want = re.findall(r'AddMacro\(ss, "(\w+)"', body)
             self.assertEqual([m.name for m in self.stage[stage].recipe.macros], want)
