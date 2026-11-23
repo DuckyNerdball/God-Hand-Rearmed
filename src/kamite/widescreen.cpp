@@ -23,10 +23,12 @@
 #include "kamite/camera.h"
 #include "kamite/hud_layout.h"
 #include "kamite/log.h"
+#include "kamite/steam_deck.h"
 #include "ps2_runtime_macros.h" // SET_GPR_U32, GPR_U32
 #include "runtime/ps2_display_options.h"
 #include "runtime/gs/gs_pcsx2_backend.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -41,6 +43,21 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#elif defined(__linux__) && !defined(__ANDROID__)
+// GLFW, built into raylib (rglfw.c; raylib does not expose GLFW's header), as ps2_runtime.cpp's window probe uses it.
+struct GLFWmonitor;
+struct Ps2xGlfwVidMode
+{
+    int width, height, redBits, greenBits, blueBits, refreshRate;
+};
+extern "C" int glfwInit(void);
+extern "C" void glfwTerminate(void);
+extern "C" GLFWmonitor *glfwGetPrimaryMonitor(void);
+extern "C" const Ps2xGlfwVidMode *glfwGetVideoMode(GLFWmonitor *monitor);
+extern "C" bool IsWindowReady(void); // raylib
+extern "C" int GetCurrentMonitor(void);
+extern "C" int GetMonitorWidth(int monitor);
+extern "C" int GetMonitorHeight(int monitor);
 #endif
 
 namespace kamite
@@ -75,6 +92,40 @@ namespace kamite
             const int width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN);
             if (width > 0 && height > 0)
                 return static_cast<float>(width) / static_cast<float>(height);
+#elif defined(__linux__) && !defined(__ANDROID__)
+            // Read once, on the main thread before the first window (installWidescreen runs before the launcher's and
+            // the game's): GLFW is started on the platform the window will use (X11 for PCSX2's GS), asked for the
+            // primary monitor's mode and stopped again (InitWindow starts it afresh). Later calls (the OPTIONS screen,
+            // EE thread) reuse the value: no GLFW off the main thread. Without it "auto" was the PS2's 4:3 on Linux
+            // (the Deck, Nov 23). A mode reported upright (a Wayland output before its rotation, the Deck's panel is
+            // 800x1280) is turned to landscape.
+            static float cached = -1.0f;
+            if (cached < 0.0f)
+            {
+                cached = 0.0f;
+                const auto landscape = [](int width, int height)
+                { return width > 0 && height > 0 ? static_cast<float>(std::max(width, height)) / static_cast<float>(std::min(width, height)) : 0.0f; };
+                if (IsWindowReady())
+                {
+                    const int monitor = GetCurrentMonitor();
+                    cached = landscape(GetMonitorWidth(monitor), GetMonitorHeight(monitor));
+                }
+                else
+                {
+                    GSPcsx2Backend::BeforeHostWindow();
+                    if (glfwInit() != 0)
+                    {
+                        if (GLFWmonitor *monitor = glfwGetPrimaryMonitor())
+                            if (const Ps2xGlfwVidMode *mode = glfwGetVideoMode(monitor))
+                                cached = landscape(mode->width, mode->height);
+                        glfwTerminate();
+                    }
+                }
+                if (cached <= 0.0f && steam_deck::detected())
+                    cached = 1.6f; // the Deck's 1280x800 when the monitor could not be read
+                KM_INFO(Game, "screen aspect " << cached << (cached > 0.0f ? "" : " (unknown: Match Screen uses 4:3)"));
+            }
+            return cached;
 #endif
             return 0.0f;
         }

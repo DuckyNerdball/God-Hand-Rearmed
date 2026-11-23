@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 23, 2026
 
+- Linux / Steam Deck: Match Screen (the Deck's default aspect) fills the screen instead of showing 4:3.
 - Linux: the Flatpak's "Choose disc image..." opens your desktop's file chooser, so a disc image can be anywhere.
 - Performance: tagging each model for drawing (its matrices, lighting, materials, visibility test and draw queue, all in one) runs as native code.
 - Performance: each model's per-frame matrices (and the game's tangent and view-screen helpers) run as native code.
