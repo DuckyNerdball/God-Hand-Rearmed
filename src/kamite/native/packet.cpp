@@ -4377,10 +4377,10 @@ namespace kamite::native::packet
                     &forwardAttack<ShadowEnv>, 0u);
         // func_00154240, a node's lighting block (its callees inline on one BlockTxn). Checked on K's 14:30 build of
         // ed4a13e (every replay shadowed: 1.41M calls, 0 mismatches, 0 declines; every .ram.bin the reference's).
-        // func_00154240: back to shadowed (Nov 23). Live, it moved 8 cases' VIF1 chain digests (frames on to a scene's
-        // end; every .ram.bin and CSV the reference's, every shadowed call matched); not timing (8cf5eca, reverted,
-        // changed nothing). What differs is still open: claude/rung3-step-a-handoff.md "K's 07:25 replays".
-        addReadable("func_00154240", kNodeLighting, false, &nodeLighting<RealEnv>, &nodeLighting<ShadowEnv>, 0u);
+        // Checked again (Nov 23): the 8 cases' moved chain digests stayed the same with it shadowed (K's 11:16 build of
+        // 6f346bc), so they were never its doing (b045d19, the 16:9 mid-boss HUD anchor, moved them); 1.41M more calls
+        // shadowed there, 0 mismatches.
+        addReadable("func_00154240", kNodeLighting, true, &nodeLighting<RealEnv>, &nodeLighting<ShadowEnv>, 0u);
         // Rung 3 step a, the 0x14C7E8 batch (Nov 23): tanf, func_0030AA40 (= sceVu0ViewScreenMatrix) and func_0014C7E8
         // composing them with the matrix natives' maths (reads first, then the writes). Checked: K's 07:25 and 09:45
         // replays of Nov 23 shadowed 448,001 / 148,646 / 29,858 calls each, 0 mismatches, 0 declines.

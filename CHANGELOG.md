@@ -4,7 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 23, 2026
 
-- Performance: each model's per-frame matrices (and the game's tangent and view-screen helpers) run as native code; each node's lighting runs the original code again while a rendering difference is checked.
+- Performance: each model's per-frame matrices (and the game's tangent and view-screen helpers) run as native code.
 
 ## November 22, 2026
 
