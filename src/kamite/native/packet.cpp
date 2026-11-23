@@ -5367,23 +5367,27 @@ namespace kamite::native::packet
             registerFunction(fn);
         };
         addReadable("func_0014C5A0", kQueueModel, true, &queueModel<RealEnv>, &queueModel<ShadowEnv>, 0u);
-        // The REWRITE natives, R1 (Nov 23): batch 1's queue and batch 2's mesh walk from the decomp's C (4607c68), these
-        // readable bodies replacing the asm ones (checked since e881eeb / 99e32b8). Unchecked until a K build shadows them.
-        addReadable("func_0014FF00", kLink, false, &linkReadable<RealEnv>, &linkReadable<ShadowEnv>, 0u);
-        addReadable("func_0031A650", kQueue, false, &queueReadable<RealEnv>, &queueReadable<ShadowEnv>, 0u);
-        addReadable("func_0031A600", kQueueOne, false, &queueOneReadable<RealEnv>, &queueOneReadable<ShadowEnv>, 0u);
-        addReadable("cModel_getMeshPtr", kGetMeshPtr, false, &meshReadable<RealEnv>, &meshReadable<ShadowEnv>,
+        // The REWRITE natives (Nov 23), R1: batch 1's queue and batch 2's mesh walk from the decomp's C (4607c68), these
+        // readable bodies replacing the asm ones (checked since e881eeb / 99e32b8). R1 and R2 checked on K's 20:57 build of
+        // 7fbf4c9 (every replay shadowed: 0x14FF00 5.15M calls, 0x31A650 5.01M, 0x31A600 133K, getMeshPtr 9.83M,
+        // 0x155D60 5.35M, 0x155AE8 2.23M, 0x155BE8 1.15M, PostInc 2.83M; 0 mismatches, 0 declines; every .ram.bin the
+        // reference's). ForwardNodeUpdate, nodeLayerScreen, 0x155C68 and 0x151168 had no standalone call (the fused
+        // natives run them inline): they stay shadowed, as 0x151FA0.
+        addReadable("func_0014FF00", kLink, true, &linkReadable<RealEnv>, &linkReadable<ShadowEnv>, 0u);
+        addReadable("func_0031A650", kQueue, true, &queueReadable<RealEnv>, &queueReadable<ShadowEnv>, 0u);
+        addReadable("func_0031A600", kQueueOne, true, &queueOneReadable<RealEnv>, &queueOneReadable<ShadowEnv>, 0u);
+        addReadable("cModel_getMeshPtr", kGetMeshPtr, true, &meshReadable<RealEnv>, &meshReadable<ShadowEnv>,
                     NativeFunction::kReturnsV0);
         addReadable("ForwardNodeUpdate_14D768", kForwardNodes, false, &forwardReadable<RealEnv>,
                     &forwardReadable<ShadowEnv>, 0u);
-        addReadable("func_00155D60", kCountdown, false, &countdownReadable<RealEnv>, &countdownReadable<ShadowEnv>,
+        addReadable("func_00155D60", kCountdown, true, &countdownReadable<RealEnv>, &countdownReadable<ShadowEnv>,
                     NativeFunction::kReturnsV0);
         // R2 (Nov 23): batch 2's tag writers, PostInc, nodeLayerScreen and the strip upload, wrappers over the bodies the
-        // fused natives run. Unchecked until a K build shadows them.
-        addReadable("func_00155AE8", kTwoTags, false, &twoTagsReadable<RealEnv>, &twoTagsReadable<ShadowEnv>, 0u);
-        addReadable("func_00155BE8", kSlotTags, false, &slotTagsReadable<RealEnv>, &slotTagsReadable<ShadowEnv>, 0u);
+        // fused natives run (checked: see R1).
+        addReadable("func_00155AE8", kTwoTags, true, &twoTagsReadable<RealEnv>, &twoTagsReadable<ShadowEnv>, 0u);
+        addReadable("func_00155BE8", kSlotTags, true, &slotTagsReadable<RealEnv>, &slotTagsReadable<ShadowEnv>, 0u);
         addReadable("func_00155C68", kTagPair, false, &tagPairReadable<RealEnv>, &tagPairReadable<ShadowEnv>, 0u);
-        addReadable("PostInc_D_00566E10_0015B0F0_15B0F0", kPostInc, false, &postIncReadable<RealEnv>,
+        addReadable("PostInc_D_00566E10_0015B0F0_15B0F0", kPostInc, true, &postIncReadable<RealEnv>,
                     &postIncReadable<ShadowEnv>, NativeFunction::kReturnsV0);
         addReadable("cModel_nodeLayerScreen", kNodeLayer, false, &nodeLayerReadable<RealEnv>, &nodeLayerReadable<ShadowEnv>,
                     NativeFunction::kReturnsV0);

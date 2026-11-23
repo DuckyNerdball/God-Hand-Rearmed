@@ -1589,15 +1589,16 @@ namespace kamite::native::libvu0
         addPacket("func_001F8DF8", kBoxTest, &boxTest<RealEnv>, &boxTest<ShadowEnv>);
         addPacket("func_002D7E50", kLightMatrix, &lightMatrix<RealEnv>, &lightMatrix<ShadowEnv>);
         // The REWRITE natives, R3 (Nov 23): rewritten from the decomp's C, kRenderPath | kChargeAtEnd (the asm versions
-        // above were checked); unchecked until a K build shadows them.
-        auto addReadable = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
+        // above were checked). 0x2D8008 checked on K's 20:57 build of 7fbf4c9 (1.08M calls shadowed, 0 mismatches, 0
+        // declines); 0x1503B8 had no standalone call (0x14C7E8's native runs it inline): stays shadowed.
+        auto addReadable = [](const char *name, uint32_t address, bool checked, bool (*real)(RealEnv &, R5900Context *),
                               bool (*shadow)(ShadowEnv &, R5900Context *)) {
-            NativeFunction fn{name, address, "packet", false, real, shadow, nullptr};
+            NativeFunction fn{name, address, "packet", checked, real, shadow, nullptr};
             fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
             fn.returns = 0u; // void for their callers (see R3 above)
             registerFunction(fn);
         };
-        addReadable("func_001503B8", kModelMatrix, &modelMatrixReadable<RealEnv>, &modelMatrixReadable<ShadowEnv>);
-        addReadable("func_002D8008", kLightColour, &lightColourReadable<RealEnv>, &lightColourReadable<ShadowEnv>);
+        addReadable("func_001503B8", kModelMatrix, false, &modelMatrixReadable<RealEnv>, &modelMatrixReadable<ShadowEnv>);
+        addReadable("func_002D8008", kLightColour, true, &lightColourReadable<RealEnv>, &lightColourReadable<ShadowEnv>);
     }
 }
