@@ -9,11 +9,16 @@
 // Only chains started during the replay's own frames count (test_mode::replayFrame; not the boot or the state load).
 // File: "GHRCHN1\0", then one 16-byte record per chain: u32 test frame, u32 channel << 28 (0x8 VIF0, 0x9 VIF1, 0xA GIF)
 // | bytes, u64 XXH3 of the bytes. No build stamp in it: identical chains give an identical file.
+//
+// gs.bin (rung 3 step b): what the GS receives, so builds compare across the switch to the draw list (when listed
+// packets leave the chain, chain.bin changes and this does not). Every packet the VU worker hands the GIF stage, per
+// job that the EE queued during a replay frame: "GHRGSD1\0", then 16-byte records: u32 test frame (at the kick), u32
+// packets, u64 XXH3 over each packet's (u32 size, u32 GIF path, bytes). Jobs without packets write nothing.
 
 namespace kamite::native::chain_digest
 {
-    // During a replay (KAMITE_REPLAY_CASE): opens nothing yet, registers the walker's observer; the file is created at
-    // the first chain. path = the case + ".30" / ".60" (the shadow harness's output base).
+    // During a replay (KAMITE_REPLAY_CASE): opens nothing yet, registers the walker's and the VU worker's observers; the
+    // files are created at the first chain / job. path = the case + ".30" / ".60" (the shadow harness's output base).
     void begin(const char *outputBase);
     // At exit (native::flush).
     void end();

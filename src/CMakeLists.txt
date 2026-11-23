@@ -91,6 +91,7 @@ set(KAMITE_HOST_SOURCES
     kamite/native/packet.cpp
     kamite/native/recording.cpp
     kamite/native/chain_digest.cpp
+    kamite/native/draw_list.cpp
     kamite/crash_history.cpp
     kamite/hud_layout.cpp
     kamite/hotkeys.cpp

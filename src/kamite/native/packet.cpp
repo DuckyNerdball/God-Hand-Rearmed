@@ -5,12 +5,14 @@
 // registers left behind (ee_ctx.h: how the generated code writes them), the guest calls' cycles; footprints recorded.
 
 #include "kamite/native/native.h"
+#include "kamite/native/draw_list.h"
 #include "kamite/native/ee_ctx.h"
 #include "kamite/native/libvu0_core.h"
 #include "kamite/texture_slots.h"
 
 #include <algorithm>
 #include <bit>
+#include <type_traits>
 #include <vector>
 
 namespace kamite::native::packet
@@ -4699,6 +4701,12 @@ namespace kamite::native::packet
             const uint32_t half = t.u32(model::kFrameParity) & 1u;
             if (!t.ok || !x.ok)
                 return false;
+            // Step b (draw_list.h): the node packets and the model's own packet this call queues, registered once it has
+            // committed (live calls only: the shadow harness's runs are scratch)
+            constexpr uint32_t kListMax = kTagNodeLimit + 1u;
+            uint32_t listHead[kListMax], listTail[kListMax];
+            uint32_t listCount = 0u;
+            const bool listing = std::is_same_v<Env, RealEnv> && draw_list::g_on;
 
             // the nodes' countdowns: ForwardNodeUpdate (objFlags 0x10), or its own walk (getMeshPtr twice: the head's
             // byte +0x380 bit 7 picks between two identical calls)
@@ -4819,6 +4827,8 @@ namespace kamite::native::packet
                         last = node, lastLayer = layer;
                         const uint32_t packet = node + half * 0xB0u;
                         queueByKind(t, self, t.u32(node + model::kNodeDispFlags), id, packet, packet + 0xA0u);
+                        if (listing && listCount < kListMax)
+                            listHead[listCount] = packet, listTail[listCount++] = packet + 0xA0u;
                     }
                     node = t.u32(node + 0x404u);
                     if (node != 0u)
@@ -4834,6 +4844,11 @@ namespace kamite::native::packet
             // func_0014C5A0(self, id): the model's own packet
             env.call();
             queueModelBody(t, ctx, self, id, inner);
+            if (listing && listCount < kListMax)
+            {
+                const uint32_t start = t.u32(self + model::kPacket + half * 4u); // queueModelBody's (the same parity word)
+                listHead[listCount] = start, listTail[listCount++] = start + 0x70u;
+            }
 
             // objFlags 0x10: the UV-scroll pass
             if (t.u32(self + kObjFlags) & 0x10u)
@@ -4919,6 +4934,15 @@ namespace kamite::native::packet
             if (!t.ok)
                 return false;
             t.commit();
+            if (listing && listCount != 0u)
+            {
+                // the head tags as committed (reads of addresses the queue already touched: they cannot fail)
+                uint64_t headTag[kListMax];
+                for (uint32_t i = 0; i < listCount; ++i)
+                    headTag[i] = t.u64(listHead[i]);
+                if (t.ok)
+                    draw_list::listPackets(half, listHead, listTail, headTag, listCount);
+            }
             returnToCaller(ctx);
             return true;
         }

@@ -3,6 +3,7 @@
 #include "kamite/native/native.h"
 #include "kamite/native/shadow.h"
 #include "kamite/native/chain_digest.h"
+#include "kamite/native/draw_list.h"
 
 #include "kamite/frame_patches.h"
 #include "kamite/function_hooks.h"
@@ -166,7 +167,11 @@ namespace kamite::native
         const bool shadowNone = shadowList == "none" || shadowList == "0";
         // Rung 3's chain digest (chain_digest.h): every replay, whatever is shadowed.
         if (replaying)
+        {
             chain_digest::begin(shadowOutput().c_str());
+            // Rung 3 step b's shadow (draw_list.h): the fused natives' packets checked in the chain, every replay.
+            draw_list::begin(shadowOutput().c_str(), shadowHeader(), runtime.memory().getRDRAM());
+        }
 #endif
 #if !defined(KAMITE_RELEASE)
         // KAMITE_NATIVE_OFF=<names, 0x addresses, subsystems> (dev probe, claude/strip-list.md): those natives are
@@ -244,6 +249,7 @@ namespace kamite::native
     {
 #if !defined(KAMITE_RELEASE)
         chain_digest::end();
+        draw_list::end();
         if (g_shadowing)
             shadow::writeSummary();
 #endif

@@ -65,6 +65,7 @@ namespace
     thread_local std::vector<ps2x::ByteBuffer> t_chainPool;
     std::atomic<ps2x::dma::ChainObserver> g_chainObserver{nullptr};
     std::atomic<ps2x::dma::ChainPiecesObserver> g_chainPiecesObserver{nullptr};
+    std::atomic<ps2x::listed::Lookup> g_listedLookup{nullptr};
 
     ps2x::ByteBuffer takeChainBuffer()
     {
@@ -2265,10 +2266,15 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
                         channelBase == 0x10009000u || channelBase == 0x10008000u;
                     const bool transferTagData = isVifChannel && (chcr & 0x40u) != 0u;
                     static thread_local std::vector<ps2x::dma::ChainPiece> chainPieces;
+                    static thread_local std::vector<ps2x::listed::Mark> listedMarks;
+                    // Step b (ps2_listed_packets.h): the draw list's packets marked in the VIF1 chain (dev shadow).
+                    const ps2x::listed::Lookup listedLookup =
+                        channelBase == 0x10009000u ? g_listedLookup.load(std::memory_order_relaxed) : nullptr;
                     size_t chainBytes = 0u;
                     const bool chainKept = ps2x::dma::walkChain(
                         walk, tieEnabled, transferTagData, m_rdram, m_scratchpad,
-                        [this](uint32_t a) { return translateAddress(a); }, chainPieces, chainBytes);
+                        [this](uint32_t a) { return translateAddress(a); }, chainPieces, chainBytes, listedLookup,
+                        listedLookup ? &listedMarks : nullptr);
 
                     if (!chainKept)
                     {
@@ -2296,6 +2302,8 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
                         pt.qwc = 0;
                         pt.chainData = takeChainBuffer();
                         ps2x::dma::gatherChain(chainPieces, chainBytes, pt.chainData);
+                        if (listedLookup && !listedMarks.empty())
+                            ps2x::listed::cutSegments(chainPieces, listedMarks, pt.listed);
                         if (const ps2x::dma::ChainObserver observer = g_chainObserver.load(std::memory_order_relaxed))
                             observer(channelBase, pt.chainData.data(), pt.chainData.size());
                         if (const ps2x::dma::ChainPiecesObserver observer = g_chainPiecesObserver.load(std::memory_order_relaxed))
@@ -2790,6 +2798,7 @@ void PS2Memory::processPendingTransfers()
                 ps2x::asyncvif::Item item;
                 item.kind = ps2x::asyncvif::ItemKind::Vif1;
                 item.data = std::move(p.chainData);
+                item.listed = std::move(p.listed);
                 asyncItems.push_back(std::move(item));
             }
             else
@@ -3728,4 +3737,14 @@ void ps2x::dma::setChainObserver(ChainObserver observer)
 void ps2x::dma::setChainPiecesObserver(ChainPiecesObserver observer)
 {
     g_chainPiecesObserver.store(observer, std::memory_order_relaxed);
+}
+
+void ps2x::listed::setLookup(Lookup lookup)
+{
+    g_listedLookup.store(lookup, std::memory_order_relaxed);
+}
+
+ps2x::listed::Lookup ps2x::listed::lookup()
+{
+    return g_listedLookup.load(std::memory_order_relaxed);
 }

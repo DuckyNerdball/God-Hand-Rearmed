@@ -32,7 +32,11 @@ namespace ps2x::asyncvif
             std::vector<Item> items;
             uint32_t mxcsr = 0u;
             uint32_t fbrst = 0u;
+            uint32_t tag = 0xFFFFFFFFu; // GifObservers::jobTag at enqueue (gs.bin); none: an idle frame
         };
+
+        std::atomic<ListedObserver> s_listedObserver{nullptr};
+        std::atomic<const GifObservers *> s_gifObservers{nullptr};
 
         struct GifPacketRef
         {
@@ -231,6 +235,11 @@ namespace ps2x::asyncvif
                 _mm_setcsr(job.mxcsr);
                 t_fbrst = job.fbrst;
                 PS2Memory &memory = *worker.memory;
+                const ListedObserver listedObserver = s_listedObserver.load(std::memory_order_relaxed);
+                if (listedObserver)
+                    for (const Item &item : job.items)
+                        if (item.kind == ItemKind::Vif1 && !item.listed.empty())
+                            listedObserver(item.listed, item.data.data(), item.data.size(), 0);
                 for (Item &item : job.items)
                 {
                     if (item.data.empty())
@@ -242,6 +251,12 @@ namespace ps2x::asyncvif
                 }
                 if (memory.m_gifArbiter)
                     memory.m_gifArbiter->drain();
+                if (listedObserver)
+                    for (const Item &item : job.items)
+                        if (item.kind == ItemKind::Vif1 && !item.listed.empty())
+                            listedObserver(item.listed, item.data.data(), item.data.size(), 1);
+                if (const GifObservers *gifObservers = s_gifObservers.load(std::memory_order_acquire))
+                    gifObservers->jobEnd(job.tag);
                 if (s_vu1ReaderReady.load(std::memory_order_acquire))
                     s_vu1Completed.store(s_vu1CycleReader(), std::memory_order_release);
                 publishGif(worker.gif);
@@ -271,6 +286,7 @@ namespace ps2x::asyncvif
                     std::lock_guard<std::mutex> lock(worker.mutex);
                     for (Item &item : job.items)
                     {
+                        item.listed.clear();
                         if (worker.spare.size() < 32u && item.data.capacity() != 0u)
                         {
                             item.data.clear();
@@ -349,6 +365,16 @@ namespace ps2x::asyncvif
         }
     }
 
+    void setListedObserver(ListedObserver observer)
+    {
+        s_listedObserver.store(observer, std::memory_order_relaxed);
+    }
+
+    void setGifObservers(const GifObservers *observers)
+    {
+        s_gifObservers.store(observers, std::memory_order_release);
+    }
+
     void setGifProcessor(std::function<void(const uint8_t *, uint32_t)> processor)
     {
         std::lock_guard<std::mutex> lock(s_bindMutex);
@@ -375,6 +401,8 @@ namespace ps2x::asyncvif
         Worker *worker = s_worker;
         if (!worker)
             return false;
+        if (const GifObservers *gifObservers = s_gifObservers.load(std::memory_order_acquire))
+            gifObservers->packet(data, sizeBytes, g_gsTracePath);
         GifStage &stage = worker->gif;
         GifChunk &chunk = stage.current;
         GifPacketRef packet;
@@ -443,6 +471,8 @@ namespace ps2x::asyncvif
         Job job;
         job.items = std::move(items);
         job.mxcsr = _mm_getcsr();
+        if (const GifObservers *gifObservers = s_gifObservers.load(std::memory_order_acquire))
+            job.tag = gifObservers->jobTag();
         {
             std::lock_guard<std::mutex> lock(s_bindMutex);
             job.fbrst = s_fbrstProvider ? s_fbrstProvider() : 0u;

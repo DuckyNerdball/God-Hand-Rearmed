@@ -11,9 +11,13 @@ a build is accepted; without it the previous build's .prev files and fingerprint
   chain       the DMA chain digest (tools/dma/chain_compare.py): "=" or how many chains differ from which test frame on.
               A chain counts only where run 1 = run 2 in both builds (single chains differ between two runs of one
               build: host-timing noise)
-  runs        this build's run 1 = run 2 (ram, csv, chain); only with RUNS=2
+  gs          the GS-input digest (gs.bin, rung 3 step b: what the GS received, per VU job), by the same rule: "=" or
+              how many jobs differ from which test frame on; "-" while the reference has none (promote a batch that
+              wrote gs.bin first). Once the draw list goes live, chain moves and gs must not.
+  runs        this build's run 1 = run 2 (ram, csv, chain, gs); only with RUNS=2
   snap        snap_compare.py's verdict against the previous build (fingerprints.txt), when it ran
-Then the natives' shadow totals (this batch's *.native.txt: a build that shadows nothing called writes none, and the
+Then the draw list shadow's totals (this batch's *.drawlist.txt, src/kamite/native/draw_list.h), the natives' shadow
+totals (this batch's *.native.txt: a build that shadows nothing called writes none, and the
 older ones left in cases/ say nothing about it) and the commit (this batch's *.stacks.txt headers, written by every dev
 replay). Anything that moves: list every commit in the
 range (render, HUD and tools commits too, not only natives) before blaming one (Nov 23: a 16:9 HUD commit moved 8 cases'
@@ -29,28 +33,68 @@ CASES = "cases"
 REF = os.path.join(CASES, "ref")
 
 
-def chain_records(path):
+MAGIC = {"chain": b"GHRCHN1\0", "gs": b"GHRGSD1\0"}
+UNIT = {"chain": "chains", "gs": "jobs"}
+
+
+def chain_records(path, kind="chain"):
+    """16-byte records after the 8-byte magic: chain.bin (frame, channel | bytes, hash) or gs.bin (frame, packets,
+    hash)."""
     try:
         data = open(path, "rb").read()
     except OSError:
         return None
-    if data[:8] != b"GHRCHN1\0":
+    if data[:8] != MAGIC[kind]:
         return None
     return [struct.unpack_from("<4I", data, off) for off in range(8, len(data) - 15, 16)]
 
 
-def chain_verdict(cur, cur1, ref, ref1):
-    a, b = chain_records(ref), chain_records(cur)
+def chain_verdict(cur, cur1, ref, ref1, kind="chain"):
+    a, b = chain_records(ref, kind), chain_records(cur, kind)
     if a is None or b is None:
-        return "chain -"
-    a1, b1 = chain_records(ref1) or a, chain_records(cur1) or b
+        return f"{kind} -"
+    a1, b1 = chain_records(ref1, kind) or a, chain_records(cur1, kind) or b
     if len(a) != len(b):
-        return f"chain !={len(a)}->{len(b)} chains"
+        return f"{kind} !={len(a)}->{len(b)} {UNIT[kind]}"
     diff = [b[i][0] for i in range(len(a)) if a[i] != b[i]
             and (i >= len(a1) or a1[i] == a[i]) and (i >= len(b1) or b1[i] == b[i])]
     if not diff:
-        return "chain ="
-    return f"chain != {len(diff)} from frame {diff[0]} to {diff[-1]}"
+        return f"{kind} ="
+    return f"{kind} != {len(diff)} from frame {diff[0]} to {diff[-1]}"
+
+
+def drawlist_totals(paths):
+    """Sums the draw list shadow's reports (draw_list.cpp end()) into {key: number}; keys: registered, found, ...,
+    parse-ok, live-start-same, ops-mscal, "microcode 0x..."; plus the first diff / parsefail lines."""
+    tot, notes = {}, []
+
+    def add(key, value):
+        try:
+            tot[key] = tot.get(key, 0) + int(value)
+        except ValueError:
+            pass
+
+    for p in paths:
+        for line in open(p, encoding="utf-8", errors="replace"):
+            f = line.split()
+            if not f or line.startswith("#"):
+                continue
+            if f[0] in ("diff", "parsefail"):
+                if len(notes) < 8:
+                    notes.append(os.path.basename(p).split(".case")[0][:32] + ": " + line.strip())
+            elif f[0] == "microcode" and len(f) == 3:
+                add("microcode " + f[1], f[2])
+            elif f[0] in ("registered", "segments"):
+                for key, value in zip(f[0::2], f[1::2]):
+                    add(key, value)
+            elif f[0] in ("parse", "ops"):
+                for key, value in zip(f[1::2], f[2::2]):
+                    add(f"{f[0]}-{key}", value)
+            elif f[0] == "live":  # live start same N differ N end same N differ N
+                for k in range(1, len(f) - 4, 5):
+                    add(f"live-{f[k]}-{f[k + 1]}", f[k + 2])
+                    add(f"live-{f[k]}-{f[k + 3]}", f[k + 4])
+    return tot, notes
 
 
 def fingerprints(path):
@@ -127,7 +171,7 @@ def main():
         kept = {"ref-fingerprints.txt"}
         for case in cases:
             for rate in ("30", "60"):
-                for suffix in ("chain.bin", "chain.run1.bin"):
+                for suffix in ("chain.bin", "chain.run1.bin", "gs.bin", "gs.run1.bin"):
                     p = os.path.join(CASES, f"{case}.{rate}.{suffix}")
                     if os.path.exists(p):
                         shutil.copy2(p, REF)
@@ -142,7 +186,7 @@ def main():
                     os.remove(p)
                 except OSError:
                     left.append(os.path.basename(p))
-        print(f"reference = {now} ({len(kept) - 1} chain files)")
+        print(f"reference = {now} ({len(kept) - 1} chain / gs files)")
         if left:
             print(f"left in cases/ref (no case of this batch; never read): {len(left)} files")
         return
@@ -183,19 +227,49 @@ def main():
             else:
                 cv = chain_verdict(base + ".chain.bin", base + ".chain.run1.bin", base + ".chain.prev.bin", "")
             out.append(cv)
+            if os.path.exists(os.path.join(REF, f"{case}.{rate}.gs.bin")):
+                rbase = os.path.join(REF, f"{case}.{rate}")
+                out.append(chain_verdict(base + ".gs.bin", base + ".gs.run1.bin", rbase + ".gs.bin", rbase + ".gs.run1.bin",
+                                         "gs"))
+            else:
+                out.append(chain_verdict(base + ".gs.bin", base + ".gs.run1.bin", base + ".gs.prev.bin", "", "gs"))
             if run1 and cur and run1 is not cur:
-                same = [f for f in ("ram.bin", "csv", "chain.bin")
-                        if f"{rate}.{f}" in run1 and run1.get(f"{rate}.{f}") == cur.get(f"{rate}.{f}")]
-                out.append("runs " + ("=" if len(same) == 3 else "differ: " + ",".join(
-                    f for f in ("ram.bin", "csv", "chain.bin") if f not in same)))
+                fields = [f for f in ("ram.bin", "csv", "chain.bin", "gs.bin") if f"{rate}.{f}" in run1]
+                same = [f for f in fields if run1.get(f"{rate}.{f}") == cur.get(f"{rate}.{f}")]
+                out.append("runs " + ("=" if len(same) == len(fields) else "differ: " + ",".join(
+                    f for f in fields if f not in same)))
             v = verdicts[now].get(f"{case} {rate}")
             if v:
                 out.append("snap " + ("=" if v.startswith("same") else v.split("(")[0].replace("DIFFERS from the previous build in ", "!= ").strip()))
             line = "  ".join(out)
-            if any(o.startswith(("ram !=", "csv !=", "chain !=")) for o in out):
+            if any(o.startswith(("ram !=", "csv !=", "chain !=", "gs !=")) for o in out):
                 moved += 1
             print(f"{case[:48]:48} {rate}  {line}")
     print()
+    drawlists, stale_drawlists = batch_files(cases, "drawlist.txt")
+    if drawlists:
+        t, notes = drawlist_totals(drawlists)
+        g = lambda k: t.get(k, 0)
+        share = 100.0 * g("bytes") / g("chainbytes") if g("chainbytes") else 0.0
+        print(f"draw list shadow ({len(drawlists)} replays): registered {g('registered')}, walked {g('found')}, "
+              f"never walked {g('unseen')}, head changed {g('tagchanged')}, table full {g('full')}")
+        print(f"  packets {g('segments')} (unclosed {g('unclosed')}), {share:.1f}% of the VIF1 chain bytes; "
+              f"VIF commands on the edges: ok {g('parse-ok')}, fail {g('parse-fail')}"
+              f"{'  <-- PARSE FAILURES' if g('parse-fail') or g('unclosed') else ''}")
+        print(f"  bytes in RAM = the walker's copy: job start {g('live-start-same')} same / {g('live-start-differ')} differ, "
+              f"job end {g('live-end-same')} same / {g('live-end-differ')} differ"
+              f"{'  <-- DIFFER' if g('live-start-differ') or g('live-end-differ') else ''}")
+        print(f"  ops: MSCAL {g('ops-mscal')}, MSCNT {g('ops-mscnt')}, MPG {g('ops-mpg')} (packets without one "
+              f"{g('ops-nompg')}), DIRECT {g('ops-direct')}, UNPACK {g('ops-unpack')}; unpack before STCYCL "
+              f"{g('parse-unpackbeforecycle')}, masked {g('parse-maskedunpacks')}")
+        micro = sorted((k.split()[1], v) for k, v in t.items() if k.startswith("microcode "))
+        if micro:
+            print("  microcode uploads (source: count): " + ", ".join(f"{k}: {v}" for k, v in micro))
+        for n in notes:
+            print("  " + n)
+        if stale_drawlists:
+            print(f"  ({stale_drawlists} older .drawlist.txt left out)")
+        print()
     totals = {}
     for p in natives:
         for line in open(p, encoding="utf-8", errors="replace"):
@@ -215,7 +289,7 @@ def main():
     if stale_natives:
         print(f"  ({stale_natives} older .native.txt left out: an earlier batch's)")
     print()
-    print(f"{moved} case/rate lines with ram, csv or chain != the reference")
+    print(f"{moved} case/rate lines with ram, csv, chain or gs != the reference")
     print("(csv ~ = differs but this build's own two runs differ too: host-timing columns; a few snap words per case")
     print(" and single noisy chains are usual; a block of ~1000 words or chains from a frame on is not)")
 

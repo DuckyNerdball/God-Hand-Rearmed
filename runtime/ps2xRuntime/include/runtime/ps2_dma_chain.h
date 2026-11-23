@@ -8,6 +8,7 @@
 // registers left behind are exactly the old walker's (tools/dma/chain_walk_check.cpp runs both on K's RAM captures).
 
 #include "runtime/ps2_byte_buffer.h"
+#include "runtime/ps2_listed_packets.h"
 #include "runtime/ps2_memory.h"
 
 #include <cstdint>
@@ -40,11 +41,21 @@ namespace ps2x::dma
     // backing, where it returns the address itself for everything below (addresses under 0x20000000 that are not the
     // scratchpad's are taken as physical). tie = CHCR.TIE, tagData = TTE on a VIF channel (each tag's upper 64 bits go
     // in front of its payload). Returns false if the chain looped or had no end (the caller drops it).
+    // Step b (ps2_listed_packets.h): with a lookup, the chain's first tag and every NEXT tag's target outside a listed
+    // packet are asked whether they start one; each listed packet gets a mark (its byte range in the chain, up to and with
+    // its tail tag). The walk itself (bytes, order, registers) is the same with or without.
     template <typename Translate>
     bool walkChain(ChainWalk &w, bool tie, bool tagData, const uint8_t *rdram, const uint8_t *scratchpad,
-                   Translate &&translate, std::vector<ChainPiece> &pieces, size_t &bytesOut)
+                   Translate &&translate, std::vector<ChainPiece> &pieces, size_t &bytesOut,
+                   ps2x::listed::Lookup lookup = nullptr, std::vector<ps2x::listed::Mark> *marks = nullptr)
     {
         pieces.clear();
+        if (!marks)
+            lookup = nullptr;
+        else
+            marks->clear();
+        bool headNext = lookup != nullptr; // ask about the next tag: the chain's first, then NEXT targets
+        int open = -1;                     // the listed packet being walked (index into marks)
         size_t total = 0u;
         auto add = [&](const uint8_t *src, uint32_t len)
         {
@@ -124,6 +135,16 @@ namespace ps2x::dma
             const uint32_t addr = static_cast<uint32_t>((tag >> 32) & 0x7FFFFFFF);
             lastTagUpper = static_cast<uint32_t>((tag >> 16) & 0xFFFFu);
             ++tagsProcessed;
+            if (headNext)
+            {
+                headNext = false;
+                uint32_t tail = 0u;
+                if (open < 0 && lookup(currentTagAddr, tag, tail))
+                {
+                    marks->push_back(ps2x::listed::Mark{currentTagAddr, tail, static_cast<uint32_t>(total), 0u, false});
+                    open = static_cast<int>(marks->size()) - 1;
+                }
+            }
 
             uint32_t dataAddr = 0;
             bool hasPayload = (tagQwc > 0);
@@ -207,6 +228,14 @@ namespace ps2x::dma
 
             if (hasPayload)
                 appendData(dataAddr, tagQwc);
+            if (open >= 0 && currentTagAddr == (*marks)[open].tail)
+            {
+                (*marks)[open].end = static_cast<uint32_t>(total);
+                (*marks)[open].closed = true;
+                open = -1;
+            }
+            if (lookup && id == 2u && open < 0)
+                headNext = true;
             if (irq && tie)
                 endChain = true;
             if (endChain)

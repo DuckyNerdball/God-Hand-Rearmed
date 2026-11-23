@@ -2,6 +2,7 @@
 
 #include "ps2x/state_io.h"
 #include "runtime/ps2_byte_buffer.h"
+#include "runtime/ps2_listed_packets.h"
 
 #include <chrono>
 #include <cstdint>
@@ -22,7 +23,23 @@ namespace ps2x::asyncvif
     {
         ItemKind kind = ItemKind::Vif1;
         ps2x::ByteBuffer data;
+        ps2x::listed::Segments listed; // step b: the draw list's packets inside data (dev shadow only)
     };
+
+    // Dev tooling, nothing in play (claude/native-next.md rung 3 step b). ListedObserver: for each VIF1 item that carries
+    // listed packets, on the VU worker, before the job's items run (phase 0) and after them (phase 1); data = the
+    // gathered chain. GifObservers (gs.bin, the GS-input digest): packet = every packet the VU worker hands the GIF stage
+    // (all paths, in the order the GS gets them; path = GifPathId); jobEnd = once a job is done, with the tag jobTag()
+    // gave on the EE thread when the job was queued. nullptr = off.
+    using ListedObserver = void (*)(const ps2x::listed::Segments &listed, const uint8_t *data, size_t size, int phase);
+    void setListedObserver(ListedObserver observer);
+    struct GifObservers
+    {
+        uint32_t (*jobTag)();
+        void (*packet)(const uint8_t *data, uint32_t size, int path);
+        void (*jobEnd)(uint32_t tag);
+    };
+    void setGifObservers(const GifObservers *observers);
 
     void setDefaultEnabled(bool enabled);
     void setHostPacingDefault(bool enabled);

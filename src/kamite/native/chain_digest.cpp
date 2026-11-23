@@ -3,6 +3,7 @@
 #if !defined(KAMITE_RELEASE)
 
 #include "kamite/test_mode.h"
+#include "runtime/ps2_async_vif.h"
 #include "runtime/ps2_dma_chain.h"
 
 #define XXH_INLINE_ALL
@@ -87,8 +88,63 @@ namespace kamite::native::chain_digest
         }
     }
 
+    namespace
+    {
+        // ---- gs.bin: the GS-input digest (rung 3 step b, claude/native-next.md) ----------------------------------------
+        // Every packet the VU worker hands the GIF stage (asyncvif::GifObservers: all GIF paths, in the GS's order),
+        // hashed per job; a job counts when the EE queued it during a replay frame (the tag). The VU worker calls packet /
+        // jobEnd (one thread), so the running hash needs no lock; the file does.
+        std::string g_gsPath;
+        std::FILE *g_gsFile = nullptr;
+        bool g_gsFailed = false;
+        XXH3_state_t g_gsState;
+        uint32_t g_gsPackets = 0u;
+
+        uint32_t gsJobTag() { return test_mode::replayFrame(); }
+        void gsPacket(const uint8_t *data, uint32_t size, int path)
+        {
+            if (g_gsPackets++ == 0u)
+                XXH3_64bits_reset(&g_gsState);
+            const uint32_t head[2] = {size, static_cast<uint32_t>(path)};
+            XXH3_64bits_update(&g_gsState, head, sizeof(head));
+            XXH3_64bits_update(&g_gsState, data, size);
+        }
+        void gsJobEnd(uint32_t tag)
+        {
+            const uint32_t packets = g_gsPackets;
+            g_gsPackets = 0u;
+            if (packets == 0u || tag == test_mode::kReplayIdle)
+                return;
+            const uint64_t hash = XXH3_64bits_digest(&g_gsState);
+            const uint32_t record[4] = {tag, packets, static_cast<uint32_t>(hash), static_cast<uint32_t>(hash >> 32)};
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (!g_gsFile)
+            {
+                if (g_gsFailed || g_gsPath.empty())
+                    return;
+                g_gsFile = std::fopen(g_gsPath.c_str(), "wb");
+                if (!g_gsFile)
+                {
+                    g_gsFailed = true;
+                    std::fprintf(stderr, "[native] gs digest: cannot write %s\n", g_gsPath.c_str());
+                    return;
+                }
+                std::fwrite("GHRGSD1\0", 1, 8, g_gsFile);
+            }
+            std::fwrite(record, sizeof(record), 1, g_gsFile);
+        }
+        const ps2x::asyncvif::GifObservers g_gsObservers{&gsJobTag, &gsPacket, &gsJobEnd};
+    }
+
     void begin(const char *outputBase)
     {
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_gsPath = std::string(outputBase) + ".gs.bin";
+            std::remove(g_gsPath.c_str());
+        }
+        ps2x::asyncvif::setGifObservers(&g_gsObservers);
+        std::fprintf(stderr, "[native] gs digest: %s\n", g_gsPath.c_str());
         std::lock_guard<std::mutex> lock(g_mutex);
         g_path = std::string(outputBase) + ".chain.bin";
         std::remove(g_path.c_str()); // a previous run's (Replay-Cases.cmd deletes it too)
@@ -108,7 +164,13 @@ namespace kamite::native::chain_digest
     {
         ps2x::dma::setChainObserver(nullptr);
         ps2x::dma::setChainPiecesObserver(nullptr);
+        ps2x::asyncvif::setGifObservers(nullptr);
         std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_gsFile)
+        {
+            std::fclose(g_gsFile);
+            g_gsFile = nullptr;
+        }
         if (g_file)
         {
             std::fclose(g_file);

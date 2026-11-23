@@ -13,6 +13,7 @@
 
 #include "gs/ps2_gif_arbiter.h"
 #include "ps2_byte_buffer.h"
+#include "ps2_listed_packets.h"
 #if defined(_MSC_VER)
 #include <intrin.h>
 #elif defined(USE_SSE2NEON)
@@ -427,6 +428,7 @@ public:
         uint32_t srcAddr = 0;
         uint32_t qwc = 0;
         ps2x::ByteBuffer chainData;
+        ps2x::listed::Segments listed; // the draw list's packets in chainData (dev shadow; not in save states)
     };
     std::vector<PendingTransfer> m_pendingGifTransfers;
     std::vector<PendingTransfer> m_pendingVif0Transfers;
