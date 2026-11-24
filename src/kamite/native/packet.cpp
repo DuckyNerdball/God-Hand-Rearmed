@@ -1456,8 +1456,13 @@ namespace kamite::native::packet
                     {
                         const uint32_t tail = link.tail; // both RAM offsets (the registry masks heads)
                         const uint64_t head = e::read64(env, off);
+                        // Tag_set_scr's node queue (func_0014B810, the caller of 0x31A650 at 0x14B8CC) stays copied:
+                        // electricity_check's two node packets there are rewritten while the VU reads them (K's 14:41
+                        // Twice, Nov 24: +0x30 for 64 B, one half each, queued once a frame), writer not found yet;
+                        // rung 3 step b3 B (the native Tag_set_scr) looks for it.
+                        const bool scenery = draw_list::g_queueCaller >= 0x14B810u && draw_list::g_queueCaller < 0x14B918u;
                         draw_list::listPackets(e::read32(env, halfOff), &off, &tail, &head, 1u,
-                                               draw_list::Source::Queue);
+                                               scenery ? draw_list::Source::Shadow : draw_list::Source::Queue);
                     }
                 }
         }
