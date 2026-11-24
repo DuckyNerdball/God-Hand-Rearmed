@@ -1481,7 +1481,9 @@ namespace kamite::native::packet
         constexpr uint32_t kQueueModel = 0x14C5A0u;
         constexpr uint32_t kQueueModelFrame = 0x50u; // its frame (0x40) + 0x31A650's (0x10)
 
-        template <class Env>
+        // cModel_queuePacket 0x14C6B8 (b3 B, decomp src/cod/00149be8.c, matched C: the same function as 0x14C5A0, its
+        // getMeshPtr call returning to 0x14C6FC) runs this with MeshRa = 0x14C6FC.
+        template <class Env, uint32_t MeshRa = 0x14C5D4u>
         bool queueModel(Env &env, R5900Context *ctx)
         {
             if (!env.atEnd)
@@ -1530,12 +1532,12 @@ namespace kamite::native::packet
                  e::overlaps(q.plan.tail, 8u, stackTop, kQueueModelFrame)))
                 return false;
 
-            // cModel_getMeshPtr's entry observers, with the context they'd see (a1 = 0, ra = 0x14C5D4, sp - 0x40)
+            // cModel_getMeshPtr's entry observers, with the context they'd see (a1 = 0, ra = MeshRa, sp - 0x40)
             env.call();
             {
                 const uint64_t ra = e::u64(ctx, e::ra);
                 e::setLow64(ctx, e::a1, 0u);
-                e::setS32(ctx, e::ra, 0x14C5D4u);
+                e::setS32(ctx, e::ra, MeshRa);
                 e::setS32(ctx, e::sp, sp - 0x40u);
                 ctx->pc = kGetMeshPtr;
                 env.observe(kGetMeshPtr, ctx);
@@ -1676,6 +1678,16 @@ namespace kamite::native::packet
             CountdownPlan p;
             if (!countdownPlan(env, node, idx, p))
                 return false;
+            // b3 B's writer probe (dev replays): a change to the packet of the half the game is not building (the one our
+            // VU thread may still read), named by the caller (cObj_setMeshValue / objScroll_Set_test write both halves)
+            if constexpr (std::is_same_v<Env, RealEnv>)
+                if (draw_list::g_probe)
+                {
+                    uint32_t parity;
+                    if (plainRam(model::kFrameParity, 4u, parity) && (e::read32(env, parity) & 1u) != (idx & 1u) &&
+                        e::read64(env, p.target) != e::u64(ctx, e::a1))
+                        draw_list::noteRewrite(p.target - 0x30u, e::u32(ctx, e::ra));
+                }
             countdownWrite(env, p, e::u64(ctx, e::a1));
             e::setS32(ctx, e::v0, idx * 0xB0u + node); // mult's low word + addu
             returnToCaller(ctx);
@@ -1919,6 +1931,7 @@ namespace kamite::native::packet
             void w16(uint32_t a, uint16_t v) { write(a, 2u, &v); }
             void w32(uint32_t a, uint32_t v) { write(a, 4u, &v); }
             void w64(uint32_t a, uint64_t v) { write(a, 8u, &v); }
+            void writeExtra(uint32_t a, uint64_t v) { w64(a, v); } // BlockTxn's interface (the bodies run on either)
             // lq / sq: the address's low 4 bits cleared
             void lq(uint32_t a, uint8_t (&v)[16]) { read(a & ~0xFu, 16u, v); }
             void sq(uint32_t a, const uint8_t (&v)[16]) { write(a & ~0xFu, 16u, v); }
@@ -3630,6 +3643,96 @@ namespace kamite::native::packet
                           floatBits(x.mul(lane<2>(v), inv)), laneBits<3>(v));
         }
 
+        // The colour of a node's lighting block (func_00154240 / func_00153B00's frame sp+0..0xC): tint.xyz * the node's
+        // +0x3A0..3A8, tint.w * node +0x3AC * cModel_alpha's three byte quotients.
+        template <class T>
+        Vec4 nodeColour(T &t, ExactOps &x, uint32_t self, uint32_t node)
+        {
+            const float k255 = 255.0f;
+            const float qa = x.div(fpuFromSmallWord(t.u8(self + 0x2B6u)), k255);
+            float w = x.mul(txnFloat(t, self + kModelTint), txnFloat(t, node + 0x3ACu));
+            const float qb = x.div(fpuFromSmallWord(t.u8(self + 0x2B7u)), k255);
+            const float qc = x.div(fpuFromSmallWord(t.u8(self + 0x2BCu)), k255);
+            const float cx = x.mul(txnFloat(t, self + 0x240u), txnFloat(t, node + 0x3A0u));
+            w = x.mul(w, qa);
+            const float cy = x.mul(txnFloat(t, self + 0x244u), txnFloat(t, node + 0x3A4u));
+            w = x.mul(w, qb);
+            const float cz = x.mul(txnFloat(t, self + 0x248u), txnFloat(t, node + 0x3A8u));
+            w = x.mul(w, qc);
+            return bitsOf(floatBits(cx), floatBits(cy), floatBits(cz), floatBits(w));
+        }
+        // func_002D8008(set, block +0x10, block +0x50, sp +0x10, colour) as func_00154240 / 00153B00 call it (the
+        // self +0xF0 qword copied to the caller's frame first): +0x4C = 1.0, +0x80 = MulVector(set +0x30, colour).
+        template <class T>
+        void light2D8008(T &t, ExactOps &x, uint32_t self, uint32_t block, Vec4 colour)
+        {
+            (void)txnQuad(t, t.u32(self + 0xF0u)); // copied to its frame (func_002D8008 doesn't read it)
+            t.env.call(); // func_002D8008
+            t.w32(block + 0x4Cu, 0x3F800000u);
+            t.env.call(); // its sceVu0MulVector into its frame
+            const Vec4 p = x.vu<15>(mul(txnQuad(t, kLightSet + 0x30u), colour));
+            txnPut4(t, p, block + 0x80u);
+        }
+        // func_002D7E50(set, self, block +0x10, block +0x50, self +0xF0, colour, self +0x2CC) as func_00154240 / 00153B00
+        // call it: +0x10 = NormalLightMatrix of the set's three directions with row 3 = colour, +0x50 = the set's colours,
+        // row 3 = set +0x40, clamped 0..1.
+        template <class T>
+        void light2D7E50(T &t, ExactOps &x, uint32_t self, uint32_t block, Vec4 colour)
+        {
+            auto &env = t.env;
+            (void)t.u32(self + 0xF0u); // t0, t2: loaded, unused by func_002D7E50
+            (void)t.u8(self + 0x2CCu);
+            env.call(); // func_002D7E50(set, model, block +0x10, block +0x50, ..., colour)
+            env.call(); // its sceVu0NormalLightMatrix(block +0x10, the set's three directions)
+            const uint32_t out = block + 0x10u;
+            for (uint32_t k = 0; k < 3u; ++k)
+            {
+                env.call(); // ScaleVector(-1)
+                const Vec4 v = x.vu<15>(mul(txnQuad(t, kLightSet + 0x161A0u + 0x10u * k), splat(registerConstant(-1.0f))));
+                env.call(); // Normalize
+                const float r = x.root(v);
+                const float q = x.div(registerConstant(1.0f), r); // VDIV Q = vf0.w / (0 + root)
+                const Vec4 n = blend<7>(splat(0.0f), x.vu<7>(mul(v, splat(q))));
+                txnStoreQuad(t, out + 0x10u * k, n);
+            }
+            t.w32(out + 0x30u, 0u);
+            t.w32(out + 0x3Cu, 0x3F800000u);
+            t.w32(out + 0x38u, 0u);
+            t.w32(out + 0x34u, 0u);
+            env.call(); // TransposeMatrix(out, out)
+            {
+                uint32_t m[4][4];
+                for (uint32_t r = 0; r < 4u; ++r)
+                {
+                    alignas(16) uint8_t q[16];
+                    t.lq(out + 0x10u * r, q);
+                    std::memcpy(m[r], q, 16);
+                }
+                for (uint32_t r = 0; r < 4u; ++r)
+                {
+                    alignas(16) uint8_t q[16];
+                    const uint32_t row[4] = {m[0][r], m[1][r], m[2][r], m[3][r]};
+                    std::memcpy(q, row, 16);
+                    t.sq(out + 0x10u * r, q);
+                }
+            }
+            txnPut4(t, colour, out + 0x30u); // the ambient row
+            const uint32_t colours = block + 0x50u;
+            txnCopy4(t, kLightSet + 0x161D0u, colours);
+            txnCopy4(t, kLightSet + 0x161E0u, colours + 0x10u);
+            txnCopy4(t, kLightSet + 0x161F0u, colours + 0x20u);
+            txnCopy4(t, kLightSet + 0x40u, colours + 0x30u);
+            Vec4 rows[4];
+            rows[3] = txnQuad(t, colours + 0x30u);
+            for (uint32_t r = 0; r < 3u; ++r)
+                rows[r] = txnQuad(t, colours + 0x10u * r);
+            rows[3] = blend<7>(rows[3], x.vu<7>(mul(rows[3], splat(registerConstant(1.0f)))));
+            for (Vec4 &row : rows)
+                row = vuMin(vuMax(row, splat(0.0f)), splat(1.0f));
+            for (uint32_t r = 0; r < 4u; ++r)
+                txnStoreQuad(t, colours + 0x10u * r, rows[r]);
+        }
+
         // The body on a caller's store (its BlockTxn below, or cModel_Tag_set_rate's Journal): false = decline. vf0 must
         // be (0, 0, 0, 1) (the caller checks).
         template <class T>
@@ -3647,18 +3750,8 @@ namespace kamite::native::packet
             t.setBlock(block);
 
             // the colour (its frame's sp+0..0xC)
-            const float k255 = 255.0f;
-            const float qa = x.div(fpuFromSmallWord(t.u8(self + 0x2B6u)), k255);
-            float w = x.mul(txnFloat(t, self + kModelTint), txnFloat(t, node + 0x3ACu));
-            const float qb = x.div(fpuFromSmallWord(t.u8(self + 0x2B7u)), k255);
-            const float qc = x.div(fpuFromSmallWord(t.u8(self + 0x2BCu)), k255);
-            const float cx = x.mul(txnFloat(t, self + 0x240u), txnFloat(t, node + 0x3A0u));
-            w = x.mul(w, qa);
-            const float cy = x.mul(txnFloat(t, self + 0x244u), txnFloat(t, node + 0x3A4u));
-            w = x.mul(w, qb);
-            const float cz = x.mul(txnFloat(t, self + 0x248u), txnFloat(t, node + 0x3A8u));
-            w = x.mul(w, qc);
-            const Vec4 colour = bitsOf(floatBits(cx), floatBits(cy), floatBits(cz), floatBits(w));
+            const Vec4 colour = nodeColour(t, x, self, node);
+            const float w = bitsFloat(laneBits<3>(colour));
             constexpr uint32_t kFixedRow = 0x3BD880u, kFixedLast = 0x3BD890u, kFixedAlt = 0x3BD870u;
 
             if (flags & 0x800000u)
@@ -3685,68 +3778,9 @@ namespace kamite::native::packet
                 txnCopy4(t, kFixedRow, block + 0x30u);
             }
             else if (t.u32(self + 0x250u) & 0x800000u)
-            {
-                (void)txnQuad(t, t.u32(self + 0xF0u)); // copied to its frame (func_002D8008 doesn't read it)
-                env.call(); // func_002D8008
-                t.w32(block + 0x4Cu, 0x3F800000u);
-                env.call(); // its sceVu0MulVector into its frame
-                const Vec4 p = x.vu<15>(mul(txnQuad(t, kLightSet + 0x30u), colour));
-                txnPut4(t, p, block + 0x80u);
-            }
+                light2D8008(t, x, self, block, colour);
             else
-            {
-                (void)t.u32(self + 0xF0u); // t0, t2: loaded, unused by func_002D7E50
-                (void)t.u8(self + 0x2CCu);
-                env.call(); // func_002D7E50(set, model, block +0x10, block +0x50, ..., colour)
-                env.call(); // its sceVu0NormalLightMatrix(block +0x10, the set's three directions)
-                const uint32_t out = block + 0x10u;
-                for (uint32_t k = 0; k < 3u; ++k)
-                {
-                    env.call(); // ScaleVector(-1)
-                    const Vec4 v = x.vu<15>(mul(txnQuad(t, kLightSet + 0x161A0u + 0x10u * k), splat(registerConstant(-1.0f))));
-                    env.call(); // Normalize
-                    const float r = x.root(v);
-                    const float q = x.div(registerConstant(1.0f), r); // VDIV Q = vf0.w / (0 + root)
-                    const Vec4 n = blend<7>(splat(0.0f), x.vu<7>(mul(v, splat(q))));
-                    txnStoreQuad(t, out + 0x10u * k, n);
-                }
-                t.w32(out + 0x30u, 0u);
-                t.w32(out + 0x3Cu, 0x3F800000u);
-                t.w32(out + 0x38u, 0u);
-                t.w32(out + 0x34u, 0u);
-                env.call(); // TransposeMatrix(out, out)
-                {
-                    uint32_t m[4][4];
-                    for (uint32_t r = 0; r < 4u; ++r)
-                    {
-                        alignas(16) uint8_t q[16];
-                        t.lq(out + 0x10u * r, q);
-                        std::memcpy(m[r], q, 16);
-                    }
-                    for (uint32_t r = 0; r < 4u; ++r)
-                    {
-                        alignas(16) uint8_t q[16];
-                        const uint32_t row[4] = {m[0][r], m[1][r], m[2][r], m[3][r]};
-                        std::memcpy(q, row, 16);
-                        t.sq(out + 0x10u * r, q);
-                    }
-                }
-                txnPut4(t, colour, out + 0x30u); // the ambient row
-                const uint32_t colours = block + 0x50u;
-                txnCopy4(t, kLightSet + 0x161D0u, colours);
-                txnCopy4(t, kLightSet + 0x161E0u, colours + 0x10u);
-                txnCopy4(t, kLightSet + 0x161F0u, colours + 0x20u);
-                txnCopy4(t, kLightSet + 0x40u, colours + 0x30u);
-                Vec4 rows[4];
-                rows[3] = txnQuad(t, colours + 0x30u);
-                for (uint32_t r = 0; r < 3u; ++r)
-                    rows[r] = txnQuad(t, colours + 0x10u * r);
-                rows[3] = blend<7>(rows[3], x.vu<7>(mul(rows[3], splat(registerConstant(1.0f)))));
-                for (Vec4 &row : rows)
-                    row = vuMin(vuMax(row, splat(0.0f)), splat(1.0f));
-                for (uint32_t r = 0; r < 4u; ++r)
-                    txnStoreQuad(t, colours + 0x10u * r, rows[r]);
-            }
+                light2D7E50(t, x, self, block, colour);
             const uint32_t modelFlags = t.u32(self + 0x250u);
             if (modelFlags & 0x80000u)
                 txnCopy4(t, kFixedAlt, block + 0x80u);
@@ -4175,6 +4209,58 @@ namespace kamite::native::packet
             }
         };
 
+        // The fixed-camera pass's shared values (func_0014C7E8's halves, func_0014D0E8's pass): the reads (tanf's table,
+        // the camera's fov at +0x250, D_003C1190 / D_00586B88 / D_003C1180, self +0x130 / +0x134) and from them V (the
+        // ViewScreenMatrix with [0][0] / [1][1] negated), P and Q as func_0014C7E8's comment gives them. False: a read
+        // not plain RAM, or maths outside the exact range (decline).
+        struct FixedPass
+        {
+            Matrix vs, pm, qm;
+            int tanCalls = 0;
+        };
+        template <class Env>
+        bool fixedPassBody(MatricesReads<Env> &rd, ExactOps &x, uint32_t cam, uint32_t self, FixedPass &out)
+        {
+            Env &env = rd.env;
+            TanTable tt;
+            uint32_t tableOff;
+            if (!rd.keep(kTanTable, 52u, tableOff))
+                return false;
+            std::memcpy(tt.t, env.at(tableOff, 52u), 52u);
+            const float fov = rd.f32(cam + 592u);
+            const float f1190 = rd.f32(0x3C1190u), f6b88 = rd.f32(0x586B88u);
+            const int32_t i1180 = static_cast<int32_t>(rd.u32(0x3C1180u));
+            const float cxIn = rd.f32(self + 304u), cyIn = rd.f32(self + 308u);
+            if (!rd.ok || i1180 >= (1 << 24) || i1180 <= -(1 << 24))
+                return false;
+            // the halves' shared scalars (each half computes them the same way, from the same inputs)
+            const float a = x.div(x.mul(fov, bitsFloat(0x40490FDBu)), bitsFloat(0x43B40000u));
+            const float t = tanfBody(tt, x, a, out.tanCalls);
+            const float scrz = x.div(x.mul(x.div(f1190, f6b88), bitsFloat(0x3F000000u)), t);
+            const float ax = x.div(fpuFromSmallWord(i1180), bitsFloat(0x44200000u));
+            const float cx = x.add(cxIn, bitsFloat(0x45000000u)), cy = x.add(cyIn, bitsFloat(0x45000000u));
+            const float q = x.div(bitsFloat(0x43200000u), scrz);
+            const float p = negBits(x.div(bitsFloat(0x3E4CCCCDu), x.add(q, q)));
+            const float tenth = bitsFloat(0x3DCCCCCDu);
+            const float qx = x.div(x.mul(x.mul(scrz, ax), q), tenth);
+            const float qy = x.div(x.mul(x.mul(scrz, f6b88), q), tenth);
+            Matrix vs;
+            if (!viewScreenBody(x, scrz, ax, f6b88, cx, cy, registerConstant(1.0f), bitsFloat(0x477FFF00u), tenth,
+                                bitsFloat(0x44160000u), vs))
+                return false;
+            vs.r[0] = negLanes01(vs.r[0], 0);
+            vs.r[1] = negLanes01(vs.r[1], 1);
+            const uint32_t pb = floatBits(p);
+            const Matrix pm{{bitsOf(pb, 0u, 0u, 0u), bitsOf(0u, pb, 0u, 0u), bitsOf(0u, 0u, 0x3F800AECu, 0x3F800000u),
+                             bitsOf(0u, 0u, 0xBE4CD58Au, 0u)}};
+            const Matrix qm{{bitsOf(floatBits(qx), 0u, 0u, 0u), bitsOf(0u, floatBits(qy), 0u, 0u),
+                             bitsOf(0u, 0u, 0xC6FFFE00u, 0u), bitsOf(0x45000000u, 0x45000000u, 0x47000000u, 0x3F800000u)}};
+            out.vs = vs;
+            out.pm = pm;
+            out.qm = qm;
+            return true;
+        }
+
         // The body: reads through env (a fused caller's earlier writes are in RAM already), every check before the
         // first write, then put(offset, size, bytes) for the three spans and the cycles. False = decline (nothing put).
         // The caller checks vf0 = (0, 0, 0, 1) (the unit matrices, func_001503B8's frame come from it).
@@ -4202,42 +4288,15 @@ namespace kamite::native::packet
 
             if (flags & 0x1080000u)
             {
-                TanTable tt;
-                uint32_t tableOff;
-                if (!rd.keep(kTanTable, 52u, tableOff))
+                FixedPass fp;
+                if (!fixedPassBody(rd, x, cam, self, fp))
                     return false;
-                std::memcpy(tt.t, env.at(tableOff, 52u), 52u);
-                const float fov = rd.f32(cam + 592u);
-                const float f1190 = rd.f32(0x3C1190u), f6b88 = rd.f32(0x586B88u);
-                const int32_t i1180 = static_cast<int32_t>(rd.u32(0x3C1180u));
-                const float cxIn = rd.f32(self + 304u), cyIn = rd.f32(self + 308u);
                 const Matrix m128 = rd.rows(self + 128u);
                 const Matrix m0 = (flags & 0x1000000u) ? rd.rows(self) : Matrix{};
-                if (!rd.ok || i1180 >= (1 << 24) || i1180 <= -(1 << 24))
+                if (!rd.ok)
                     return false;
-                // the halves' shared scalars (each half computes them the same way, from the same inputs)
-                const float a = x.div(x.mul(fov, bitsFloat(0x40490FDBu)), bitsFloat(0x43B40000u));
-                int tanCalls = 0;
-                const float t = tanfBody(tt, x, a, tanCalls);
-                const float scrz = x.div(x.mul(x.div(f1190, f6b88), bitsFloat(0x3F000000u)), t);
-                const float ax = x.div(fpuFromSmallWord(i1180), bitsFloat(0x44200000u));
-                const float cx = x.add(cxIn, bitsFloat(0x45000000u)), cy = x.add(cyIn, bitsFloat(0x45000000u));
-                const float q = x.div(bitsFloat(0x43200000u), scrz);
-                const float p = negBits(x.div(bitsFloat(0x3E4CCCCDu), x.add(q, q)));
-                const float tenth = bitsFloat(0x3DCCCCCDu);
-                const float qx = x.div(x.mul(x.mul(scrz, ax), q), tenth);
-                const float qy = x.div(x.mul(x.mul(scrz, f6b88), q), tenth);
-                Matrix vs;
-                if (!viewScreenBody(x, scrz, ax, f6b88, cx, cy, registerConstant(1.0f), bitsFloat(0x477FFF00u), tenth,
-                                    bitsFloat(0x44160000u), vs))
-                    return false;
-                vs.r[0] = negLanes01(vs.r[0], 0);
-                vs.r[1] = negLanes01(vs.r[1], 1);
-                const uint32_t pb = floatBits(p);
-                const Matrix pm{{bitsOf(pb, 0u, 0u, 0u), bitsOf(0u, pb, 0u, 0u), bitsOf(0u, 0u, 0x3F800AECu, 0x3F800000u),
-                                 bitsOf(0u, 0u, 0xBE4CD58Au, 0u)}};
-                const Matrix qm{{bitsOf(floatBits(qx), 0u, 0u, 0u), bitsOf(0u, floatBits(qy), 0u, 0u),
-                                 bitsOf(0u, 0u, 0xC6FFFE00u, 0u), bitsOf(0x45000000u, 0x45000000u, 0x47000000u, 0x3F800000u)}};
+                const Matrix &vs = fp.vs, &pm = fp.pm, &qm = fp.qm;
+                const int tanCalls = fp.tanCalls;
                 for (int half = 0; half < 2; ++half)
                 {
                     if (!(flags & (half == 0 ? 0x80000u : 0x1000000u)))
@@ -4701,11 +4760,12 @@ namespace kamite::native::packet
 
         // func_0014C5A0(self, id) on the Journal (its own native plans first; here the writes are already in order)
         template <class Env>
-        void queueModelBody(Journal<Env> &t, R5900Context *ctx, uint32_t self, int64_t id, uint32_t sp)
+        void queueModelBody(Journal<Env> &t, R5900Context *ctx, uint32_t self, int64_t id, uint32_t sp,
+                            uint32_t meshRa = 0x14C5D4u)
         {
             const uint32_t parity = t.u32(model::kFrameParity) & 1u;
             t.env.call(); // jal cModel_getMeshPtr
-            observeMeshPtr(t.env, ctx, 0x14C5D4u, sp - 0x40u);
+            observeMeshPtr(t.env, ctx, meshRa, sp - 0x40u);
             const uint32_t node = t.u32(self + model::kMeshHead);
             const uint32_t flags = t.u32(node + model::kNodeDispFlags);
             const uint32_t start = t.u32(self + model::kPacket + parity * 4u);
@@ -5138,6 +5198,442 @@ namespace kamite::native::packet
             returnToCaller(ctx);
             return true;
         }
+
+        // ==== Rung 3 step b3 B (Nov 24, the b3-B chat): cModel_Tag_set_scr's subtree, function by function ==========
+        // claude/native-next.md "b3 B map". Each kRenderPath | kChargeAtEnd, registered unchecked (dev replays shadow
+        // them; play runs the originals) until K's build proves them; the fused Tag_set_scr follows (K, Nov 24).
+
+        inline bool ramOverlap(uint32_t a, uint32_t an, uint32_t b, uint32_t bn) // also true when either isn't plain RAM
+        {
+            uint32_t ao, bo;
+            if (!plainRam(a, an, ao) || !plainRam(b, bn, bo))
+                return true;
+            return e::overlaps(ao, an, bo, bn);
+        }
+        // sceVu0CopyMatrix(dst, src) (four lq, then four sq) and a matrix stored row by row, on a caller's store
+        template <class T>
+        void txnCopyMatrix(T &t, uint32_t src, uint32_t dst)
+        {
+            Vec4 m[4];
+            for (uint32_t r = 0; r < 4u; ++r)
+                m[r] = txnQuad(t, src + 0x10u * r);
+            for (uint32_t r = 0; r < 4u; ++r)
+                txnStoreQuad(t, dst + 0x10u * r, m[r]);
+        }
+        template <class T>
+        void txnStoreMatrix(T &t, uint32_t dst, const Matrix &m)
+        {
+            for (uint32_t r = 0; r < 4u; ++r)
+                txnStoreQuad(t, dst + 0x10u * r, m.r[r]);
+        }
+
+        // ---- func_0014D0E8: a scenery model's per-frame matrices (unmatched in the decomp at 59fb572; our C++ from the
+        // disassembly, its callees inline) ----------------------------------------------------------------------------
+        // void func_0014D0E8(cModel *self), called by cModel_Tag_set_scr. buf = self->[0x228 + 4 half] (func_0014C7E8's
+        // buffer), M = self +0x80 (the world matrix). cModel_getMeshPtr(self, 0)'s info +0x34 0x200000 (a view-space
+        // mesh): buf +0x10 = *D_005CAFF0, +0x50 = D_004A6900; else +0x10 = cam x M, +0x50 = D_004A6900 x M (inline VU0);
+        // +0x110 = D_004A6940; +0x90 = Unit. objFlags 0x80000: func_0014C7E8's fixed pass at z = 50 (fixedPassBody),
+        // every product times M: +0x10 = (V x C) x M, +0x50 = (P x C) x M, +0x110 = Q (the first products are dead then:
+        // not computed). Reads first, then the writes (declined when a write would land on a read, so the original's
+        // order of loads and stores can't show). A model without meshes declines (the original reads address 0x414).
+        constexpr uint32_t kScrMatrices = 0x14D0E8u;
+        constexpr uint32_t kScrMatricesFrame = 0x2C0u; // the same deepest callee chain as 0x14C7E8: kModelMatricesWindow
+
+        template <class Env, class Put>
+        bool scrMatricesBody(Env &env, uint32_t self, uint32_t stackLow, uint32_t window, Put &&put)
+        {
+            MatricesReads<Env> rd{env, stackLow, window};
+            ExactOps x;
+            int calls = 1, backs = 0; // the jal cModel_getMeshPtr (index 0: no walk)
+            const uint32_t idx = rd.u32(model::kFrameParity) & 1u;
+            const uint32_t buf = rd.u32(self + 0x228u + 4u * idx);
+            const uint32_t head = rd.u32(self + model::kMeshHead);
+            if (!rd.ok || head == 0u)
+                return false;
+            const uint32_t info = rd.u32(head + 0x414u);
+            const bool viewSpace = (rd.u32(info + 0x34u) & kMeshSpecial) != 0u;
+            const uint32_t cam = rd.u32(kViewPointer);
+            const uint32_t flags = rd.u32(self + kObjFlags);
+            const Matrix m = rd.rows(self + 0x80u);
+            const Matrix camRows = rd.rows(cam);
+            const Matrix g = rd.rows(0x4A6900u);
+            const Matrix h = rd.rows(0x4A6940u);
+            if (!rd.ok)
+                return false;
+            Matrix out10, out50, out110 = h;
+            calls += viewSpace ? 3 : 1; // sceVu0CopyMatrix x3 / x1
+            calls += 1;                 // sceVu0UnitMatrix(buf +0x90)
+            if (flags & 0x80000u)
+            {
+                FixedPass fp;
+                if (!fixedPassBody(rd, x, cam, self, fp))
+                    return false;
+                const Matrix c = fixedCamera(0);
+                Matrix vc, pc;
+                if (!mulMatrixRows(fp.vs, c, vc) || !mulMatrixRows(vc, m, out10) || !mulMatrixRows(fp.pm, c, pc) ||
+                    !mulMatrixRows(pc, m, out50))
+                    return false;
+                out110 = fp.qm;
+                // CameraMatrix 1 + 7, tanf x2, ViewScreenMatrix 1 + 3, MtxMultiply 2, CopyMatrix, MtxCopy 2, UnitMatrix,
+                // MulMatrix, InversMatrix, UnitMatrix, CopyMatrix (0x14C7E8's half); three MulMatrix loops
+                calls += 22 + 2 * (1 + fp.tanCalls);
+                backs += 3 * kMulMatrixBacks;
+            }
+            else if (viewSpace)
+                out10 = camRows, out50 = g;
+            else if (!mulMatrixRows(camRows, m, out10) || !mulMatrixRows(g, m, out50))
+                return false;
+            uint32_t loOff, hiOff;
+            if (!x.ok || (buf & 0xFu) != 0u || !rd.span(buf + 0x10u, 0xC0u, loOff) || !rd.span(buf + 0x110u, 0x40u, hiOff))
+                return false;
+            for (int i = 0; i < rd.count; ++i)
+                if (e::overlaps(rd.at[i], rd.size[i], loOff, 0xC0u) || e::overlaps(rd.at[i], rd.size[i], hiOff, 0x40u))
+                    return false;
+            const Matrix unit = unitMatrix();
+            alignas(16) uint8_t lo[0xC0], hi[0x40];
+            for (int k = 0; k < 4; ++k)
+            {
+                store(lo + 16 * k, out10.r[k]);
+                store(lo + 0x40 + 16 * k, out50.r[k]);
+                store(lo + 0x80 + 16 * k, unit.r[k]);
+                store(hi + 16 * k, out110.r[k]);
+            }
+            put(loOff, 0xC0u, lo);
+            put(hiOff, 0x40u, hi);
+            for (int i = 0; i < calls; ++i)
+                env.call();
+            for (int i = 0; i < backs; ++i)
+                env.checkpoint(32u);
+            return true;
+        }
+
+        template <class Env>
+        bool scrMatrices(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackLow;
+            // vf0 = (0, 0, 0, 1): the unit matrices come from it
+            if (!e::vf0Constant(ctx) || (sp & 0xFu) != 0u ||
+                !plainRam(sp - kModelMatricesWindow, kModelMatricesWindow, stackLow))
+                return false;
+            // the writes held until cModel_getMeshPtr's entry observers ran (its call comes before them)
+            struct Pending
+            {
+                uint32_t at[2], size[2];
+                alignas(16) uint8_t bytes[2][0xC0];
+                int count = 0;
+            } pending;
+            if (!scrMatricesBody(env, e::u32(ctx, e::a0), stackLow, kModelMatricesWindow,
+                                 [&pending](uint32_t off, uint32_t size, const uint8_t *bytes) {
+                                     pending.at[pending.count] = off;
+                                     pending.size[pending.count] = size;
+                                     std::memcpy(pending.bytes[pending.count++], bytes, size);
+                                 }))
+                return false;
+            observeMeshPtr(env, ctx, 0x14D160u, sp - kScrMatricesFrame);
+            for (int i = 0; i < pending.count; ++i)
+                std::memcpy(env.at(pending.at[i], pending.size[i]), pending.bytes[i], pending.size[i]);
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // ---- func_00153B00: a scenery node's lighting block (unmatched at 59fb572; our C++ from the disassembly) -------
+        // void func_00153B00(cModel *self, cModelNode *node), called by cModel_Tag_set_scr for every mesh. func_00154240's
+        // twin on the same block (node + 0x160 + 0xD0 half; skips a hidden node): first +0x90 = CopyMatrix(D_004A6940);
+        // the same colour; dispFlags 0x800000 or D_00747A38 0x800: +0x80 = colour; else model 0x800000: func_002D7E50
+        // (func_00154240 calls func_002D8008 there), else func_002D8008; model 0x80000: +0x80 = colour; info +0x34 0x200000
+        // (view space): +0x50 / +0x58 = the eye (cam +0x210, 8 + 4 bytes), +0x10 = CopyMatrix(self +0x80); layerForce
+        // (+0x2BE) not 0x18 / 0x1C: +0x70 = (node +0x38C, +0x390, 0, 1); dispFlags 0x8000: +0x10 = Unit. The fog by self
+        // +0x2BD: 0: dispFlags 0x200000 or D_00747A2C 0x1000: +0x1C / +0x2C = constants; else the first of dispFlags
+        // 0x20000 / 2 / 0x40000 / 0x10000000 picks a light-set range and colour (fogPair), none: func_002D81A0; 1 / 2:
+        // D_003C3D28 / 3D30's colour with D_003C3D20 / 24's range (fogFixed). Writes: the block and one word of the
+        // model's packet (+0x30): a BlockTxn. Void.
+        constexpr uint32_t kScrLighting = 0x153B00u;
+        // its frame (0x90) + func_002D7E50's (0x50) + sceVu0NormalLightMatrix's (0x60): the deepest chain
+        constexpr uint32_t kScrLightingWindow = 0x90u + 0x50u + 0x60u;
+        constexpr uint32_t kFixedFogNear = 0x3C3D20u, kFixedFogFar = 0x3C3D24u; // D_003C3D20 / 24
+
+        // func_002D81A0's range part, also fogFixed's: +out1C = (near / (far - near) + 1) * 255, then (both read again)
+        // +out2C = -255 / (far - near)
+        template <class T>
+        void fogLinear(T &t, ExactOps &x, uint32_t nearAt, uint32_t farAt, uint32_t out1C, uint32_t out2C)
+        {
+            const float n = txnFloat(t, nearAt), f = txnFloat(t, farAt);
+            float r = x.div(n, x.sub(f, n));
+            r = x.add(r, 1.0f);
+            t.w32(out1C, floatBits(x.mul(r, 255.0f)));
+            const float n2 = txnFloat(t, nearAt), f2 = txnFloat(t, farAt);
+            t.w32(out2C, floatBits(x.div(-255.0f, x.sub(f2, n2))));
+        }
+        // func_002D81A0(set, out, colourOut): *colourOut = the set's fog colour +0x16158 / 5C / 60 (cvt.w.s, 0 below 0)
+        // packed 0 / 8 / 16; out +0xC / +0x1C = fogLinear(set +0x16150, +0x16154)
+        template <class T>
+        void fog2D81A0(T &t, ExactOps &x, uint32_t set, uint32_t out, uint32_t colourOut)
+        {
+            uint64_t ch[3];
+            for (uint32_t k = 0; k < 3u; ++k)
+            {
+                const uint32_t c = t.u32(set + 0x16158u + 4u * k);
+                ch[k] = e::fpuKey(c) < e::fpuKey(0u) ? 0u : static_cast<uint32_t>(fpuToWord(bitsFloat(c)));
+            }
+            t.writeExtra(colourOut, ch[0] | ch[1] << 8 | ch[2] << 16);
+            fogLinear(t, x, set + 0x16150u, set + 0x16154u, out + 0xCu, out + 0x1Cu);
+        }
+        // func_00153B00's fog from a light-set range (+range, +range + 4) and colour bytes (+bytes): packet +0x30 = the
+        // bytes, block +0x2C = -255 / (far - near), +0x1C = near / (far - near) * 255 + 255. The code first stores two
+        // other quotients to +0x2C / +0x1C and overwrites them (not computed here): a later read landing there would
+        // have seen them, so that declines (never in practice).
+        template <class T>
+        bool fogPair(T &t, ExactOps &x, uint32_t self, uint32_t block, uint32_t half, uint32_t range, uint32_t bytes)
+        {
+            const float n = txnFloat(t, kLightSet + range), f = txnFloat(t, kLightSet + range + 4u);
+            const float d = x.sub(f, n);
+            const float q = x.div(n, d);
+            const float inv = x.div(-255.0f, d);
+            const float fog = x.add(x.mul(q, 255.0f), 255.0f);
+            const uint32_t slot = self + model::kPacket + half * 4u;
+            if (ramOverlap(kLightSet + bytes, 3u, block + 0x1Cu, 0x14u) || ramOverlap(slot, 4u, block + 0x1Cu, 0x14u))
+                return t.ok = false;
+            const uint64_t b1 = t.u8(kLightSet + bytes + 1u), b2 = t.u8(kLightSet + bytes + 2u), b0 = t.u8(kLightSet + bytes);
+            t.writeExtra(t.u32(slot) + 0x30u, b0 | b1 << 8 | b2 << 16);
+            t.w32(block + 0x2Cu, floatBits(inv));
+            t.w32(block + 0x1Cu, floatBits(fog));
+            return true;
+        }
+        template <class T>
+        void fogFixed(T &t, ExactOps &x, uint32_t self, uint32_t block, uint32_t half, uint32_t colourAt)
+        {
+            const uint64_t b0 = t.u8(colourAt), b1 = t.u8(colourAt + 1u), b2 = t.u8(colourAt + 2u);
+            t.writeExtra(t.u32(self + model::kPacket + half * 4u) + 0x30u, b0 | b1 << 8 | b2 << 16);
+            fogLinear(t, x, kFixedFogNear, kFixedFogFar, block + 0x1Cu, block + 0x2Cu);
+        }
+
+        // The body on a caller's store (its BlockTxn below, or the fused Tag_set_scr's Journal): false = decline. vf0
+        // must be (0, 0, 0, 1) (the caller checks).
+        template <class T>
+        bool scrLightingBody(T &t, uint32_t self, uint32_t node)
+        {
+            auto &env = t.env;
+            ExactOps x;
+            const uint32_t flags = t.u32(node + model::kNodeDispFlags);
+            const uint32_t half = t.u32(model::kFrameParity) & 1u;
+            if (!t.ok)
+                return false;
+            if (flags & 1u)
+                return true;
+            const uint32_t block = node + 0x160u + half * 0xD0u;
+            t.setBlock(block);
+            env.call(); // sceVu0CopyMatrix(block +0x90, D_004A6940)
+            txnCopyMatrix(t, 0x4A6940u, block + 0x90u);
+            const Vec4 colour = nodeColour(t, x, self, node);
+
+            if ((t.u32(node + model::kNodeDispFlags) & 0x800000u) || (t.u32(0x747A38u) & 0x800u))
+                txnPut4(t, colour, block + 0x80u);
+            else if (t.u32(self + kObjFlags) & 0x800000u)
+                light2D7E50(t, x, self, block, colour);
+            else
+                light2D8008(t, x, self, block, colour);
+            if (t.u32(self + kObjFlags) & 0x80000u)
+                txnPut4(t, colour, block + 0x80u);
+            if (t.u32(t.u32(node + 0x414u) + 0x34u) & kMeshSpecial)
+            {
+                const uint32_t cam = t.u32(kViewPointer);
+                t.w64(block + 0x50u, t.u64(cam + 0x210u));
+                t.w32(block + 0x58u, t.u32(cam + 0x218u));
+                env.call(); // sceVu0CopyMatrix(block +0x10, self +0x80)
+                txnCopyMatrix(t, self + 0x80u, block + 0x10u);
+            }
+            const uint32_t force = t.u8(self + 0x2BEu); // layerForce
+            if (force != 0x18u && force != 0x1Cu)
+            {
+                const uint32_t u = t.u32(node + 0x38Cu), v = t.u32(node + 0x390u); // uvScroll
+                txnPut4(t, bitsOf(u, v, 0u, 0x3F800000u), block + 0x70u);
+            }
+            if (t.u32(node + model::kNodeDispFlags) & 0x8000u)
+            {
+                env.call(); // sceVu0UnitMatrix(block +0x10)
+                txnStoreMatrix(t, block + 0x10u, unitMatrix());
+            }
+
+            const uint32_t fog = t.u8(self + 0x2BDu);
+            if (fog == 0u)
+            {
+                const uint32_t f = t.u32(node + model::kNodeDispFlags);
+                if ((f & 0x200000u) || (t.u32(0x747A2Cu) & 0x1000u))
+                {
+                    t.w32(block + 0x1Cu, 0xC43F3FFFu);
+                    t.w32(block + 0x2Cu, 0x4F3663E6u);
+                }
+                else if (f & 0x20000u)
+                    fogPair(t, x, self, block, half, 0x64u, 0x60u);
+                else if (f & 2u)
+                    fogPair(t, x, self, block, half, 0x18u, 0x8u);
+                else if (f & 0x40000u)
+                    fogPair(t, x, self, block, half, 0x20u, 0xCu);
+                else if (f & 0x10000000u)
+                    fogPair(t, x, self, block, half, 0x70u, 0x6Cu);
+                else
+                {
+                    const uint32_t colourOut = t.u32(self + model::kPacket + half * 4u) + 0x30u;
+                    env.call(); // func_002D81A0(set, block +0x10, packet +0x30)
+                    fog2D81A0(t, x, kLightSet, block + 0x10u, colourOut);
+                }
+            }
+            else
+            {
+                if (fog == 1u)
+                    fogFixed(t, x, self, block, half, 0x3C3D28u);
+                if (t.u8(self + 0x2BDu) == 2u) // read again (its delay slot / after the 1 case)
+                    fogFixed(t, x, self, block, half, 0x3C3D30u);
+            }
+            return t.ok && x.ok;
+        }
+
+        template <class Env>
+        bool scrLighting(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd || !e::vf0Constant(ctx))
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kScrLightingWindow, kScrLightingWindow, stackTop))
+                return false;
+            BlockTxn<Env> t{env, stackTop, stackTop + kScrLightingWindow};
+            if (!scrLightingBody(t, e::u32(ctx, e::a0), e::u32(ctx, e::a1)))
+                return false;
+            t.commit();
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // ---- func_002D81A0(set, out, colourOut): the light set's fog colour and range (unmatched at 59fb572) --------
+        constexpr uint32_t kFogLinear = 0x2D81A0u;
+        template <class Env>
+        bool fogNative(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            Txn<Env> t{env, 0u, 0u};
+            if (!t.ok)
+                return false;
+            ExactOps x;
+            fog2D81A0(t, x, e::u32(ctx, e::a0), e::u32(ctx, e::a1), e::u32(ctx, e::a2));
+            if (!t.ok || !x.ok)
+                return false;
+            t.commit();
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // ---- cModel_nodeLayer 0x14BEF8 (decomp src/cod/0014b4d0.c, matched C): a scenery node's draw layer -------------
+        // int cModel_nodeLayer(cModel *self, cModelNode *node): self->layerForce (+0x2BE) unless CMODEL_LAYER_AUTO (0xFE);
+        // else 0xE for a CMODEL_NODE_BACK node (dispFlags 0x1000000), 0xA otherwise; 0x14 for a CMODEL_F_LATE model; 0x1E
+        // when the node blends (CMODEL_NODE_ALPHA) and cModel_alpha is 1.0; 0x22 for a CMODEL_MESH_SPECIAL mesh in the
+        // special pass (D_00747AA8). Reads only; false: the alpha outside the host's exact range (modelAlphaOne).
+        constexpr uint32_t kMeshLayer = 0x14BEF8u;
+        template <class T>
+        bool meshLayerBody(T &t, uint32_t self, uint32_t node, uint32_t &layer)
+        {
+            const uint32_t force = t.u8(self + 0x2BEu);
+            if (force != 0xFEu)
+            {
+                layer = force;
+                return true;
+            }
+            const uint32_t flags = t.u32(node + model::kNodeDispFlags);
+            layer = (flags & 0x1000000u) ? 0xEu : 0xAu;
+            if (t.u32(self + kObjFlags) & kLate)
+                layer = 0x14u;
+            if (flags & kNodeAlpha)
+            {
+                bool exact;
+                const bool one = modelAlphaOne(t, self, exact);
+                if (!exact)
+                    return false;
+                if (one)
+                    layer = 0x1Eu;
+            }
+            if ((t.u32(t.u32(node + 0x414u) + 0x34u) & kMeshSpecial) && t.u32(kSpecialPass) != 0u)
+                layer = 0x22u;
+            return true;
+        }
+        template <class Env>
+        bool meshLayer(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            Txn<Env> t{env, 0u, 0u};
+            uint32_t layer;
+            if (!t.ok || !meshLayerBody(t, e::u32(ctx, e::a0), e::u32(ctx, e::a1), layer) || !t.ok)
+                return false;
+            e::setS32(ctx, e::v0, layer);
+            returnToCaller(ctx);
+            return true;
+        }
+
+        // ---- func_0014B810: queue a scenery node's packet (unmatched at 59fb572; our C++ from the disassembly) ---------
+        // void func_0014B810(cModel *self, cModelNode *node, short id): the packet node + 0xB0 half (tail +0xA0) into the
+        // order table D_00754C80 by func_0014C5A0's rule (queueByKind): a per-node model by the node's sorted flag (kind
+        // 2 with id, else kind 1 index 0xD), any other model by its drawKind and id.
+        constexpr uint32_t kNodeQueue = 0x14B810u;
+        constexpr uint32_t kNodeQueueFrame = 0x20u; // its frame (0x10) + 0x31A650's (0x10)
+        template <class Env>
+        bool nodeQueue(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackTop;
+            if (!plainRam(sp - kNodeQueueFrame, kNodeQueueFrame, stackTop))
+                return false;
+            Reader<Env> rd{env, stackTop, stackTop + kNodeQueueFrame};
+            const uint32_t self = e::u32(ctx, e::a0), node = e::u32(ctx, e::a1);
+            const int64_t id = static_cast<int16_t>(e::u32(ctx, e::a2)); // sll / sra 16
+            const uint32_t half = rd.u32(model::kFrameParity) & 1u;
+            const int32_t kind = rd.s32(self + model::kDrawKind);
+            const uint32_t flags = rd.u32(node + model::kNodeDispFlags);
+            const uint32_t packet = node + half * 0xB0u, tail = packet + 0xA0u;
+            int64_t bucket, index;
+            uint32_t site; // the return address of its jal 0x31A650 (b3 A's dev report names the builder by it)
+            if (kind == model::kKindPerNode)
+            {
+                const bool sorted = (flags & model::kNodeSorted) != 0u;
+                bucket = sorted ? 2 : 1;
+                index = sorted ? id : 0xD;
+                site = sorted ? 0x14B88Cu : 0x14B8CCu;
+            }
+            else
+            {
+                bucket = kind;
+                index = rd.s16(self + model::kId);
+                site = 0x14B90Cu;
+            }
+            if (!rd.ok || tail == 0u) // tail 0 takes 0x31A600 (a packet at -0xA0): never in practice, the original runs
+                return false;
+            QueuePlan q;
+            if (!queuePlan(env, sp - 0x10u, 0x754C80u, static_cast<uint64_t>(bucket), static_cast<uint64_t>(index), packet,
+                           static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(tail))), q))
+                return false;
+            if (q.inRange &&
+                (e::overlaps(q.half, 4u, stackTop, kNodeQueueFrame) || e::overlaps(q.at, 4u, stackTop, kNodeQueueFrame) ||
+                 e::overlaps(q.plan.desc0, 4u, stackTop, kNodeQueueFrame) ||
+                 e::overlaps(q.plan.desc20, 4u, stackTop, kNodeQueueFrame) ||
+                 e::overlaps(q.plan.slot, 8u, stackTop, kNodeQueueFrame) ||
+                 e::overlaps(q.plan.tail, 8u, stackTop, kNodeQueueFrame)))
+                return false;
+            if constexpr (std::is_same_v<Env, RealEnv>)
+                draw_list::g_queueCaller = site;
+            env.call(); // the jal to 0x31A650
+            if (q.inRange)
+            {
+                env.call(); // its jal to 0x14FF00
+                linkPacket(env, q.plan, packet);
+            }
+            returnToCaller(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -5247,5 +5743,15 @@ namespace kamite::native::packet
             fn.maxRanges = 16384u;
             registerFunction(fn);
         }
+        // Rung 3 step b3 B (Nov 24): cModel_Tag_set_scr's subtree, shadowed (unchecked) until a K build proves them
+        // (K's pipeline: the six shadowed in one plain Build and Replay, then live with the fused Tag_set_scr shadowed).
+        addReadable("func_0014D0E8", kScrMatrices, false, &scrMatrices<RealEnv>, &scrMatrices<ShadowEnv>, 0u);
+        addReadable("func_00153B00", kScrLighting, false, &scrLighting<RealEnv>, &scrLighting<ShadowEnv>, 0u);
+        addReadable("func_002D81A0", kFogLinear, false, &fogNative<RealEnv>, &fogNative<ShadowEnv>, 0u);
+        addReadable("cModel_nodeLayer", kMeshLayer, false, &meshLayer<RealEnv>, &meshLayer<ShadowEnv>,
+                    NativeFunction::kReturnsV0);
+        addReadable("func_0014B810", kNodeQueue, false, &nodeQueue<RealEnv>, &nodeQueue<ShadowEnv>, 0u);
+        addReadable("cModel_queuePacket", 0x14C6B8u, false, &queueModel<RealEnv, 0x14C6FCu>,
+                    &queueModel<ShadowEnv, 0x14C6FCu>, 0u);
     }
 }

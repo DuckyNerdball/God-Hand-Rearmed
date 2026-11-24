@@ -61,3 +61,9 @@ tanf,0x003A1AE8,decomp,func_003A1AE8,src/cod/003a1ae8.c,4607c68,5343d85b18c8,rec
 func_0030AA40,0x0030AA40,decomp,func_0030AA40,src/cod/0030aa40.c,4607c68,db5829e0eb43,record only (Nov 23): already readable; the C's zs / zo = the native's A / B; kRenderPath|kChargeAtEnd
 func_0014C7E8,0x0014C7E8,asm,,,,,step a readable: a model's per-frame matrices (unmatched); tanf / ViewScreenMatrix / CameraMatrix (constant) / MtxMultiply / MulMatrix / func_001503B8 inline, reads first then writes; kRenderPath|kChargeAtEnd
 cModel_Tag_set_rate,0x0014AC90,asm,,,,,step a fused: a model's per-frame tagging (unmatched at 4607c68), its whole subtree inline on a Journal (no guest call); no_lod carried; kRenderPath|kChargeAtEnd
+func_0014D0E8,0x0014D0E8,asm,,,,,b3 B: a scenery model's per-frame matrices (unmatched at 59fb572); getMeshPtr / CopyMatrix / UnitMatrix / 0x14C7E8's fixed pass (fixedPassBody) inline, reads first then writes; kRenderPath|kChargeAtEnd
+func_00153B00,0x00153B00,asm,,,,,b3 B: a scenery node's lighting block (unmatched at 59fb572); 0x154240's twin on a BlockTxn (nodeColour / light2D7E50 / light2D8008 shared), its fog section and func_002D81A0 inline; kRenderPath|kChargeAtEnd
+func_002D81A0,0x002D81A0,asm,,,,,b3 B: the light set's fog colour and range (unmatched at 59fb572); kRenderPath|kChargeAtEnd
+cModel_nodeLayer,0x0014BEF8,decomp,cModel_nodeLayer,src/cod/0014b4d0.c,59fb572,39544284dd30,b3 B readable; kRenderPath|kChargeAtEnd
+cModel_queuePacket,0x0014C6B8,decomp,cModel_queuePacket,src/cod/00149be8.c,59fb572,7a5c4e36fbcc,b3 B readable; kRenderPath|kChargeAtEnd
+func_0014B810,0x0014B810,asm,,,,,b3 B: queue a scenery node's packet (unmatched at 59fb572; = cModel_Tag_set_rate's inline node queue); kRenderPath|kChargeAtEnd

@@ -88,7 +88,9 @@ def drawlist_totals(paths):
             elif f[0] in ("registered", "segments"):
                 for key, value in zip(f[0::2], f[1::2]):
                     add(key, value)
-            elif f[0] in ("parse", "ops", "cache", "kinds", "inplace"):
+            elif f[0] == "rewriter" and len(f) == 3:
+                add("rewriter " + f[1], f[2])
+            elif f[0] in ("parse", "ops", "cache", "kinds", "inplace", "rewrites"):
                 for key, value in zip(f[1::2], f[2::2]):
                     add(f"{f[0]}-{key}", value)
             elif f[0] == "live":  # live start same N differ N end same N differ N
@@ -272,6 +274,11 @@ def main():
         if g('inplace-same') or g('inplace-differ'):
             print(f"  read in place, bytes at job start = job end: {g('inplace-same')} same / {g('inplace-differ')} differ"
                   f"{'  <-- DIFFER (rewritten while the VU read it: see the diff inplace lines)' if g('inplace-differ') else ''}")
+        if g('rewrites-writes'):
+            callers = sorted(((k.split()[1], v) for k, v in t.items() if k.startswith("rewriter ")), key=lambda kv: -kv[1])
+            print(f"  both-halves writer probe (0x155D60 changing the half not being built): {g('rewrites-writes')} writes, "
+                  f"heads {g('rewrites-heads')} (summed per replay); callers: "
+                  + ", ".join(f"{k} {v}" for k, v in callers[:6]))
         if "shadow" in modes or g('kinds-shadow'):
             print(f"  bytes in RAM = the walker's copy: job start {g('live-start-same')} same / {g('live-start-differ')} "
                   f"differ, job end {g('live-end-same')} same / {g('live-end-differ')} differ"

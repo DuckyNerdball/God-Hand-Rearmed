@@ -14,6 +14,7 @@
 //   "rerun <case>.<rate>.native.bin": each saved mismatch's input through the native and the recompiled function
 //   again, here; prints where they differ (and whether this host agrees with what the game saw).
 #include "kamite/native/native.h"
+#include "kamite/native/draw_list.h"
 #include "kamite/native/shadow.h"
 #include "kamite/native/libvu0_core.h"
 #include "kamite/texture_slots.h"
@@ -108,6 +109,13 @@ KM_RECOMPILED(copysignf_0x3a4f88)
 KM_RECOMPILED(func_0030AA40_0x30aa40)
 KM_RECOMPILED(func_0014C7E8_0x14c7e8)
 KM_RECOMPILED(cModel_Tag_set_rate_0x14ac90)
+// rung 3 step b3 B: cModel_Tag_set_scr's subtree
+KM_RECOMPILED(func_0014D0E8_0x14d0e8)
+KM_RECOMPILED(func_00153B00_0x153b00)
+KM_RECOMPILED(func_002D81A0_0x2d81a0)
+KM_RECOMPILED(cModel_nodeLayer_0x14bef8)
+KM_RECOMPILED(func_0014B810_0x14b810)
+KM_RECOMPILED(cModel_queuePacket_0x14c6b8)
 KM_RECOMPILED(SearchDataByTwoNames_0x31cdc0)
 KM_RECOMPILED(cIDBase_getSlotPtr_0x1522c0)
 #undef KM_RECOMPILED
@@ -192,6 +200,15 @@ int g_breaks = 0;
 void PS2Runtime::handleBreak(uint8_t *, R5900Context *) { ++g_breaks; }
 // native.cpp is not linked: no entry observers here.
 void kamite::native::runEntryObservers(uint32_t, uint8_t *, R5900Context *, PS2Runtime *) {}
+// The draw list (draw_list.cpp: the walker's registry) is off here: the natives' registration is skipped.
+namespace kamite::native::draw_list
+{
+    bool g_on = false;
+    uint32_t g_queueCaller = 0u;
+    bool g_probe = false;
+    void listPackets(uint32_t, const uint32_t *, const uint32_t *, const uint64_t *, uint32_t, Source) {}
+    void noteRewrite(uint32_t, uint32_t) {}
+}
 
 // The patch flags and host hooks the generated code reads (ps2_runtime.cpp's; not linked here): the TIM2 loader's
 // texture_slots hook at 0x151C70, registered by texture_slots::install() and switched per call by the setups.
@@ -902,6 +919,7 @@ namespace
             return;
         }
         case 0x14C5A0u: // batch 3: queue the model's packet (cModel at base; decomp field names in packet.cpp)
+        case 0x14C6B8u: // b3 B: cModel_queuePacket, the same function
         {
             orderTable(mirror);
             const uint32_t node = 0x30000u + 0x40u * static_cast<uint32_t>(g_rng() % 64u);
@@ -1357,9 +1375,132 @@ namespace
             setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
             return;
         }
+        case 0x153B00u: // b3 B: a scenery node's lighting block (func_00154240's setup, then this function's paths)
+        {
+            NativeFunction sub = fn;
+            sub.address = 0x154240u;
+            setupBatch2(sub, call, wild, base, seg);
+            uint32_t model;
+            std::memcpy(&model, &ctx.r[4], 4);
+            model &= 0x1FFFFFFu;
+            uint32_t flags;
+            std::memcpy(&flags, g_ramA + base + 0x380u, 4);
+            // the colour row: dispFlags 0x800000 / D_00747A38 0x800, else 0x2D7E50 (model 0x800000), else 0x2D8008
+            const uint32_t path = static_cast<uint32_t>(g_rng() % 4u);
+            flags &= ~(0x800000u | 0x8000u | 0x200000u | 0x20000u | 2u | 0x40000u | 0x10000000u);
+            if (path == 0u)
+                flags |= 0x800000u;
+            setU32(0x747A38u, path == 1u ? static_cast<uint32_t>(g_rng()) | 0x800u : static_cast<uint32_t>(g_rng()) & ~0x800u);
+            uint32_t m250;
+            std::memcpy(&m250, g_ramA + model + 0x250u, 4);
+            m250 = (path == 2u || g_rng() % 4u == 0u) ? m250 | 0x800000u : m250 & ~0x800000u;
+            setU32(model + 0x250u, g_rng() % 4u == 0u ? m250 | 0x80000u : m250 & ~0x80000u);
+            if (g_rng() % 4u == 0u)
+                flags |= 0x8000u; // +0x10 = Unit
+            // the fog: one of the dispFlags paths (sometimes several: the first wins)
+            static constexpr uint32_t kFogBits[5] = {0x200000u, 0x20000u, 2u, 0x40000u, 0x10000000u};
+            const uint32_t fogPick = static_cast<uint32_t>(g_rng() % 7u);
+            if (fogPick < 5u)
+                flags |= kFogBits[fogPick];
+            else if (fogPick == 5u)
+                for (uint32_t b : kFogBits)
+                    if (g_rng() % 2u)
+                        flags |= b;
+            setU32(base + 0x380u, flags);
+            uint32_t info;
+            std::memcpy(&info, g_ramA + base + 0x414u, 4);
+            info &= 0x1FFFFFFu;
+            const uint32_t bits = static_cast<uint32_t>(g_rng());
+            setU32(info + 0x34u, g_rng() % 3u == 0u ? bits | 0x200000u : bits & ~0x200000u); // view space
+            const uint32_t forcePick = static_cast<uint32_t>(g_rng() % 4u);
+            setByte(model + 0x2BEu, forcePick == 0u ? 0x18u : forcePick == 1u ? 0x1Cu : static_cast<uint8_t>(g_rng()));
+            const uint32_t fogByte = static_cast<uint32_t>(g_rng() % 8u);
+            setByte(model + 0x2BDu, fogByte < 4u ? 0u : fogByte == 4u ? 1u : fogByte == 5u ? 2u : static_cast<uint8_t>(g_rng()));
+            // the light set's ranges and colours (+0x08..+0x27, +0x60..+0x77) and the fixed fog (D_003C3D20..3D33)
+            floatsAt(0x604708u, 8, wild);
+            floatsAt(0x604760u, 6, wild);
+            floatsAt(0x3C3D20u, 5, wild);
+            if (g_rng() % 8u == 0u) // a zero range (declines)
+            {
+                setU32(0x604768u, 0u), setU32(0x604764u, 0u);
+                setU32(0x3C3D24u, 0u), setU32(0x3C3D20u, 0u);
+            }
+            for (uint32_t pair : {0x604718u, 0x604720u, 0x604764u, 0x604770u, 0x3C3D20u})
+                if (g_rng() % 2u) // ordinary ranges: near < far
+                {
+                    const float n = static_cast<float>(g_rng() % 2000u), f = n + 1.0f + static_cast<float>(g_rng() % 30000u);
+                    setFloat(pair, n), setFloat(pair + 4u, f);
+                }
+            if (g_rng() % 64u == 0u) // this half's packet over the block's fog words: the dead stores alias (declines)
+            {
+                uint32_t parity;
+                std::memcpy(&parity, g_ramA + 0x7476B0u, 4);
+                setU32(model + 0x220u + 4u * (parity & 1u), (base + 0x160u + 0xD0u * (parity & 1u)) | seg);
+            }
+            return;
+        }
+        case 0x2D81A0u: // b3 B: the light set's fog colour and range (set at base)
+        {
+            floatsAt(base + 0x16150u, 5, wild);
+            if (g_rng() % 8u == 0u) // near == far: a zero divisor
+                setU32(base + 0x16154u, 0u), setU32(base + 0x16150u, 0u);
+            for (uint32_t k = 0; k < 3; ++k)
+                if (g_rng() % 2u)
+                    setFloat(base + 0x16158u + 4u * k, static_cast<float>(static_cast<int>(g_rng() % 600u) - 100) / 2.0f);
+            setGpr(ctx, 4, base | seg);
+            const uint32_t alias = static_cast<uint32_t>(g_rng() % 16u);
+            setGpr(ctx, 5, (alias == 0u ? base + 0x16150u - 0xCu : base + 0x200u) | seg);  // out +0xC over near
+            setGpr(ctx, 6, (alias == 1u ? base + 0x16150u : base + 0x300u + 8u * static_cast<uint32_t>(g_rng() % 8u)) | seg);
+            return;
+        }
+        case 0x14BEF8u: // b3 B: cModel_nodeLayer (model at base, node at base + 0x100, its info at base + 0x300)
+        {
+            const uint32_t node = base + 0x100u, info = base + 0x300u;
+            setU32(node + 0x380u, static_cast<uint32_t>(g_rng()));
+            setU32(base + 0x250u, static_cast<uint32_t>(g_rng()));
+            if (g_rng() % 2u)
+            {
+                setFloat(base + 0x24Cu, 1.0f);
+                setByte(base + 0x2B6u, 255u), setByte(base + 0x2B7u, 255u), setByte(base + 0x2BCu, 255u);
+            }
+            else
+            {
+                setU32(base + 0x24Cu, inputFloat(wild));
+                setByte(base + 0x2B6u, static_cast<uint8_t>(g_rng())), setByte(base + 0x2B7u, static_cast<uint8_t>(g_rng()));
+                setByte(base + 0x2BCu, static_cast<uint8_t>(g_rng()));
+            }
+            setByte(base + 0x2BEu, g_rng() % 4u ? 0xFEu : static_cast<uint8_t>(g_rng()));
+            setU32(node + 0x414u, info | seg);
+            setU32(info + 0x34u, static_cast<uint32_t>(g_rng()));
+            setU32(0x747AA8u, (g_rng() % 2u) ? 0u : static_cast<uint32_t>(g_rng()));
+            setGpr(ctx, 4, base | seg);
+            setGpr(ctx, 5, node | seg);
+            return;
+        }
+        case 0x14B810u: // b3 B: queue a scenery node's packet (cModel at base, the node at 0x30000 + ...)
+        {
+            orderTable(mirror);
+            const uint32_t node = 0x30000u + 0x200u * static_cast<uint32_t>(g_rng() % 32u);
+            const uint32_t flags = static_cast<uint32_t>(g_rng());
+            const uint32_t pick = static_cast<uint32_t>(g_rng() % 4u);
+            setU32(node + 0x380u, pick == 0 ? flags & ~0x4080u : pick == 1 ? flags | 0x4080u : flags);
+            for (uint32_t half = 0; half < 2; ++half)
+                randomBytes(node + 0xB0u * half + 0xA0u, 0x10u); // the packet's last tag (0x31A650's t0)
+            setU32(0x7476B0u, static_cast<uint32_t>(g_rng()));
+            const uint32_t kinds = static_cast<uint32_t>(g_rng() % 8u);
+            setU32(base + 0x2C0u, kinds < 4 ? 0xAu : kinds == 4 ? static_cast<uint32_t>(g_rng()) & 0x7FFFFFFFu :
+                                  static_cast<uint32_t>(g_rng() % 12u));
+            setU32(base + 0x2ACu, static_cast<uint32_t>(g_rng()));
+            setGpr(ctx, 4, base | seg);
+            setGpr(ctx, 5, node | seg);
+            setGpr64(ctx, 6, g_rng()); // short id: only the low 16 bits count
+            setGpr(ctx, 29, (0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u)) | (g_rng() % 4u == 0u ? 0x80000000u : 0u));
+            return;
+        }
         case 0x3A1AE8u: // the 0x14C7E8 batch: tanf (f12; the ELF's T table, sometimes wild)
         case 0x30AA40u: // func_0030AA40 = sceVu0ViewScreenMatrix (a0 = m, f12-f19, farz at the caller's 0(sp))
         case 0x14C7E8u: // func_0014C7E8: a model's per-frame matrices (model at 0x38000.., its node list at 0x48000..)
+        case 0x14D0E8u: // b3 B: func_0014D0E8, the scenery variant (the same model, buffer and camera; a mesh head)
         {
             static constexpr uint32_t kT[13] = {0x3EAAAAABu, 0x3E088889u, 0x3D5D0DD1u, 0x3CB327A4u, 0x3C11371Fu,
                                                 0x3B6B6916u, 0x3ABEDE48u, 0x3A1A26C8u, 0x398137B9u, 0x38A3F445u,
@@ -1493,6 +1634,20 @@ namespace
             setU32(self + 560u + 4u * (idx ^ 1u), static_cast<uint32_t>(g_rng()));
             if (g_rng() % 32u == 0u)
                 std::memset(&ctx.vu0_vf[0], 0, 16); // a broken vf0 (the original's UnitMatrix reads it)
+            if (fn.address == 0x14D0E8u)
+            {
+                // the mesh head (getMeshPtr(self, 0)) and its info's view-space bit; D_004A6940; sometimes no mesh
+                // (the original reads address 0x414 then: the native declines)
+                const uint32_t meshHead = 0x6C000u + 0x400u * static_cast<uint32_t>(g_rng() % 8u);
+                const uint32_t info = 0x3A800u + 0x40u * static_cast<uint32_t>(g_rng() % 16u);
+                setU32(self + 0x25Cu, g_rng() % 32u == 0u ? 0u : meshHead | seg);
+                setU32(meshHead + 0x414u, info | seg);
+                const uint32_t bits = static_cast<uint32_t>(g_rng());
+                setU32(info + 0x34u, g_rng() % 3u == 0u ? bits | 0x200000u : bits & ~0x200000u);
+                floatsAt(0x4A6940u, 16, wild);
+                if (g_rng() % 48u == 0u) // the buffer over the mesh's info: a write over a read (declines)
+                    setU32(self + 552u + 4u * idx, (info - 0x30u) | seg);
+            }
             setGpr(ctx, 4, self | seg);
             return;
         }
@@ -2612,7 +2767,10 @@ int main(int argc, char **argv)
         {0x148690u, &func_00148690_0x148690},    {0x14B4D0u, &cModel_setNodeMaterial_0x14b4d0},
         {0x14B5D8u, &ForwardAttackByMode_14B5D8_0x14b5d8}, {0x154240u, &func_00154240_0x154240},
         {0x3A1AE8u, &tanf_0x3a1ae8},             {0x30AA40u, &func_0030AA40_0x30aa40},
-        {0x14C7E8u, &func_0014C7E8_0x14c7e8},    {0x14AC90u, &cModel_Tag_set_rate_0x14ac90}};
+        {0x14C7E8u, &func_0014C7E8_0x14c7e8},    {0x14AC90u, &cModel_Tag_set_rate_0x14ac90},
+        {0x14D0E8u, &func_0014D0E8_0x14d0e8},    {0x153B00u, &func_00153B00_0x153b00},
+        {0x2D81A0u, &func_002D81A0_0x2d81a0},    {0x14BEF8u, &cModel_nodeLayer_0x14bef8},
+        {0x14B810u, &func_0014B810_0x14b810},    {0x14C6B8u, &cModel_queuePacket_0x14c6b8}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
@@ -2709,7 +2867,8 @@ int main(int argc, char **argv)
     for (const NativeFunction &fn : g_natives)
         for (uint32_t caller : {0x30A8C8u, 0x30A978u, 0x147528u, 0x147548u, 0x101E28u, 0x31A650u, 0x31A600u, 0x14D768u,
                                 0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u,
-                                0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u})
+                                0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u, 0x14D0E8u, 0x153B00u, 0x14B810u,
+                                0x14C6B8u})
             if (fn.address == caller)
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;
