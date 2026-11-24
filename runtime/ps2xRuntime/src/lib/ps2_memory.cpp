@@ -2317,7 +2317,7 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
                         if (listedLookup && !listedMarks.empty())
                         {
                             if (listedLive)
-                                ps2x::listed::takeLive(listedPieces, listedMarks, pt.listed);
+                                ps2x::listed::takeLive(chainPieces, listedPieces, listedMarks, pt.listed);
                             else
                                 ps2x::listed::cutSegments(chainPieces, listedMarks, pt.listed);
                         }

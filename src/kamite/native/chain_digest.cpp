@@ -77,6 +77,8 @@ namespace kamite::native::chain_digest
                 size_t pos = 0;
                 for (const ps2x::listed::Segment &seg : listed->segments)
                 {
+                    if (!seg.live)
+                        continue; // its bytes are in data
                     const size_t at = seg.start < size ? seg.start : size;
                     XXH3_64bits_update(&state, data + pos, at - pos);
                     pos = at;
@@ -85,7 +87,10 @@ namespace kamite::native::chain_digest
                 }
                 XXH3_64bits_update(&state, data + pos, size - pos);
                 hash = XXH3_64bits_digest(&state);
-                size += listed->listedBytes();
+                for (const ps2x::listed::Segment &seg : listed->segments)
+                    if (seg.live)
+                        for (uint32_t i = seg.pieceBegin; i < seg.pieceEnd; ++i)
+                            size += listed->pieces[i].len;
             }
             else
                 hash = XXH3_64bits(data, size);

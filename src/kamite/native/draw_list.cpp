@@ -34,6 +34,7 @@ namespace kamite::native::draw_list
             uint32_t gen = 0u;
             uint8_t half = 0u;
             bool seen = false;
+            bool shadow = false; // a source not proven yet: copied and checked, not read in place
         };
         constexpr uint32_t kSlots = 1u << 14;
         constexpr uint32_t kRamMask = 0x01FFFFFFu;
@@ -50,6 +51,7 @@ namespace kamite::native::draw_list
 
         // EE-side counts (game thread)
         uint64_t g_registered = 0u, g_halves = 0u, g_found = 0u, g_unseen = 0u, g_tagChanged = 0u, g_full = 0u;
+        uint64_t g_registeredShadow = 0u; // from the sources still in the shadow (the queue native's)
 
         uint32_t slotOf(uint32_t key) { return (key * 2654435761u) >> (32u - 14u); }
         bool current(const Entry &e) { return e.key != 0u && e.gen == g_gen[e.half]; }
@@ -91,7 +93,7 @@ namespace kamite::native::draw_list
             }
         }
 
-        bool lookup(uint32_t headAddr, uint64_t headTag, uint32_t &tailAddr)
+        bool lookup(uint32_t headAddr, uint64_t headTag, uint32_t &tailAddr, bool &shadow)
         {
             if ((headAddr & 0xF0000000u) == 0x70000000u) // the scratchpad: never a listed packet
                 return false;
@@ -125,6 +127,7 @@ namespace kamite::native::draw_list
                 e.seen = true;
                 ++g_found;
                 tailAddr = tail;
+                shadow = e.shadow;
                 return true;
             }
             return false;
@@ -132,7 +135,8 @@ namespace kamite::native::draw_list
 
     }
 
-    void listPackets(uint32_t half, const uint32_t *heads, const uint32_t *tails, const uint64_t *headTags, uint32_t count)
+    void listPackets(uint32_t half, const uint32_t *heads, const uint32_t *tails, const uint64_t *headTags, uint32_t count,
+                     bool shadow)
     {
         if (!g_on)
             return;
@@ -171,6 +175,8 @@ namespace kamite::native::draw_list
                 continue;
             }
             Entry &e = g_table[at];
+            if (shadow && e.key == key && current(e) && e.half == half && !e.shadow)
+                continue; // already listed live this generation (a proven source): keep it
             if (e.key == 0u)
                 ++g_used;
             if (!(e.key == key && current(e) && e.half == half)) // a second registration this generation: one slot
@@ -182,7 +188,8 @@ namespace kamite::native::draw_list
             e.half = static_cast<uint8_t>(half);
             e.gen = g_gen[half];
             e.seen = false;
-            ++g_registered;
+            e.shadow = shadow;
+            ++(shadow ? g_registeredShadow : g_registered);
         }
     }
 
@@ -200,6 +207,7 @@ namespace kamite::native::draw_list
         struct Stats
         {
             uint64_t items = 0u, chainBytes = 0u, segments = 0u, unclosed = 0u, bytes = 0u;
+            uint64_t liveSegments = 0u, shadowSegments = 0u;
             uint64_t parseOk = 0u, parseFail = 0u, unpackBeforeCycle = 0u, maskedUnpacks = 0u;
             uint64_t same[2] = {0u, 0u}, differ[2] = {0u, 0u};
             uint64_t mscal = 0u, mscnt = 0u, mpg = 0u, direct = 0u, unpack = 0u, segmentsWithoutMpg = 0u;
@@ -340,7 +348,9 @@ namespace kamite::native::draw_list
             }
             for (const ps2x::listed::Segment &s : l.segments)
             {
-                if (l.live)
+                if (phase == 0)
+                    ++(s.live ? st.liveSegments : st.shadowSegments);
+                if (s.live)
                 {
                     if (phase != 0)
                         continue;
@@ -428,6 +438,9 @@ namespace kamite::native::draw_list
         ps2x::listed::cacheCounts(hits, misses);
         std::fprintf(f, "cache hits %llu misses %llu\n", static_cast<unsigned long long>(hits),
                      static_cast<unsigned long long>(misses));
+        std::fprintf(f, "kinds live %llu shadow %llu registeredshadow %llu\n",
+                     static_cast<unsigned long long>(st.liveSegments), static_cast<unsigned long long>(st.shadowSegments),
+                     static_cast<unsigned long long>(g_registeredShadow));
         std::fprintf(f, "registered %llu found %llu unseen %llu tagchanged %llu full %llu halves %llu\n",
                      static_cast<unsigned long long>(g_registered), static_cast<unsigned long long>(g_found),
                      static_cast<unsigned long long>(g_unseen), static_cast<unsigned long long>(g_tagChanged),

@@ -212,7 +212,7 @@ int main(int argc, char **argv)
         ps2x::ByteBuffer g2;
         ps2x::dma::gatherChain(p2, b2, g2);
         ps2x::listed::Segments live;
-        ps2x::listed::takeLive(lp2, m2, live);
+        ps2x::listed::takeLive(p2, lp2, m2, live);
         std::vector<uint8_t> rebuilt;
         XXH3_state_t state;
         XXH3_64bits_reset(&state);
@@ -366,6 +366,59 @@ int main(int argc, char **argv)
         std::printf("    live: chain copy %zu bytes + %zu listed in place = %zu; rebuilt / logical pieces / streaming hash %s\n",
                     b2, live.listedBytes(), b2 + live.listedBytes(), liveSame ? "= the full chain" : "DIFFER");
         failures += !liveSame;
+
+        // b3: live and shadow packets in one chain (every other candidate re-registered as shadow in a new generation).
+        // The shadow ones stay in the copy, cut like build 1's; the logical chain must still be the full chain.
+        {
+            using namespace kamite::native::draw_list;
+            listPackets(1u - fin, nullptr, nullptr, nullptr, 0u); // retire this half's generation
+            for (size_t i = 0; i < heads.size(); ++i)
+                listPackets(fin, &heads[i], &tails[i], &headTags[i], 1u, (i & 1u) != 0u);
+            std::vector<ps2x::dma::ChainPiece> pm, lm, wm;
+            std::vector<ps2x::listed::Mark> mm;
+            ps2x::dma::ChainWalk wk;
+            size_t bm = 0;
+            const bool km = walk(true, pm, mm, wk, bm, &lm);
+            ps2x::listed::Segments mixed;
+            ps2x::listed::takeLive(pm, lm, mm, mixed);
+            size_t nLive = 0, nShadow = 0, shadowOk = 0;
+            ps2x::ByteBuffer gm;
+            ps2x::dma::gatherChain(pm, bm, gm);
+            for (const ps2x::listed::Segment &sg : mixed.segments)
+            {
+                if (sg.live)
+                {
+                    ++nLive;
+                    continue;
+                }
+                ++nShadow;
+                uint32_t off = sg.start;
+                bool ok = sg.closed;
+                for (uint32_t i = sg.pieceBegin; i < sg.pieceEnd && ok; ++i)
+                {
+                    ok = std::memcmp(mixed.pieces[i].src, gm.data() + off, mixed.pieces[i].len) == 0;
+                    off += mixed.pieces[i].len;
+                }
+                shadowOk += ok && off == sg.end;
+            }
+            ps2x::listed::logicalPieces(pm, mixed, wm);
+            ps2x::ByteBuffer gwm;
+            size_t bwm = 0;
+            for (const auto &pc : wm)
+                bwm += pc.len;
+            ps2x::dma::gatherChain(wm, bwm, gwm);
+            const bool mixedSame = km == k0 && wk.tagAddr == w0.tagAddr && wk.tagsProcessed == w0.tagsProcessed &&
+                                   mm.size() == m1.size() && bm + mixed.listedBytes() == b0 && bwm == b0 &&
+                                   std::memcmp(gwm.data(), g0.data(), b0) == 0 && nShadow == shadowOk && nLive && nShadow;
+            std::printf("    mixed: %zu live, %zu shadow (cut = copied %zu); copy %zu + %zu in place; logical chain %s\n",
+                        nLive, nShadow, shadowOk, bm, mixed.listedBytes(), mixedSame ? "= the full chain" : "DIFFER");
+            failures += !mixedSame;
+            if (g_observer)
+            {
+                g_observer(mixed, gm.data(), bm, 0);
+                g_observer(mixed, gm.data(), bm, 1);
+            }
+        }
         kamite::native::draw_list::end();
         // candidates inside another candidate's packet are never asked about (the walker asks only outside a listed
         // packet): the heuristic finds more than a native registers, so marks <= candidates
@@ -383,6 +436,7 @@ int main(int argc, char **argv)
         // a fresh registry and stats for the next capture
         kamite::native::draw_list::g_stats = {};
         kamite::native::draw_list::g_registered = kamite::native::draw_list::g_found = 0;
+        kamite::native::draw_list::g_registeredShadow = 0;
         kamite::native::draw_list::g_unseen = kamite::native::draw_list::g_tagChanged = 0;
         kamite::native::draw_list::g_lastHalf = -1;
         kamite::native::draw_list::g_genSlots[0].clear();

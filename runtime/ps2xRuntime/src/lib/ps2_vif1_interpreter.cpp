@@ -546,6 +546,8 @@ void PS2Memory::processVIF1Listed(const uint8_t *data, uint32_t sizeBytes, const
     uint32_t pos = 0u;
     for (const ps2x::listed::Segment &s : listed.segments)
     {
+        if (!s.live)
+            continue; // a shadow packet: its bytes are in data
         const uint32_t at = s.start < sizeBytes ? s.start : sizeBytes;
         if (at > pos)
         {

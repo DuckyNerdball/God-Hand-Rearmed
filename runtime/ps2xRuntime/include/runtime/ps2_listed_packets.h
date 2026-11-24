@@ -34,13 +34,14 @@ namespace ps2x::listed
         uint32_t pieceBegin, pieceEnd; // its bytes as guest RAM, in Segments::pieces
         bool closed;         // false: the chain ended before its tail tag (shadow: end = start, no pieces; live: the
                              // bytes up to the chain's end)
+        bool live = false;   // its bytes are not in the gathered chain (else a shadow packet: copied, and checked)
     };
 
     struct Segments
     {
         std::vector<Segment> segments;
         std::vector<Piece> pieces;
-        bool live = false; // the packets' bytes are not in the gathered chain: read them from pieces
+        bool live = false; // some packet's bytes are not in the gathered chain (Segment::live): read them from pieces
         bool empty() const { return segments.empty(); }
         void clear()
         {
@@ -48,11 +49,13 @@ namespace ps2x::listed
             pieces.clear();
             live = false;
         }
-        size_t listedBytes() const
+        size_t listedBytes() const // the live packets' bytes (not in the gathered chain)
         {
             size_t n = 0;
-            for (const Piece &p : pieces)
-                n += p.len;
+            for (const Segment &s : segments)
+                if (s.live)
+                    for (uint32_t i = s.pieceBegin; i < s.pieceEnd; ++i)
+                        n += pieces[i].len;
             return n;
         }
     };
@@ -65,6 +68,7 @@ namespace ps2x::listed
         uint32_t end;        // after the tail tag's bytes; 0 while open
         bool closed;
         uint32_t pieceBegin = 0u, pieceEnd = 0u; // live: its bytes, in the walker's listed pieces
+        bool live = false;                       // its bytes went to the listed pieces (a live entry in a live walk)
     };
 
     // The walker's memory of listed packets (step b's cached decode): for each head, every tag the walk visited from the
@@ -90,7 +94,8 @@ namespace ps2x::listed
     // The draw list's registry: is the tag at headAddr (headTag = its first 8 bytes as the walker read them) the head of
     // a listed packet, and where is its last tag? Asked for the chain's first tag and for every NEXT tag's target, on the
     // thread that starts the VIF1 DMA (the game thread). nullptr (the default, and always in releases): no marks.
-    using Lookup = bool (*)(uint32_t headAddr, uint64_t headTag, uint32_t &tailAddr);
+    // shadow: the packet is listed for the shadow check only (a source not proven yet): the walker copies its bytes.
+    using Lookup = bool (*)(uint32_t headAddr, uint64_t headTag, uint32_t &tailAddr, bool &shadow);
     // live: leave the listed packets' bytes out of the gathered chain (else: copy everything, mark only)
     void setLookup(Lookup lookup, bool live);
     Lookup lookup();
@@ -130,17 +135,42 @@ namespace ps2x::listed
         }
     }
 
-    // Live: the marks as Segments, their bytes the walker's listed pieces (ChainPiece as above).
+    // A live walk's marks as Segments: a live mark's bytes are the walker's listed pieces (start = end, where they
+    // belong), a shadow mark's are cut out of the gathered chain's pieces as cutSegments does (ChainPiece as above).
     template <class ChainPiece>
-    void takeLive(const std::vector<ChainPiece> &listedPieces, const std::vector<Mark> &marks, Segments &out)
+    void takeLive(const std::vector<ChainPiece> &pieces, const std::vector<ChainPiece> &listedPieces,
+                  const std::vector<Mark> &marks, Segments &out)
     {
         out.clear();
-        out.live = true;
+        size_t p = 0;
+        uint64_t pieceStart = 0;
         for (const Mark &m : marks)
         {
-            Segment s{m.head, m.start, m.start, static_cast<uint32_t>(out.pieces.size()), 0u, m.closed};
-            for (uint32_t i = m.pieceBegin; i < m.pieceEnd && i < listedPieces.size(); ++i)
-                out.pieces.push_back(Piece{listedPieces[i].src, static_cast<uint32_t>(listedPieces[i].len)});
+            if (m.live)
+            {
+                Segment s{m.head, m.start, m.start, static_cast<uint32_t>(out.pieces.size()), 0u, m.closed, true};
+                for (uint32_t i = m.pieceBegin; i < m.pieceEnd && i < listedPieces.size(); ++i)
+                    out.pieces.push_back(Piece{listedPieces[i].src, static_cast<uint32_t>(listedPieces[i].len)});
+                s.pieceEnd = static_cast<uint32_t>(out.pieces.size());
+                out.segments.push_back(s);
+                out.live = true;
+                continue;
+            }
+            Segment s{m.head, m.start, m.closed ? m.end : m.start, static_cast<uint32_t>(out.pieces.size()), 0u, m.closed};
+            if (m.closed && m.end > m.start)
+            {
+                while (p < pieces.size() && pieceStart + pieces[p].len <= m.start)
+                    pieceStart += pieces[p++].len;
+                size_t q = p;
+                uint64_t qStart = pieceStart;
+                while (q < pieces.size() && qStart < m.end)
+                {
+                    const uint64_t from = qStart < m.start ? m.start - qStart : 0u;
+                    const uint64_t to = qStart + pieces[q].len > m.end ? m.end - qStart : pieces[q].len;
+                    out.pieces.push_back(Piece{pieces[q].src + from, static_cast<uint32_t>(to - from)});
+                    qStart += pieces[q++].len;
+                }
+            }
             s.pieceEnd = static_cast<uint32_t>(out.pieces.size());
             out.segments.push_back(s);
         }
@@ -157,6 +187,8 @@ namespace ps2x::listed
         uint32_t used = 0;     // bytes of pieces[p] already out
         for (const Segment &s : listed.segments)
         {
+            if (!s.live)
+                continue; // a shadow packet's bytes are in the chain's pieces already
             while (p < pieces.size() && at < s.start)
             {
                 const uint32_t left = pieces[p].len - used;

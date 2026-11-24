@@ -78,7 +78,7 @@ namespace ps2x::dma
         size_t total = 0u;
         auto add = [&](const uint8_t *src, uint32_t len)
         {
-            if (open >= 0 && listedPieces)
+            if (open >= 0 && (*marks)[open].live)
             {
                 std::vector<ChainPiece> &lp = *listedPieces;
                 if (lp.size() > openPiece && lp.back().src + lp.back().len == src)
@@ -194,10 +194,12 @@ namespace ps2x::dma
             {
                 headNext = false;
                 uint32_t tail = 0u;
-                if (open < 0 && lookup(currentTagAddr, tag, tail))
+                bool shadowOnly = false;
+                if (open < 0 && lookup(currentTagAddr, tag, tail, shadowOnly))
                 {
                     marks->push_back(ps2x::listed::Mark{currentTagAddr, tail, static_cast<uint32_t>(total), 0u, false});
                     open = static_cast<int>(marks->size()) - 1;
+                    marks->back().live = listedPieces && !shadowOnly;
                     if (listedPieces)
                         marks->back().pieceBegin = static_cast<uint32_t>(openPiece = listedPieces->size());
                     if (cache && !tagInSPR && tagAddr < PS2_RDRAM_SIZE)
