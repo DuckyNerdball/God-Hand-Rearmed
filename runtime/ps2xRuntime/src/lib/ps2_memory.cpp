@@ -67,6 +67,8 @@ namespace
     std::atomic<ps2x::dma::ChainPiecesObserver> g_chainPiecesObserver{nullptr};
     std::atomic<ps2x::listed::Lookup> g_listedLookup{nullptr};
     std::atomic<bool> g_listedLive{false};
+    std::atomic<bool> g_listedCacheOn{true};
+    ps2x::listed::Cache g_listedCache; // the VIF1 kick's (the game thread's) cached decode
 
     ps2x::ByteBuffer takeChainBuffer()
     {
@@ -2278,7 +2280,8 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
                     const bool chainKept = ps2x::dma::walkChain(
                         walk, tieEnabled, transferTagData, m_rdram, m_scratchpad,
                         [this](uint32_t a) { return translateAddress(a); }, chainPieces, chainBytes, listedLookup,
-                        listedLookup ? &listedMarks : nullptr, listedLive ? &listedPieces : nullptr);
+                        listedLookup ? &listedMarks : nullptr, listedLive ? &listedPieces : nullptr,
+                        listedLookup && g_listedCacheOn.load(std::memory_order_relaxed) ? &g_listedCache : nullptr);
 
                     if (!chainKept)
                     {
@@ -3768,6 +3771,17 @@ void ps2x::listed::setLookup(Lookup lookup, bool live)
 bool ps2x::listed::live()
 {
     return g_listedLive.load(std::memory_order_relaxed);
+}
+
+void ps2x::listed::setCache(bool on)
+{
+    g_listedCacheOn.store(on, std::memory_order_relaxed);
+}
+
+void ps2x::listed::cacheCounts(uint64_t &hits, uint64_t &misses)
+{
+    hits = g_listedCache.hits;
+    misses = g_listedCache.misses;
 }
 
 ps2x::listed::Lookup ps2x::listed::lookup()

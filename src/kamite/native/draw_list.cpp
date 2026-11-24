@@ -42,6 +42,11 @@ namespace kamite::native::draw_list
         int g_lastHalf = -1;
         uint32_t g_used = 0u;
         std::vector<uint32_t> g_genSlots[2]; // the slots each half registered in its current generation
+        // One bit per RAM qword: "a head was registered here" (set on registering, cleared only when the table is
+        // rebuilt): most NEXT targets the walker asks about are not heads, and a bit test is cheaper than the probe.
+        std::vector<uint64_t> g_headBits;
+        void setHeadBit(uint32_t key) { g_headBits[(key & kRamMask) >> 10] |= 1ull << (((key & kRamMask) >> 4) & 63u); }
+        bool headBit(uint32_t off) { return (g_headBits[off >> 10] >> ((off >> 4) & 63u)) & 1u; }
 
         // EE-side counts (game thread)
         uint64_t g_registered = 0u, g_halves = 0u, g_found = 0u, g_unseen = 0u, g_tagChanged = 0u, g_full = 0u;
@@ -69,6 +74,7 @@ namespace kamite::native::draw_list
                     if (current(e))
                         live.push_back(e);
                 std::fill(g_table.begin(), g_table.end(), Entry{});
+                std::fill(g_headBits.begin(), g_headBits.end(), 0ull);
                 g_used = 0u;
                 g_genSlots[0].clear();
                 g_genSlots[1].clear();
@@ -78,6 +84,7 @@ namespace kamite::native::draw_list
                     while (g_table[s].key != 0u)
                         s = (s + 1u) & (kSlots - 1u);
                     g_table[s] = e;
+                    setHeadBit(e.key);
                     g_genSlots[e.half].push_back(s);
                     ++g_used;
                 }
@@ -87,6 +94,8 @@ namespace kamite::native::draw_list
         bool lookup(uint32_t headAddr, uint64_t headTag, uint32_t &tailAddr)
         {
             if ((headAddr & 0xF0000000u) == 0x70000000u) // the scratchpad: never a listed packet
+                return false;
+            if (!headBit(headAddr & kRamMask))
                 return false;
             const uint32_t key = (headAddr & kRamMask) | 1u;
             for (uint32_t s = slotOf(key), n = 0; n < kSlots; s = (s + 1u) & (kSlots - 1u), ++n)
@@ -167,6 +176,7 @@ namespace kamite::native::draw_list
             if (!(e.key == key && current(e) && e.half == half)) // a second registration this generation: one slot
                 g_genSlots[half].push_back(at);
             e.key = key;
+            setHeadBit(key);
             e.tailDelta = tails[i] - heads[i];
             e.headTag = headTags[i];
             e.half = static_cast<uint8_t>(half);
@@ -414,6 +424,10 @@ namespace kamite::native::draw_list
         if (!f)
             return;
         std::fprintf(f, "# GHR draw list %s v1 %s\n", g_live ? "live" : "shadow", g_header.c_str());
+        uint64_t hits = 0u, misses = 0u;
+        ps2x::listed::cacheCounts(hits, misses);
+        std::fprintf(f, "cache hits %llu misses %llu\n", static_cast<unsigned long long>(hits),
+                     static_cast<unsigned long long>(misses));
         std::fprintf(f, "registered %llu found %llu unseen %llu tagchanged %llu full %llu halves %llu\n",
                      static_cast<unsigned long long>(g_registered), static_cast<unsigned long long>(g_found),
                      static_cast<unsigned long long>(g_unseen), static_cast<unsigned long long>(g_tagChanged),
@@ -453,12 +467,14 @@ namespace kamite::native::draw_list
         }
 #if !defined(KAMITE_RELEASE)
         g_live = mode != "shadow";
+        ps2x::listed::setCache(mode != "nocache"); // nocache: live, every listed packet's tags walked
         g_rdram = rdram;
 #else
         g_live = true;
         (void)rdram;
 #endif
         g_table.assign(kSlots, Entry{});
+        g_headBits.assign((kRamMask + 1u) / 16u / 64u, 0ull);
         g_ram = rdram;
         g_on = true;
         ps2x::listed::setLookup(&lookup, g_live);

@@ -49,7 +49,7 @@ namespace ps2x::dma
     bool walkChain(ChainWalk &w, bool tie, bool tagData, const uint8_t *rdram, const uint8_t *scratchpad,
                    Translate &&translate, std::vector<ChainPiece> &pieces, size_t &bytesOut,
                    ps2x::listed::Lookup lookup = nullptr, std::vector<ps2x::listed::Mark> *marks = nullptr,
-                   std::vector<ChainPiece> *listedPieces = nullptr)
+                   std::vector<ChainPiece> *listedPieces = nullptr, ps2x::listed::Cache *cache = nullptr)
     {
         pieces.clear();
         if (!marks)
@@ -63,6 +63,18 @@ namespace ps2x::dma
         bool headNext = lookup != nullptr; // ask about the next tag: the chain's first, then NEXT targets
         int open = -1;                     // the listed packet being walked (index into marks)
         size_t openPiece = 0u;             // live: its first piece in listedPieces (no merging across packets)
+        // The cached decode (ps2_listed_packets.h Cache): rec = the entry being recorded for the open packet.
+        if (!lookup)
+            cache = nullptr;
+        ps2x::listed::CacheEntry *rec = nullptr;
+        uint32_t recKey = 0u;
+        int recStart = 0;
+        auto dropRec = [&]()
+        {
+            if (rec)
+                cache->entries.erase(recKey);
+            rec = nullptr;
+        };
         size_t total = 0u;
         auto add = [&](const uint8_t *src, uint32_t len)
         {
@@ -73,7 +85,33 @@ namespace ps2x::dma
                     lp.back().len += len;
                 else
                     lp.push_back(ChainPiece{src, len});
+                if (rec)
+                {
+                    if (src >= rdram && src + len <= rdram + PS2_RDRAM_SIZE)
+                    {
+                        const uint32_t off = static_cast<uint32_t>(src - rdram);
+                        if (!rec->pieces.empty() && rec->pieces.back().first + rec->pieces.back().second == off)
+                            rec->pieces.back().second += len;
+                        else
+                            rec->pieces.emplace_back(off, len);
+                    }
+                    else
+                        dropRec(); // the scratchpad: not remembered
+                }
                 return;
+            }
+            if (rec)
+            {
+                if (src >= rdram && src + len <= rdram + PS2_RDRAM_SIZE)
+                {
+                    const uint32_t off = static_cast<uint32_t>(src - rdram);
+                    if (!rec->pieces.empty() && rec->pieces.back().first + rec->pieces.back().second == off)
+                        rec->pieces.back().second += len;
+                    else
+                        rec->pieces.emplace_back(off, len);
+                }
+                else
+                    dropRec();
             }
             if (!pieces.empty() && pieces.back().src + pieces.back().len == src)
                 pieces.back().len += len;
@@ -151,6 +189,7 @@ namespace ps2x::dma
             const uint32_t addr = static_cast<uint32_t>((tag >> 32) & 0x7FFFFFFF);
             lastTagUpper = static_cast<uint32_t>((tag >> 16) & 0xFFFFu);
             ++tagsProcessed;
+            bool jumped = false; // the cached decode replayed the whole packet
             if (headNext)
             {
                 headNext = false;
@@ -161,7 +200,74 @@ namespace ps2x::dma
                     open = static_cast<int>(marks->size()) - 1;
                     if (listedPieces)
                         marks->back().pieceBegin = static_cast<uint32_t>(openPiece = listedPieces->size());
+                    if (cache && !tagInSPR && tagAddr < PS2_RDRAM_SIZE)
+                    {
+                        auto it = cache->entries.find(physTag);
+                        bool valid = it != cache->entries.end() && it->second.ready && it->second.headAsp == asp &&
+                                     it->second.tie == tie && it->second.tagData == tagData;
+                        if (valid)
+                            for (const auto &[off, value] : it->second.tags)
+                            {
+                                uint64_t now;
+                                std::memcpy(&now, rdram + off, sizeof(now));
+                                if (now != value)
+                                {
+                                    valid = false;
+                                    break;
+                                }
+                            }
+                        if (valid)
+                        {
+                            const ps2x::listed::CacheEntry &e = it->second;
+                            for (const auto &[off, len] : e.pieces)
+                                add(rdram + off, len);
+                            (*marks)[open].end = static_cast<uint32_t>(total);
+                            (*marks)[open].closed = true;
+                            if (listedPieces)
+                                (*marks)[open].pieceEnd = static_cast<uint32_t>(listedPieces->size());
+                            open = -1;
+                            tagsProcessed += e.tagCount - 1;
+                            lastTagUpper = e.lastTagUpper;
+                            tagAddr = e.next;
+                            if (e.wrote0)
+                                asr0 = e.asr0;
+                            if (e.wrote1)
+                                asr1 = e.asr1;
+                            headNext = true; // the tail is a NEXT
+                            jumped = true;
+                            ++cache->hits;
+                        }
+                        else
+                        {
+                            ++cache->misses;
+                            if (cache->entries.size() >= 32768u)
+                                cache->entries.clear();
+                            recKey = physTag;
+                            rec = &cache->entries[recKey];
+                            rec->tags.clear();
+                            rec->pieces.clear();
+                            rec->ready = false;
+                            rec->wrote0 = rec->wrote1 = false;
+                            rec->headAsp = asp;
+                            rec->tie = tie;
+                            rec->tagData = tagData;
+                            recStart = tagsProcessed;
+                        }
+                    }
                 }
+            }
+            if (jumped)
+            {
+                // the loop check below, as after any tag
+            }
+            else
+            {
+            if (rec)
+            {
+                if (!tagInSPR && physTag + 8u <= PS2_RDRAM_SIZE && tagAddr < PS2_RDRAM_SIZE)
+                    rec->tags.emplace_back(physTag, tag);
+                else
+                    dropRec();
             }
 
             uint32_t dataAddr = 0;
@@ -192,6 +298,8 @@ namespace ps2x::dma
                 dataAddr = tagAddr + 16;
                 {
                     const uint32_t retAddr = dataAddr + static_cast<uint32_t>(tagQwc) * 16u;
+                    if (rec && asp < 2u)
+                        (asp == 0u ? rec->wrote0 : rec->wrote1) = true;
                     if (asp == 0u)
                     {
                         asr0 = retAddr;
@@ -253,13 +361,33 @@ namespace ps2x::dma
                 if (listedPieces)
                     (*marks)[open].pieceEnd = static_cast<uint32_t>(listedPieces->size());
                 open = -1;
+                if (rec)
+                {
+                    // remembered only if the packet ended the plain way: its tail a NEXT, no interrupt / end on the way,
+                    // the call stack back where it was
+                    if (id == 2u && !irq && !endChain && asp == rec->headAsp)
+                    {
+                        rec->next = tagAddr;
+                        rec->lastTagUpper = lastTagUpper;
+                        rec->asr0 = asr0;
+                        rec->asr1 = asr1;
+                        rec->tagCount = tagsProcessed - recStart + 1;
+                        rec->ready = true;
+                        rec = nullptr;
+                    }
+                    else
+                        dropRec();
+                }
             }
+            else if (rec && (endChain || (irq && tie)))
+                dropRec();
             if (lookup && id == 2u && open < 0)
                 headNext = true;
             if (irq && tie)
                 endChain = true;
             if (endChain)
                 break;
+            }
             if (tagAddr == loopTag && asp == loopAsp && asr0 == loopAsr0 && asr1 == loopAsr1)
             {
                 looped = true;
@@ -286,6 +414,7 @@ namespace ps2x::dma
         bytesOut = total;
         if (open >= 0 && listedPieces) // the chain ended inside a listed packet: its bytes so far stay its own
             (*marks)[open].pieceEnd = static_cast<uint32_t>(listedPieces->size());
+        dropRec();
         return !(looped || tagsProcessed >= kMaxChainTags);
     }
 

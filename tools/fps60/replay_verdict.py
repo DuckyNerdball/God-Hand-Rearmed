@@ -88,7 +88,7 @@ def drawlist_totals(paths):
             elif f[0] in ("registered", "segments"):
                 for key, value in zip(f[0::2], f[1::2]):
                     add(key, value)
-            elif f[0] in ("parse", "ops"):
+            elif f[0] in ("parse", "ops", "cache"):
                 for key, value in zip(f[1::2], f[2::2]):
                     add(f"{f[0]}-{key}", value)
             elif f[0] == "live":  # live start same N differ N end same N differ N
@@ -258,6 +258,10 @@ def main():
         print(f"  packets {g('segments')} (unclosed {g('unclosed')}), {share:.1f}% of the VIF1 chain bytes"
               f"{' (read in place, not copied)' if modes == ['live'] else ''}; VIF commands on the edges: ok "
               f"{g('parse-ok')}, fail {g('parse-fail')}{'  <-- PARSE FAILURES' if g('parse-fail') or g('unclosed') else ''}")
+        if g("cache-hits") or g("cache-misses"):
+            hm = g("cache-hits") + g("cache-misses")
+            print(f"  cached decode: {g('cache-hits')} packets jumped head to tail, {g('cache-misses')} walked "
+                  f"({100.0 * g('cache-hits') / hm:.1f}% jumped)")
         if "shadow" in modes:
             print(f"  bytes in RAM = the walker's copy: job start {g('live-start-same')} same / {g('live-start-differ')} "
                   f"differ, job end {g('live-end-same')} same / {g('live-end-differ')} differ"

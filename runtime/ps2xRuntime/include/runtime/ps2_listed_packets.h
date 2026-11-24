@@ -13,6 +13,8 @@
 // ps2_async_vif.h include it.
 
 #include <cstdint>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace ps2x::listed
@@ -65,6 +67,26 @@ namespace ps2x::listed
         uint32_t pieceBegin = 0u, pieceEnd = 0u; // live: its bytes, in the walker's listed pieces
     };
 
+    // The walker's memory of listed packets (step b's cached decode): for each head, every tag the walk visited from the
+    // head to the tail (RAM offset, value), the pieces those tags produced (RAM offset, length) and the walk's state
+    // after the tail. The pieces and the state depend on nothing but those tag values, so when every recorded tag still
+    // holds its value the walker replays the pieces and jumps to the tail's link without walking the tags. Kept by the
+    // thread that starts the DMA (PS2Memory's VIF1 kick).
+    struct CacheEntry
+    {
+        std::vector<std::pair<uint32_t, uint64_t>> tags;   // head first, tail last
+        std::vector<std::pair<uint32_t, uint32_t>> pieces; // as the walk added them (merged)
+        uint32_t next = 0u, lastTagUpper = 0u, asr0 = 0u, asr1 = 0u, headAsp = 0u;
+        int tagCount = 0;
+        bool wrote0 = false, wrote1 = false, ready = false;
+        bool tie = false, tagData = false; // the walk's CHCR.TIE / TTE when recorded
+    };
+    struct Cache
+    {
+        std::unordered_map<uint32_t, CacheEntry> entries; // by the head's RAM offset
+        uint64_t hits = 0u, misses = 0u;
+    };
+
     // The draw list's registry: is the tag at headAddr (headTag = its first 8 bytes as the walker read them) the head of
     // a listed packet, and where is its last tag? Asked for the chain's first tag and for every NEXT tag's target, on the
     // thread that starts the VIF1 DMA (the game thread). nullptr (the default, and always in releases): no marks.
@@ -73,6 +95,9 @@ namespace ps2x::listed
     void setLookup(Lookup lookup, bool live);
     Lookup lookup();
     bool live();
+    // The cached decode (on by default with a lookup); its hits / misses so far (read on the game thread).
+    void setCache(bool on);
+    void cacheCounts(uint64_t &hits, uint64_t &misses);
 
     // The marks of one walk as Segments: each mark's bytes cut out of the walk's pieces (pieces = the walk's, total
     // in chain order; Piece mirrors ps2x::dma::ChainPiece). An open mark (the chain ended inside it): closed = false,

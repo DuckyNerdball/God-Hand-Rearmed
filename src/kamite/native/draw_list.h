@@ -13,7 +13,8 @@
 // <case>.<30|60>.drawlist.txt (tools/fps60/replay_verdict.py sums them).
 //
 // KAMITE_NATIVE_DRAWLIST (hidden, GHR.ini [Runtime] like the other natives' switches): unset = live; 0 = off (the walker
-// copies every packet as before build 2); shadow = the shadow (dev builds; live in releases).
+// copies every packet as before build 2); shadow = the shadow (dev builds; live in releases); nocache = live without the
+// walker's cached decode (every listed packet's tags walked each frame, as in build 2).
 
 #include <cstdint>
 #include <string>

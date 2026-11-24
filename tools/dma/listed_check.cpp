@@ -9,6 +9,11 @@
 // Build 2 (live): the walk with the listed bytes routed out has the same walk state; the copied chain with each packet
 // put back, logicalPieces, and chain_digest's streaming hash all equal the full chain. (The report printed below holds
 // both the shadow and the live pass's counts.)
+// Build 3 (the cached decode): a cold walk that records and a warm one that jumps equal the uncached live walk; a
+// changed REF tag inside a remembered packet misses once, re-records, and equals a fresh walk; restoring it misses once.
+// LISTED_BENCH=1 times the walks (Nov 24, sandbox, best of 9 x 300): 649722 plain 406 us, live uncached 429, cached 366;
+// 650290 308 / 353 / 313; 15923 77 / 81 / 58 (69-72% of the tags sit in listed packets; checking them reads the same
+// memory as walking them, so the cache mostly wins back the lookups).
 //
 //   g++ -std=c++20 -O2 -msse4.1 -I runtime/ps2xRuntime/include -I runtime/ps2xIOP/include -I src
 //       tools/dma/listed_check.cpp -o /tmp/listed_check
@@ -28,13 +33,21 @@ void ps2x::listed::setLookup(Lookup lookup, bool live) { g_lookup = lookup, g_li
 ps2x::listed::Lookup ps2x::listed::lookup() { return g_lookup; }
 bool ps2x::listed::live() { return g_liveMode; }
 void ps2x::asyncvif::setListedObserver(ListedObserver observer) { g_observer = observer; }
+namespace
+{
+    ps2x::listed::Cache g_cache;
+}
+void ps2x::listed::setCache(bool) {}
+void ps2x::listed::cacheCounts(uint64_t &hits, uint64_t &misses) { hits = g_cache.hits, misses = g_cache.misses; }
 
 #include "kamite/native/draw_list.cpp"
 
 #define XXH_INLINE_ALL
 #include "../../thirdparty/pcsx2/3rdparty/include/xxhash.h"
 
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <stdexcept>
@@ -228,6 +241,102 @@ int main(int argc, char **argv)
                               XXH3_64bits_digest(&state) == XXH3_64bits(g0.data(), b0);
         if (g_observer)
             g_observer(live, g2.data(), b2, 0);
+
+        // The cached decode: a cold walk records, a warm one jumps; both must give the uncached live walk's pieces,
+        // marks and walk state. Then a REF tag inside a remembered packet points elsewhere: the warm walk must notice
+        // and give what a fresh uncached walk of the changed RAM gives.
+        auto cacheSame = [&](const char *what, bool withCache)
+        {
+            std::vector<ps2x::dma::ChainPiece> pa, la, pb, lb;
+            std::vector<ps2x::listed::Mark> ma, mb;
+            ps2x::dma::ChainWalk wa, wb;
+            size_t ba = 0, bb = 0;
+            wa.tagAddr = wb.tagAddr = head;
+            const bool ka = ps2x::dma::walkChain(wa, false, true, g_rdram.data(), g_spr.data(), translate, pa, ba, g_lookup,
+                                                 &ma, &la, nullptr);
+            const bool kb = ps2x::dma::walkChain(wb, false, true, g_rdram.data(), g_spr.data(), translate, pb, bb, g_lookup,
+                                                 &mb, &lb, withCache ? &g_cache : nullptr);
+            auto eqp = [](const std::vector<ps2x::dma::ChainPiece> &x, const std::vector<ps2x::dma::ChainPiece> &y)
+            {
+                if (x.size() != y.size())
+                    return false;
+                for (size_t i = 0; i < x.size(); ++i)
+                    if (x[i].src != y[i].src || x[i].len != y[i].len)
+                        return false;
+                return true;
+            };
+            bool ok = ka == kb && ba == bb && eqp(pa, pb) && eqp(la, lb) && ma.size() == mb.size() &&
+                      wa.tagAddr == wb.tagAddr && wa.asp == wb.asp && wa.asr0 == wb.asr0 && wa.asr1 == wb.asr1 &&
+                      wa.lastTagUpper == wb.lastTagUpper && wa.tagsProcessed == wb.tagsProcessed;
+            for (size_t i = 0; ok && i < ma.size(); ++i)
+                ok = ma[i].head == mb[i].head && ma[i].start == mb[i].start && ma[i].end == mb[i].end &&
+                     ma[i].closed == mb[i].closed && ma[i].pieceBegin == mb[i].pieceBegin && ma[i].pieceEnd == mb[i].pieceEnd;
+            std::printf("    cache %-34s %s (hits %llu misses %llu)\n", what, ok ? "= uncached" : "DIFFERS",
+                        static_cast<unsigned long long>(g_cache.hits), static_cast<unsigned long long>(g_cache.misses));
+            return ok;
+        };
+        g_cache = {};
+        failures += !cacheSame("cold (records)", true);
+        failures += !cacheSame("warm (jumps)", true);
+        // change a REF tag's address inside the first remembered packet that has one (and put it back after)
+        uint32_t changedAt = 0u;
+        uint64_t old = 0u;
+        for (const auto &[key, e] : g_cache.entries)
+        {
+            for (size_t i = 1; i < e.tags.size(); ++i) // not the head: that one the registry checks itself
+            {
+                const auto &[off, value] = e.tags[i];
+                if (((value >> 28) & 7u) == 3u && ((value >> 32) & 0x7FFFFFFFu) >= 0x100000u)
+                {
+                    changedAt = off, old = value;
+                    break;
+                }
+            }
+            if (changedAt)
+                break;
+        }
+        if (std::getenv("LISTED_BENCH"))
+        {
+            // the game thread's walk of this chain, live: uncached vs the warm cache (and the plain walk for scale)
+            auto time = [&](int mode)
+            {
+                std::vector<ps2x::dma::ChainPiece> pa, la;
+                std::vector<ps2x::listed::Mark> ma;
+                const auto t0 = std::chrono::steady_clock::now();
+                for (int n = 0; n < 300; ++n)
+                {
+                    ps2x::dma::ChainWalk wa;
+                    wa.tagAddr = head;
+                    size_t ba = 0;
+                    if (mode == 0)
+                        ps2x::dma::walkChain(wa, false, true, g_rdram.data(), g_spr.data(), translate, pa, ba);
+                    else
+                        ps2x::dma::walkChain(wa, false, true, g_rdram.data(), g_spr.data(), translate, pa, ba, g_lookup, &ma,
+                                             &la, mode == 2 ? &g_cache : nullptr);
+                }
+                return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count() / 300.0;
+            };
+            size_t listedTags = 0;
+            for (const auto &kv : g_cache.entries)
+                listedTags += kv.second.tags.size();
+            double best[3] = {1e30, 1e30, 1e30};
+            for (int round = 0; round < 9; ++round)
+                for (int m = 0; m < 3; ++m)
+                    best[m] = std::min(best[m], time(m));
+            std::printf("    walk (best of 9 x 300): plain %.0f us, live uncached %.0f us, live cached %.0f us (listed tags "
+                        "%zu of %d)\n", best[0], best[1], best[2], listedTags, w0.tagsProcessed);
+        }
+        if (changedAt)
+        {
+            const uint64_t moved = old - (0x40ull << 32); // the payload read 0x40 bytes earlier
+            std::memcpy(g_rdram.data() + changedAt, &moved, 8);
+            failures += !cacheSame("after a tag changed", true);
+            failures += !cacheSame("warm again", true);
+            std::memcpy(g_rdram.data() + changedAt, &old, 8);
+            failures += !cacheSame("tag restored", true);
+        }
+        else
+            std::printf("    cache: no REF tag to change\n"), ++failures;
         std::printf("    live: chain copy %zu bytes + %zu listed in place = %zu; rebuilt / logical pieces / streaming hash %s\n",
                     b2, live.listedBytes(), b2 + live.listedBytes(), liveSame ? "= the full chain" : "DIFFER");
         failures += !liveSame;
