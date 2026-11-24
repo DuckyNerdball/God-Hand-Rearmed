@@ -5,7 +5,7 @@
 **God Hand for PS2. Recompiled, Refined, Rearmed.**
 
 An unofficial, fan-made native PC port of Clover Studio's **God Hand** (PlayStation 2, 2006). The game's own code is
-recompiled into a Windows program: no emulator running the show. It plays start to credits at a smooth 60, on any
+recompiled into a Windows and Linux program: no emulator running the show. It plays start to credits at a smooth 60, on any
 screen, with as much or as little of our own nonsense as you want.
 
 > [!WARNING]
@@ -17,7 +17,13 @@ screen, with as much or as little of our own nonsense as you want.
 
 ## Get It Running
 
-1. Grab the latest `GHR-v….zip` from [Releases](https://github.com/God-Hand-Rearmed/God-Hand-Rearmed/releases).
+Grab the latest release from [Releases](https://github.com/God-Hand-Rearmed/God-Hand-Rearmed/releases), then open
+yours:
+
+<details>
+<summary><b>Windows</b></summary>
+
+1. Grab `GHR-v…-Windows-x64.zip`.
 2. Unzip it somewhere you can write to, **Not Program Files**!
     * The launcher updates the game in place and Windows won't let it write there.
 3. Run **GHR.exe**. 
@@ -27,6 +33,29 @@ screen, with as much or as little of our own nonsense as you want.
     * Beat thugs™, demons™, women™!
 
 The first start compiles shaders for your GPU, so the screen may stay black before coming back. Patience, young ass-whooper.
+
+</details>
+
+<details>
+<summary><b>Linux and Steam Deck</b></summary>
+
+Same release, three flavours: pick one.
+* **AppImage** (`GHR-v…-Linux-x64.AppImage`, one file): make it executable (file manager > Properties > Is
+  executable, or `chmod +x`) and run it.
+* **Folder** (`GHR-v…-Linux-x64.tar.gz`): unpack it anywhere you can write to and run `GHR` inside, like the Windows zip.
+* **Flatpak** (`GHR-v…-Linux-x64.flatpak`): `flatpak install --user` it, then `flatpak run io.github.God_Hand_Rearmed.GHR`.
+
+Point the launcher at your disc image (.iso or .chd) once, pick a preset and hit "**Play**"! The first start shows a
+"Preparing shaders" notice while the shaders are built for your GPU.
+
+**Steam Deck:** in Desktop Mode, start the AppImage once, point it at your disc image, then hit **Add to Steam** in
+the launcher. Back in Game Mode it's in your library, full screen at the Deck's 16:10. (The Flatpak can't reach Steam
+from its sandbox: use Steam's own "Add a Non-Steam Game".)
+
+Needs glibc 2.31 or newer (SteamOS, or any distro from 2020 on) and a Vulkan driver. The `README.txt` in the tar.gz has
+the rest.
+
+</details>
 
 ## What's In It
 
@@ -210,11 +239,12 @@ Every option, with the same help text you'll see in the launcher and in game.
 
 **Controller**
 
+- **Menu Controls:** Western: bottom button confirms; right cancels. Japanese: right button confirms; bottom cancels. *Western / Japanese / Classic*
 - **Vibration:** Controller rumble. Girls know what it's for.
 - **Left Stick Deadzone:** How far the left stick must move before it counts. Raise it if Gene walks on his own. *0% to 50%*
 - **Right Stick Deadzone:** How far the right stick must move before it counts. Raise it if the camera drifts or Gene dodges on his own. *0% to 50%*
 - **Swap Sticks:** For lefties: the right stick moves Gene, the left one dodges and aims. Stick presses: swap them in Button Mapping.
-- **Menu Controls:** Western: bottom button confirms; right cancels. Japanese: right button confirms; bottom cancels. *Western / Japanese / Classic*
+- **Mash Assistic:** Are ya winning, dad? Waggle and mash events are easier.
 
 </details>
 <details>
@@ -305,6 +335,7 @@ Every option, with the same help text you'll see in the launcher and in game.
 
 - **Roulette Timer:** Time limit to select a move after opening the Roulette. Techniques fire off automatically at the end of the timer. *Normal / Double time*
 - **Target Select:** Switch Roulette targets with the right stick and the d-pad. HINT: You can also use the d-pad to cycle Roulette moves. `Rearmed+`
+- **Inverse Roulette:** Reverse the direction of the roulette, so up goes up and down goes down.
 - **Dry Spinning:** You can open the Roulette even when you don't have balls. HINT: You can use the Roulette camera for targeting. `Rearmed+`
 
 **Skip Poker**
@@ -358,10 +389,14 @@ The USA release (SLUS-21503). Others may work; that's the one it's tested with. 
 the checksums.
 
 **Why is the screen black for a while on the first start?**
-The shaders are being compiled for your GPU. Once. After that it's quick.
+The shaders are being compiled for your GPU. Once. After that it's quick. On Linux and the Steam Deck a "Preparing
+shaders" notice with a moving bar shows meanwhile (the seconds, and how many shaders are done).
 
 **Windows SmartScreen is yelling at me.**
 The exe isn't signed (certificates cost money; this is free). **More info > Run anyway**.
+
+**Steam Deck? Linux?**
+Yes, natively: the AppImage, the tar.gz or the Flatpak ([Get It Running](#get-it-running)). No Proton needed.
 
 **Will my PCSX2 texture pack work?**
 Yes: packs in PCSX2's format (a `replacements` folder). A texture pack is a mod: put its folder in `mods` next to
@@ -373,7 +408,9 @@ Loose images go in `mods/Loose Textures/textures`. Press **T** in game to switch
 The port keeps its own memory card in `memcards\mc0`.
 
 **Where are my saves?**
-`memcards\mc0` (the game's saves) and `states` (save states), next to GHR.exe. Updates never touch them.
+`memcards\mc0` (the game's saves) and `states` (save states), next to GHR.exe (Linux AppImage:
+`~/.local/share/GodHandRearmed`; Flatpak: `~/.var/app/io.github.God_Hand_Rearmed.GHR/data/GodHandRearmed`). Updates
+never touch them.
 
 **How do I update?**
 Start the launcher. If a new version is out, press **Update**. That's it!
@@ -390,7 +427,7 @@ you saw.
 
 ## Coming Soon
 
-- **Linux, Android and Mac!**
+- **Android and Mac!**
 - **Photo mode** with a free camera.
 - **Subtitles** for the cutscenes.
 - **More playable characters.**
