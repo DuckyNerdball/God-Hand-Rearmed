@@ -2293,6 +2293,11 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
                             std::fflush(stderr);
                         }
                         chainBytes = 0u;
+                        // a dropped chain stays dropped: its listed packets go with it (b2 lists the texture upload
+                        // records the game rings up after a 60 -> 30 state load: renderer-debugging.md)
+                        chainPieces.clear();
+                        listedMarks.clear();
+                        listedPieces.clear();
                     }
                     m_ioRegisters[channelBase + 0x30] = walk.tagAddr;
                     m_ioRegisters[channelBase + 0x40] = walk.asr0;

@@ -329,6 +329,29 @@ int main(int argc, char **argv)
             std::printf("    walk (best of 9 x 300): plain %.0f us, live uncached %.0f us, live cached %.0f us (listed tags "
                         "%zu of %d)\n", best[0], best[1], best[2], listedTags, w0.tagsProcessed);
         }
+        {
+            // A ring (the game links its texture queue into one after a 60 -> 30 state load): a listed packet's tail
+            // pointed back at its own head. The walk must end (dropped as looped), cold and with the cache warm.
+            const auto &[ringHead, ringTail] = *cands.rbegin();
+            uint64_t tailTag;
+            std::memcpy(&tailTag, g_rdram.data() + ringTail, 8);
+            const uint64_t ring = (tailTag & 0x80000000FFFFFFFFull) | (static_cast<uint64_t>(ringHead) << 32);
+            std::memcpy(g_rdram.data() + ringTail, &ring, 8);
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                std::vector<ps2x::dma::ChainPiece> pr, lr;
+                std::vector<ps2x::listed::Mark> mr;
+                ps2x::dma::ChainWalk wr;
+                wr.tagAddr = head;
+                size_t br = 0;
+                const bool kept = ps2x::dma::walkChain(wr, false, true, g_rdram.data(), g_spr.data(), translate, pr, br,
+                                                       g_lookup, &mr, &lr, &g_cache);
+                std::printf("    ring (%s): %s after %d tags\n", pass ? "warm" : "cold",
+                            !kept && wr.looped ? "dropped as looped" : "NOT DROPPED", wr.tagsProcessed);
+                failures += kept || !wr.looped;
+            }
+            std::memcpy(g_rdram.data() + ringTail, &tailTag, 8);
+        }
         if (changedAt)
         {
             const uint64_t moved = old - (0x40ull << 32); // the payload read 0x40 bytes earlier

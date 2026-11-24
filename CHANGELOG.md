@@ -4,7 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 24, 2026
 
-- Performance: the models' draw packets go to the vector unit straight from memory instead of being copied every frame.
+- Performance: the models' draw packets and texture uploads go to the vector unit straight from memory instead of being copied every frame.
 
 ## November 23, 2026
 
