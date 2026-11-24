@@ -2,7 +2,8 @@
 // (runtime/ps2_dma_chain.h with a lookup), cutSegments and the VU thread's check (src/kamite/native/draw_list.cpp,
 // #included as is) on K's F8 RAM captures. Without the game running, the packets the fused native would register are
 // found from the chain itself: a NEXT target T whose first NEXT tag outside a CALL is at T + 0xA0 (a node's packet) or
-// T + 0x70 (a model's own packet); it finds scenery packets too, and ones nested in others (never asked about). Checks:
+// T + 0x70 (a model's own packet) or T + 0x80 (a texture upload's record, b2; its head is a NEXT itself, so the search
+// starts past the head); it finds scenery packets too, and ones nested in others (never asked about). Checks:
 // the walk with the lookup is byte-identical to the walk without one, every mark closes at its tail, the cut pieces are
 // the gathered bytes; draw_list.cpp's report (VIF commands on the packets' edges, bytes in RAM = the copy) is printed.
 // Nov 23 on 649722 / 650290 / 15923: 646 / 642 / 173 marks, all closed and cut right, parse ok on every one.
@@ -14,6 +15,8 @@
 // LISTED_BENCH=1 times the walks (Nov 24, sandbox, best of 9 x 300): 649722 plain 406 us, live uncached 429, cached 366;
 // 650290 308 / 353 / 313; 15923 77 / 81 / 58 (69-72% of the tags sit in listed packets; checking them reads the same
 // memory as walking them, so the cache mostly wins back the lookups).
+// b2 (upload records too): 649722 copies 2.85 MB + 4.72 MB in place; 650290 2.00 + 4.72; 15923 0.46 + 1.61; parse ok on
+// every packet.
 //
 //   g++ -std=c++20 -O2 -msse4.1 -I runtime/ps2xRuntime/include -I runtime/ps2xIOP/include -I src
 //       tools/dma/listed_check.cpp -o /tmp/listed_check
@@ -117,10 +120,10 @@ namespace
             if (tags[i].id != 2)
                 continue;
             const uint32_t t = tags[i + 1].addr;
-            for (size_t j = i + 1; j < tags.size(); ++j)
+            for (size_t j = i + 2; j < tags.size(); ++j) // past the head (an upload record's head is a NEXT itself)
                 if (tags[j].id == 2 && tags[j].depth == tags[i + 1].depth)
                 {
-                    if (tags[j].addr == t + 0xA0u || tags[j].addr == t + 0x70u)
+                    if (tags[j].addr == t + 0xA0u || tags[j].addr == t + 0x70u || tags[j].addr == t + 0x80u)
                         out[t] = tags[j].addr;
                     break;
                 }

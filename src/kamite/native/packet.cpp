@@ -563,11 +563,26 @@ namespace kamite::native::packet
         template <class Env>
         bool textureCall(Env &env, R5900Context *ctx, uint32_t site, const QueuePlan &q)
         {
+            const uint32_t record = e::u32(ctx, e::a3);
             e::jal(ctx, site, kQueue, true);
             addiu(ctx, e::t0, e::a3, 0x80);
             if (env.call())
                 return false;
-            return queueBody(env, ctx, q);
+            if (!queueBody(env, ctx, q))
+                return false;
+            // Step b (draw_list.h): the upload's record (NEXT head, pixels REF at +0x70, tail +0x80), now queued
+            if constexpr (std::is_same_v<Env, RealEnv>)
+                if (draw_list::g_on)
+                {
+                    uint32_t off, halfOff;
+                    if (plainRam(record, 8u, off) && plainRam(kFrameHalf, 4u, halfOff))
+                    {
+                        const uint32_t tail = record + 0x80u;
+                        const uint64_t tag = e::read64(env, off);
+                        draw_list::listPackets(e::read32(env, halfOff), &record, &tail, &tag, 1u);
+                    }
+                }
+            return true;
         }
 
         // func_00150DC8 (a0 = object, a1 = the texture's holder (+4: its record), a2 = the address word, a3 = sign / mode
@@ -1917,8 +1932,25 @@ namespace kamite::native::packet
             const uint64_t tag = t.u64(last);
             t.w64(last, (tag & 0x0FFFFFFFu) | 0x20000000u | (before << 32));
         }
+        // Step b (draw_list.h): the packets a live tagSetRate call queues, registered once it commits. Set only while a
+        // RealEnv tagSetRate runs with the draw list on; its node / model packets and (b2) the texture uploads its
+        // texture-cache misses queue (txnQueueKind) land here.
+        struct ListCollect
+        {
+            static constexpr uint32_t kMax = 512u;
+            uint32_t head[kMax], tail[kMax];
+            uint32_t count = 0u;
+            void add(uint32_t h, uint32_t t)
+            {
+                if (count < kMax)
+                    head[count] = h, tail[count++] = t;
+            }
+        };
+        ListCollect *g_listCollect = nullptr;
+
         // The three upload functions' queue: kind 0 / 3 bucket 1 order 0xE, 2: 6 / 8, 1: 1 / 2, else none (a 64-bit
-        // compare of the kind register).
+        // compare of the kind register). The record: a NEXT head to +0x70 (the GS packet inline), a REF to the pixels at
+        // +0x70, the tail at +0x80.
         template <class T>
         void txnQueueKind(T &t, uint64_t kind, uint32_t record)
         {
@@ -1930,7 +1962,12 @@ namespace kamite::native::packet
             else if (kind == 1u)
                 bucket = 1u, order = 2u;
             if (bucket != 0u)
+            {
                 txnQueue(t, bucket, order, record, record + 0x80u);
+                if constexpr (std::is_same_v<std::remove_reference_t<decltype(t.env)>, RealEnv>)
+                    if (g_listCollect)
+                        g_listCollect->add(record, record + 0x80u);
+            }
         }
         // The upload functions' head: -1 when the GS flag 0x800 is set (unless `sign` < 0) or the object's 0x280
         // records are used up; else the record (object + 0x40 + n * 0x180, this half's 0xC0 in) and the counter moved.
@@ -4703,10 +4740,13 @@ namespace kamite::native::packet
                 return false;
             // Step b (draw_list.h): the node packets and the model's own packet this call queues, registered once it has
             // committed (live calls only: the shadow harness's runs are scratch)
-            constexpr uint32_t kListMax = kTagNodeLimit + 1u;
-            uint32_t listHead[kListMax], listTail[kListMax];
-            uint32_t listCount = 0u;
+            ListCollect list;
             const bool listing = std::is_same_v<Env, RealEnv> && draw_list::g_on;
+            struct CollectScope
+            {
+                explicit CollectScope(ListCollect *c) { g_listCollect = c; }
+                ~CollectScope() { g_listCollect = nullptr; }
+            } collectScope(listing ? &list : nullptr);
 
             // the nodes' countdowns: ForwardNodeUpdate (objFlags 0x10), or its own walk (getMeshPtr twice: the head's
             // byte +0x380 bit 7 picks between two identical calls)
@@ -4827,8 +4867,8 @@ namespace kamite::native::packet
                         last = node, lastLayer = layer;
                         const uint32_t packet = node + half * 0xB0u;
                         queueByKind(t, self, t.u32(node + model::kNodeDispFlags), id, packet, packet + 0xA0u);
-                        if (listing && listCount < kListMax)
-                            listHead[listCount] = packet, listTail[listCount++] = packet + 0xA0u;
+                        if (listing)
+                            list.add(packet, packet + 0xA0u);
                     }
                     node = t.u32(node + 0x404u);
                     if (node != 0u)
@@ -4844,10 +4884,10 @@ namespace kamite::native::packet
             // func_0014C5A0(self, id): the model's own packet
             env.call();
             queueModelBody(t, ctx, self, id, inner);
-            if (listing && listCount < kListMax)
+            if (listing)
             {
                 const uint32_t start = t.u32(self + model::kPacket + half * 4u); // queueModelBody's (the same parity word)
-                listHead[listCount] = start, listTail[listCount++] = start + 0x70u;
+                list.add(start, start + 0x70u);
             }
 
             // objFlags 0x10: the UV-scroll pass
@@ -4934,14 +4974,14 @@ namespace kamite::native::packet
             if (!t.ok)
                 return false;
             t.commit();
-            if (listing && listCount != 0u)
+            if (listing && list.count != 0u)
             {
                 // the head tags as committed (reads of addresses the queue already touched: they cannot fail)
-                uint64_t headTag[kListMax];
-                for (uint32_t i = 0; i < listCount; ++i)
-                    headTag[i] = t.u64(listHead[i]);
+                uint64_t headTag[ListCollect::kMax];
+                for (uint32_t i = 0; i < list.count; ++i)
+                    headTag[i] = t.u64(list.head[i]);
                 if (t.ok)
-                    draw_list::listPackets(half, listHead, listTail, headTag, listCount);
+                    draw_list::listPackets(half, list.head, list.tail, headTag, list.count);
             }
             returnToCaller(ctx);
             return true;
