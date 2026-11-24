@@ -42,7 +42,7 @@ Recompiled as a native program under Vulkan or DX11 (Windows); PCSX2 as the rend
 
 Available on the following platforms:
 - Windows: Out now!
-- Linux/Steam Deck: Later today!
+- Linux/Steam Deck: Out now!
 - Android: Later!
 - MacOS: Laterer!
 ---
