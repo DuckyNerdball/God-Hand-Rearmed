@@ -1,9 +1,9 @@
 #include "kamite/native/draw_list.h"
 
-#if !defined(KAMITE_RELEASE)
-
-#include "runtime/ps2_async_vif.h"
 #include "runtime/ps2_listed_packets.h"
+#if !defined(KAMITE_RELEASE)
+#include "runtime/ps2_async_vif.h"
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -20,6 +20,8 @@ namespace kamite::native::draw_list
 
     namespace
     {
+        bool g_live = false;
+        const uint8_t *g_ram = nullptr; // the RAM backing (the lookup's tail check)
         // ---- the registry (game thread only: the fused natives register, the walker looks up) ----------------------
         // Open addressing by head address (RAM offset). An entry is valid while its generation is its half's current one:
         // a half starts a new generation the first time a native registers for it after registering for the other half
@@ -99,15 +101,87 @@ namespace kamite::native::draw_list
                     ++g_tagChanged; // rewritten since the native registered it: walked as a plain packet
                     return false;
                 }
+                // the tail must still be the NEXT the queue's link wrote (an entry from before a save-state load whose
+                // address now holds something else with the same first 8 bytes: never seen, but then it is not listed)
+                const uint32_t tail = headAddr + e.tailDelta;
+                const uint32_t tailOff = tail & kRamMask;
+                uint64_t tailTag = 0u;
+                if (g_ram && tailOff + 8u <= kRamMask + 1u)
+                    std::memcpy(&tailTag, g_ram + tailOff, 8);
+                if (((tailTag >> 28) & 7u) != 2u)
+                {
+                    ++g_tagChanged;
+                    return false;
+                }
                 e.seen = true;
                 ++g_found;
-                tailAddr = headAddr + e.tailDelta;
+                tailAddr = tail;
                 return true;
             }
             return false;
         }
 
-        // ---- the VU thread's shadow check ------------------------------------------------------------------------
+    }
+
+    void listPackets(uint32_t half, const uint32_t *heads, const uint32_t *tails, const uint64_t *headTags, uint32_t count)
+    {
+        if (!g_on)
+            return;
+        half &= 1u;
+        if (g_lastHalf != static_cast<int>(half))
+        {
+            g_lastHalf = static_cast<int>(half);
+            newGeneration(half);
+        }
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            const uint32_t key = (heads[i] & kRamMask) | 1u;
+            // the same packet's slot if it has one (its new entry replaces the old), else the first empty or retired one
+            uint32_t found = kSlots, free = kSlots;
+            for (uint32_t s = slotOf(key), n = 0; n < kSlots; s = (s + 1u) & (kSlots - 1u), ++n)
+            {
+                const Entry &e = g_table[s];
+                if (e.key == key)
+                {
+                    found = s;
+                    break;
+                }
+                if (e.key == 0u)
+                {
+                    if (free == kSlots)
+                        free = s;
+                    break;
+                }
+                if (free == kSlots && !current(e))
+                    free = s;
+            }
+            const uint32_t at = found != kSlots ? found : free;
+            if (at == kSlots)
+            {
+                ++g_full;
+                continue;
+            }
+            Entry &e = g_table[at];
+            if (e.key == 0u)
+                ++g_used;
+            if (!(e.key == key && current(e) && e.half == half)) // a second registration this generation: one slot
+                g_genSlots[half].push_back(at);
+            e.key = key;
+            e.tailDelta = tails[i] - heads[i];
+            e.headTag = headTags[i];
+            e.half = static_cast<uint8_t>(half);
+            e.gen = g_gen[half];
+            e.seen = false;
+            ++g_registered;
+        }
+    }
+
+#if !defined(KAMITE_RELEASE)
+    namespace
+    {
+        // ---- the VU thread's check (dev replays) ------------------------------------------------------------------
+        // Shadow: each packet's VIF edges, and its bytes in RAM against the walker's copy at job start and end. Live: its
+        // bytes are only in RAM: the VIF edge check on them, and the counts.
         struct Diff
         {
             int phase;
@@ -256,6 +330,25 @@ namespace kamite::native::draw_list
             }
             for (const ps2x::listed::Segment &s : l.segments)
             {
+                if (l.live)
+                {
+                    if (phase != 0)
+                        continue;
+                    ++st.segments;
+                    if (!s.closed)
+                        ++st.unclosed;
+                    static thread_local std::vector<uint8_t> packet;
+                    packet.clear();
+                    for (uint32_t i = s.pieceBegin; i < s.pieceEnd; ++i)
+                        packet.insert(packet.end(), l.pieces[i].src, l.pieces[i].src + l.pieces[i].len);
+                    st.bytes += packet.size();
+                    st.chainBytes += packet.size(); // the chain's whole size: its listed bytes are not in data
+                    ps2x::listed::Segment t = s;
+                    t.start = 0u;
+                    t.end = static_cast<uint32_t>(packet.size());
+                    parseSegment(l, t, packet.data(), st);
+                    continue;
+                }
                 if (phase == 0)
                 {
                     ++st.segments;
@@ -296,87 +389,22 @@ namespace kamite::native::draw_list
         }
     }
 
-    void listPackets(uint32_t half, const uint32_t *heads, const uint32_t *tails, const uint64_t *headTags, uint32_t count)
+    void report(const char *outputBase, const std::string &header)
     {
         if (!g_on)
             return;
-        half &= 1u;
-        if (g_lastHalf != static_cast<int>(half))
-        {
-            g_lastHalf = static_cast<int>(half);
-            newGeneration(half);
-        }
-        for (uint32_t i = 0; i < count; ++i)
-        {
-            const uint32_t key = (heads[i] & kRamMask) | 1u;
-            // the same packet's slot if it has one (its new entry replaces the old), else the first empty or retired one
-            uint32_t found = kSlots, free = kSlots;
-            for (uint32_t s = slotOf(key), n = 0; n < kSlots; s = (s + 1u) & (kSlots - 1u), ++n)
-            {
-                const Entry &e = g_table[s];
-                if (e.key == key)
-                {
-                    found = s;
-                    break;
-                }
-                if (e.key == 0u)
-                {
-                    if (free == kSlots)
-                        free = s;
-                    break;
-                }
-                if (free == kSlots && !current(e))
-                    free = s;
-            }
-            const uint32_t at = found != kSlots ? found : free;
-            if (at == kSlots)
-            {
-                ++g_full;
-                continue;
-            }
-            Entry &e = g_table[at];
-            if (e.key == 0u)
-                ++g_used;
-            if (!(e.key == key && current(e) && e.half == half)) // a second registration this generation: one slot
-                g_genSlots[half].push_back(at);
-            e.key = key;
-            e.tailDelta = tails[i] - heads[i];
-            e.headTag = headTags[i];
-            e.half = static_cast<uint8_t>(half);
-            e.gen = g_gen[half];
-            e.seen = false;
-            ++g_registered;
-        }
-    }
-
-    void begin(const char *outputBase, const std::string &header, const uint8_t *rdram)
-    {
-        const char *value = std::getenv("KAMITE_NATIVE_DRAWLIST");
-        if (value && *value == '0')
-        {
-            std::fprintf(stderr, "[native] draw list: off (KAMITE_NATIVE_DRAWLIST=0)\n");
-            return;
-        }
-        if (value && *value == '1')
-            std::fprintf(stderr, "[native] draw list: live is not built yet; running the shadow\n");
-        g_table.assign(kSlots, Entry{});
-        g_rdram = rdram;
         g_path = std::string(outputBase) + ".drawlist.txt";
         g_header = header;
         std::remove(g_path.c_str());
-        g_on = true;
-        ps2x::listed::setLookup(&lookup);
         ps2x::asyncvif::setListedObserver(&observe);
-        std::fprintf(stderr, "[native] draw list shadow: %s\n", g_path.c_str());
+        std::fprintf(stderr, "[native] draw list report: %s\n", g_path.c_str());
     }
 
     void end()
     {
-        if (!g_on)
+        if (!g_on || g_path.empty())
             return;
-        ps2x::listed::setLookup(nullptr);
         ps2x::asyncvif::setListedObserver(nullptr);
-        g_on = false;
         Stats st;
         {
             std::lock_guard<std::mutex> lock(g_statsMutex);
@@ -385,7 +413,7 @@ namespace kamite::native::draw_list
         std::FILE *f = std::fopen(g_path.c_str(), "wb");
         if (!f)
             return;
-        std::fprintf(f, "# GHR draw list shadow v1 %s\n", g_header.c_str());
+        std::fprintf(f, "# GHR draw list %s v1 %s\n", g_live ? "live" : "shadow", g_header.c_str());
         std::fprintf(f, "registered %llu found %llu unseen %llu tagchanged %llu full %llu halves %llu\n",
                      static_cast<unsigned long long>(g_registered), static_cast<unsigned long long>(g_found),
                      static_cast<unsigned long long>(g_unseen), static_cast<unsigned long long>(g_tagChanged),
@@ -412,6 +440,29 @@ namespace kamite::native::draw_list
             std::fprintf(f, "parsefail %s\n", n.c_str());
         std::fclose(f);
     }
-}
-
 #endif
+
+    void begin(const uint8_t *rdram)
+    {
+        const char *value = std::getenv("KAMITE_NATIVE_DRAWLIST");
+        const std::string mode = value ? value : "";
+        if (mode == "0")
+        {
+            std::fprintf(stderr, "[native] draw list: off (KAMITE_NATIVE_DRAWLIST=0)\n");
+            return;
+        }
+#if !defined(KAMITE_RELEASE)
+        g_live = mode != "shadow";
+        g_rdram = rdram;
+#else
+        g_live = true;
+        (void)rdram;
+#endif
+        g_table.assign(kSlots, Entry{});
+        g_ram = rdram;
+        g_on = true;
+        ps2x::listed::setLookup(&lookup, g_live);
+        std::fprintf(stderr, "[native] draw list: %s (KAMITE_NATIVE_DRAWLIST=%s)\n", g_live ? "live" : "shadow",
+                     mode.empty() ? "unset" : mode.c_str());
+    }
+}

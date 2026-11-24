@@ -354,6 +354,9 @@ public:
     void processVIF0Data(const uint8_t *data, uint32_t sizeBytes);
     void processVIF1Data(uint32_t srcPhysAddr, uint32_t sizeBytes);
     void processVIF1Data(const uint8_t *data, uint32_t sizeBytes);
+    // Step b's live draw list (ps2_listed_packets.h): data = a gathered chain without its listed packets; each listed
+    // packet's bytes are read from guest RAM where it belongs, through processVIF1Data as one stream would be.
+    void processVIF1Listed(const uint8_t *data, uint32_t sizeBytes, const ps2x::listed::Segments &listed);
     void processPendingTransfers();
     std::vector<uint32_t> consumeCompletedDmacCauses();
 

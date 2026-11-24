@@ -43,22 +43,38 @@ namespace ps2x::dma
     // in front of its payload). Returns false if the chain looped or had no end (the caller drops it).
     // Step b (ps2_listed_packets.h): with a lookup, the chain's first tag and every NEXT tag's target outside a listed
     // packet are asked whether they start one; each listed packet gets a mark (its byte range in the chain, up to and with
-    // its tail tag). The walk itself (bytes, order, registers) is the same with or without.
+    // its tail tag). With listedPieces too (live), a listed packet's bytes go there instead of into pieces / bytesOut (the
+    // mark keeps its range in listedPieces). The walk itself (tags, order, registers) is the same either way.
     template <typename Translate>
     bool walkChain(ChainWalk &w, bool tie, bool tagData, const uint8_t *rdram, const uint8_t *scratchpad,
                    Translate &&translate, std::vector<ChainPiece> &pieces, size_t &bytesOut,
-                   ps2x::listed::Lookup lookup = nullptr, std::vector<ps2x::listed::Mark> *marks = nullptr)
+                   ps2x::listed::Lookup lookup = nullptr, std::vector<ps2x::listed::Mark> *marks = nullptr,
+                   std::vector<ChainPiece> *listedPieces = nullptr)
     {
         pieces.clear();
         if (!marks)
             lookup = nullptr;
         else
             marks->clear();
+        if (!lookup)
+            listedPieces = nullptr;
+        else if (listedPieces)
+            listedPieces->clear();
         bool headNext = lookup != nullptr; // ask about the next tag: the chain's first, then NEXT targets
         int open = -1;                     // the listed packet being walked (index into marks)
+        size_t openPiece = 0u;             // live: its first piece in listedPieces (no merging across packets)
         size_t total = 0u;
         auto add = [&](const uint8_t *src, uint32_t len)
         {
+            if (open >= 0 && listedPieces)
+            {
+                std::vector<ChainPiece> &lp = *listedPieces;
+                if (lp.size() > openPiece && lp.back().src + lp.back().len == src)
+                    lp.back().len += len;
+                else
+                    lp.push_back(ChainPiece{src, len});
+                return;
+            }
             if (!pieces.empty() && pieces.back().src + pieces.back().len == src)
                 pieces.back().len += len;
             else
@@ -143,6 +159,8 @@ namespace ps2x::dma
                 {
                     marks->push_back(ps2x::listed::Mark{currentTagAddr, tail, static_cast<uint32_t>(total), 0u, false});
                     open = static_cast<int>(marks->size()) - 1;
+                    if (listedPieces)
+                        marks->back().pieceBegin = static_cast<uint32_t>(openPiece = listedPieces->size());
                 }
             }
 
@@ -232,6 +250,8 @@ namespace ps2x::dma
             {
                 (*marks)[open].end = static_cast<uint32_t>(total);
                 (*marks)[open].closed = true;
+                if (listedPieces)
+                    (*marks)[open].pieceEnd = static_cast<uint32_t>(listedPieces->size());
                 open = -1;
             }
             if (lookup && id == 2u && open < 0)
@@ -264,6 +284,8 @@ namespace ps2x::dma
         w.tagsProcessed = tagsProcessed;
         w.looped = looped;
         bytesOut = total;
+        if (open >= 0 && listedPieces) // the chain ended inside a listed packet: its bytes so far stay its own
+            (*marks)[open].pieceEnd = static_cast<uint32_t>(listedPieces->size());
         return !(looped || tagsProcessed >= kMaxChainTags);
     }
 
@@ -280,11 +302,14 @@ namespace ps2x::dma
     }
 
     // Dev builds' check of rung 3 (claude/native-next.md): called with every chain the walker built, on the thread that
-    // started the DMA, before it is queued. Unset (nullptr) in play and releases.
-    using ChainObserver = void (*)(uint32_t channelBase, const uint8_t *data, size_t size);
+    // started the DMA, before it is queued. Unset (nullptr) in play and releases. listed: the draw list's packets (live:
+    // their bytes are not in data but belong at each segment's start; the whole chain is data with them put back).
+    using ChainObserver = void (*)(uint32_t channelBase, const uint8_t *data, size_t size,
+                                   const ps2x::listed::Segments *listed);
     void setChainObserver(ChainObserver observer);
     // The same chain as its source pieces (where each run of bytes came from: rdram = the RAM backing), for the dev
-    // dump of early frames (chain_digest.h, KAMITE_CHAIN_DUMP). Unset in play and releases.
+    // dump of early frames (chain_digest.h, KAMITE_CHAIN_DUMP); live listed packets put back in place. Unset in play and
+    // releases.
     using ChainPiecesObserver = void (*)(uint32_t channelBase, const ChainPiece *pieces, size_t count, const uint8_t *rdram);
     void setChainPiecesObserver(ChainPiecesObserver observer);
 }

@@ -2,6 +2,10 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 24, 2026
+
+- Performance: the models' draw packets go to the vector unit straight from memory instead of being copied every frame.
+
 ## November 23, 2026
 
 - Mash Assistic mashes at 7 presses a second (was 10).

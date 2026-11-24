@@ -61,13 +61,34 @@ namespace kamite::native::chain_digest
             }
         }
 
-        void observe(uint32_t channelBase, const uint8_t *data, size_t size)
+        void observe(uint32_t channelBase, const uint8_t *data, size_t size, const ps2x::listed::Segments *listed)
         {
             // Only the replay's own frames: before the state loads (boot, loading) the frame count follows the host.
             const uint32_t frame = test_mode::replayFrame();
             if (frame == test_mode::kReplayIdle)
                 return;
-            const uint64_t hash = XXH3_64bits(data, size);
+            uint64_t hash;
+            if (listed && listed->live && !listed->empty())
+            {
+                // the live draw list: the whole chain is data with each listed packet's bytes put back where it belongs
+                // (the same hash and size as the chain the walker copied in full before)
+                XXH3_state_t state;
+                XXH3_64bits_reset(&state);
+                size_t pos = 0;
+                for (const ps2x::listed::Segment &seg : listed->segments)
+                {
+                    const size_t at = seg.start < size ? seg.start : size;
+                    XXH3_64bits_update(&state, data + pos, at - pos);
+                    pos = at;
+                    for (uint32_t i = seg.pieceBegin; i < seg.pieceEnd; ++i)
+                        XXH3_64bits_update(&state, listed->pieces[i].src, listed->pieces[i].len);
+                }
+                XXH3_64bits_update(&state, data + pos, size - pos);
+                hash = XXH3_64bits_digest(&state);
+                size += listed->listedBytes();
+            }
+            else
+                hash = XXH3_64bits(data, size);
             const uint32_t record[4] = {frame, (((channelBase >> 12) & 0xFu) << 28) | (static_cast<uint32_t>(size) & 0x0FFFFFFFu),
                                         static_cast<uint32_t>(hash), static_cast<uint32_t>(hash >> 32)};
             std::lock_guard<std::mutex> lock(g_mutex);

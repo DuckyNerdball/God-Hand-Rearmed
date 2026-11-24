@@ -536,6 +536,45 @@ void PS2Memory::processVIF1Data(uint32_t srcPhys, uint32_t sizeBytes)
     processVIF1Data(m_rdram + srcPhys, sizeBytes);
 }
 
+void PS2Memory::processVIF1Listed(const uint8_t *data, uint32_t sizeBytes, const ps2x::listed::Segments &listed)
+{
+    // processVIF1Data keeps its state in members (vif1_regs, the PATH2 image left over), so calls cut where one VIF
+    // command ends and the next begins are one stream; build 1's shadow found every listed packet's commands on its own
+    // edges (K's 36 replays, Nov 24). A packet's bytes are scattered (tags, the static lists it calls): a single piece
+    // goes as it is, else they are put together here, on the VU thread, instead of in the chain copy on the EE thread.
+    static thread_local std::vector<uint8_t> packet;
+    uint32_t pos = 0u;
+    for (const ps2x::listed::Segment &s : listed.segments)
+    {
+        const uint32_t at = s.start < sizeBytes ? s.start : sizeBytes;
+        if (at > pos)
+        {
+            processVIF1Data(data + pos, at - pos);
+            pos = at;
+        }
+        if (s.pieceEnd == s.pieceBegin)
+            continue;
+        if (s.pieceEnd - s.pieceBegin == 1u)
+        {
+            processVIF1Data(listed.pieces[s.pieceBegin].src, listed.pieces[s.pieceBegin].len);
+            continue;
+        }
+        size_t bytes = 0u;
+        for (uint32_t i = s.pieceBegin; i < s.pieceEnd; ++i)
+            bytes += listed.pieces[i].len;
+        packet.resize(bytes);
+        uint8_t *dst = packet.data();
+        for (uint32_t i = s.pieceBegin; i < s.pieceEnd; ++i)
+        {
+            std::memcpy(dst, listed.pieces[i].src, listed.pieces[i].len);
+            dst += listed.pieces[i].len;
+        }
+        processVIF1Data(packet.data(), static_cast<uint32_t>(bytes));
+    }
+    if (sizeBytes > pos)
+        processVIF1Data(data + pos, sizeBytes - pos);
+}
+
 void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
 {
     if (sizeBytes == 0u)

@@ -6,6 +6,9 @@
 // the walk with the lookup is byte-identical to the walk without one, every mark closes at its tail, the cut pieces are
 // the gathered bytes; draw_list.cpp's report (VIF commands on the packets' edges, bytes in RAM = the copy) is printed.
 // Nov 23 on 649722 / 650290 / 15923: 646 / 642 / 173 marks, all closed and cut right, parse ok on every one.
+// Build 2 (live): the walk with the listed bytes routed out has the same walk state; the copied chain with each packet
+// put back, logicalPieces, and chain_digest's streaming hash all equal the full chain. (The report printed below holds
+// both the shadow and the live pass's counts.)
 //
 //   g++ -std=c++20 -O2 -msse4.1 -I runtime/ps2xRuntime/include -I runtime/ps2xIOP/include -I src
 //       tools/dma/listed_check.cpp -o /tmp/listed_check
@@ -18,13 +21,18 @@
 namespace
 {
     ps2x::listed::Lookup g_lookup = nullptr;
+    bool g_liveMode = false;
     ps2x::asyncvif::ListedObserver g_observer = nullptr;
 }
-void ps2x::listed::setLookup(Lookup lookup) { g_lookup = lookup; }
+void ps2x::listed::setLookup(Lookup lookup, bool live) { g_lookup = lookup, g_liveMode = live; }
 ps2x::listed::Lookup ps2x::listed::lookup() { return g_lookup; }
+bool ps2x::listed::live() { return g_liveMode; }
 void ps2x::asyncvif::setListedObserver(ListedObserver observer) { g_observer = observer; }
 
 #include "kamite/native/draw_list.cpp"
+
+#define XXH_INLINE_ALL
+#include "../../thirdparty/pcsx2/3rdparty/include/xxhash.h"
 
 #include <cstdio>
 #include <cstring>
@@ -127,7 +135,8 @@ int main(int argc, char **argv)
         std::memcpy(&head, g_rdram.data() + 0x754C80 + fin * 128, 4);
 
         const std::string out = std::string("/tmp/listed_check_") + std::to_string(a);
-        kamite::native::draw_list::begin(out.c_str(), "offline", g_rdram.data());
+        kamite::native::draw_list::begin(g_rdram.data());
+        kamite::native::draw_list::report(out.c_str(), "offline");
         const std::map<uint32_t, uint32_t> cands = candidates(head);
         std::vector<uint32_t> heads, tails;
         std::vector<uint64_t> headTags;
@@ -137,12 +146,12 @@ int main(int argc, char **argv)
                                                static_cast<uint32_t>(heads.size()));
 
         auto walk = [&](bool withLookup, std::vector<ps2x::dma::ChainPiece> &pieces, std::vector<ps2x::listed::Mark> &marks,
-                        ps2x::dma::ChainWalk &w, size_t &bytes)
+                        ps2x::dma::ChainWalk &w, size_t &bytes, std::vector<ps2x::dma::ChainPiece> *listedPieces = nullptr)
         {
             w = ps2x::dma::ChainWalk{};
             w.tagAddr = head;
             return ps2x::dma::walkChain(w, false, true, g_rdram.data(), g_spr.data(), translate, pieces, bytes,
-                                        withLookup ? g_lookup : nullptr, withLookup ? &marks : nullptr);
+                                        withLookup ? g_lookup : nullptr, withLookup ? &marks : nullptr, listedPieces);
         };
         std::vector<ps2x::dma::ChainPiece> p0, p1;
         std::vector<ps2x::listed::Mark> m0, m1;
@@ -175,6 +184,53 @@ int main(int argc, char **argv)
             g_observer(segs, g1.data(), b1, 0);
             g_observer(segs, g1.data(), b1, 1);
         }
+
+        // Live (build 2): the same walk with the listed bytes routed out. The walk's state must match, the gathered chain
+        // with each packet's bytes put back must be the full chain, logicalPieces must give it too, and chain_digest's
+        // streaming hash of it must be the one-shot hash of the full chain (chain.bin unchanged).
+        std::vector<ps2x::dma::ChainPiece> p2, lp2, whole;
+        std::vector<ps2x::listed::Mark> m2;
+        ps2x::dma::ChainWalk w2;
+        size_t b2 = 0;
+        const bool k2 = walk(true, p2, m2, w2, b2, &lp2);
+        ps2x::ByteBuffer g2;
+        ps2x::dma::gatherChain(p2, b2, g2);
+        ps2x::listed::Segments live;
+        ps2x::listed::takeLive(lp2, m2, live);
+        std::vector<uint8_t> rebuilt;
+        XXH3_state_t state;
+        XXH3_64bits_reset(&state);
+        size_t pos = 0;
+        for (const ps2x::listed::Segment &sg : live.segments)
+        {
+            rebuilt.insert(rebuilt.end(), g2.data() + pos, g2.data() + sg.start);
+            XXH3_64bits_update(&state, g2.data() + pos, sg.start - pos);
+            pos = sg.start;
+            for (uint32_t i = sg.pieceBegin; i < sg.pieceEnd; ++i)
+            {
+                rebuilt.insert(rebuilt.end(), live.pieces[i].src, live.pieces[i].src + live.pieces[i].len);
+                XXH3_64bits_update(&state, live.pieces[i].src, live.pieces[i].len);
+            }
+        }
+        rebuilt.insert(rebuilt.end(), g2.data() + pos, g2.data() + b2);
+        XXH3_64bits_update(&state, g2.data() + pos, b2 - pos);
+        ps2x::listed::logicalPieces(p2, live, whole);
+        ps2x::ByteBuffer gw;
+        size_t bw = 0;
+        for (const auto &pc : whole)
+            bw += pc.len;
+        ps2x::dma::gatherChain(whole, bw, gw);
+        const bool liveSame = k2 == k0 && w2.tagAddr == w0.tagAddr && w2.asp == w0.asp && w2.tagsProcessed == w0.tagsProcessed &&
+                              w2.lastTagUpper == w0.lastTagUpper && m2.size() == m1.size() &&
+                              b2 + live.listedBytes() == b0 && rebuilt.size() == b0 &&
+                              std::memcmp(rebuilt.data(), g0.data(), b0) == 0 && bw == b0 &&
+                              std::memcmp(gw.data(), g0.data(), b0) == 0 &&
+                              XXH3_64bits_digest(&state) == XXH3_64bits(g0.data(), b0);
+        if (g_observer)
+            g_observer(live, g2.data(), b2, 0);
+        std::printf("    live: chain copy %zu bytes + %zu listed in place = %zu; rebuilt / logical pieces / streaming hash %s\n",
+                    b2, live.listedBytes(), b2 + live.listedBytes(), liveSame ? "= the full chain" : "DIFFER");
+        failures += !liveSame;
         kamite::native::draw_list::end();
         // candidates inside another candidate's packet are never asked about (the walker asks only outside a listed
         // packet): the heuristic finds more than a native registers, so marks <= candidates
@@ -196,6 +252,7 @@ int main(int argc, char **argv)
         kamite::native::draw_list::g_lastHalf = -1;
         kamite::native::draw_list::g_genSlots[0].clear();
         kamite::native::draw_list::g_genSlots[1].clear();
+        kamite::native::draw_list::g_on = false;
     }
     std::printf("%s\n", failures ? "FAILED" : "all passed");
     return failures ? 1 : 0;

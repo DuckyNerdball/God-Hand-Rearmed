@@ -242,10 +242,12 @@ namespace ps2x::asyncvif
                             listedObserver(item.listed, item.data.data(), item.data.size(), 0);
                 for (Item &item : job.items)
                 {
-                    if (item.data.empty())
+                    if (item.data.empty() && !item.listed.live)
                         continue;
                     if (item.kind == ItemKind::GifPath3)
                         memory.submitGifPacket(GifPathId::Path3, item.data.data(), static_cast<uint32_t>(item.data.size()), false);
+                    else if (item.listed.live)
+                        memory.processVIF1Listed(item.data.data(), static_cast<uint32_t>(item.data.size()), item.listed);
                     else
                         memory.processVIF1Data(item.data.data(), static_cast<uint32_t>(item.data.size()));
                 }

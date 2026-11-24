@@ -157,6 +157,8 @@ namespace kamite::native
     {
         libvu0::registerFunctions();
         packet::registerFunctions();
+        // Rung 3 step b's draw list (draw_list.h): live in every build unless KAMITE_NATIVE_DRAWLIST=0.
+        draw_list::begin(runtime.memory().getRDRAM());
 
 #if !defined(KAMITE_RELEASE)
         const bool replaying = replayCase() != nullptr;
@@ -169,8 +171,8 @@ namespace kamite::native
         if (replaying)
         {
             chain_digest::begin(shadowOutput().c_str());
-            // Rung 3 step b's shadow (draw_list.h): the fused natives' packets checked in the chain, every replay.
-            draw_list::begin(shadowOutput().c_str(), shadowHeader(), runtime.memory().getRDRAM());
+            // Rung 3 step b's draw list report (draw_list.h): every replay, live or shadow.
+            draw_list::report(shadowOutput().c_str(), shadowHeader());
         }
 #endif
 #if !defined(KAMITE_RELEASE)

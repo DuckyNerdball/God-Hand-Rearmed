@@ -13,10 +13,11 @@ a build is accepted; without it the previous build's .prev files and fingerprint
               build: host-timing noise)
   gs          the GS-input digest (gs.bin, rung 3 step b: what the GS received, per VU job), by the same rule: "=" or
               how many jobs differ from which test frame on; "-" while the reference has none (promote a batch that
-              wrote gs.bin first). Once the draw list goes live, chain moves and gs must not.
+              wrote gs.bin first). Live, chain.bin hashes the chain with the listed packets' bytes put back, so both
+              chain and gs must stay "=".
   runs        this build's run 1 = run 2 (ram, csv, chain, gs); only with RUNS=2
   snap        snap_compare.py's verdict against the previous build (fingerprints.txt), when it ran
-Then the draw list shadow's totals (this batch's *.drawlist.txt, src/kamite/native/draw_list.h), the natives' shadow
+Then the draw list's totals (this batch's *.drawlist.txt, live or shadow: src/kamite/native/draw_list.h), the natives' shadow
 totals (this batch's *.native.txt: a build that shadows nothing called writes none, and the
 older ones left in cases/ say nothing about it) and the commit (this batch's *.stacks.txt headers, written by every dev
 replay). Anything that moves: list every commit in the
@@ -251,14 +252,16 @@ def main():
         t, notes = drawlist_totals(drawlists)
         g = lambda k: t.get(k, 0)
         share = 100.0 * g("bytes") / g("chainbytes") if g("chainbytes") else 0.0
-        print(f"draw list shadow ({len(drawlists)} replays): registered {g('registered')}, walked {g('found')}, "
-              f"never walked {g('unseen')}, head changed {g('tagchanged')}, table full {g('full')}")
-        print(f"  packets {g('segments')} (unclosed {g('unclosed')}), {share:.1f}% of the VIF1 chain bytes; "
-              f"VIF commands on the edges: ok {g('parse-ok')}, fail {g('parse-fail')}"
-              f"{'  <-- PARSE FAILURES' if g('parse-fail') or g('unclosed') else ''}")
-        print(f"  bytes in RAM = the walker's copy: job start {g('live-start-same')} same / {g('live-start-differ')} differ, "
-              f"job end {g('live-end-same')} same / {g('live-end-differ')} differ"
-              f"{'  <-- DIFFER' if g('live-start-differ') or g('live-end-differ') else ''}")
+        modes = sorted({open(p, encoding="utf-8", errors="replace").readline().split()[4] for p in drawlists})
+        print(f"draw list {'/'.join(modes)} ({len(drawlists)} replays): registered {g('registered')}, walked "
+              f"{g('found')}, never walked {g('unseen')}, head / tail changed {g('tagchanged')}, table full {g('full')}")
+        print(f"  packets {g('segments')} (unclosed {g('unclosed')}), {share:.1f}% of the VIF1 chain bytes"
+              f"{' (read in place, not copied)' if modes == ['live'] else ''}; VIF commands on the edges: ok "
+              f"{g('parse-ok')}, fail {g('parse-fail')}{'  <-- PARSE FAILURES' if g('parse-fail') or g('unclosed') else ''}")
+        if "shadow" in modes:
+            print(f"  bytes in RAM = the walker's copy: job start {g('live-start-same')} same / {g('live-start-differ')} "
+                  f"differ, job end {g('live-end-same')} same / {g('live-end-differ')} differ"
+                  f"{'  <-- DIFFER' if g('live-start-differ') or g('live-end-differ') else ''}")
         print(f"  ops: MSCAL {g('ops-mscal')}, MSCNT {g('ops-mscnt')}, MPG {g('ops-mpg')} (packets without one "
               f"{g('ops-nompg')}), DIRECT {g('ops-direct')}, UNPACK {g('ops-unpack')}; unpack before STCYCL "
               f"{g('parse-unpackbeforecycle')}, masked {g('parse-maskedunpacks')}")
