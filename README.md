@@ -34,8 +34,17 @@ The first start compiles shaders for your GPU, so the screen may stay black befo
 
 ### God Hand - Gone Native!
 
-Recompiled as a Windows program under Vulkan or DX11; PCSX2 as the renderer until later.
+Recompiled as a native program under Vulkan or DX11 (Windows); PCSX2 as the renderer until later.
 
+---
+
+### Beat Off Anywhere!
+
+Available on the following platforms:
+- Windows: Out now!
+- Linux/Steam Deck: Later today!
+- Android: Later!
+- MacOS: Laterer!
 ---
 
 ### You've Been Hit by, You've Been Struck by, My Smooth Visuals!
