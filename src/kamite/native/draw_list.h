@@ -26,14 +26,17 @@ namespace kamite::native::draw_list
     // Where a registration comes from. Proven: the fused natives' own packets (read in place). Shadow: copied, and the
     // dev replays check them (never downgrades a live entry). Queue (b3 A: every packet the queue natives link): read in
     // place once the head has been queued in two frames of the same half and never in the other (a double-buffered
-    // packet); a head queued in both halves is one buffer the game rewrites while our VU thread may still be reading
-    // last frame's chain (electricity_check, Nov 24), so it stays copied for good.
+    // packet); a head queued in both halves, or twice in one frame, is a buffer the game rewrites while our VU thread may
+    // still be reading an earlier chain (electricity_check, Nov 24), so it stays copied for good.
     enum class Source : uint8_t
     {
         Proven,
         Shadow,
         Queue
     };
+    // The guest caller (ra) of the queue native running now (game thread; set by packet.cpp's queue natives): kept with
+    // each Source::Queue head for the dev report.
+    extern uint32_t g_queueCaller;
     // After a native committed (game thread): `count` packets it queued for frame half `half`, each as its head tag's
     // address, its tail tag's address and the head tag's first 8 bytes as now in RAM.
     void listPackets(uint32_t half, const uint32_t *heads, const uint32_t *tails, const uint64_t *headTags, uint32_t count,

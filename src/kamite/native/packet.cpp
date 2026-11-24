@@ -1481,6 +1481,8 @@ namespace kamite::native::packet
         {
             if (!env.atEnd)
                 return false;
+            if constexpr (std::is_same_v<Env, RealEnv>)
+                draw_list::g_queueCaller = e::u32(ctx, e::ra); // b3 A's dev report: which builder queued it
             const uint32_t sp = e::u32(ctx, e::sp);
             uint32_t stackTop;
             if (!plainRam(sp - kQueueModelFrame, kQueueModelFrame, stackTop))
@@ -1558,6 +1560,8 @@ namespace kamite::native::packet
         {
             if (!env.atEnd)
                 return false;
+            if constexpr (std::is_same_v<Env, RealEnv>)
+                draw_list::g_queueCaller = e::u32(ctx, e::ra); // b3 A's dev report: which builder queued it
             Link plan;
             if (!linkPlan(env, e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u32(ctx, e::a3), plan))
                 return false;
@@ -1574,6 +1578,8 @@ namespace kamite::native::packet
         {
             if (!env.atEnd)
                 return false;
+            if constexpr (std::is_same_v<Env, RealEnv>)
+                draw_list::g_queueCaller = e::u32(ctx, e::ra); // b3 A's dev report: which builder queued it
             QueuePlan q;
             if (!queuePlan(env, e::u32(ctx, e::sp), e::u32(ctx, e::a0), e::u64(ctx, e::a1), e::u64(ctx, e::a2),
                            e::u32(ctx, e::a3), tail, q))

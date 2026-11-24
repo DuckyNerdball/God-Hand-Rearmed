@@ -88,7 +88,7 @@ def drawlist_totals(paths):
             elif f[0] in ("registered", "segments"):
                 for key, value in zip(f[0::2], f[1::2]):
                     add(key, value)
-            elif f[0] in ("parse", "ops", "cache", "kinds"):
+            elif f[0] in ("parse", "ops", "cache", "kinds", "inplace"):
                 for key, value in zip(f[1::2], f[2::2]):
                     add(f"{f[0]}-{key}", value)
             elif f[0] == "live":  # live start same N differ N end same N differ N
@@ -269,6 +269,9 @@ def main():
             print(f"  queue natives' packets: {g('kinds-queuelive')} in place (double-buffered), {g('kinds-queuereused')} "
                   f"copied (one buffer for both halves), {g('kinds-queuenew')} copied (first frame); a diff on a head "
                   f"with halves != 3 would mean the rule missed one")
+        if g('inplace-same') or g('inplace-differ'):
+            print(f"  read in place, bytes at job start = job end: {g('inplace-same')} same / {g('inplace-differ')} differ"
+                  f"{'  <-- DIFFER (rewritten while the VU read it: see the diff inplace lines)' if g('inplace-differ') else ''}")
         if "shadow" in modes or g('kinds-shadow'):
             print(f"  bytes in RAM = the walker's copy: job start {g('live-start-same')} same / {g('live-start-differ')} "
                   f"differ, job end {g('live-end-same')} same / {g('live-end-differ')} differ"

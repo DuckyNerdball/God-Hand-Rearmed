@@ -3,6 +3,8 @@
 #include "runtime/ps2_listed_packets.h"
 #if !defined(KAMITE_RELEASE)
 #include "runtime/ps2_async_vif.h"
+#define XXH_INLINE_ALL
+#include "../../../thirdparty/pcsx2/3rdparty/include/xxhash.h"
 #endif
 
 #include <algorithm>
@@ -18,6 +20,7 @@
 namespace kamite::native::draw_list
 {
     bool g_on = false;
+    uint32_t g_queueCaller = 0u;
 
     namespace
     {
@@ -59,24 +62,32 @@ namespace kamite::native::draw_list
         struct Reuse
         {
             uint32_t lastGen = 0u;
+            uint32_t caller = 0u; // the queue native's guest caller, last time (dev report)
+            uint8_t lastHalf = 0u;
             uint8_t halves = 0u; // bit per frame half the head was queued in
             uint8_t frames = 0u; // generations it was queued in (saturates)
+            bool twice = false;  // queued twice in one generation (one frame)
         };
         std::unordered_map<uint32_t, Reuse> g_reuse;
-        // true: read in place (a double-buffered head, seen in two frames of this half only)
-        bool reuseOk(uint32_t key, uint32_t half, uint32_t gen)
+        // true: read in place (a double-buffered head, seen in two frames of this half only). sticky: copied for good.
+        bool reuseOk(uint32_t key, uint32_t half, uint32_t gen, bool &sticky)
         {
             if (g_reuse.size() > (1u << 17))
                 g_reuse.clear(); // never in practice (heads are a few thousand buffers)
             Reuse &r = g_reuse[key];
             r.halves |= static_cast<uint8_t>(1u << half);
-            if (r.lastGen != gen || r.frames == 0u)
+            r.caller = g_queueCaller;
+            if (r.frames != 0u && r.lastGen == gen && r.lastHalf == half)
+                r.twice = true;
+            else
             {
                 r.lastGen = gen;
+                r.lastHalf = static_cast<uint8_t>(half);
                 if (r.frames < 255u)
                     ++r.frames;
             }
-            if (r.halves == 3u)
+            sticky = r.halves == 3u || r.twice;
+            if (sticky)
             {
                 ++g_queueReused;
                 return false;
@@ -186,8 +197,9 @@ namespace kamite::native::draw_list
         for (uint32_t i = 0; i < count; ++i)
         {
             const uint32_t key = (heads[i] & kRamMask) | 1u;
+            bool sticky = false;
             const bool shadow = source == Source::Shadow ||
-                                (source == Source::Queue && !reuseOk(key, half, g_gen[half]));
+                                (source == Source::Queue && !reuseOk(key, half, g_gen[half], sticky));
             // the same packet's slot if it has one (its new entry replaces the old), else the first empty or retired one
             uint32_t found = kSlots, free = kSlots;
             for (uint32_t s = slotOf(key), n = 0; n < kSlots; s = (s + 1u) & (kSlots - 1u), ++n)
@@ -214,8 +226,8 @@ namespace kamite::native::draw_list
                 continue;
             }
             Entry &e = g_table[at];
-            if (shadow && e.key == key && current(e) && e.half == half && !e.shadow)
-                continue; // already listed live this generation: keep it
+            if (shadow && !sticky && e.key == key && current(e) && e.half == half && !e.shadow)
+                continue; // already listed live this generation: keep it (a reused buffer is not kept)
             if (e.key == 0u)
                 ++g_used;
             if (!(e.key == key && current(e) && e.half == half)) // a second registration this generation: one slot
@@ -246,7 +258,8 @@ namespace kamite::native::draw_list
         struct Stats
         {
             uint64_t items = 0u, chainBytes = 0u, segments = 0u, unclosed = 0u, bytes = 0u;
-            uint64_t liveSegments = 0u, shadowSegments = 0u;
+            uint64_t liveSegments = 0u, shadowSegments = 0u, liveSame = 0u, liveDiffer = 0u;
+            std::vector<uint32_t> liveDiffs; // heads, the first few
             uint64_t parseOk = 0u, parseFail = 0u, unpackBeforeCycle = 0u, maskedUnpacks = 0u;
             uint64_t same[2] = {0u, 0u}, differ[2] = {0u, 0u};
             uint64_t mscal = 0u, mscnt = 0u, mpg = 0u, direct = 0u, unpack = 0u, segmentsWithoutMpg = 0u;
@@ -376,6 +389,8 @@ namespace kamite::native::draw_list
                 ++st.segmentsWithoutMpg;
         }
 
+        thread_local std::unordered_map<const void *, std::vector<uint64_t>> t_starts; // live packets' job-start hashes
+
         void observe(const ps2x::listed::Segments &l, const uint8_t *data, size_t size, int phase)
         {
             std::lock_guard<std::mutex> lock(g_statsMutex);
@@ -391,8 +406,35 @@ namespace kamite::native::draw_list
                     ++(s.live ? st.liveSegments : st.shadowSegments);
                 if (s.live)
                 {
-                    if (phase != 0)
+                    // in place: its bytes at job start vs job end (a rewrite during the job is what the VU may have read)
+                    uint64_t h = 0u;
+                    {
+                        XXH3_state_t xs;
+                        XXH3_64bits_reset(&xs);
+                        for (uint32_t i = s.pieceBegin; i < s.pieceEnd; ++i)
+                            XXH3_64bits_update(&xs, l.pieces[i].src, l.pieces[i].len);
+                        h = XXH3_64bits_digest(&xs);
+                    }
+                    std::vector<uint64_t> &v = t_starts[&l];
+                    const size_t idx = static_cast<size_t>(&s - l.segments.data());
+                    if (phase == 0)
+                    {
+                        if (v.size() < l.segments.size())
+                            v.resize(l.segments.size());
+                        v[idx] = h;
+                    }
+                    else
+                    {
+                        if (idx < v.size() && v[idx] == h)
+                            ++st.liveSame;
+                        else
+                        {
+                            ++st.liveDiffer;
+                            if (st.liveDiffs.size() < 16u)
+                                st.liveDiffs.push_back(s.head);
+                        }
                         continue;
+                    }
                     ++st.segments;
                     if (!s.closed)
                         ++st.unclosed;
@@ -445,6 +487,8 @@ namespace kamite::native::draw_list
                 else
                     ++st.differ[phase];
             }
+            if (phase == 1)
+                t_starts.erase(&l);
         }
     }
 
@@ -501,12 +545,25 @@ namespace kamite::native::draw_list
                      static_cast<unsigned long long>(st.unpack), static_cast<unsigned long long>(st.segmentsWithoutMpg));
         for (const auto &[src, n] : st.microcode)
             std::fprintf(f, "microcode 0x%07x %llu\n", src, static_cast<unsigned long long>(n));
+        // a queue packet's record: halves 3 or twice 1 = the reused buffer the rule keeps copied, as it should
+        auto reuseOf = [](uint32_t head)
+        {
+            const auto r = g_reuse.find((head & kRamMask) | 1u);
+            return r == g_reuse.end() ? Reuse{} : r->second;
+        };
+        std::fprintf(f, "inplace same %llu differ %llu\n", static_cast<unsigned long long>(st.liveSame),
+                     static_cast<unsigned long long>(st.liveDiffer));
+        for (const uint32_t head : st.liveDiffs)
+        {
+            const Reuse r = reuseOf(head);
+            std::fprintf(f, "diff inplace head 0x%07x halves %u twice %u frames %u caller 0x%06x\n", head, r.halves,
+                         r.twice ? 1u : 0u, r.frames, r.caller);
+        }
         for (const Diff &d : st.diffs)
         {
-            // a queue packet's halves (3 = both: the reused buffer the rule keeps copied, as it should)
-            const auto r = g_reuse.find((d.head & kRamMask) | 1u);
-            std::fprintf(f, "diff %s head 0x%07x at 0x%07x len %u halves %u\n", d.phase == 0 ? "start" : "end", d.head,
-                         d.at, d.len, r == g_reuse.end() ? 0u : r->second.halves);
+            const Reuse r = reuseOf(d.head);
+            std::fprintf(f, "diff %s head 0x%07x at 0x%07x len %u halves %u twice %u caller 0x%06x\n",
+                         d.phase == 0 ? "start" : "end", d.head, d.at, d.len, r.halves, r.twice ? 1u : 0u, r.caller);
         }
         for (const std::string &n : st.parseNotes)
             std::fprintf(f, "parsefail %s\n", n.c_str());

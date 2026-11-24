@@ -437,7 +437,23 @@ int main(int argc, char **argv)
             g_reuse.clear();
             const bool first = inPlace(fin), second = inPlace(fin), third = inPlace(fin);
             const bool other = inPlace(1u - fin), back = inPlace(fin);
-            const bool ok = !first && second && third && !other && !back;
+            // a head queued twice in one frame (electricity_check's reused buffer): copied for good, even when its
+            // first queue that frame was in place
+            const uint32_t h2 = heads[1], tl2 = tails[1];
+            const uint64_t tg2 = headTags[1];
+            auto queue2 = [&](uint32_t halfNow, int times)
+            {
+                listPackets(1u - halfNow, nullptr, nullptr, nullptr, 0u);
+                for (int k = 0; k < times; ++k)
+                    listPackets(halfNow, &h2, &tl2, &tg2, 1u, Source::Queue);
+                uint32_t t = 0u;
+                bool shadow = true;
+                return g_lookup(h2, tg2, t, shadow) && t == tl2 ? !shadow : false;
+            };
+            const bool t1 = queue2(fin, 1), t2 = queue2(fin, 1), t3 = queue2(fin, 2), t4 = queue2(fin, 1);
+            std::printf("    reuse rule, twice in a frame: %s/%s, then twice %s, after %s\n", t1 ? "in place" : "copied",
+                        t2 ? "in place" : "copied", t3 ? "in place" : "copied", t4 ? "in place" : "copied");
+            const bool ok = !first && second && third && !other && !back && !t1 && t2 && !t3 && !t4;
             std::printf("    reuse rule: frames 1-3 in one half %s/%s/%s, then the other half %s, back %s: %s\n",
                         first ? "in place" : "copied", second ? "in place" : "copied", third ? "in place" : "copied",
                         other ? "in place" : "copied", back ? "in place" : "copied", ok ? "ok" : "WRONG");
