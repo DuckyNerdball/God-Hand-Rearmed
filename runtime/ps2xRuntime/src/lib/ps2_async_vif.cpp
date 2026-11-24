@@ -617,6 +617,15 @@ namespace ps2x::asyncvif
         return pipelineBusy(memory);
     }
 
+    bool waitVuIdle(std::chrono::microseconds timeout)
+    {
+        Worker *worker = s_worker;
+        if (!worker || t_onWorker)
+            return true;
+        std::unique_lock<std::mutex> lock(worker->mutex);
+        return worker->idleCv.wait_for(lock, timeout, [&] { return worker->jobs.empty() && !worker->busy; });
+    }
+
     bool vu1Busy(PS2Memory &memory)
     {
         Vu1Timing &timing = vu1Timing();

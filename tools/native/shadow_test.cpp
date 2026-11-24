@@ -116,6 +116,7 @@ KM_RECOMPILED(func_002D81A0_0x2d81a0)
 KM_RECOMPILED(cModel_nodeLayer_0x14bef8)
 KM_RECOMPILED(func_0014B810_0x14b810)
 KM_RECOMPILED(cModel_queuePacket_0x14c6b8)
+KM_RECOMPILED(cModel_Tag_set_scr_0x14aab8)
 KM_RECOMPILED(SearchDataByTwoNames_0x31cdc0)
 KM_RECOMPILED(cIDBase_getSlotPtr_0x1522c0)
 #undef KM_RECOMPILED
@@ -134,9 +135,9 @@ bool PS2Runtime::eeCheckpointDue(uint32_t cycles) noexcept
     g_charged += cycles == 32u ? 32u : cycles;
     return ++g_checkpointCalls == g_dueAt;
 }
-__m128i PS2Runtime::Load128(uint8_t *, R5900Context *, uint32_t)
+__m128i PS2Runtime::Load128(uint8_t *, R5900Context *ctx, uint32_t a)
 {
-    std::fprintf(stderr, "unexpected Load128 (special address)\n");
+    std::fprintf(stderr, "unexpected Load128 (special address) %08X pc %08X\n", a, ctx ? ctx->pc : 0u);
     std::abort();
 }
 void PS2Runtime::Store128(uint8_t *, R5900Context *, uint32_t, __m128i)
@@ -208,6 +209,7 @@ namespace kamite::native::draw_list
     bool g_probe = false;
     void listPackets(uint32_t, const uint32_t *, const uint32_t *, const uint64_t *, uint32_t, Source) {}
     void noteRewrite(uint32_t, uint32_t) {}
+    void rewriting(uint32_t, uint32_t, uint32_t) {}
 }
 
 // The patch flags and host hooks the generated code reads (ps2_runtime.cpp's; not linked here): the TIM2 loader's
@@ -1653,6 +1655,7 @@ namespace
         }
         case 0x14AC90u: // step a's last item: cModel_Tag_set_rate fused (node 0 from the material callee's setup, the
                         // model from func_0014C7E8's, the other nodes cloned from node 0; each pass's flags at random)
+        case 0x14AAB8u: // b3 B: cModel_Tag_set_scr fused (the same model and nodes; its own paths added at the end)
         {
             if (call.dueAt && g_rng() % 4u != 0u)
                 call.dueAt = 0; // mostly whole runs: its checkpoints are many (decided first: the setups below spin
@@ -1824,6 +1827,45 @@ namespace
             setGpr64(ctx, 5, (g_rng() & ~0xFFFFull) | id);
             setGpr64(ctx, 6, g_rng() % 8u == 0u ? g_rng() : g_rng() % 2u);
             ps2xSetPatchFlag("no_lod", g_rng() % 2u == 0u);
+            if (fn.address == 0x14AAB8u)
+            {
+                // func_0014D0E8's fixed pass, a late model; func_00153B00's paths (view-space meshes, the colour row,
+                // the layer force, the fog), cModel_nodeLayer's (back nodes, the layer force)
+                uint32_t of;
+                std::memcpy(&of, g_ramA + self + 0x250u, 4);
+                for (uint32_t bit : {0x80000u, 0x2000u})
+                    of = g_rng() % 3u == 0u ? of | bit : of & ~bit;
+                setU32(self + 0x250u, of);
+                setU32(0x747A38u, g_rng() % 4u == 0u ? 0x800u : 0u);
+                if (g_rng() % 4u == 0u) // the far flag's upper word set (the original compares all 64 bits)
+                    setGpr64(ctx, 6, (g_rng() << 32) | (g_rng() % 2u));
+                const uint32_t forcePick = static_cast<uint32_t>(g_rng() % 6u);
+                setByte(self + 0x2BEu, forcePick < 3u ? 0xFEu : forcePick == 3u ? 0x18u : forcePick == 4u ? 0x1Cu :
+                                       static_cast<uint8_t>(g_rng() % 0x30u));
+                const uint32_t fogByte = static_cast<uint32_t>(g_rng() % 8u);
+                setByte(self + 0x2BDu, fogByte < 5u ? 0u : fogByte == 5u ? 1u : fogByte == 6u ? 2u : static_cast<uint8_t>(g_rng()));
+                floatsAt(0x604708u, 8, wild);
+                floatsAt(0x604760u, 6, wild);
+                floatsAt(0x3C3D20u, 5, wild);
+                for (uint32_t pair : {0x604718u, 0x604720u, 0x604764u, 0x604770u, 0x3C3D20u})
+                    if (g_rng() % 2u)
+                    {
+                        const float n = static_cast<float>(g_rng() % 2000u), f = n + 1.0f + static_cast<float>(g_rng() % 30000u);
+                        setFloat(pair, n), setFloat(pair + 4u, f);
+                    }
+                for (uint32_t i = 0; i < nodes; ++i) // the nodes' view-space bits and the scenery dispFlags bits
+                {
+                    const uint32_t info = 0x3A800u + 0x40u * i, node = node0 + 0x800u * i;
+                    uint32_t m, f;
+                    std::memcpy(&m, g_ramA + info + 0x34u, 4);
+                    if (!(of & 0x400000u)) // (ForwardAttackByMode's material keys on it: its setup's bit stays)
+                        setU32(info + 0x34u, g_rng() % 4u == 0u ? m | 0x200000u : m & ~0x200000u);
+                    std::memcpy(&f, g_ramA + node + 0x380u, 4);
+                    for (uint32_t bit : {0x8000u, 0x10000000u, 0x1000000u})
+                        f = g_rng() % 4u == 0u ? f | bit : f & ~bit;
+                    setU32(node + 0x380u, f);
+                }
+            }
             return;
         }
         default:
@@ -2770,7 +2812,8 @@ int main(int argc, char **argv)
         {0x14C7E8u, &func_0014C7E8_0x14c7e8},    {0x14AC90u, &cModel_Tag_set_rate_0x14ac90},
         {0x14D0E8u, &func_0014D0E8_0x14d0e8},    {0x153B00u, &func_00153B00_0x153b00},
         {0x2D81A0u, &func_002D81A0_0x2d81a0},    {0x14BEF8u, &cModel_nodeLayer_0x14bef8},
-        {0x14B810u, &func_0014B810_0x14b810},    {0x14C6B8u, &cModel_queuePacket_0x14c6b8}};
+        {0x14B810u, &func_0014B810_0x14b810},    {0x14C6B8u, &cModel_queuePacket_0x14c6b8},
+        {0x14AAB8u, &cModel_Tag_set_scr_0x14aab8}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
@@ -2868,7 +2911,7 @@ int main(int argc, char **argv)
         for (uint32_t caller : {0x30A8C8u, 0x30A978u, 0x147528u, 0x147548u, 0x101E28u, 0x31A650u, 0x31A600u, 0x14D768u,
                                 0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u,
                                 0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u, 0x14D0E8u, 0x153B00u, 0x14B810u,
-                                0x14C6B8u})
+                                0x14C6B8u, 0x14AAB8u})
             if (fn.address == caller)
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;

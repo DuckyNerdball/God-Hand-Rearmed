@@ -42,6 +42,13 @@ namespace kamite::native::draw_list
     void listPackets(uint32_t half, const uint32_t *heads, const uint32_t *tails, const uint64_t *headTags, uint32_t count,
                      Source source = Source::Proven);
 
+    // Rung 3 step b3 B (K, Nov 24): func_00155D60's native (game thread) before it changes a node packet's +0x30 in the
+    // half the game is not building (cObj_setMeshValue / objScroll_Set_test write both halves; the other half's packet
+    // may be read in place by the VU job in flight): the node's two packets (node, node + 0xB0) are copied for good from
+    // now on, whatever registers them; when the written packet is in place in its half's current generation, the game
+    // thread first waits for the VU worker (host only, once per node). caller = the writer's return address (dev report).
+    void rewriting(uint32_t node, uint32_t head, uint32_t caller);
+
     // native.cpp installFromEnvironment, every build: reads KAMITE_NATIVE_DRAWLIST, starts the registry and the
     // walker's lookup. rdram = the RAM backing (to name guest addresses in the report).
     void begin(const uint8_t *rdram);

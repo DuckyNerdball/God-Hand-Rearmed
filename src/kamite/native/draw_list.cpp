@@ -1,8 +1,8 @@
 #include "kamite/native/draw_list.h"
 
 #include "runtime/ps2_listed_packets.h"
-#if !defined(KAMITE_RELEASE)
 #include "runtime/ps2_async_vif.h"
+#if !defined(KAMITE_RELEASE)
 #define XXH_INLINE_ALL
 #include "../../../thirdparty/pcsx2/3rdparty/include/xxhash.h"
 #endif
@@ -52,6 +52,10 @@ namespace kamite::native::draw_list
         std::vector<uint64_t> g_headBits;
         void setHeadBit(uint32_t key) { g_headBits[(key & kRamMask) >> 10] |= 1ull << (((key & kRamMask) >> 4) & 63u); }
         bool headBit(uint32_t off) { return (g_headBits[off >> 10] >> ((off >> 4) & 63u)) & 1u; }
+        // b3 B: one bit per RAM qword, "a node packet a both-halves writer changed" (copied for good; never cleared)
+        std::vector<uint64_t> g_rewrittenBits;
+        uint64_t g_rewriteMarks = 0u, g_rewriteWaits = 0u, g_rewriteTimeouts = 0u;
+        bool rewrittenBit(uint32_t key) { return (g_rewrittenBits[(key & kRamMask) >> 10] >> (((key & kRamMask) >> 4) & 63u)) & 1u; }
 
         // EE-side counts (game thread)
         uint64_t g_registered = 0u, g_halves = 0u, g_found = 0u, g_unseen = 0u, g_tagChanged = 0u, g_full = 0u;
@@ -207,8 +211,9 @@ namespace kamite::native::draw_list
         for (uint32_t i = 0; i < count; ++i)
         {
             const uint32_t key = (heads[i] & kRamMask) | 1u;
-            bool sticky = false;
-            const bool shadow = source == Source::Shadow ||
+            // a packet a both-halves writer changed (b3 B) is copied for good, whatever its source
+            bool sticky = rewrittenBit(key);
+            const bool shadow = sticky || source == Source::Shadow ||
                                 (source == Source::Queue && !reuseOk(key, half, g_gen[half], sticky));
             // the same packet's slot if it has one (its new entry replaces the old), else the first empty or retired one
             uint32_t found = kSlots, free = kSlots;
@@ -581,8 +586,10 @@ namespace kamite::native::draw_list
             const auto r = g_rewrites.find((head & kRamMask) | 1u);
             return r == g_rewrites.end() ? Rewrite{} : r->second;
         };
-        std::fprintf(f, "rewrites writes %llu heads %llu\n", static_cast<unsigned long long>(g_rewriteCount),
-                     static_cast<unsigned long long>(g_rewrites.size()));
+        std::fprintf(f, "rewrites writes %llu heads %llu marks %llu waits %llu timeouts %llu\n",
+                     static_cast<unsigned long long>(g_rewriteCount), static_cast<unsigned long long>(g_rewrites.size()),
+                     static_cast<unsigned long long>(g_rewriteMarks), static_cast<unsigned long long>(g_rewriteWaits),
+                     static_cast<unsigned long long>(g_rewriteTimeouts));
         for (const auto &[caller, n] : g_rewriters)
             std::fprintf(f, "rewriter 0x%06x %llu\n", caller, static_cast<unsigned long long>(n));
         for (const uint32_t head : st.liveDiffs)
@@ -606,6 +613,48 @@ namespace kamite::native::draw_list
     }
 #endif
 
+    void rewriting(uint32_t node, uint32_t head, uint32_t caller)
+    {
+        if (!g_on)
+            return;
+        const uint32_t n = node & kRamMask;
+        for (const uint32_t h : {n, n + 0xB0u})
+        {
+            uint64_t &word = g_rewrittenBits[(h & kRamMask) >> 10];
+            const uint64_t bit = 1ull << (((h & kRamMask) >> 4) & 63u);
+            if (!(word & bit))
+                ++g_rewriteMarks;
+            word |= bit;
+        }
+        // the written packet in place in its half's current generation: the VU job in flight may still read it
+        const uint32_t key = (head & kRamMask) | 1u;
+        for (uint32_t s = slotOf(key), k = 0; k < kSlots; s = (s + 1u) & (kSlots - 1u), ++k)
+        {
+            Entry &e = g_table[s];
+            if (e.key == 0u)
+                break;
+            if (e.key != key || !current(e))
+                continue;
+            if (!e.shadow)
+            {
+                ++g_rewriteWaits;
+                if (!ps2x::asyncvif::waitVuIdle(std::chrono::milliseconds(250)))
+                {
+                    if (g_rewriteTimeouts++ == 0u)
+                        std::fprintf(stderr, "[native] draw list: the VU worker stayed busy 250 ms (packet 0x%07x)\n", head);
+                }
+                e.shadow = true; // (its job has run: the entry is for the record only now)
+            }
+            break;
+        }
+#if !defined(KAMITE_RELEASE)
+        if (g_probe)
+            noteRewrite(head, caller);
+#else
+        (void)caller;
+#endif
+    }
+
     void begin(const uint8_t *rdram)
     {
         const char *value = std::getenv("KAMITE_NATIVE_DRAWLIST");
@@ -625,6 +674,7 @@ namespace kamite::native::draw_list
 #endif
         g_table.assign(kSlots, Entry{});
         g_headBits.assign((kRamMask + 1u) / 16u / 64u, 0ull);
+        g_rewrittenBits.assign((kRamMask + 1u) / 16u / 64u, 0ull);
         g_ram = rdram;
         g_on = true;
         ps2x::listed::setLookup(&lookup, g_live);

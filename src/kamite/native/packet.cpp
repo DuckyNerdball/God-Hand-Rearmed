@@ -1456,13 +1456,9 @@ namespace kamite::native::packet
                     {
                         const uint32_t tail = link.tail; // both RAM offsets (the registry masks heads)
                         const uint64_t head = e::read64(env, off);
-                        // Tag_set_scr's node queue (func_0014B810, the caller of 0x31A650 at 0x14B8CC) stays copied:
-                        // electricity_check's two node packets there are rewritten while the VU reads them (K's 14:41
-                        // Twice, Nov 24: +0x30 for 64 B, one half each, queued once a frame), writer not found yet;
-                        // rung 3 step b3 B (the native Tag_set_scr) looks for it.
-                        const bool scenery = draw_list::g_queueCaller >= 0x14B810u && draw_list::g_queueCaller < 0x14B918u;
-                        draw_list::listPackets(e::read32(env, halfOff), &off, &tail, &head, 1u,
-                                               scenery ? draw_list::Source::Shadow : draw_list::Source::Queue);
+                        // (b3 B, K's build 2: Tag_set_scr's node packets go in place too; the ones a both-halves writer
+                        // changes, electricity_check's, are copied by draw_list::rewriting's mark)
+                        draw_list::listPackets(e::read32(env, halfOff), &off, &tail, &head, 1u, draw_list::Source::Queue);
                     }
                 }
         }
@@ -1678,15 +1674,16 @@ namespace kamite::native::packet
             CountdownPlan p;
             if (!countdownPlan(env, node, idx, p))
                 return false;
-            // b3 B's writer probe (dev replays): a change to the packet of the half the game is not building (the one our
-            // VU thread may still read), named by the caller (cObj_setMeshValue / objScroll_Set_test write both halves)
+            // b3 B (K, Nov 24): a change to the packet of the half the game is not building (the one our VU thread may
+            // still read in place; cObj_setMeshValue / objScroll_Set_test write both halves): the draw list copies this
+            // node's packets for good from now on, waiting for the VU job first when this one is in it
             if constexpr (std::is_same_v<Env, RealEnv>)
-                if (draw_list::g_probe)
+                if (draw_list::g_on)
                 {
                     uint32_t parity;
                     if (plainRam(model::kFrameParity, 4u, parity) && (e::read32(env, parity) & 1u) != (idx & 1u) &&
                         e::read64(env, p.target) != e::u64(ctx, e::a1))
-                        draw_list::noteRewrite(p.target - 0x30u, e::u32(ctx, e::ra));
+                        draw_list::rewriting(node, p.target - 0x30u, e::u32(ctx, e::ra));
                 }
             countdownWrite(env, p, e::u64(ctx, e::a1));
             e::setS32(ctx, e::v0, idx * 0xB0u + node); // mult's low word + addu
@@ -5634,6 +5631,169 @@ namespace kamite::native::packet
             returnToCaller(ctx);
             return true;
         }
+
+        // ==== cModel_Tag_set_scr fused (rung 3 step b3 B, Nov 24): a scenery model's per-frame tagging ===============
+        // void cModel_Tag_set_scr(cModel *self, int id, int far) (decomp src/cod/0014aab8.c, matched C at 59fb572; reached
+        // through cModel's vtables): func_0014D0E8; func_00153B00 for every mesh; func_00155BE8(self, negative, half);
+        // per node not hidden and in the pass (objFlags 0x400, or the mesh's far bit equal to the 64-bit far register):
+        // cModel_setNodeMaterial unless objFlags 0x80 (the value read before the pass test), ForwardAttackByMode when
+        // objFlags (read again) 0x400000, cModel_nodeLayer, func_00155AE8(node, layer | 0x80000000, half), the previous
+        // node's func_00155AE8 on a layer change, func_0014B810; the last node's func_00155AE8; cModel_queuePacket. Every
+        // callee's body inline on one Journal, as cModel_Tag_set_rate's; no_lod (km_no_lod at its entry) carried.
+        constexpr uint32_t kTagSetScr = 0x14AAB8u;
+        constexpr uint32_t kScrTagFrame = 0xA0u;
+        constexpr uint32_t kScrTagWindow =
+            kScrTagFrame + std::max({kModelMatricesWindow, kScrLightingWindow, kNodeCallerWindow, kQueueModelFrame,
+                                     kNodeQueueFrame});
+
+        template <class Env>
+        bool tagSetScr(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd || !e::vf0Constant(ctx)) // vf0 = (0, 0, 0, 1): the unit matrices come from it
+                return false;
+            const uint32_t sp = e::u32(ctx, e::sp);
+            uint32_t stackLow;
+            if ((sp & 0xFu) != 0u || !plainRam(sp - kScrTagWindow, kScrTagWindow, stackLow))
+                return false;
+            const uint32_t self = e::u32(ctx, e::a0);
+            const int64_t id = static_cast<int16_t>(e::u32(ctx, e::a1)); // sll / sra 16
+            // the far flag: the whole register (bnel s7, v0); no_lod's hook zeroes it (sign-extended 0) when the model
+            // has a near mesh and the flag's low word is set
+            uint64_t far = e::u64(ctx, e::a2);
+            if (noLodOn() && static_cast<uint32_t>(far) != 0u && noLodFar(env, self, static_cast<uint32_t>(far)) == 0u)
+                far = 0u;
+            const uint32_t inner = sp - kScrTagFrame; // the callees' sp
+            Journal<Env> t{env, stackLow, stackLow + kScrTagWindow};
+            const uint32_t half = t.u32(model::kFrameParity) & 1u;
+            if (!t.ok)
+                return false;
+            ListCollect list;
+            const bool listing = std::is_same_v<Env, RealEnv> && draw_list::g_on;
+
+            // func_0014D0E8: the model's matrices (its getMeshPtr's observers first: that call comes before its writes)
+            env.call();
+            observeMeshPtr(env, ctx, 0x14D160u, inner - kScrMatricesFrame);
+            if (!scrMatricesBody(env, self, stackLow, kScrTagWindow,
+                                 [&t](uint32_t off, uint32_t size, const uint8_t *bytes) { t.putOffset(off, size, bytes); }) ||
+                !t.ok)
+                return false;
+
+            // func_00153B00 for every mesh (it skips hidden ones itself)
+            env.call(); // jal cModel_getMeshPtr
+            observeMeshPtr(env, ctx, 0x14AB0Cu, inner);
+            {
+                uint32_t node = t.u32(self + model::kMeshHead);
+                for (int n = 0; node != 0u; ++n)
+                {
+                    env.call(); // jal 0x153B00
+                    if (n == kTagNodeLimit || !scrLightingBody(t, self, node))
+                        return false;
+                    node = t.u32(node + 0x404u);
+                    if (node != 0u)
+                        env.checkpoint(32u);
+                }
+            }
+
+            // func_00155BE8(self, negative, half): the model's slot tags off
+            env.call();
+            {
+                const uint32_t packet = t.u32(self + model::kPacket + half * 4u);
+                t.w64(packet + 0x60u, 0x10000000u);
+                t.w64(packet + 0x50u, 0x10000000u);
+            }
+
+            // the main pass
+            env.call(); // jal cModel_getMeshPtr
+            observeMeshPtr(env, ctx, 0x14AB5Cu, inner);
+            uint32_t last = 0u; // the last node tagged (s3) and its layer (s4)
+            uint64_t lastLayer = 0u;
+            {
+                uint32_t node = t.u32(self + model::kMeshHead);
+                for (int n = 0; node != 0u; ++n)
+                {
+                    if (n == kTagNodeLimit)
+                        return false;
+                    if (!(t.u32(node + model::kNodeDispFlags) & 1u))
+                    {
+                        const uint32_t objFlags = t.u32(self + kObjFlags);
+                        bool drawn = (objFlags & 0x400u) != 0u;
+                        if (!drawn)
+                        {
+                            const uint32_t info = t.u32(node + 0x414u);
+                            drawn = far == ((t.u32(info + 0x34u) & 0x01000000u) != 0u ? 1u : 0u);
+                        }
+                        if (drawn)
+                        {
+                            if (!(objFlags & 0x80u))
+                            {
+                                env.call(); // jal cModel_setNodeMaterial
+                                if (!setNodeMaterialBody(t, self, node))
+                                    return false;
+                            }
+                            if (t.u32(self + kObjFlags) & 0x400000u)
+                            {
+                                env.call(); // jal ForwardAttackByMode
+                                if (!forwardAttackBody(t, self, node))
+                                    return false;
+                            }
+                            uint32_t layer;
+                            env.call(); // jal cModel_nodeLayer
+                            if (!meshLayerBody(t, self, node, layer))
+                                return false;
+                            env.call(); // jal 0x155AE8
+                            twoTagsBody(t, node, layer | 0xFFFFFFFF80000000ull, half);
+                            if (lastLayer != layer && last != 0u)
+                            {
+                                env.call();
+                                twoTagsBody(t, last, lastLayer, half);
+                            }
+                            last = node, lastLayer = layer;
+                            env.call(); // jal 0x14B810
+                            const uint32_t packet = node + half * 0xB0u;
+                            queueByKind(t, self, t.u32(node + model::kNodeDispFlags), id, packet, packet + 0xA0u);
+                            if (listing)
+                                list.add(packet, packet + 0xA0u);
+                        }
+                    }
+                    node = t.u32(node + 0x404u);
+                    if (node != 0u)
+                        env.checkpoint(32u);
+                }
+            }
+            if (last != 0u)
+            {
+                env.call();
+                twoTagsBody(t, last, lastLayer, half);
+            }
+
+            // cModel_queuePacket(self, id): the model's own packet
+            env.call();
+            queueModelBody(t, ctx, self, id, inner, 0x14C6FCu);
+            if (listing)
+            {
+                const uint32_t start = t.u32(self + model::kPacket + half * 4u);
+                list.add(start, start + 0x70u);
+            }
+
+            if (!t.ok)
+                return false;
+            t.commit();
+            if (listing && list.count != 0u)
+            {
+                uint64_t headTag[ListCollect::kMax];
+                for (uint32_t i = 0; i < list.count; ++i)
+                    headTag[i] = t.u64(list.head[i]);
+                // the queue's reuse rule (first frame copied, a reused buffer copied for good) and the both-halves
+                // writers' marks decide what is read in place
+                if (t.ok)
+                {
+                    draw_list::g_queueCaller = 0x14AC30u; // (dev report: Tag_set_scr's queue)
+                    draw_list::listPackets(half, list.head, list.tail, headTag, list.count, draw_list::Source::Queue);
+                }
+            }
+            returnToCaller(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -5743,15 +5903,25 @@ namespace kamite::native::packet
             fn.maxRanges = 16384u;
             registerFunction(fn);
         }
-        // Rung 3 step b3 B (Nov 24): cModel_Tag_set_scr's subtree, shadowed (unchecked) until a K build proves them
-        // (K's pipeline: the six shadowed in one plain Build and Replay, then live with the fused Tag_set_scr shadowed).
-        addReadable("func_0014D0E8", kScrMatrices, false, &scrMatrices<RealEnv>, &scrMatrices<ShadowEnv>, 0u);
-        addReadable("func_00153B00", kScrLighting, false, &scrLighting<RealEnv>, &scrLighting<ShadowEnv>, 0u);
-        addReadable("func_002D81A0", kFogLinear, false, &fogNative<RealEnv>, &fogNative<ShadowEnv>, 0u);
-        addReadable("cModel_nodeLayer", kMeshLayer, false, &meshLayer<RealEnv>, &meshLayer<ShadowEnv>,
+        // Rung 3 step b3 B (Nov 24): cModel_Tag_set_scr's subtree. Proven by K's plain run of 596321a (21:28 build of
+        // 4980be7: 1.67M-1.74M calls each, 0 mismatches, 0 declines): checked.
+        addReadable("func_0014D0E8", kScrMatrices, true, &scrMatrices<RealEnv>, &scrMatrices<ShadowEnv>, 0u);
+        addReadable("func_00153B00", kScrLighting, true, &scrLighting<RealEnv>, &scrLighting<ShadowEnv>, 0u);
+        addReadable("func_002D81A0", kFogLinear, true, &fogNative<RealEnv>, &fogNative<ShadowEnv>, 0u);
+        addReadable("cModel_nodeLayer", kMeshLayer, true, &meshLayer<RealEnv>, &meshLayer<ShadowEnv>,
                     NativeFunction::kReturnsV0);
-        addReadable("func_0014B810", kNodeQueue, false, &nodeQueue<RealEnv>, &nodeQueue<ShadowEnv>, 0u);
-        addReadable("cModel_queuePacket", 0x14C6B8u, false, &queueModel<RealEnv, 0x14C6FCu>,
+        addReadable("func_0014B810", kNodeQueue, true, &nodeQueue<RealEnv>, &nodeQueue<ShadowEnv>, 0u);
+        addReadable("cModel_queuePacket", 0x14C6B8u, true, &queueModel<RealEnv, 0x14C6FCu>,
                     &queueModel<ShadowEnv, 0x14C6FCu>, 0u);
+        // b3 B's fused item: cModel_Tag_set_scr, its whole subtree inline on a Journal (shadowed first)
+        {
+            auto fn = NativeFunction{"cModel_Tag_set_scr", kTagSetScr, "packet", false, &tagSetScr<RealEnv>,
+                                     &tagSetScr<ShadowEnv>, nullptr};
+            fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
+            fn.returns = 0u; // void
+            fn.maxBytes = 1u << 20;
+            fn.maxRanges = 16384u;
+            registerFunction(fn);
+        }
     }
 }

@@ -88,6 +88,10 @@ namespace ps2x::asyncvif
     bool pipelineBusy(PS2Memory &memory);
     // Waits up to `timeout` for the workers to go idle; returns pipelineBusy() afterwards.
     bool waitPipelineIdle(PS2Memory &memory, std::chrono::microseconds timeout);
+    // Rung 3 step b3 B (the draw list): waits up to `timeout` for the VU worker to finish the jobs queued so far (not the
+    // GIF stage: only the VU worker reads guest RAM in place). Host only, no guest-visible timing. True: idle (or no
+    // worker, or called on the worker).
+    bool waitVuIdle(std::chrono::microseconds timeout);
     void saveTimingState(ps2x::state::Writer &out);
     void loadTimingState(ps2x::state::Reader &in);
 }

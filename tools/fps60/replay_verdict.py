@@ -277,7 +277,8 @@ def main():
         if g('rewrites-writes'):
             callers = sorted(((k.split()[1], v) for k, v in t.items() if k.startswith("rewriter ")), key=lambda kv: -kv[1])
             print(f"  both-halves writer probe (0x155D60 changing the half not being built): {g('rewrites-writes')} writes, "
-                  f"heads {g('rewrites-heads')} (summed per replay); callers: "
+                  f"heads {g('rewrites-heads')} (summed per replay); copied for good {g('rewrites-marks')}, waits for the VU "
+                  f"{g('rewrites-waits')}, timeouts {g('rewrites-timeouts')}; callers: "
                   + ", ".join(f"{k} {v}" for k, v in callers[:6]))
         if "shadow" in modes or g('kinds-shadow'):
             print(f"  bytes in RAM = the walker's copy: job start {g('live-start-same')} same / {g('live-start-differ')} "

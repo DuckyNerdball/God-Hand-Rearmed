@@ -4,6 +4,8 @@ Newest first, one line per change; the code comments say how.
 
 ## November 24, 2026
 
+- Performance: scenery's per-frame matrices, lighting, fog, draw layers and draw queue run as native code.
+- Performance: scenery's draw packets go to the vector unit straight from memory too (except the few an effect rewrites while they're being drawn).
 - 60 FPS: the building in stage 2 that sends out enemies sends them at the PS2's pace (it ran twice as fast).
 - 60 FPS: the roulette target's flash (an effect light circling the model) circles at the PS2's speed.
 - Target Select: the flash moves to the new target at once.
