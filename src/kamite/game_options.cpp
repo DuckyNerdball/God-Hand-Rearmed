@@ -1324,13 +1324,16 @@ namespace kamite
         constexpr uint32_t kKillEffectId = 0x306168u;    // KillEffect_306168(group, id, mode)
         constexpr uint32_t kEffectRecord = 0x306030u;    // func_00306030(0x7419A0, group, id): the effect's EST
         constexpr uint32_t kLightDel = 0x2D9158u;        // cWorldLight_Del_LightData(0x604700, id, model)
+        constexpr uint32_t kLightSet = 0x2D90B0u;        // cWorldLight_Set_LightData(0x604700, block): copies 0x70 bytes
 
         // The flash is a light particle (vtable 0x44E640, ESP pool 0x61B7C0, 1024 slots of 0x400, in-use bits at
         // 0x71B7C0 MSB first) that lights its owner's model (cWorldLight, by +0x2B2 id and +0x2B4 model) and turns round
         // its part 0 (+0x350). Respawned on the new target it waits for its emitter's start delay in the roulette's slow
         // motion (K, Nov 24: "it takes a long time"), so the live particle is moved instead, as it is: owner +0x108 /
-        // +0x114, light model +0x2B4 / +0x3B4, the old model's light taken off (the particle adds it to the new one at
-        // its next move), +0x350 the new target's part 0. False when there is none to move (the emitter hasn't fired).
+        // +0x114, light model +0x2B4 / +0x3B4 (its +0x360 light block's model), +0x350 the new target's part 0; the
+        // light taken off the old model and set on the new one (the move only updates a light it finds by id and model,
+        // K's Nov 24 build: none found, so the new target stayed dark). False when there is none to move (the emitter
+        // hasn't fired).
         bool moveFlash(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t from, uint32_t to)
         {
             const uint32_t est = callGuestValue(rdram, ctx, runtime, kEffectRecord, {0x7419A0u, 0u, 0x61u});
@@ -1348,13 +1351,16 @@ namespace kamite
                     continue;
                 uint16_t light = 0;
                 std::memcpy(&light, rdram + obj + 0x2B2u, 2);
-                if (ram32(rdram, obj + 0x2B4u) == from)
+                const bool lit = ram32(rdram, obj + 0x2B4u) == from;
+                if (lit)
                     callGuest(rdram, ctx, runtime, kLightDel, {0x604700u, light, from});
                 for (uint32_t o : {0x108u, 0x114u, 0x2B4u, 0x3B4u})
                     if (ram32(rdram, obj + o) == from)
                         put32(rdram, obj + o, to);
                 if (ram32(rdram, obj + 0x350u) == fromPart)
                     put32(rdram, obj + 0x350u, toPart);
+                if (lit)
+                    callGuest(rdram, ctx, runtime, kLightSet, {0x604700u, obj + 0x360u});
                 moved = true;
             }
             return moved;
