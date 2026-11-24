@@ -5913,9 +5913,10 @@ namespace kamite::native::packet
         addReadable("func_0014B810", kNodeQueue, true, &nodeQueue<RealEnv>, &nodeQueue<ShadowEnv>, 0u);
         addReadable("cModel_queuePacket", 0x14C6B8u, true, &queueModel<RealEnv, 0x14C6FCu>,
                     &queueModel<ShadowEnv, 0x14C6FCu>, 0u);
-        // b3 B's fused item: cModel_Tag_set_scr, its whole subtree inline on a Journal (shadowed first)
+        // b3 B's fused item: cModel_Tag_set_scr, its whole subtree inline on a Journal. Proven by K's Twice of abb760a
+        // (21:58 build: 1.74M calls, 0 mismatches; promoted): checked.
         {
-            auto fn = NativeFunction{"cModel_Tag_set_scr", kTagSetScr, "packet", false, &tagSetScr<RealEnv>,
+            auto fn = NativeFunction{"cModel_Tag_set_scr", kTagSetScr, "packet", true, &tagSetScr<RealEnv>,
                                      &tagSetScr<ShadowEnv>, nullptr};
             fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
             fn.returns = 0u; // void
