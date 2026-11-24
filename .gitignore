@@ -3,6 +3,8 @@ game/*
 !game/README.md
 *.iso
 *.bin
+# The GS warm-up lists GHR ships (pipeline selectors, no game data: tools/gs/warm_merge.py)
+!resources/gs_warm/*.bin
 *.img
 *.chd
 *.cso
