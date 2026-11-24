@@ -1446,8 +1446,8 @@ namespace kamite::native::packet
             e::write64(env, link.slot, (static_cast<uint64_t>(packet) << 32) | 0x20000000u);
             const uint64_t tag = e::read64(env, link.tail);
             e::write64(env, link.tail, (tag & 0x0FFFFFFFu) | 0x20000000u | (before << 32));
-            // Step b3 A (draw_list.h): every packet the queue natives link (0x31A650 / 0x31A600 / 0x14FF00 / 0x14C5A0),
-            // shadow first: the walker copies it and the dev replays check it. A one-tag packet (head = tail) is not.
+            // Step b3 A (draw_list.h Source::Queue): every packet the queue natives link (0x31A650 / 0x31A600 /
+            // 0x14FF00 / 0x14C5A0), read in place when double-buffered. A one-tag packet (head = tail) is not listed.
             if constexpr (std::is_same_v<Env, RealEnv>)
                 if (draw_list::g_on && (packet & PS2_RAM_MASK) != link.tail)
                 {
@@ -1456,7 +1456,8 @@ namespace kamite::native::packet
                     {
                         const uint32_t tail = link.tail; // both RAM offsets (the registry masks heads)
                         const uint64_t head = e::read64(env, off);
-                        draw_list::listPackets(e::read32(env, halfOff), &off, &tail, &head, 1u, true);
+                        draw_list::listPackets(e::read32(env, halfOff), &off, &tail, &head, 1u,
+                                               draw_list::Source::Queue);
                     }
                 }
         }

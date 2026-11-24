@@ -12,6 +12,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace kamite::native::draw_list
@@ -51,7 +52,43 @@ namespace kamite::native::draw_list
 
         // EE-side counts (game thread)
         uint64_t g_registered = 0u, g_halves = 0u, g_found = 0u, g_unseen = 0u, g_tagChanged = 0u, g_full = 0u;
-        uint64_t g_registeredShadow = 0u; // from the sources still in the shadow (the queue native's)
+        uint64_t g_registeredShadow = 0u; // registered to be copied (a shadow source, or a queue packet not in place yet)
+        uint64_t g_queueLive = 0u, g_queueReused = 0u, g_queueNew = 0u; // queue registrations by their reuse verdict
+
+        // Source::Queue's reuse record per head (game thread; sticky: a head seen in both halves stays copied).
+        struct Reuse
+        {
+            uint32_t lastGen = 0u;
+            uint8_t halves = 0u; // bit per frame half the head was queued in
+            uint8_t frames = 0u; // generations it was queued in (saturates)
+        };
+        std::unordered_map<uint32_t, Reuse> g_reuse;
+        // true: read in place (a double-buffered head, seen in two frames of this half only)
+        bool reuseOk(uint32_t key, uint32_t half, uint32_t gen)
+        {
+            if (g_reuse.size() > (1u << 17))
+                g_reuse.clear(); // never in practice (heads are a few thousand buffers)
+            Reuse &r = g_reuse[key];
+            r.halves |= static_cast<uint8_t>(1u << half);
+            if (r.lastGen != gen || r.frames == 0u)
+            {
+                r.lastGen = gen;
+                if (r.frames < 255u)
+                    ++r.frames;
+            }
+            if (r.halves == 3u)
+            {
+                ++g_queueReused;
+                return false;
+            }
+            if (r.frames < 2u)
+            {
+                ++g_queueNew;
+                return false;
+            }
+            ++g_queueLive;
+            return true;
+        }
 
         uint32_t slotOf(uint32_t key) { return (key * 2654435761u) >> (32u - 14u); }
         bool current(const Entry &e) { return e.key != 0u && e.gen == g_gen[e.half]; }
@@ -136,7 +173,7 @@ namespace kamite::native::draw_list
     }
 
     void listPackets(uint32_t half, const uint32_t *heads, const uint32_t *tails, const uint64_t *headTags, uint32_t count,
-                     bool shadow)
+                     Source source)
     {
         if (!g_on)
             return;
@@ -149,6 +186,8 @@ namespace kamite::native::draw_list
         for (uint32_t i = 0; i < count; ++i)
         {
             const uint32_t key = (heads[i] & kRamMask) | 1u;
+            const bool shadow = source == Source::Shadow ||
+                                (source == Source::Queue && !reuseOk(key, half, g_gen[half]));
             // the same packet's slot if it has one (its new entry replaces the old), else the first empty or retired one
             uint32_t found = kSlots, free = kSlots;
             for (uint32_t s = slotOf(key), n = 0; n < kSlots; s = (s + 1u) & (kSlots - 1u), ++n)
@@ -176,7 +215,7 @@ namespace kamite::native::draw_list
             }
             Entry &e = g_table[at];
             if (shadow && e.key == key && current(e) && e.half == half && !e.shadow)
-                continue; // already listed live this generation (a proven source): keep it
+                continue; // already listed live this generation: keep it
             if (e.key == 0u)
                 ++g_used;
             if (!(e.key == key && current(e) && e.half == half)) // a second registration this generation: one slot
@@ -438,9 +477,10 @@ namespace kamite::native::draw_list
         ps2x::listed::cacheCounts(hits, misses);
         std::fprintf(f, "cache hits %llu misses %llu\n", static_cast<unsigned long long>(hits),
                      static_cast<unsigned long long>(misses));
-        std::fprintf(f, "kinds live %llu shadow %llu registeredshadow %llu\n",
+        std::fprintf(f, "kinds live %llu shadow %llu registeredshadow %llu queuelive %llu queuereused %llu queuenew %llu\n",
                      static_cast<unsigned long long>(st.liveSegments), static_cast<unsigned long long>(st.shadowSegments),
-                     static_cast<unsigned long long>(g_registeredShadow));
+                     static_cast<unsigned long long>(g_registeredShadow), static_cast<unsigned long long>(g_queueLive),
+                     static_cast<unsigned long long>(g_queueReused), static_cast<unsigned long long>(g_queueNew));
         std::fprintf(f, "registered %llu found %llu unseen %llu tagchanged %llu full %llu halves %llu\n",
                      static_cast<unsigned long long>(g_registered), static_cast<unsigned long long>(g_found),
                      static_cast<unsigned long long>(g_unseen), static_cast<unsigned long long>(g_tagChanged),
@@ -462,7 +502,12 @@ namespace kamite::native::draw_list
         for (const auto &[src, n] : st.microcode)
             std::fprintf(f, "microcode 0x%07x %llu\n", src, static_cast<unsigned long long>(n));
         for (const Diff &d : st.diffs)
-            std::fprintf(f, "diff %s head 0x%07x at 0x%07x len %u\n", d.phase == 0 ? "start" : "end", d.head, d.at, d.len);
+        {
+            // a queue packet's halves (3 = both: the reused buffer the rule keeps copied, as it should)
+            const auto r = g_reuse.find((d.head & kRamMask) | 1u);
+            std::fprintf(f, "diff %s head 0x%07x at 0x%07x len %u halves %u\n", d.phase == 0 ? "start" : "end", d.head,
+                         d.at, d.len, r == g_reuse.end() ? 0u : r->second.halves);
+        }
         for (const std::string &n : st.parseNotes)
             std::fprintf(f, "parsefail %s\n", n.c_str());
         std::fclose(f);

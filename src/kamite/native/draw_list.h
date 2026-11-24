@@ -23,11 +23,21 @@ namespace kamite::native::draw_list
 {
     extern bool g_on; // registering (live or shadow)
 
-    // After a fused native committed (game thread): `count` packets it queued for frame half `half`, each as its head
-    // tag's address, its tail tag's address and the head tag's first 8 bytes as now in RAM. shadow: a source not proven
-    // yet (b3's queue native): the walker copies them and the dev replays check them; never downgrades a live entry.
+    // Where a registration comes from. Proven: the fused natives' own packets (read in place). Shadow: copied, and the
+    // dev replays check them (never downgrades a live entry). Queue (b3 A: every packet the queue natives link): read in
+    // place once the head has been queued in two frames of the same half and never in the other (a double-buffered
+    // packet); a head queued in both halves is one buffer the game rewrites while our VU thread may still be reading
+    // last frame's chain (electricity_check, Nov 24), so it stays copied for good.
+    enum class Source : uint8_t
+    {
+        Proven,
+        Shadow,
+        Queue
+    };
+    // After a native committed (game thread): `count` packets it queued for frame half `half`, each as its head tag's
+    // address, its tail tag's address and the head tag's first 8 bytes as now in RAM.
     void listPackets(uint32_t half, const uint32_t *heads, const uint32_t *tails, const uint64_t *headTags, uint32_t count,
-                     bool shadow = false);
+                     Source source = Source::Proven);
 
     // native.cpp installFromEnvironment, every build: reads KAMITE_NATIVE_DRAWLIST, starts the registry and the
     // walker's lookup. rdram = the RAM backing (to name guest addresses in the report).

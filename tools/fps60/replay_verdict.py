@@ -265,6 +265,10 @@ def main():
         if g('kinds-shadow'):
             print(f"  shadow packets (copied, checked): {g('kinds-shadow')} walked, {g('kinds-registeredshadow')} "
                   f"registered; live {g('kinds-live')}")
+        if g('kinds-queuelive') or g('kinds-queuereused') or g('kinds-queuenew'):
+            print(f"  queue natives' packets: {g('kinds-queuelive')} in place (double-buffered), {g('kinds-queuereused')} "
+                  f"copied (one buffer for both halves), {g('kinds-queuenew')} copied (first frame); a diff on a head "
+                  f"with halves != 3 would mean the rule missed one")
         if "shadow" in modes or g('kinds-shadow'):
             print(f"  bytes in RAM = the walker's copy: job start {g('live-start-same')} same / {g('live-start-differ')} "
                   f"differ, job end {g('live-end-same')} same / {g('live-end-differ')} differ"

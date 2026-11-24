@@ -373,7 +373,7 @@ int main(int argc, char **argv)
             using namespace kamite::native::draw_list;
             listPackets(1u - fin, nullptr, nullptr, nullptr, 0u); // retire this half's generation
             for (size_t i = 0; i < heads.size(); ++i)
-                listPackets(fin, &heads[i], &tails[i], &headTags[i], 1u, (i & 1u) != 0u);
+                listPackets(fin, &heads[i], &tails[i], &headTags[i], 1u, (i & 1u) ? Source::Shadow : Source::Proven);
             std::vector<ps2x::dma::ChainPiece> pm, lm, wm;
             std::vector<ps2x::listed::Mark> mm;
             ps2x::dma::ChainWalk wk;
@@ -419,6 +419,30 @@ int main(int argc, char **argv)
                 g_observer(mixed, gm.data(), bm, 1);
             }
         }
+
+        // b3 A's reuse rule (Source::Queue): in place from a head's second frame in one half; a head queued in both
+        // halves stays copied for good.
+        {
+            using namespace kamite::native::draw_list;
+            const uint32_t h = heads[0], tl = tails[0];
+            const uint64_t tg = headTags[0];
+            auto inPlace = [&](uint32_t halfNow)
+            {
+                listPackets(1u - halfNow, nullptr, nullptr, nullptr, 0u);
+                listPackets(halfNow, &h, &tl, &tg, 1u, Source::Queue);
+                uint32_t t = 0u;
+                bool shadow = true;
+                return g_lookup(h, tg, t, shadow) && t == tl ? !shadow : false;
+            };
+            g_reuse.clear();
+            const bool first = inPlace(fin), second = inPlace(fin), third = inPlace(fin);
+            const bool other = inPlace(1u - fin), back = inPlace(fin);
+            const bool ok = !first && second && third && !other && !back;
+            std::printf("    reuse rule: frames 1-3 in one half %s/%s/%s, then the other half %s, back %s: %s\n",
+                        first ? "in place" : "copied", second ? "in place" : "copied", third ? "in place" : "copied",
+                        other ? "in place" : "copied", back ? "in place" : "copied", ok ? "ok" : "WRONG");
+            failures += !ok;
+        }
         kamite::native::draw_list::end();
         // candidates inside another candidate's packet are never asked about (the walker asks only outside a listed
         // packet): the heuristic finds more than a native registers, so marks <= candidates
@@ -437,6 +461,9 @@ int main(int argc, char **argv)
         kamite::native::draw_list::g_stats = {};
         kamite::native::draw_list::g_registered = kamite::native::draw_list::g_found = 0;
         kamite::native::draw_list::g_registeredShadow = 0;
+        kamite::native::draw_list::g_reuse.clear();
+        kamite::native::draw_list::g_queueLive = kamite::native::draw_list::g_queueReused = 0;
+        kamite::native::draw_list::g_queueNew = 0;
         kamite::native::draw_list::g_unseen = kamite::native::draw_list::g_tagChanged = 0;
         kamite::native::draw_list::g_lastHalf = -1;
         kamite::native::draw_list::g_genSlots[0].clear();
