@@ -1734,6 +1734,29 @@
       }
     },
     {
+      "id": "RouletteInvert",
+      "label": "Invert Roulette",
+      "help": "Up spins the Roulette forward and down spins it back (stick and d-pad).",
+      "group": "Roulette Charrette",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "Game/RouletteInvert": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "Game/RouletteInvert": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/RouletteInvert": "0"
+      }
+    },
+    {
       "id": "RouletteNoOrbs",
       "label": "Dry Spinning",
       "help": "You can open the Roulette even when you don't have balls. HINT: You can use the Roulette camera for targeting.",

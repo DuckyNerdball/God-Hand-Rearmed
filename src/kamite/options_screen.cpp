@@ -1005,6 +1005,8 @@ namespace kamite::options_screen
                 setRouletteRatchet(on);
             else if (id == "RouletteTargetCycle")
                 setRouletteTargetCycle(on);
+            else if (id == "RouletteInvert")
+                setRouletteInvert(on);
             else if (id == "RouletteNoOrbs")
                 setRouletteNoOrbs(on);
             else if (id == "LiftChairs")

@@ -1290,6 +1290,11 @@ namespace kamite
         // ---- Cycle Roulette Target: the wheel's greying for a new target (see the top of the file) ----------------
         constexpr uint32_t kListBuilder = 0x125048u;     // func_00125048(gene): the roulette's move list
         constexpr uint32_t kSetCommandList = 0x1F7900u;  // cActionButton_setCommandList(mgr, 0xD, matrix, list, count)
+        // The target's flash (Nov 24, K: it stayed on the first target): func_0012CC70 links Gene's +0x640 as +0x644 (only
+        // while +0x644 is 0) and puts effect 0x61 on it (0x79 on each part for kind 0x26A); ClearLinkedTarget would
+        // kill them but returns at once while the roulette's +0x15F4 0x800000 is set.
+        constexpr uint32_t kLinkTarget = 0x12CC70u;      // func_0012CC70(gene)
+        constexpr uint32_t kKillEffectId = 0x306168u;    // KillEffect_306168(group, id, mode)
         GuestFunction g_setCommandList = nullptr;
 
         // The roulette camera is the parts camera (0x463970, set by func_00124EC0 / cPartsCamera_SetParts): its update
@@ -1894,6 +1899,16 @@ namespace kamite
         if (list[next].em == current)
             return;
         put32(rdram, gene + 0x640u, list[next].em);
+        // The flash moves with the target: the old one's effects killed as ClearLinkedTarget does, then linked again.
+        const uint32_t linked = ram32(rdram, gene + 0x644u);
+        if (inGuest(linked))
+        {
+            if (ram32(rdram, linked + 0x564u) == 0x26Au)
+                callGuest(rdram, ctx, runtime, kKillEffectId, {0u, 0x79u, 2u});
+            callGuest(rdram, ctx, runtime, kKillEffectId, {0u, 0x61u, 2u});
+            put32(rdram, gene + 0x644u, 0u);
+            callGuest(rdram, ctx, runtime, kLinkTarget, {gene});
+        }
         // The wheel's greying for the new target: the game's own list builder run again, its list caught at
         // cActionButton_setCommandList (setCommandListWrapped) and only the greyed flags copied into the wheel.
         if (g_setCommandList)

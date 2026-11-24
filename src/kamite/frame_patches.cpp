@@ -170,12 +170,13 @@ namespace kamite
         void rouletteSeen(uint8_t *, R5900Context *, PS2Runtime *) { g_rouletteSeen = g_gameFrame; }
 
         // Replaces addiu v1,v1,1 at 0x1458CC (cCockRoulette, the wheel's move: any of its command bits advances the
-        // cursor +0x422 by one, wrapping at the count in $a0). Pushing up (stick or d-pad) goes back one instead, so
-        // an overshot move is one step away, not a whole lap.
+        // cursor +0x422 by one, wrapping at the count in $a0). Pushing up (stick or d-pad) goes back one instead (down with
+        // Invert Roulette), so an overshot move is one step away, not a whole lap.
         // The direction comes from the command bit that made the step (GameWork +0x1A0, pressed: 49 = left stick up,
         // the pad code's Y < -0x50; 48 = down; 40 = R1), not from the stick as it is now: a flick up read a stick already
         // on its way back (the live byte past 0x40) and stepped down. The d-pad pushes the stick (rouletteDpad).
         std::atomic<bool> g_rouletteRatchet{false}; // [Sound] RouletteRatchet: the wheel's steps tick
+        std::atomic<bool> g_rouletteInvert{false};  // [Game] RouletteInvert: up steps forward, down back (R1 forward)
 
         void rouletteStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
@@ -184,7 +185,10 @@ namespace kamite
             std::memcpy(&buttons, &ram8(rdram, kPadButtons), sizeof(buttons));
             uint64_t pressed = 0;
             std::memcpy(&pressed, &ram8(rdram, 0x7474A0u + 0x1A0u), sizeof(pressed));
-            const bool up = (pressed & (1ull << 49)) != 0u || ((pressed & (1ull << 48)) == 0u && (buttons & 0x10u) != 0u);
+            const bool stickUp = (pressed & (1ull << 49)) != 0u, stickDown = (pressed & (1ull << 48)) != 0u;
+            const bool up = g_rouletteInvert.load(std::memory_order_relaxed)
+                                ? stickDown || (!stickUp && (buttons & 0x40u) != 0u)
+                                : stickUp || (!stickDown && (buttons & 0x10u) != 0u);
             g_rouletteBack = up && count > 1;
             const int32_t next = up && count > 0 ? (cursor + count - 1) % count : cursor + 1;
             // Roulette Ratchet: the menus' tick on each step (the game's sound call, as the menus make it: (0x5FEE00,
@@ -1883,9 +1887,53 @@ namespace kamite
         // Replaces `and v1,v1,a0` after each effect test of STA_WORLD_SLOW (a0 = 0x20000): at 60 every effect takes its
         // slow-motion path, which steps by the effect rate (0.5 at 60, below) instead of a whole PS2 frame
         // (recomp/kamite.toml "Effects at 60 FPS").
-        void effectWorldSlow(uint8_t *, R5900Context *ctx, PS2Runtime *)
+        // The effects' object flag "follows the slow rate" (Nov 24, K: the roulette target's flash ran fast at 60): each
+        // of the 19 steps and the colour fade (0x2FC720) test it before STA_WORLD_SLOW (particles +0x11C bit 0x100 =
+        // byte +0x11D bit 0, emitters +0x114 bit 0x1000000; a record with +4 bit 0x2000 skips it) and, set, take the
+        // slow path whatever the world flag: at 30 such an effect runs at the rate the game set (cEmManage_SetSpeedRate: the roulette's 0.03, the
+        // roulette moves' 0.1 / 0.05). At 60 effectRateForFlag puts the plain 0.5 in 0x741DC0 while the world flag is
+        // clear, so these ran at full speed in the roulette (the flash, effect 0x61 on the target). Now the flag test
+        // (replaced, km_fps60_effect_obj_slow_*) hands those steps the game's own rate, kept at MoveEffect's top, and
+        // the next world-flag test (effectWorldSlow) puts the plain rate back. MoveEffect's end forgets it.
+        float g_effectGameRate = 0.5f;  // 0x741DC0 as the game left it at MoveEffect's top (x0.5 at 60)
+        float g_effectPlainRate = 0.5f; // what effectRateForFlag left there
+        bool g_effectRateSwapped = false;
+        void effectObjSlowTaken(uint8_t *rdram, bool slow)
+        {
+            if (!slow)
+                return;
+            setRamF32(rdram, 0x741DC0u, g_effectGameRate);
+            g_effectRateSwapped = true;
+        }
+        template <int Rs, uint32_t Imm>
+        void effectObjSlowAndi(uint8_t *rdram, R5900Context *ctx, PS2Runtime *) // andi v0,rs,imm
+        {
+            const uint32_t value = GPR_U32(ctx, Rs) & Imm;
+            SET_GPR_U32(ctx, 2, value);
+            effectObjSlowTaken(rdram, value != 0u);
+        }
+        template <int Rs, int Rt>
+        void effectObjSlowAnd(uint8_t *rdram, R5900Context *ctx, PS2Runtime *) // and v0,rs,rt
+        {
+            const uint32_t value = GPR_U32(ctx, Rs) & GPR_U32(ctx, Rt);
+            SET_GPR_U32(ctx, 2, value);
+            effectObjSlowTaken(rdram, value != 0u);
+        }
+        // Replaces lui v0,0x74 at 0x30F27C (MoveEffect's end, before its rate reset).
+        void effectMoveEnd(uint8_t *, R5900Context *ctx, PS2Runtime *)
+        {
+            SET_GPR_U32(ctx, 2, 0x740000u);
+            g_effectRateSwapped = false;
+        }
+
+        void effectWorldSlow(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
         {
             SET_GPR_U32(ctx, 3, (GPR_U32(ctx, 3) | 0x20000u) & GPR_U32(ctx, 4));
+            if (g_effectRateSwapped)
+            {
+                setRamF32(rdram, 0x741DC0u, g_effectPlainRate);
+                g_effectRateSwapped = false;
+            }
         }
         // The effects' colour fade at 60 (Nov 1; kamite.toml at 0x2FC7F0): RGBA x a per-frame factor each PS2 frame, so
         // the square root of each factor a vblank (two vblanks = one 30 FPS frame). Replaces mul.s f0,f0,f4 (R, with G
@@ -1928,8 +1976,11 @@ namespace kamite
             std::memcpy(&ram8(rdram, GPR_U32(ctx, 3) + 0x3BB8u), &zero, sizeof(zero));
             uint32_t flags = 0;
             std::memcpy(&flags, &ram8(rdram, 0x747A84u), sizeof(flags));
+            g_effectGameRate = ramF32(rdram, 0x741DC0u);
             if ((flags & 0x20000u) == 0u)
                 setRamF32(rdram, 0x741DC0u, 0.5f);
+            g_effectPlainRate = ramF32(rdram, 0x741DC0u);
+            g_effectRateSwapped = false;
         }
         // Replaces swc1 f12,0x1DC0(v1) in cEmManage_SetSpeedRate: the effects' slow-motion rate, half at 60.
         void effectSlowRate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
@@ -2707,6 +2758,7 @@ namespace kamite
             ps2x::asyncvif::setVu1TimingScale(0.5);
         g_l3Dash = envOn("KAMITE_L3_DASH");
         g_rouletteRatchet = envOn("KAMITE_ROULETTE_RATCHET");
+        g_rouletteInvert = envOn("KAMITE_ROULETTE_INVERT");
         ps2xRegisterHostHook("km_frame_start", &frameStart);
         ps2xRegisterHostHook("km_fps60_hitbox_compare", &hitboxCompare);
         ps2xRegisterHostHook("km_fps60_roulette_timer", &rouletteTimer);
@@ -2914,6 +2966,11 @@ namespace kamite
         ps2xRegisterHostHook("km_fps60_effect_world_slow", &effectWorldSlow);
         ps2xRegisterHostHook("km_fps60_effect_slow_rate", &effectSlowRate);
         ps2xRegisterHostHook("km_fps60_effect_rate_for_flag", &effectRateForFlag);
+        ps2xRegisterHostHook("km_fps60_effect_obj_slow_v0_1", &effectObjSlowAndi<2, 0x1u>);
+        ps2xRegisterHostHook("km_fps60_effect_obj_slow_a0_100", &effectObjSlowAndi<4, 0x100u>);
+        ps2xRegisterHostHook("km_fps60_effect_obj_slow_a0_v0", &effectObjSlowAnd<4, 2>);
+        ps2xRegisterHostHook("km_fps60_effect_obj_slow_v0_v1", &effectObjSlowAnd<2, 3>);
+        ps2xRegisterHostHook("km_fps60_effect_move_end", &effectMoveEnd);
         ps2xRegisterHostHook("km_fps60_bullet_vadd_half", &bulletVaddHalf);
         ps2xRegisterHostHook("km_fps60_wiggle_begin", &wiggleBegin);
         ps2xRegisterHostHook("km_fps60_wiggle_end", &wiggleEnd);
@@ -3066,5 +3123,10 @@ namespace kamite
     void setRouletteRatchet(bool on)
     {
         g_rouletteRatchet.store(on, std::memory_order_relaxed);
+    }
+
+    void setRouletteInvert(bool on)
+    {
+        g_rouletteInvert.store(on, std::memory_order_relaxed);
     }
 }

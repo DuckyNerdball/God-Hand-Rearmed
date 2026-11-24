@@ -418,6 +418,7 @@ namespace
         {"game", "skipintro", "KAMITE_SKIP_INTRO"},
         {"game", "roulettenoorbs", "KAMITE_ROULETTE_NO_ORBS"},
         {"game", "roulettetargetcycle", "KAMITE_ROULETTE_CYCLE"},
+        {"game", "rouletteinvert", "KAMITE_ROULETTE_INVERT"},
         {"game", "liftchairs", "KAMITE_LIFT_CHAIRS"},
         {"game", "tensionplacable", "KAMITE_TENSION_PLACABLE"},
         {"game", "offthecuff", "KAMITE_OFF_THE_CUFF"},

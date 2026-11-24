@@ -21,4 +21,6 @@ namespace kamite
     // [Sound] RouletteRatchet ("Roulette Ratchet", K Nov 16): each step of the roulette wheel ticks (the menus' tick,
     // 0x164; the wheel steps silently on the PS2). Any thread.
     void setRouletteRatchet(bool on);
+    // [Game] RouletteInvert ("Invert Roulette", K Nov 24): the wheel's up / down swapped (up forward, down back). Any thread.
+    void setRouletteInvert(bool on);
 }

@@ -4,6 +4,10 @@ Newest first, one line per change; the code comments say how.
 
 ## November 24, 2026
 
+- 60 FPS: effects that follow the slow motion (the roulette target's flash, effects on slowed enemies) keep the PS2's speed in the roulette and the roulette moves.
+- Target Select: the target's flash moves to the new target.
+- Options: Invert Roulette (Gameplay > Roulette Charrette): up spins the wheel forward, down back.
+- Steam Deck: the shader warm-up list ships, so the first start builds the Deck's shaders up front.
 - Performance: most of the draw packets and texture uploads (models, scenery, effects) go to the vector unit straight from memory instead of being copied every frame.
 
 ## November 23, 2026
