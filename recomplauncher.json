@@ -1735,8 +1735,8 @@
     },
     {
       "id": "RouletteInvert",
-      "label": "Invert Roulette",
-      "help": "Up spins the Roulette forward and down spins it back (stick and d-pad).",
+      "label": "Inverse Roulette",
+      "help": "Reverse the direction of the roulette, so up goes up and down goes down.",
       "group": "Roulette Charrette",
       "choices": [
         {

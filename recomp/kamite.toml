@@ -298,6 +298,13 @@ address = "0x0030F27C"
 hook = "km_fps60_effect_move_end"
 replace = true
 flag = "fps60"
+# The effect lights' spin (the roulette target's flash, Nov 24): +0x304 += +0x2CC degrees a frame with no rate
+# (0x2E7E10, the light particle's move); half a vblank at 60. Replaces mul.s f12,f12,f1.
+[[patches.hooks]]
+address = "0x002E7E80"
+hook = "km_fps60_effect_light_spin"
+replace = true
+flag = "fps60"
 
 # The HUD's tension bar (func_00142060) eases its shown value toward the gauge by 0.1 of the gap a frame (0x1426BC
 # lui / 0x1426C0 ori = 0.1): 1 - 0.9^0.5 = 0.0513 at 60 (0x3D523176), the same easing in real time.

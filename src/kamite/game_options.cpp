@@ -373,6 +373,33 @@ namespace kamite
             return true;
         }
 
+        // The same, returning the function's v0 (0 when it can't run).
+        uint32_t callGuestValue(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t address,
+                                std::initializer_list<uint32_t> args)
+        {
+            if (!runtime || !runtime->hasFunction(address))
+                return 0u;
+            PS2Runtime::RecompiledFunction fn = runtime->lookupFunction(address);
+            if (!fn)
+                return 0u;
+            const R5900Context saved = *ctx;
+            int reg = 4;
+            for (uint32_t a : args)
+            {
+                if (reg > 11)
+                    break;
+                SET_GPR_U32(ctx, reg, a);
+                ++reg;
+            }
+            ctx->pc = address;
+            runtime->eeScheduler().beginHostCall();
+            fn(rdram, ctx, runtime);
+            runtime->eeScheduler().endHostCall();
+            const uint32_t value = GPR_U32(ctx, 2);
+            *ctx = saved;
+            return value;
+        }
+
         void startSteam(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t gene)
         {
             // The parameter block func_00268788 builds on its stack (0x80 bytes), here below the caller's stack.
@@ -1295,6 +1322,43 @@ namespace kamite
         // kill them but returns at once while the roulette's +0x15F4 0x800000 is set.
         constexpr uint32_t kLinkTarget = 0x12CC70u;      // func_0012CC70(gene)
         constexpr uint32_t kKillEffectId = 0x306168u;    // KillEffect_306168(group, id, mode)
+        constexpr uint32_t kEffectRecord = 0x306030u;    // func_00306030(0x7419A0, group, id): the effect's EST
+        constexpr uint32_t kLightDel = 0x2D9158u;        // cWorldLight_Del_LightData(0x604700, id, model)
+
+        // The flash is a light particle (vtable 0x44E640, ESP pool 0x61B7C0, 1024 slots of 0x400, in-use bits at
+        // 0x71B7C0 MSB first) that lights its owner's model (cWorldLight, by +0x2B2 id and +0x2B4 model) and turns round
+        // its part 0 (+0x350). Respawned on the new target it waits for its emitter's start delay in the roulette's slow
+        // motion (K, Nov 24: "it takes a long time"), so the live particle is moved instead, as it is: owner +0x108 /
+        // +0x114, light model +0x2B4 / +0x3B4, the old model's light taken off (the particle adds it to the new one at
+        // its next move), +0x350 the new target's part 0. False when there is none to move (the emitter hasn't fired).
+        bool moveFlash(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t from, uint32_t to)
+        {
+            const uint32_t est = callGuestValue(rdram, ctx, runtime, kEffectRecord, {0x7419A0u, 0u, 0x61u});
+            const uint32_t fromPart = ram32(rdram, from + 0x144u), toPart = ram32(rdram, to + 0x144u);
+            if (!inGuest(est) || !inGuest(toPart))
+                return false;
+            const uint32_t record = est + 0x10u;
+            bool moved = false;
+            for (uint32_t slot = 0; slot < 1024u; ++slot)
+            {
+                if (((ram32(rdram, 0x71B7C0u + 4u * (slot >> 5)) >> (31u - (slot & 31u))) & 1u) == 0u)
+                    continue;
+                const uint32_t obj = 0x61B7C0u + slot * 0x400u;
+                if (ram32(rdram, obj + 0x110u) != record || ram32(rdram, obj + 0x114u) != from)
+                    continue;
+                uint16_t light = 0;
+                std::memcpy(&light, rdram + obj + 0x2B2u, 2);
+                if (ram32(rdram, obj + 0x2B4u) == from)
+                    callGuest(rdram, ctx, runtime, kLightDel, {0x604700u, light, from});
+                for (uint32_t o : {0x108u, 0x114u, 0x2B4u, 0x3B4u})
+                    if (ram32(rdram, obj + o) == from)
+                        put32(rdram, obj + o, to);
+                if (ram32(rdram, obj + 0x350u) == fromPart)
+                    put32(rdram, obj + 0x350u, toPart);
+                moved = true;
+            }
+            return moved;
+        }
         GuestFunction g_setCommandList = nullptr;
 
         // The roulette camera is the parts camera (0x463970, set by func_00124EC0 / cPartsCamera_SetParts): its update
@@ -1899,9 +1963,14 @@ namespace kamite
         if (list[next].em == current)
             return;
         put32(rdram, gene + 0x640u, list[next].em);
-        // The flash moves with the target: the old one's effects killed as ClearLinkedTarget does, then linked again.
+        // The flash moves with the target: the live light moved over (moveFlash); else (kind 0x26A's part flashes, or
+        // none fired yet) the old one's effects killed as ClearLinkedTarget does, then linked again.
         const uint32_t linked = ram32(rdram, gene + 0x644u);
-        if (inGuest(linked))
+        const uint32_t to = list[next].em;
+        if (inGuest(linked) && ram32(rdram, linked + 0x564u) != 0x26Au && ram32(rdram, to + 0x564u) != 0x26Au &&
+            moveFlash(rdram, ctx, runtime, linked, to))
+            put32(rdram, gene + 0x644u, to);
+        else if (inGuest(linked))
         {
             if (ram32(rdram, linked + 0x564u) == 0x26Au)
                 callGuest(rdram, ctx, runtime, kKillEffectId, {0u, 0x79u, 2u});

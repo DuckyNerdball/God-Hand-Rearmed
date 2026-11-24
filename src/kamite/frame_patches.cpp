@@ -171,7 +171,7 @@ namespace kamite
 
         // Replaces addiu v1,v1,1 at 0x1458CC (cCockRoulette, the wheel's move: any of its command bits advances the
         // cursor +0x422 by one, wrapping at the count in $a0). Pushing up (stick or d-pad) goes back one instead (down with
-        // Invert Roulette), so an overshot move is one step away, not a whole lap.
+        // Inverse Roulette), so an overshot move is one step away, not a whole lap.
         // The direction comes from the command bit that made the step (GameWork +0x1A0, pressed: 49 = left stick up,
         // the pad code's Y < -0x50; 48 = down; 40 = R1), not from the stick as it is now: a flick up read a stick already
         // on its way back (the live byte past 0x40) and stepped down. The d-pad pushes the stick (rouletteDpad).
@@ -1919,6 +1919,15 @@ namespace kamite
             SET_GPR_U32(ctx, 2, value);
             effectObjSlowTaken(rdram, value != 0u);
         }
+        // The effect lights' spin (Nov 24, K: the roulette target's flash flashed twice as fast at 60): the light
+        // particle (vtable 0x44E640, its move 0x2E7E10) turns its offset round the owner by +0x2CC degrees every frame
+        // with no rate (+0x304 += deg x pi/180), so the light sweeps across the model twice as often at 60. Replaces
+        // mul.s f12,f12,f1 at 0x2E7E80: half the step a vblank.
+        void effectLightSpin(uint8_t *, R5900Context *ctx, PS2Runtime *)
+        {
+            ctx->f[12] = ctx->f[12] * ctx->f[1] * 0.5f;
+        }
+
         // Replaces lui v0,0x74 at 0x30F27C (MoveEffect's end, before its rate reset).
         void effectMoveEnd(uint8_t *, R5900Context *ctx, PS2Runtime *)
         {
@@ -2685,6 +2694,17 @@ namespace kamite
                 SET_GPR_U32(ctx, 5, skipFrame(rdram) ? 1u : 2u);
         }
 
+        // r206's spawner (the building that sends out enemies; recomp/modules/r206.toml, K's case MADHOUSE, Nov 24): a
+        // sleep(1) loop counts s0 down once a poll in bgez's delay slot. Replaces slti v0,v0,8 (fewer than 8 alive): on
+        // second halves s0 + 1 first, which the delay slot takes back, so it counts once a PS2 frame.
+        void r206SpawnGate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            const bool fewer = GPR_S32(ctx, 2) < 8;
+            SET_GPR_U32(ctx, 2, fewer ? 1u : 0u);
+            if (fewer && skipFrame(rdram))
+                SET_GPR_S32(ctx, 16, GPR_S32(ctx, 16) + 1);
+        }
+
         // Drivers that step a phase and a timer once a game frame and act on timer values (a beep at 30, a sound at 10),
         // so halving the timer would fire those twice (room DLLs, Nov 2): their "running" bit test `lwu v0,0(Base)`
         // reads the bits in Mask clear on second halves, so the whole driver runs once per 30 FPS frame (the ID anims it
@@ -2780,6 +2800,7 @@ namespace kamite
         ps2xRegisterHostHook("km_fps60_r301_cd_s1_78", &countdownLoadExact<17, 0x78u, 2, 4>);
         ps2xRegisterHostHook("km_fps60_r301_cd_s2_70", &countdownLoadExact<18, 0x70u, 2, 4>);
         ps2xRegisterHostHook("km_fps60_r301_countdown_tick", &tickOnlyGate<17, 1u>);
+        ps2xRegisterHostHook("km_fps60_r206_spawn_gate", &r206SpawnGate);
         // The other room DLLs' countdowns (recomp/modules/r*.toml, census Nov 2).
         ps2xRegisterHostHook("km_fps60_countdown_a0v0", &countdownPair<4, 2>); // addiu a0,v0,-1
         ps2xRegisterHostHook("km_fps60_r040_fight_tick", &tickOnlyGate<19, 2u>);
@@ -2971,6 +2992,7 @@ namespace kamite
         ps2xRegisterHostHook("km_fps60_effect_obj_slow_a0_v0", &effectObjSlowAnd<4, 2>);
         ps2xRegisterHostHook("km_fps60_effect_obj_slow_v0_v1", &effectObjSlowAnd<2, 3>);
         ps2xRegisterHostHook("km_fps60_effect_move_end", &effectMoveEnd);
+        ps2xRegisterHostHook("km_fps60_effect_light_spin", &effectLightSpin);
         ps2xRegisterHostHook("km_fps60_bullet_vadd_half", &bulletVaddHalf);
         ps2xRegisterHostHook("km_fps60_wiggle_begin", &wiggleBegin);
         ps2xRegisterHostHook("km_fps60_wiggle_end", &wiggleEnd);

@@ -22,3 +22,15 @@ skip = []
 stubs = []
 # No runtime relocations: every import resolves to a boot .sndata export at static-link time
 # (r206_runtime_relocations.csv has 0 rows).
+
+# Nov 24 (K's case MADHOUSE: the building's enemies came every ~5 s at 60): the spawner task func_00799800 is a
+# counted sleep(1) loop. Each poll, while GameWork +0x5EC bit 31 is set and fewer than 8 enemies live (func_0079A548),
+# s0 counts down (the decrement sits in bgez's delay slot at 0x799860); below 0 it starts the spawn task (0x79A020, one
+# enemy, at most 4 in the room's save) and reloads 0x168 (12 s at 30). The poll runs every vblank at 60, so the count
+# ran twice as fast. Replaces slti v0,v0,8 (the live-enemy test): on second halves s0 + 1 first, which the delay
+# slot's decrement takes back (frame_patches.cpp r206SpawnGate).
+[[patches.hooks]]
+address = "0x00799850"
+hook = "km_fps60_r206_spawn_gate"
+flag = "fps60"
+replace = true
