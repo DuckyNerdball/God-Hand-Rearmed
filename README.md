@@ -349,14 +349,10 @@ The USA release (SLUS-21503). Others may work; that's the one it's tested with. 
 the checksums.
 
 **Why is the screen black for a while on the first start?**
-The shaders are being compiled for your GPU. Once. After that it's quick. On Linux and the Steam Deck a "Preparing
-shaders" notice with a moving bar shows meanwhile (the seconds, and how many shaders are done).
+The shaders are being compiled for your GPU. Once. After that it's quick.
 
 **Windows SmartScreen is yelling at me.**
 The exe isn't signed (certificates cost money; this is free). **More info > Run anyway**.
-
-**Steam Deck? Linux?**
-Yes, natively: the AppImage or the tar.gz ([Linux and Steam Deck](#linux-and-steam-deck)). No Proton needed.
 
 **Will my PCSX2 texture pack work?**
 Yes: packs in PCSX2's format (a `replacements` folder). A texture pack is a mod: put its folder in `mods` next to
@@ -368,8 +364,7 @@ Loose images go in `mods/Loose Textures/textures`. Press **T** in game to switch
 The port keeps its own memory card in `memcards\mc0`.
 
 **Where are my saves?**
-`memcards\mc0` (the game's saves) and `states` (save states), next to GHR.exe (Linux AppImage:
-`~/.local/share/GodHandRearmed`). Updates never touch them.
+`memcards\mc0` (the game's saves) and `states` (save states), next to GHR.exe. Updates never touch them.
 
 **How do I update?**
 Start the launcher. If a new version is out, press **Update**. That's it!
