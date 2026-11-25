@@ -39,7 +39,7 @@ with kamite/git_commit.h):
        ForwardVec3At30_147C60_0x147c60 func_00150710_0x150710 Quaternion_SetRotationAxis_0x159fc8 capVu0Cos_0x1f7fb8
        sinf_0x3a19f8 ps2___kernel_cosf_0x3a3c80 ps2___kernel_sinf_0x3a4728 func_00156D70_0x156d70
        func_0015A6A0_0x15a6a0 func_0015A190_0x15a190 capVu0LengthSq_0x1f7e28 sceVu0ScaleVectorXYZ_0x30aba0
-       capVu0Atan2_0x1f8180"
+       capVu0Atan2_0x1f8180 cModel_calcParts_0x149eb8 cModel_calcWorldParts_0x14a038"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -173,4 +173,8 @@ only when the original's own checkpoint came due (its dueAt-th call), not on any
 restores a frame it overwrote (another ra) is compared and fails (planted: MtxMulScaleVec's out in its frame).
 New setups draw from g_rng only for their own functions: a draw for every native shifts all later inputs, and on a
 shifted sequence a batch-3 setup drove the recompiled func_00151398 to a special address (the stub's abort, pc 0x1514E0)
-in checkInvisible.
+in checkInvisible. M2 (batch 3) fuses cModel_calcParts / cModel_calcWorldParts: each callee runs
+its own native on a scratch context over a JournalEnv (every access keeps its bytes; a decline puts them back, newest
+first; an access in the pass's stack window declines). setupModel lays out a model and up to 8 parts as the game does
+(pos = &mtx[12], anchors = &mtxLocal[12], parents earlier parts or the model); a pointer the original follows must lead
+to plain RAM in the test (a random one aborts the recompiled run), so a short list ends in address 0, zeroed.

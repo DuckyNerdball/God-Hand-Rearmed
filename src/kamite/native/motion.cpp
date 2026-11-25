@@ -714,6 +714,285 @@ namespace kamite::native::motion
             returnFrom(ctx);
             return true;
         }
+        // ==== M2 (batch 3): cModel_calcParts and cModel_calcWorldParts fused ===========================================
+        // The whole per-model pass as one native: the model's own matrix (MtxInitCoord) and its parts' (Adjust_theta_vec,
+        // cParts_calcLocal, the blend 0x156D70, the parent join 0x1501D0), each callee run by its own native's body on a
+        // scratch context (the same checks, the same charges), each jal charged, each taken back-edge a checkpoint.
+        // A part's natives read what earlier ones wrote (its parent's world matrix, its own local one), so they run on a
+        // JournalEnv: every access keeps the bytes it touched (the inner natives reach RAM through at() alone, reads and
+        // writes alike), and a decline puts them back newest first: RAM as it was, the original runs. Any access inside
+        // the stack window (the bytes below the entry sp that the original's frames write) declines.
+        struct MotionJournalStore
+        {
+            struct Entry
+            {
+                uint32_t at;
+                uint32_t size;
+                uint32_t old; // offset into bytes
+            };
+            std::vector<Entry> entries;
+            std::vector<uint8_t> bytes;
+            bool busy = false;
+        };
+        inline MotionJournalStore &motionJournalStore()
+        {
+            thread_local MotionJournalStore store;
+            return store;
+        }
+        template <class Env>
+        struct JournalEnv
+        {
+            Env &env;
+            uint32_t low, size; // the stack window (RAM offsets)
+            bool atEnd = true;
+            bool ok = true;
+            bool kept = false;
+            MotionJournalStore *store = nullptr;
+            JournalEnv(Env &e, uint32_t windowLow, uint32_t windowSize) : env(e), low(windowLow), size(windowSize)
+            {
+                MotionJournalStore &s = motionJournalStore();
+                if (s.busy)
+                    ok = false;
+                else
+                {
+                    s.busy = true, store = &s;
+                    s.entries.clear(), s.bytes.clear();
+                }
+            }
+            ~JournalEnv()
+            {
+                if (!store)
+                    return;
+                if (!kept)
+                    for (size_t i = store->entries.size(); i-- > 0u;)
+                    {
+                        const MotionJournalStore::Entry &w = store->entries[i];
+                        std::memcpy(env.at(w.at, w.size), store->bytes.data() + w.old, w.size);
+                    }
+                store->busy = false;
+            }
+            JournalEnv(const JournalEnv &) = delete;
+            JournalEnv &operator=(const JournalEnv &) = delete;
+            void commit() { kept = true; }
+            uint8_t *at(uint32_t offset, uint32_t bytes)
+            {
+                uint8_t *p = env.at(offset, bytes);
+                if (!store)
+                {
+                    ok = false;
+                    return p;
+                }
+                if (e::overlaps(offset, bytes, low, size))
+                    ok = false; // still kept: the inner native may write it before the decline
+                const uint32_t old = static_cast<uint32_t>(store->bytes.size());
+                store->entries.push_back({offset, bytes, old});
+                store->bytes.insert(store->bytes.end(), p, p + bytes);
+                return p;
+            }
+            bool call() { return env.call(); }
+            bool checkpoint(uint32_t cycles) { return env.checkpoint(cycles); }
+        };
+
+        // cModel (a cParts with more): mtx +0x80, pos pointer +0xF0, rot +0x100, scale +0x110, scaleCalc +0x120, rotOrder
+        // byte +0x140, first part +0x144, objFlags +0x250, blend +0x27C, partNum byte +0x2B4. A part: next +0x144, parent
+        // +0x148, partFlags +0x154 (0x8 no local, 0x10 no parent join, 0x100000 no blend). objFlags 0x800 = the owner builds
+        // the matrix, 0x20 = near (calcWorldParts' models), bit 2 = blending (calcParts sets it from blend > 0).
+        constexpr uint32_t kModelBytes = 0x2B8u;
+        struct ModelPass
+        {
+            uint32_t model;  // RAM offset
+            uint32_t self;   // its guest address (the inner natives' arguments are guest addresses)
+            uint32_t callSp; // the callees' sp: the entry sp less the pass's frame
+        };
+        // The scratch context for an inner native: sp and the argument registers set, the rest the caller's (vf0).
+        void innerArgs(R5900Context &c, uint32_t sp, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3)
+        {
+            e::setS32(&c, e::sp, sp);
+            e::setS32(&c, e::a0, a0);
+            e::setS32(&c, e::a1, a1);
+            e::setS32(&c, e::a2, a2);
+            e::setS32(&c, e::a3, a3);
+        }
+        // MtxInitCoord(mtx, *pos, &rot, &scale, rotOrder byte) and the scale copied to scaleCalc word by word (lwc1 /
+        // swc1, x then y then z), unless objFlags & 0x800.
+        template <class Env>
+        bool modelMatrix(JournalEnv<Env> &j, R5900Context &c, const ModelPass &p)
+        {
+            if ((e::read32(j, p.model + 0x250u) & 0x800u) != 0u)
+                return true;
+            innerArgs(c, p.callSp, p.self + 0x80u, e::read32(j, p.model + 0xF0u), p.self + 0x100u, p.self + 0x110u);
+            e::setZe32(&c, e::t0, *j.at(p.model + 0x140u, 1u));
+            j.call();
+            if (!initCoord(j, &c))
+                return false;
+            for (uint32_t k = 0; k < 12u; k += 4u)
+                e::write32(j, p.model + 0x120u + k, e::read32(j, p.model + 0x110u + k));
+            return true;
+        }
+        float readFloat(uint32_t bits)
+        {
+            float f;
+            std::memcpy(&f, &bits, 4);
+            return f;
+        }
+        // blend(part, part, part +0x40, f12 = the model's blend as read now)
+        template <class Env>
+        bool partBlend(JournalEnv<Env> &j, R5900Context &c, const ModelPass &p, uint32_t part)
+        {
+            innerArgs(c, p.callSp, part, part, part + 0x40u, e::u32(&c, e::a3));
+            e::setFBits(&c, 12, e::read32(j, p.model + 0x27Cu));
+            j.call();
+            return blendNative(j, &c);
+        }
+        // the parent join: func_001501D0(part, objFlags as read now)
+        template <class Env>
+        bool partJoin(JournalEnv<Env> &j, R5900Context &c, const ModelPass &p, uint32_t part)
+        {
+            innerArgs(c, p.callSp, part, e::read32(j, p.model + 0x250u), e::u32(&c, e::a2), e::u32(&c, e::a3));
+            j.call();
+            return partWorld(j, &c);
+        }
+        template <class Env>
+        bool modelEntry(Env &env, R5900Context *ctx, uint32_t frame, uint32_t window, ModelPass &p, uint32_t &stackLow)
+        {
+            const uint32_t sp0 = e::u32(ctx, e::sp), self = e::u32(ctx, e::a0);
+            if (!env.atEnd || (sp0 & 0xFu) != 0u || (self & 0xFu) != 0u || !e::vf0Constant(ctx) ||
+                !plainRam(sp0 - window, window, stackLow) || !plainRam(self, kModelBytes, p.model) ||
+                e::overlaps(p.model, kModelBytes, stackLow, window))
+                return false;
+            p.self = self;
+            p.callSp = sp0 - frame;
+            return true;
+        }
+
+        // ---- cModel_calcParts 0x149EB8 (a0 = the model; src/cod/00149eb8.c) ---------------------------------------------
+        // A 0x60 frame: the model matrix; objFlags bit 2 = (0 < blend) (c.lt.s); then per part (partNum, re-read each
+        // turn; next +0x144 read in the loop's delay slot): Adjust_theta_vec(part +0x100); calcLocal unless 0x8; the blend
+        // when 0 < blend (re-read) and not 0x100000 and the model not near (0x20); the join unless 0x10.
+        constexpr uint32_t kCalcParts = 0x149EB8u, kCalcPartsFrame = 0x60u;
+        constexpr uint32_t kCalcPartsWindow = kCalcPartsFrame + kBlendFrames; // the deepest callee: the blend (0x2C0)
+        constexpr int kPartLimit = 255; // partNum is a byte
+        template <class Env>
+        bool calcPartsNative(Env &env, R5900Context *ctx)
+        {
+            ModelPass p;
+            uint32_t stackLow;
+            if (!modelEntry(env, ctx, kCalcPartsFrame, kCalcPartsWindow, p, stackLow))
+                return false;
+            JournalEnv<Env> j(env, stackLow, kCalcPartsWindow);
+            R5900Context c = *ctx;
+            if (!j.ok || !modelMatrix(j, c, p))
+                return false;
+            const float zero = bitsFloat(0u);
+            const uint32_t flags = e::read32(j, p.model + 0x250u);
+            e::write32(j, p.model + 0x250u,
+                       fpuLess(zero, readFloat(e::read32(j, p.model + 0x27Cu))) ? (flags | 4u) : (flags & ~4u));
+            const uint32_t count = *j.at(p.model + 0x2B4u, 1u);
+            uint32_t part = e::read32(j, p.model + 0x144u);
+            for (int i = 0; i < static_cast<int>(count) && j.ok;)
+            {
+                uint32_t at;
+                if ((part & 0xFu) != 0u || !plainRam(part, 0x160u, at))
+                    return false;
+                innerArgs(c, p.callSp, part + 0x100u, e::u32(&c, e::a1), e::u32(&c, e::a2), e::u32(&c, e::a3));
+                j.call();
+                if (!adjustThetaVec(j, &c))
+                    return false;
+                if ((e::read32(j, at + 0x154u) & 0x8u) == 0u)
+                {
+                    innerArgs(c, p.callSp, part, e::u32(&c, e::a1), e::u32(&c, e::a2), e::u32(&c, e::a3));
+                    j.call();
+                    if (!calcLocal(j, &c))
+                        return false;
+                }
+                if (fpuLess(zero, readFloat(e::read32(j, p.model + 0x27Cu))) &&
+                    (e::read32(j, at + 0x154u) & 0x100000u) == 0u && (e::read32(j, p.model + 0x250u) & 0x20u) == 0u &&
+                    !partBlend(j, c, p, part))
+                    return false;
+                if ((e::read32(j, at + 0x154u) & 0x10u) == 0u && !partJoin(j, c, p, part))
+                    return false;
+                const uint32_t n = *j.at(p.model + 0x2B4u, 1u);
+                ++i;
+                part = e::read32(j, at + 0x144u);
+                if (i < static_cast<int>(n))
+                    j.checkpoint(32u); // bnez back to the loop's top
+                else
+                    break;
+            }
+            if (!j.ok)
+                return false;
+            j.commit();
+            returnFrom(ctx);
+            return true;
+        }
+
+        // ---- cModel_calcWorldParts 0x14A038 (a0 = the model; src/cod/0014a038.c) ----------------------------------------
+        // Near models only (objFlags 0x20; else it returns at once): the model matrix; per part (flags read once) unless
+        // 0x10: when 0 < blend and not 0x100000, MtxInverse(frame, parent world) and sceVu0MulMatrix(frame, frame, the
+        // part's world) into its frame (never read again: dead stack, charged only; their reads must be plain RAM), then
+        // the blend; then the join. A 0xA0 frame.
+        constexpr uint32_t kCalcWorldParts = 0x14A038u, kCalcWorldFrame = 0xA0u;
+        constexpr uint32_t kCalcWorldWindow = kCalcWorldFrame + kBlendFrames;
+        template <class Env>
+        bool calcWorldPartsNative(Env &env, R5900Context *ctx)
+        {
+            ModelPass p;
+            uint32_t stackLow;
+            if (!modelEntry(env, ctx, kCalcWorldFrame, kCalcWorldWindow, p, stackLow))
+                return false;
+            JournalEnv<Env> j(env, stackLow, kCalcWorldWindow);
+            if (!j.ok)
+                return false;
+            if ((e::read32(j, p.model + 0x250u) & 0x20u) == 0u)
+            {
+                j.commit();
+                returnFrom(ctx);
+                return true;
+            }
+            R5900Context c = *ctx;
+            if (!modelMatrix(j, c, p))
+                return false;
+            const float zero = bitsFloat(0u);
+            const uint32_t count = *j.at(p.model + 0x2B4u, 1u);
+            uint32_t part = e::read32(j, p.model + 0x144u);
+            for (int i = 0; i < static_cast<int>(count) && j.ok;)
+            {
+                uint32_t at;
+                if ((part & 0xFu) != 0u || !plainRam(part, 0x160u, at))
+                    return false;
+                const uint32_t flags = e::read32(j, at + 0x154u);
+                if ((flags & 0x10u) == 0u)
+                {
+                    if (fpuLess(zero, readFloat(e::read32(j, p.model + 0x27Cu))) && (flags & 0x100000u) == 0u)
+                    {
+                        const uint32_t parentWorld = e::read32(j, at + 0x148u) + 0x80u;
+                        uint32_t in;
+                        if (!plainRam(parentWorld & ~0xFu, 0x50u, in))
+                            return false;
+                        j.call(); // jal MtxInverse (no calls, no loops)
+                        j.call(); // jal sceVu0MulMatrix
+                        for (int k = 0; k < 3; ++k)
+                            j.checkpoint(32u);
+                        if (!partBlend(j, c, p, part))
+                            return false;
+                    }
+                    if (!partJoin(j, c, p, part))
+                        return false;
+                }
+                const uint32_t n = *j.at(p.model + 0x2B4u, 1u);
+                ++i;
+                part = e::read32(j, at + 0x144u);
+                if (i < static_cast<int>(n))
+                    j.checkpoint(32u);
+                else
+                    break;
+            }
+            if (!j.ok)
+                return false;
+            j.commit();
+            returnFrom(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -748,5 +1027,19 @@ namespace kamite::native::motion
         add("func_0015A6A0", kSlerp, &slerpNative<RealEnv>, &slerpNative<ShadowEnv>, true);
         add("func_0015A190", kMatToQuat, &matToQuatNative<RealEnv>, &matToQuatNative<ShadowEnv>, true);
         add("MtxInitRotQuaternion", kQuatToMat, &quatToMatNative<RealEnv>, &quatToMatNative<ShadowEnv>, true);
+        // M2 (batch 3, Nov 25): the per-model passes fused; shadowed (unchecked) until a K build shows 0 mismatches. Their
+        // footprints (a model and all its parts) are recorded with Tag_set_scr's limits.
+        auto addPass = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
+                          bool (*shadow)(ShadowEnv &, R5900Context *), bool checked) {
+            NativeFunction fn{name, address, "motion", checked, real, shadow, nullptr};
+            fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
+            fn.returns = 0u;
+            fn.maxBytes = 1u << 20;
+            fn.maxRanges = 16384u;
+            registerFunction(fn);
+        };
+        addPass("cModel_calcParts", kCalcParts, &calcPartsNative<RealEnv>, &calcPartsNative<ShadowEnv>, false);
+        addPass("cModel_calcWorldParts", kCalcWorldParts, &calcWorldPartsNative<RealEnv>, &calcWorldPartsNative<ShadowEnv>,
+                false);
     }
 }

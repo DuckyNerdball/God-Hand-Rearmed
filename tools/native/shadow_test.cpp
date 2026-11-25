@@ -149,6 +149,9 @@ KM_RECOMPILED(func_0015A190_0x15a190)
 KM_RECOMPILED(capVu0LengthSq_0x1f7e28)
 KM_RECOMPILED(sceVu0ScaleVectorXYZ_0x30aba0)
 KM_RECOMPILED(capVu0Atan2_0x1f8180)
+// M2 (batch 3): the per-model passes
+KM_RECOMPILED(cModel_calcParts_0x149eb8)
+KM_RECOMPILED(cModel_calcWorldParts_0x14a038)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -2003,13 +2006,110 @@ namespace
         for (uint32_t i = 0; i < 3u; ++i)
             setFloat(at + 4u * i, angle());
     }
+    // M2: a cModel and its parts as the game lays them out (cModel.h): the model's pos pointer +0xF0 = &mtx[12]
+    // (+0xB0), each part's anchor +0xD0 = &mtxLocal[12] (+0x30), parents the model or an earlier part (sometimes a
+    // later one), parts +0x2C0 + 0x160 i after the model; flags, blend, rotOrder and partNum varied; now and then a
+    // twist part (declined), a list shorter than partNum, a part in the frames or unaligned, NO_CALC with a set matrix.
+    void setupModel(uint32_t address, R5900Context &ctx, uint32_t sp, uint32_t pick, uint32_t seg, uint32_t base)
+    {
+        setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
+        setRotOrderTable();
+        setThetaTable();
+        setBlendTables(false);
+        const uint32_t model = base + (pick == 0 ? 4u : 0u);
+        const uint32_t count = static_cast<uint32_t>(g_rng() % 9u); // 0-8 parts
+        const uint32_t end = model + 0x2C0u + 0x160u * 8u;
+        for (uint32_t a = base; a < end; a += 4u)
+            setFloat(a, static_cast<float>(static_cast<int>(g_rng() % 2001u) - 1000) / 500.0f);
+        auto rigidAt = [](uint32_t at) {
+            Mat4f m;
+            randomRigid(m);
+            setMat4f(at, m);
+        };
+        auto trsAt = [](uint32_t at) {
+            Mat4f m;
+            randomTrs(m);
+            setMat4f(at, m);
+        };
+        auto scaleAt = [](uint32_t at) {
+            for (uint32_t i = 0; i < 3u; ++i)
+                setFloat(at + 4u * i, 0.5f + static_cast<float>(g_rng() % 1000u) / 500.0f);
+            setFloat(at + 12u, 1.0f);
+        };
+        rigidAt(model + 0x80u);
+        setU32(model + 0xF0u, ((g_rng() % 8u) ? model + 0xB0u : model + 0x30u) | seg);
+        setAngles(model + 0x100u);
+        scaleAt(model + 0x110u);
+        scaleAt(model + 0x120u);
+        setU32(model + 0x140u, static_cast<uint32_t>(g_rng() & ~0xFFull) | (pick < 14 ? g_rng() % 6u : 6u + g_rng() % 250u));
+        uint32_t objFlags = static_cast<uint32_t>(g_rng()) & ~0x40824u;
+        if (g_rng() % 4u == 0u)
+            objFlags |= 0x800u; // the owner builds the matrix
+        if (address == 0x14A038u ? g_rng() % 8u != 0u : g_rng() % 4u == 0u)
+            objFlags |= 0x20u;  // near
+        if (g_rng() % 2u)
+            objFlags |= 0x40000u; // 0x1501D0's unscaled path (with bit 2 clear)
+        setU32(model + 0x250u, objFlags);
+        setFloat(model + 0x27Cu, (g_rng() % 2u) ? 0.0f : blendWeight());
+        const uint32_t listed = (g_rng() % 16u == 0u && count != 0u) ? count - 1u : count; // a short list: declined
+        setU32(model + 0x2B4u, (static_cast<uint32_t>(g_rng()) & ~0xFFu) | count);
+        uint32_t parts[8];
+        for (uint32_t i = 0; i < 8u; ++i)
+            parts[i] = model + 0x2C0u + 0x160u * i;
+        setU32(model + 0x144u, (listed ? parts[0] : 0u) | seg);
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            const uint32_t part = parts[i];
+            rigidAt(part);
+            trsAt(part + 0x40u);
+            rigidAt(part + 0x80u);
+            uint32_t anchor = part + 0x30u;
+            const uint32_t a = static_cast<uint32_t>(g_rng() % 32u);
+            if (a == 0)
+                anchor = part + 0x20u;   // inside the rows written first: declined
+            else if (a == 1)
+                anchor = model + 0x30u;  // another struct's words
+            else if (a == 2)
+                anchor = sp - 0x200u;    // in the pass's window (below the callee's own frames): declined
+            setU32(part + 0xD0u, anchor | seg);
+            for (uint32_t k = 0; k < 3u; ++k)
+            {
+                setFloat(part + 0x100u + 4u * k, angle());
+                setFloat(part + 0x130u + 4u * k, (g_rng() % 4u) ? angle() * 0.0625f : 0.0f);
+            }
+            scaleAt(part + 0x110u);
+            scaleAt(part + 0x120u);
+            // past the last part: read, never followed (random); a short list's end: 0 (the pass walks on into
+            // address 0, zeroed here, as the original would)
+            uint32_t next = i + 1u < listed ? parts[i + 1u] : i + 1u < count ? 0u : static_cast<uint32_t>(g_rng());
+            setU32(part + 0x144u, next | seg);
+            uint32_t parent = (i == 0u || g_rng() % 3u == 0u) ? model : parts[g_rng() % i];
+            if (g_rng() % 16u == 0u && i + 1u < count)
+                parent = parts[i + 1u]; // a later part: its world not built yet this pass
+            setU32(part + 0x148u, parent | seg);
+            uint32_t flags = static_cast<uint32_t>(g_rng()) & ~0x100818u;
+            if (g_rng() % 4u == 0u)
+                flags |= 0x8u;
+            if (g_rng() % 6u == 0u)
+                flags |= 0x10u;
+            if (g_rng() % 4u == 0u)
+                flags |= 0x100000u;
+            if (g_rng() % 24u == 0u)
+                flags |= 0x800u; // the twist: 0x1501D0 declines, so does the pass
+            setU32(part + 0x154u, flags);
+        }
+        for (uint32_t a = 0; a < 0x200u; a += 4u)
+            setU32(a, 0u);
+        setGpr(ctx, 4, model | seg);
+    }
     void setupMotion(const NativeFunction &fn, Call &call, bool wild, uint32_t base, uint32_t seg)
     {
         // Other natives: untouched, and no draws from g_rng (their setups stay the sequence they were proven on).
         if (fn.address != 0x1F7DA0u && fn.address != 0x1476D0u && fn.address != 0x147A08u && fn.address != 0x147728u &&
             fn.address != 0x147B60u && fn.address != 0x147BF8u && fn.address != 0x147B18u && fn.address != 0x147A48u &&
             fn.address != 0x150138u && fn.address != 0x147568u && fn.address != 0x1501D0u && fn.address != 0x156D70u &&
-            fn.address != 0x15A6A0u && fn.address != 0x15A190u && fn.address != 0x1478A8u)
+            fn.address != 0x15A6A0u && fn.address != 0x15A190u && fn.address != 0x1478A8u && fn.address != 0x149EB8u &&
+            fn.address != 0x14A038u)
             return;
         R5900Context &ctx = call.ctx;
         const uint32_t sp = 0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u);
@@ -2261,6 +2361,10 @@ namespace
             setGpr64(ctx, 5, flags | (g_rng() & 0xFFFFFFFF00000000ull));
             return;
         }
+        case 0x149EB8u: // cModel_calcParts(model)
+        case 0x14A038u: // cModel_calcWorldParts(model): near models only
+            setupModel(fn.address, ctx, sp, pick, seg, base);
+            return;
         case 0x147568u: // MtxInverse(out, in)
         {
             uint32_t out = base, in = base + 0x100u;
@@ -3342,7 +3446,8 @@ int main(int argc, char **argv)
         {0x150138u, &cParts_calcLocal_0x150138}, {0x147568u, &MtxInverse_0x147568},
         {0x1501D0u, &func_001501D0_0x1501d0},    {0x156D70u, &func_00156D70_0x156d70},
         {0x15A6A0u, &func_0015A6A0_0x15a6a0},    {0x15A190u, &func_0015A190_0x15a190},
-        {0x1478A8u, &MtxInitRotQuaternion_0x1478a8}};
+        {0x1478A8u, &MtxInitRotQuaternion_0x1478a8},
+        {0x149EB8u, &cModel_calcParts_0x149eb8}, {0x14A038u, &cModel_calcWorldParts_0x14a038}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
@@ -3453,7 +3558,7 @@ int main(int argc, char **argv)
                                 0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u,
                                 0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u, 0x14D0E8u, 0x153B00u, 0x14B810u,
                                 0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u, 0x147B18u, 0x147A48u,
-                                0x150138u, 0x1501D0u, 0x156D70u, 0x15A6A0u})
+                                0x150138u, 0x1501D0u, 0x156D70u, 0x15A6A0u, 0x149EB8u, 0x14A038u})
             if (fn.address == caller)
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;
