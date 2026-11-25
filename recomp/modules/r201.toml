@@ -30,3 +30,10 @@ hook = "km_fps60_countdown_v1"
 flag = "fps60"
 replace = true
 
+# The spawn wait (func_0079A2C8): s5 counts up in bnez's delay slot (0x79A554) to 0x1C3, then setEm + setGoto at Gene.
+# On second halves s5 - 1 first (census Nov 25).
+[[patches.hooks]]
+address = "0x0079A548"
+hook = "km_fps60_sleep_undo_s5_up"
+flag = "fps60"
+replace = false

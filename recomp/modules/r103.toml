@@ -22,3 +22,29 @@ skip = []
 stubs = []
 # No runtime relocations: every import resolves to a boot .sndata export at static-link time
 # (r103_runtime_relocations.csv has 0 rows).
+
+# The timed fight (func_007996F0): fp limits the first phase to 0x709 polls (60 s); s7 totals the polls of all three
+# phases, tested against 0xB23 (95 s) with the game level after the fight. Count once a 30 FPS frame (census Nov 25).
+[[patches.hooks]]
+address = "0x00799888"
+hook = "km_fps60_sleep_fp_up"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079988C"
+hook = "km_fps60_sleep_s7_up"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x00799A08"
+hook = "km_fps60_sleep_s7_up"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x00799B34"
+hook = "km_fps60_sleep_s7_up"
+flag = "fps60"
+replace = true

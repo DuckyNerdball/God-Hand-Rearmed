@@ -22,3 +22,10 @@ skip = []
 stubs = []
 # No runtime relocations: every import resolves to a boot .sndata export at static-link time
 # (r601_runtime_relocations.csv has 0 rows).
+
+# func_0079A890: looping SE 0x94 stops when f22 (-= 0.01 a poll) reaches 0. Step once a 30 FPS frame (census Nov 25).
+[[patches.hooks]]
+address = "0x0079AA28"
+hook = "km_fps60_r601_se_timer"
+flag = "fps60"
+replace = true

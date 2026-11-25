@@ -22,3 +22,10 @@ skip = []
 stubs = []
 # No runtime relocations: every import resolves to a boot .sndata export at static-link time
 # (r604_runtime_relocations.csv has 0 rows).
+
+# func_0079A880: a scenario camera shot held *(s2) polls (s0 counts up). Count once a 30 FPS frame (census Nov 25).
+[[patches.hooks]]
+address = "0x0079A94C"
+hook = "km_fps60_sleep_s0_up"
+flag = "fps60"
+replace = true

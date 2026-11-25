@@ -22,3 +22,47 @@ skip = []
 stubs = []
 # No runtime relocations: every import resolves to a boot .sndata export at static-link time
 # (r000_runtime_relocations.csv has 0 rows).
+
+# The soft event's seven voiced message pages (func_0079B628): s0 = 0x35 polls a page, a press skips. Count once a 30
+# FPS frame (census Nov 25).
+[[patches.hooks]]
+address = "0x0079B724"
+hook = "km_fps60_sleep_s0_down"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079B7BC"
+hook = "km_fps60_sleep_s0_down"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079B854"
+hook = "km_fps60_sleep_s0_down"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079B8EC"
+hook = "km_fps60_sleep_s0_down"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079B984"
+hook = "km_fps60_sleep_s0_down"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079BA1C"
+hook = "km_fps60_sleep_s0_down"
+flag = "fps60"
+replace = true
+
+[[patches.hooks]]
+address = "0x0079BAB4"
+hook = "km_fps60_sleep_s0_down"
+flag = "fps60"
+replace = true

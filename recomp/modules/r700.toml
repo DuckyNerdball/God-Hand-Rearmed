@@ -22,3 +22,11 @@ skip = []
 stubs = []
 # No runtime relocations: every import resolves to a boot .sndata export at static-link time
 # (r700_runtime_relocations.csv has 0 rows).
+
+# The spawn wait (func_00799A90 state 1): s5 from 0x2EE counts down in bgez's delay slot (0x799BB0), then a spawn at
+# the nearest point. On second halves s5 + 1 first (census Nov 25).
+[[patches.hooks]]
+address = "0x00799BA8"
+hook = "km_fps60_sleep_undo_s5_down"
+flag = "fps60"
+replace = false

@@ -34,3 +34,11 @@ address = "0x00799850"
 hook = "km_fps60_r206_spawn_gate"
 flag = "fps60"
 replace = true
+
+# The second spawner (func_007998D0): s0 from 0x384 counts down in bgez's delay slot (0x79992C); below 0 a free enemy
+# is sent at Gene. Before the loop tail's lw: on second halves s0 + 1 first (census Nov 25).
+[[patches.hooks]]
+address = "0x007999D0"
+hook = "km_fps60_sleep_undo_s0_down"
+flag = "fps60"
+replace = false

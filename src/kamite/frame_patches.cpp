@@ -2658,6 +2658,31 @@ namespace kamite
                 SET_GPR_S32(ctx, 16, GPR_S32(ctx, 16) + 1);
         }
 
+        // Counters kept in saved registers across sleep(1) in room tasks (tools/fps60/sleep_loop_census.py; census Nov 25):
+        // the coroutine keeps the register and sleep(1) stays one vblank, so a step a poll counts twice as fast at 60.
+        // Replaces addiu Reg,Reg,Delta: no step on second halves.
+        template <int Reg, int Delta>
+        void regStepFirstHalf(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            const int32_t value = GPR_S32(ctx, Reg);
+            SET_GPR_S32(ctx, Reg, skipFrame(rdram) ? value : value + Delta);
+        }
+        // Where the step sits in a delay slot (no hook there): runs before an instruction on the step's own path, ahead
+        // of its test; on second halves it takes the step back first, so the test sees the first half's value (as
+        // r206SpawnGate).
+        template <int Reg, int Delta>
+        void regStepUndo(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            if (skipFrame(rdram))
+                SET_GPR_S32(ctx, Reg, GPR_S32(ctx, Reg) - Delta);
+        }
+        // Replaces sub.s Fd,Fs,Ft: no step on second halves.
+        template <int Fd, int Fs, int Ft>
+        void floatSubFirstHalf(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
+        {
+            ctx->f[Fd] = skipFrame(rdram) ? ctx->f[Fs] : ctx->f[Fs] - ctx->f[Ft];
+        }
+
         // Drivers that step a phase and a timer once a game frame and act on timer values (a beep at 30, a sound at 10),
         // so halving the timer would fire those twice (room DLLs, Nov 2): their "running" bit test `lwu v0,0(Base)`
         // reads the bits in Mask clear on second halves, so the whole driver runs once per 30 FPS frame (the ID anims it
@@ -2754,6 +2779,18 @@ namespace kamite
         ps2xRegisterHostHook("km_fps60_r301_cd_s2_70", &countdownLoadExact<18, 0x70u, 2, 4>);
         ps2xRegisterHostHook("km_fps60_r301_countdown_tick", &tickOnlyGate<17, 1u>);
         ps2xRegisterHostHook("km_fps60_r206_spawn_gate", &r206SpawnGate);
+        // Saved-register counters in sleep(1) loops (census Nov 25, claude/room-dll-census.md; recomp/modules/r*.toml).
+        // Spawn waits: r206's second spawner (s0, 30 s), r700 (s5, 25 s), r701 (s5, 15 s), r201 (s5 up, 15 s).
+        ps2xRegisterHostHook("km_fps60_sleep_undo_s0_down", &regStepUndo<16, -1>);
+        ps2xRegisterHostHook("km_fps60_sleep_undo_s5_down", &regStepUndo<21, -1>);
+        ps2xRegisterHostHook("km_fps60_sleep_undo_s5_up", &regStepUndo<21, 1>);
+        // r103's timed fight (fp: the 60 s first phase; s7: the 95 s total), r000's message pages (s0), r604's camera
+        // hold (s0), r601's looping sound timer (f22 -= 0.01).
+        ps2xRegisterHostHook("km_fps60_sleep_fp_up", &regStepFirstHalf<30, 1>);
+        ps2xRegisterHostHook("km_fps60_sleep_s7_up", &regStepFirstHalf<23, 1>);
+        ps2xRegisterHostHook("km_fps60_sleep_s0_up", &regStepFirstHalf<16, 1>);
+        ps2xRegisterHostHook("km_fps60_sleep_s0_down", &regStepFirstHalf<16, -1>);
+        ps2xRegisterHostHook("km_fps60_r601_se_timer", &floatSubFirstHalf<22, 22, 0>);
         // The other room DLLs' countdowns (recomp/modules/r*.toml, census Nov 2).
         ps2xRegisterHostHook("km_fps60_countdown_a0v0", &countdownPair<4, 2>); // addiu a0,v0,-1
         ps2xRegisterHostHook("km_fps60_r040_fight_tick", &tickOnlyGate<19, 2u>);
