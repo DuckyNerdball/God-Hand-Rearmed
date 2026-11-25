@@ -41,6 +41,7 @@ namespace kamite::native::draw_list
             bool seen = false;
             bool shadow = false; // a source not proven yet: copied and checked, not read in place
             uint8_t why = 0u;    // shadow: why it is copied (Why; the dev report's copied-bytes map)
+            uint32_t caller = 0u; // Source::Queue: g_queueCaller at registration (dev report)
         };
         // Why a registered packet is copied (dev report): the queue rule's first frames, a buffer queued in both halves /
         // twice a frame, a both-halves writer's mark (b3 B), a source still shadowed
@@ -85,11 +86,15 @@ namespace kamite::native::draw_list
             bool twice = false;  // queued twice in one generation (one frame)
         };
         std::unordered_map<uint32_t, Reuse> g_reuse;
+        uint64_t g_reuseClears = 0u; // (dev report: the record's resets, each one re-copies every queue buffer once)
         // true: read in place (a double-buffered head, seen in two frames of this half only). sticky: copied for good.
         bool reuseOk(uint32_t key, uint32_t half, uint32_t gen, bool &sticky)
         {
             if (g_reuse.size() > (1u << 17))
+            {
                 g_reuse.clear(); // never in practice (heads are a few thousand buffers)
+                ++g_reuseClears;
+            }
             Reuse &r = g_reuse[key];
             r.halves |= static_cast<uint8_t>(1u << half);
             r.caller = g_queueCaller;
@@ -261,6 +266,7 @@ namespace kamite::native::draw_list
             e.seen = false;
             e.shadow = shadow;
             e.why = why;
+            e.caller = source == Source::Queue ? g_queueCaller : 0u;
             ++(shadow ? g_registeredShadow : g_registered);
         }
     }
@@ -292,6 +298,10 @@ namespace kamite::native::draw_list
             // VIF1 chains with no registered packet at all (all copied): their count, bytes and commands
             uint64_t unlistedItems = 0u, unlistedBytes = 0u, unlistedOps[5] = {};
             std::map<uint32_t, std::pair<uint64_t, uint64_t>> gapAfter; // the packet before a gap of > 1 KB -> runs, bytes
+            // the registered packets still copied by (why << 32 | queue caller) -> packets, bytes; the first-frame ones
+            // by how far into the run their half's generation was (< 30, < 300, later: a load's warm-up or churn)
+            std::map<uint64_t, std::pair<uint64_t, uint64_t>> whyCaller;
+            uint64_t firstByAge[3] = {}, firstBytesByAge[3] = {};
             uint64_t mscal = 0u, mscnt = 0u, mpg = 0u, direct = 0u, unpack = 0u, segmentsWithoutMpg = 0u;
             std::map<uint32_t, uint64_t> microcode; // MPG source (guest address) -> uploads
             std::vector<Diff> diffs;                 // the first few
@@ -422,18 +432,20 @@ namespace kamite::native::draw_list
         thread_local std::unordered_map<const void *, std::vector<uint64_t>> t_starts; // live packets' job-start hashes
 
         // The registry's entry for a head (read from the VU thread: dev only, a racy read of a byte)
-        uint8_t whyOf(uint32_t head)
+        Entry entryOf(uint32_t head)
         {
             const uint32_t key = (head & kRamMask) | 1u;
             for (uint32_t s = slotOf(key), n = 0; n < kSlots; s = (s + 1u) & (kSlots - 1u), ++n)
             {
                 const Entry &e = g_table[s];
                 if (e.key == key)
-                    return e.why;
+                    return e;
                 if (e.key == 0u)
                     break;
             }
-            return kWhyShadow;
+            Entry none;
+            none.why = kWhyShadow;
+            return none;
         }
         // A gap's VIF commands (it starts and ends on command edges: the packets around it do): their bytes by kind
         void vifOps(uint64_t *ops, const uint8_t *d, uint32_t n)
@@ -526,9 +538,23 @@ namespace kamite::native::draw_list
                     if (s.live)
                         continue;
                     const uint32_t end = s.closed ? std::min<uint32_t>(s.end, static_cast<uint32_t>(size)) : start;
-                    const uint8_t why = whyOf(s.head);
+                    const Entry en = entryOf(s.head);
+                    const uint8_t why = en.why < 5u ? en.why : kWhyShadow;
+                    const uint64_t n = end > start ? end - start : 0u;
                     ++st.whyPackets[why];
-                    st.whyBytes[why] += end > start ? end - start : 0u;
+                    st.whyBytes[why] += n;
+                    if (st.whyCaller.size() < 4096u || st.whyCaller.count((uint64_t(why) << 32) | en.caller))
+                    {
+                        auto &c = st.whyCaller[(uint64_t(why) << 32) | en.caller];
+                        ++c.first;
+                        c.second += n;
+                    }
+                    if (why == kWhyFirst)
+                    {
+                        const int age = en.gen < 30u ? 0 : en.gen < 300u ? 1 : 2;
+                        ++st.firstByAge[age];
+                        st.firstBytesByAge[age] += n;
+                    }
                     at = std::max(at, end);
                 }
                 gapRun(st, data, at, static_cast<uint32_t>(size), before);
@@ -695,6 +721,13 @@ namespace kamite::native::draw_list
                      ull(st.gapBytes[2]), ull(st.gapRuns[3]), ull(st.gapBytes[3]), ull(st.gapRuns[4]), ull(st.gapBytes[4]));
         std::fprintf(f, "copiedops direct %llu unpack %llu mpg %llu other %llu unparsed %llu\n", ull(st.gapOps[0]),
                      ull(st.gapOps[1]), ull(st.gapOps[2]), ull(st.gapOps[3]), ull(st.gapOps[4]));
+        std::fprintf(f, "copiedfirstage n30 %llu b30 %llu n300 %llu b300 %llu nlater %llu blater %llu reuseclears %llu\n",
+                     ull(st.firstByAge[0]), ull(st.firstBytesByAge[0]), ull(st.firstByAge[1]), ull(st.firstBytesByAge[1]),
+                     ull(st.firstByAge[2]), ull(st.firstBytesByAge[2]), ull(g_reuseClears));
+        for (const auto &[k, c] : st.whyCaller)
+            if (static_cast<uint32_t>(k >> 32) != kWhyLive)
+                std::fprintf(f, "copiedby %u 0x%06x %llu %llu\n", static_cast<unsigned>(k >> 32), static_cast<uint32_t>(k),
+                             ull(c.first), ull(c.second));
         std::fprintf(f, "copiedunlisted items %llu bytes %llu direct %llu unpack %llu mpg %llu other %llu unparsed %llu\n",
                      ull(st.unlistedItems), ull(st.unlistedBytes), ull(st.unlistedOps[0]), ull(st.unlistedOps[1]),
                      ull(st.unlistedOps[2]), ull(st.unlistedOps[3]), ull(st.unlistedOps[4]));

@@ -88,9 +88,12 @@ def drawlist_totals(paths):
             elif f[0] in ("registered", "segments"):
                 for key, value in zip(f[0::2], f[1::2]):
                     add(key, value)
+            elif f[0] == "copiedby" and len(f) == 5:  # copiedby WHY CALLER PACKETS BYTES
+                add(f"copiedby {f[1]} {f[2]} n", f[3])
+                add(f"copiedby {f[1]} {f[2]} b", f[4])
             elif f[0] == "copiedafter" and len(f) == 5:  # copiedafter HEAD BYTES caller CALLER
                 add(f"copiedafter {f[1]} {f[4]}", f[2])
-            elif f[0] in ("parse", "ops", "cache", "kinds", "inplace", "rewrites", "executor", "uploads", "copiedwhy", "copiedgap",
+            elif f[0] in ("parse", "ops", "cache", "kinds", "inplace", "rewrites", "executor", "uploads", "copiedwhy", "copiedgap", "copiedfirstage",
                           "copiedops", "copiedunlisted"):
                 for key, value in zip(f[1::2], f[2::2]):
                     add(f"{f[0]}-{key}", value)
@@ -311,6 +314,17 @@ def main():
                   f" runs     {mb(gaps):>9}  {pc(gaps)}: <=16 B {g('copiedgap-n16')}, <=64 B {g('copiedgap-n64')}, "
                   f"<=1 KB {g('copiedgap-n1k')}, <=16 KB {g('copiedgap-n16k')} ({mb(g('copiedgap-b16k'))}), "
                   f"bigger {g('copiedgap-nbig')} ({mb(g('copiedgap-bbig'))})")
+            if g('copiedfirstage-n30') or g('copiedfirstage-n300') or g('copiedfirstage-nlater'):
+                print(f"    first frames by when (their half's generation): < 30 {g('copiedfirstage-n30')} packets "
+                      f"{mb(g('copiedfirstage-b30'))}, < 300 {g('copiedfirstage-n300')} {mb(g('copiedfirstage-b300'))}, "
+                      f"later {g('copiedfirstage-nlater')} {mb(g('copiedfirstage-blater'))}; reuse record resets "
+                      f"{g('copiedfirstage-reuseclears')}")
+            whyname = {"1": "first", "2": "both halves", "3": "marked", "4": "shadow"}
+            by = sorted(((t[k], k.split()[1], k.split()[2]) for k in t if k.startswith("copiedby ") and k.endswith(" b")),
+                        reverse=True)[:10]
+            if by:
+                print("    copied packets by why and queue caller (bytes, packets): " +
+                      ", ".join(f"{whyname.get(w, w)} {c} {mb(b)} {g(f'copiedby {w} {c} n')}" for b, w, c in by))
             ops = lambda pre: ", ".join(f"{n} {mb(g(f'{pre}-{k}'))}" for n, k in (("DIRECT", "direct"), ("UNPACK", "unpack"),
                                         ("MPG", "mpg"), ("other", "other"), ("unparsed", "unparsed")))
             print(f"    between packets by command: {ops('copiedops')}")
