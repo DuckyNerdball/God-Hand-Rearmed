@@ -54,20 +54,12 @@ namespace kamite::native::draw_list
     void begin(const uint8_t *rdram);
 
 #if !defined(KAMITE_RELEASE)
-    // Rung 3 step b3 B's writer probe (dev replays only: set by report()): func_00155D60's native notes a change to a
-    // node packet's +0x30 in the half the game is not building (the half our VU thread may still read), with the
-    // caller's return address; the report prints them and names the writer on each diff line.
-    extern bool g_probe;
-    void noteRewrite(uint32_t head, uint32_t caller);
-
     // Dev replays, after begin(): the VU thread's observer (shadow: the checks; live: counts and the VIF edge check) and
     // the report. outputBase = the case + ".30" / ".60"; header = the .native.txt header line's text.
     void report(const char *outputBase, const std::string &header);
     // At exit (native::flush): writes <outputBase>.drawlist.txt.
     void end();
 #else
-    constexpr bool g_probe = false;
-    inline void noteRewrite(uint32_t, uint32_t) {}
     inline void report(const char *, const std::string &) {}
     inline void end() {}
 #endif

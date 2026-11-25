@@ -357,6 +357,16 @@ public:
     // Step b's live draw list (ps2_listed_packets.h): data = a gathered chain without its listed packets; each listed
     // packet's bytes are read from guest RAM where it belongs, through processVIF1Data as one stream would be.
     void processVIF1Listed(const uint8_t *data, uint32_t sizeBytes, const ps2x::listed::Segments &listed);
+    // The VIF1 interpreter's step (rung 3, the VIF executor, Nov 25): one command (its VIFcode already read) with its
+    // payload at data + pos (sizeBytes = the end of what may be read); advances pos past the payload. False: the
+    // command ran past sizeBytes (processVIF1Data stops there). processVIF1Data loops it over contiguous bytes.
+    bool vif1Command(uint32_t cmd, const uint8_t *data, uint32_t &pos, uint32_t sizeBytes);
+    // The bytes vif1Command will take after this VIFcode, in the VIF1 registers' current state.
+    uint32_t vif1PayloadBytes(uint32_t cmd) const;
+    // A listed packet's pieces (in place in guest RAM) run command by command: a command inside a piece reads it there,
+    // a VIFcode ending a piece (a DMA tag's upper half) takes its payload from the next piece; only a command split
+    // otherwise (never seen) gathers the packet's rest (counted: ps2x::listed::executorGathers).
+    void runListedPacket(const ps2x::listed::Segments &listed, uint32_t pieceBegin, uint32_t pieceEnd);
     void processPendingTransfers();
     std::vector<uint32_t> consumeCompletedDmacCauses();
 

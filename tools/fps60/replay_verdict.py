@@ -88,15 +88,15 @@ def drawlist_totals(paths):
             elif f[0] in ("registered", "segments"):
                 for key, value in zip(f[0::2], f[1::2]):
                     add(key, value)
-            elif f[0] == "rewriter" and len(f) == 3:
-                add("rewriter " + f[1], f[2])
-            elif f[0] in ("parse", "ops", "cache", "kinds", "inplace", "rewrites"):
+            elif f[0] in ("parse", "ops", "cache", "kinds", "inplace", "rewrites", "executor"):
                 for key, value in zip(f[1::2], f[2::2]):
                     add(f"{f[0]}-{key}", value)
             elif f[0] == "live":  # live start same N differ N end same N differ N
                 for k in range(1, len(f) - 4, 5):
                     add(f"live-{f[k]}-{f[k + 1]}", f[k + 2])
                     add(f"live-{f[k]}-{f[k + 3]}", f[k + 4])
+                if "marked" in f[:-1]:
+                    add("live-marked", f[f.index("marked") + 1])
     return tot, notes
 
 
@@ -274,15 +274,15 @@ def main():
         if g('inplace-same') or g('inplace-differ'):
             print(f"  read in place, bytes at job start = job end: {g('inplace-same')} same / {g('inplace-differ')} differ"
                   f"{'  <-- DIFFER (rewritten while the VU read it: see the diff inplace lines)' if g('inplace-differ') else ''}")
-        if g('rewrites-writes'):
-            callers = sorted(((k.split()[1], v) for k, v in t.items() if k.startswith("rewriter ")), key=lambda kv: -kv[1])
-            print(f"  both-halves writer probe (0x155D60 changing the half not being built): {g('rewrites-writes')} writes, "
-                  f"heads {g('rewrites-heads')} (summed per replay); copied for good {g('rewrites-marks')}, waits for the VU "
-                  f"{g('rewrites-waits')}, timeouts {g('rewrites-timeouts')}; callers: "
-                  + ", ".join(f"{k} {v}" for k, v in callers[:6]))
+        if g('rewrites-marks') or g('rewrites-waits'):
+            print(f"  both-halves writers (0x155D60 changing the half not being built): copied for good {g('rewrites-marks')}, "
+                  f"waits for the VU {g('rewrites-waits')}, timeouts {g('rewrites-timeouts')}"
+                  f"{'  <-- TIMEOUTS' if g('rewrites-timeouts') else ''}")
+        print(f"  VIF executor: packets whose rest was gathered {g('executor-gathers')} (0 expected: every split is VIFcode | payload)")
         if "shadow" in modes or g('kinds-shadow'):
             print(f"  bytes in RAM = the walker's copy: job start {g('live-start-same')} same / {g('live-start-differ')} "
-                  f"differ, job end {g('live-end-same')} same / {g('live-end-differ')} differ"
+                  f"differ, job end {g('live-end-same')} same / {g('live-end-differ')} differ (marked, not compared: "
+                  f"{g('live-marked')})"
                   f"{'  <-- DIFFER' if g('live-start-differ') or g('live-end-differ') else ''}")
         print(f"  ops: MSCAL {g('ops-mscal')}, MSCNT {g('ops-mscnt')}, MPG {g('ops-mpg')} (packets without one "
               f"{g('ops-nompg')}), DIRECT {g('ops-direct')}, UNPACK {g('ops-unpack')}; unpack before STCYCL "

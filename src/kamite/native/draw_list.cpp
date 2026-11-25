@@ -73,16 +73,6 @@ namespace kamite::native::draw_list
             bool twice = false;  // queued twice in one generation (one frame)
         };
         std::unordered_map<uint32_t, Reuse> g_reuse;
-#if !defined(KAMITE_RELEASE)
-        // b3 B's writer probe (game thread): per head, the changing writes to the half not being built and the last caller
-        struct Rewrite
-        {
-            uint32_t writes = 0u, caller = 0u;
-        };
-        std::unordered_map<uint32_t, Rewrite> g_rewrites;
-        std::map<uint32_t, uint64_t> g_rewriters; // caller -> writes
-        uint64_t g_rewriteCount = 0u;
-#endif
         // true: read in place (a double-buffered head, seen in two frames of this half only). sticky: copied for good.
         bool reuseOk(uint32_t key, uint32_t half, uint32_t gen, bool &sticky)
         {
@@ -277,6 +267,7 @@ namespace kamite::native::draw_list
             std::vector<uint32_t> liveDiffs; // heads, the first few
             uint64_t parseOk = 0u, parseFail = 0u, unpackBeforeCycle = 0u, maskedUnpacks = 0u;
             uint64_t same[2] = {0u, 0u}, differ[2] = {0u, 0u};
+            uint64_t marked = 0u; // shadow packets copied for a both-halves writer: not compared
             uint64_t mscal = 0u, mscnt = 0u, mpg = 0u, direct = 0u, unpack = 0u, segmentsWithoutMpg = 0u;
             std::map<uint32_t, uint64_t> microcode; // MPG source (guest address) -> uploads
             std::vector<Diff> diffs;                 // the first few
@@ -478,6 +469,11 @@ namespace kamite::native::draw_list
                 }
                 else if (!s.closed || s.end > size)
                     continue;
+                else if (rewrittenBit(s.head)) // copied because a both-halves writer changes it (b3 B): RAM moves on
+                {
+                    ++st.marked;
+                    continue;
+                }
                 // the packet's bytes in guest RAM now vs the copy the walker made at the kick
                 uint32_t off = s.start;
                 bool same = true;
@@ -507,23 +503,10 @@ namespace kamite::native::draw_list
         }
     }
 
-    bool g_probe = false;
-    void noteRewrite(uint32_t head, uint32_t caller)
-    {
-        if (g_rewrites.size() > (1u << 16))
-            return;
-        Rewrite &r = g_rewrites[(head & kRamMask) | 1u];
-        ++r.writes;
-        r.caller = caller;
-        ++g_rewriters[caller];
-        ++g_rewriteCount;
-    }
-
     void report(const char *outputBase, const std::string &header)
     {
         if (!g_on)
             return;
-        g_probe = true;
         g_path = std::string(outputBase) + ".drawlist.txt";
         g_header = header;
         std::remove(g_path.c_str());
@@ -564,9 +547,10 @@ namespace kamite::native::draw_list
         std::fprintf(f, "parse ok %llu fail %llu unpackbeforecycle %llu maskedunpacks %llu\n",
                      static_cast<unsigned long long>(st.parseOk), static_cast<unsigned long long>(st.parseFail),
                      static_cast<unsigned long long>(st.unpackBeforeCycle), static_cast<unsigned long long>(st.maskedUnpacks));
-        std::fprintf(f, "live start same %llu differ %llu end same %llu differ %llu\n",
+        std::fprintf(f, "live start same %llu differ %llu end same %llu differ %llu marked %llu\n",
                      static_cast<unsigned long long>(st.same[0]), static_cast<unsigned long long>(st.differ[0]),
-                     static_cast<unsigned long long>(st.same[1]), static_cast<unsigned long long>(st.differ[1]));
+                     static_cast<unsigned long long>(st.same[1]), static_cast<unsigned long long>(st.differ[1]),
+                     static_cast<unsigned long long>(st.marked));
         std::fprintf(f, "ops mscal %llu mscnt %llu mpg %llu direct %llu unpack %llu nompg %llu\n",
                      static_cast<unsigned long long>(st.mscal), static_cast<unsigned long long>(st.mscnt),
                      static_cast<unsigned long long>(st.mpg), static_cast<unsigned long long>(st.direct),
@@ -581,31 +565,21 @@ namespace kamite::native::draw_list
         };
         std::fprintf(f, "inplace same %llu differ %llu\n", static_cast<unsigned long long>(st.liveSame),
                      static_cast<unsigned long long>(st.liveDiffer));
-        auto rewriteOf = [](uint32_t head)
-        {
-            const auto r = g_rewrites.find((head & kRamMask) | 1u);
-            return r == g_rewrites.end() ? Rewrite{} : r->second;
-        };
-        std::fprintf(f, "rewrites writes %llu heads %llu marks %llu waits %llu timeouts %llu\n",
-                     static_cast<unsigned long long>(g_rewriteCount), static_cast<unsigned long long>(g_rewrites.size()),
-                     static_cast<unsigned long long>(g_rewriteMarks), static_cast<unsigned long long>(g_rewriteWaits),
-                     static_cast<unsigned long long>(g_rewriteTimeouts));
-        for (const auto &[caller, n] : g_rewriters)
-            std::fprintf(f, "rewriter 0x%06x %llu\n", caller, static_cast<unsigned long long>(n));
+        std::fprintf(f, "rewrites marks %llu waits %llu timeouts %llu\n", static_cast<unsigned long long>(g_rewriteMarks),
+                     static_cast<unsigned long long>(g_rewriteWaits), static_cast<unsigned long long>(g_rewriteTimeouts));
+        std::fprintf(f, "executor gathers %llu\n",
+                     static_cast<unsigned long long>(ps2x::listed::executorGathers.load(std::memory_order_relaxed)));
         for (const uint32_t head : st.liveDiffs)
         {
             const Reuse r = reuseOf(head);
-            const Rewrite w = rewriteOf(head);
-            std::fprintf(f, "diff inplace head 0x%07x halves %u twice %u frames %u caller 0x%06x rewrites %u writer 0x%06x\n",
-                         head, r.halves, r.twice ? 1u : 0u, r.frames, r.caller, w.writes, w.caller);
+            std::fprintf(f, "diff inplace head 0x%07x halves %u twice %u frames %u caller 0x%06x\n", head, r.halves,
+                         r.twice ? 1u : 0u, r.frames, r.caller);
         }
         for (const Diff &d : st.diffs)
         {
             const Reuse r = reuseOf(d.head);
-            const Rewrite w = rewriteOf(d.head);
-            std::fprintf(f, "diff %s head 0x%07x at 0x%07x len %u halves %u twice %u caller 0x%06x rewrites %u writer 0x%06x\n",
-                         d.phase == 0 ? "start" : "end", d.head, d.at, d.len, r.halves, r.twice ? 1u : 0u, r.caller,
-                         w.writes, w.caller);
+            std::fprintf(f, "diff %s head 0x%07x at 0x%07x len %u halves %u twice %u caller 0x%06x\n",
+                         d.phase == 0 ? "start" : "end", d.head, d.at, d.len, r.halves, r.twice ? 1u : 0u, r.caller);
         }
         for (const std::string &n : st.parseNotes)
             std::fprintf(f, "parsefail %s\n", n.c_str());
@@ -647,12 +621,7 @@ namespace kamite::native::draw_list
             }
             break;
         }
-#if !defined(KAMITE_RELEASE)
-        if (g_probe)
-            noteRewrite(head, caller);
-#else
         (void)caller;
-#endif
     }
 
     void begin(const uint8_t *rdram)

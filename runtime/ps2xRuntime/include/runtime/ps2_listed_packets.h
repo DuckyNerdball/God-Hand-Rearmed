@@ -12,6 +12,7 @@
 // Nothing here changes what the VU or the GS receive. Small on purpose: ps2_memory.h, ps2_dma_chain.h and
 // ps2_async_vif.h include it.
 
+#include <atomic>
 #include <cstdint>
 #include <unordered_map>
 #include <utility>
@@ -19,6 +20,10 @@
 
 namespace ps2x::listed
 {
+    // The VIF executor's fallback count (PS2Memory::runListedPacket): listed packets whose rest had to be gathered
+    // (a command split across pieces otherwise than VIFcode | payload). Dev reports print it.
+    inline std::atomic<uint64_t> executorGathers{0};
+
     // A run of guest bytes (inside the RAM backing), in chain order.
     struct Piece
     {
