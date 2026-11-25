@@ -742,10 +742,11 @@ namespace kamite::native::motion
         add("cParts_calcLocal", kCalcLocal, &calcLocal<RealEnv>, &calcLocal<ShadowEnv>, true);
         add("MtxInverse", kInverse, &mtxInverse<RealEnv>, &mtxInverse<ShadowEnv>, true);
         add("func_001501D0", kPartWorld, &partWorld<RealEnv>, &partWorld<ShadowEnv>, true);
-        // M1's blend batch (Nov 25): shadowed (unchecked) until a K build shows 0 mismatches over the replays.
-        add("func_00156D70", kBlend, &blendNative<RealEnv>, &blendNative<ShadowEnv>, false);
-        add("func_0015A6A0", kSlerp, &slerpNative<RealEnv>, &slerpNative<ShadowEnv>, false);
-        add("func_0015A190", kMatToQuat, &matToQuatNative<RealEnv>, &matToQuatNative<ShadowEnv>, false);
-        add("MtxInitRotQuaternion", kQuatToMat, &quatToMatNative<RealEnv>, &quatToMatNative<ShadowEnv>, false);
+        // M1's blend batch: checked since K's 22:04 Twice of 0e44f7a (0x156D70 0.52M, slerp 1.35M, 0x15A190 1.44M,
+        // MtxInitRotQuaternion 2.76M calls compared, 0 mismatches, 0 declines).
+        add("func_00156D70", kBlend, &blendNative<RealEnv>, &blendNative<ShadowEnv>, true);
+        add("func_0015A6A0", kSlerp, &slerpNative<RealEnv>, &slerpNative<ShadowEnv>, true);
+        add("func_0015A190", kMatToQuat, &matToQuatNative<RealEnv>, &matToQuatNative<ShadowEnv>, true);
+        add("MtxInitRotQuaternion", kQuatToMat, &quatToMatNative<RealEnv>, &quatToMatNative<ShadowEnv>, true);
     }
 }
