@@ -593,12 +593,12 @@ namespace kamite::native::motion
         add("MtxMulRotVec", kMulRotVec, &mulRotVec<RealEnv>, &mulRotVec<ShadowEnv>, true);
         add("MtxMulScaleVec", kMulScaleVec, &mulScaleVec<RealEnv>, &mulScaleVec<ShadowEnv>, true);
         // M1 batch 2: MtxMulTransVec, MtxInverse and func_001501D0 checked since K's 17:31 Twice of d8151b0 (0.18M /
-        // 0.74M / 10.77M calls compared, 0 mismatches; 0x1501D0 declined 0.72M: the twist). MtxInitCoord (2.80M, 0
-        // mismatches) and cParts_calcLocal (declined all 7.5M: its anchor is &mtxLocal[12]) shadowed again with the
-        // read-after rule kTransReadAfter.
+        // 0.74M / 10.77M calls compared, 0 mismatches; 0x1501D0 declined 0.72M: the twist). MtxInitCoord and
+        // cParts_calcLocal checked since K's 19:09 Twice of 91dfbd2 (3.29M / 7.50M calls, 0 mismatches, 0 declines,
+        // with the read-after rule kTransReadAfter).
         add("MtxMulTransVec", kMulTransVec, &mulTransVec<RealEnv>, &mulTransVec<ShadowEnv>, true);
-        add("MtxInitCoord", kInitCoord, &initCoord<RealEnv>, &initCoord<ShadowEnv>, false);
-        add("cParts_calcLocal", kCalcLocal, &calcLocal<RealEnv>, &calcLocal<ShadowEnv>, false);
+        add("MtxInitCoord", kInitCoord, &initCoord<RealEnv>, &initCoord<ShadowEnv>, true);
+        add("cParts_calcLocal", kCalcLocal, &calcLocal<RealEnv>, &calcLocal<ShadowEnv>, true);
         add("MtxInverse", kInverse, &mtxInverse<RealEnv>, &mtxInverse<ShadowEnv>, true);
         add("func_001501D0", kPartWorld, &partWorld<RealEnv>, &partWorld<ShadowEnv>, true);
     }
