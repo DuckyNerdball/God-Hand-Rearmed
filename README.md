@@ -69,11 +69,9 @@ Recompiled as a native program under Vulkan or DX11 (Windows); PCSX2 as the rend
 
 ### Beat Off Anywhere!
 
-Available on the following platforms:
-- Windows: Out now!
-- Linux/Steam Deck: Out now!
-- Android: Later!
-- MacOS: Laterer!
+Available on or planned for the following platforms:
+
+![God Hand: Rearmed](assets/platforms_release.webp)
 ---
 
 ### You've Been Hit by, You've Been Struck by, My Smooth Visuals!
