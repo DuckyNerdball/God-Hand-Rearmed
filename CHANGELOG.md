@@ -5,6 +5,7 @@ Newest first, one line per change; the code comments say how.
 ## November 25, 2026
 
 - Performance: the vector unit's thread runs the draw packets straight from memory instead of copying them first.
+- Performance: the texture uploads that effects and other objects ask for go to the vector unit straight from memory too.
 - 60 FPS: four more rooms that keep sending enemies (stages 2 and 7) wait as long between them as on the PS2 (they waited half as long).
 - 60 FPS: a stage 1 timed fight keeps the PS2's clock (its time limit and its finish time ran twice as fast).
 - 60 FPS: a voiced message sequence, a held camera shot and a looping sound in a few rooms last as long as on the PS2.

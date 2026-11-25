@@ -206,6 +206,7 @@ namespace kamite::native::draw_list
 {
     bool g_on = false;
     uint32_t g_queueCaller = 0u;
+    uint64_t g_uploadsUnlisted = 0u;
     void listPackets(uint32_t, const uint32_t *, const uint32_t *, const uint64_t *, uint32_t, Source) {}
     void rewriting(uint32_t, uint32_t, uint32_t) {}
 }

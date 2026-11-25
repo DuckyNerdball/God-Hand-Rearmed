@@ -1767,6 +1767,25 @@ namespace kamite::native::packet
         // pack in place), so they run on a Txn: every read sees the writes made so far and nothing reaches RAM before the
         // end, so a decline midway changes nothing.
 
+        // Step b (draw_list.h): the packets a live native queues, registered once it commits. The fused tagSetRate /
+        // tagSetScr set it for their node / model packets and (b2) the texture uploads their texture-cache misses queue
+        // (txnQueueKind); any other live Txn sets its own for the uploads (Txn::commit publishes them: the standalone
+        // 0x151398 / 0x148BD8 / 0x148D30 / 0x148690 and the upload natives, the copy map's chain-start run, Nov 25).
+        struct ListCollect
+        {
+            static constexpr uint32_t kMax = 512u;
+            uint32_t head[kMax], tail[kMax];
+            uint32_t count = 0u;
+            void add(uint32_t h, uint32_t t)
+            {
+                if (count < kMax)
+                    head[count] = h, tail[count++] = t;
+                else
+                    ++draw_list::g_uploadsUnlisted; // (dev report: "uploads unlisted")
+            }
+        };
+        ListCollect *g_listCollect = nullptr;
+
         // The Txn's working storage, one per thread, reused (a native never opens a second one while one is open:
         // busy declines).
         struct TxnStore
@@ -1782,6 +1801,7 @@ namespace kamite::native::packet
             std::vector<Write> writes;
             std::vector<uint32_t> hash, used;
             bool busy = false;
+            ListCollect list; // a live Txn's uploads when no fused native collects (Txn::commit publishes them)
         };
         inline TxnStore &txnStore()
         {
@@ -1806,6 +1826,7 @@ namespace kamite::native::packet
             bool ok = true;
             TxnStore *store = nullptr;
             uint32_t count = 0;
+            bool listing = false; // this Txn collects its own uploads (no fused native's collect was set)
             Txn(Env &e, uint32_t low, uint32_t high) : env(e), stackLow(low), stackHigh(high)
             {
                 TxnStore &s = txnStore();
@@ -1813,9 +1834,18 @@ namespace kamite::native::packet
                     ok = false;
                 else
                     s.busy = true, store = &s;
+                if constexpr (std::is_same_v<Env, RealEnv>)
+                    if (store && draw_list::g_on && !g_listCollect)
+                    {
+                        s.list.count = 0u;
+                        g_listCollect = &s.list;
+                        listing = true;
+                    }
             }
             ~Txn()
             {
+                if (listing && g_listCollect == &store->list)
+                    g_listCollect = nullptr;
                 if (!store)
                     return;
                 for (uint32_t slot : store->used)
@@ -1939,6 +1969,27 @@ namespace kamite::native::packet
                     const TxnStore::Write &w = store->writes[i];
                     std::memcpy(env.at(w.at, w.size), w.bytes, w.size);
                 }
+                if constexpr (std::is_same_v<Env, RealEnv>)
+                    if (listing && g_listCollect == &store->list && store->list.count != 0u)
+                        publishList(store->list);
+            }
+            // The collected upload records as committed (head tags read from RAM now), this frame's half
+            void publishList(ListCollect &list)
+            {
+                uint32_t halfOff;
+                if (!plainRam(0x7476B0u, 4u, halfOff)) // D_007476B0, the frame's half
+                    return;
+                uint64_t headTag[ListCollect::kMax];
+                uint32_t heads[ListCollect::kMax], tails[ListCollect::kMax], n = 0u;
+                for (uint32_t i = 0; i < list.count; ++i)
+                {
+                    uint32_t off;
+                    if (!plainRam(list.head[i], 8u, off))
+                        continue;
+                    heads[n] = list.head[i], tails[n] = list.tail[i], headTag[n++] = e::read64(env, off);
+                }
+                draw_list::listPackets(e::read32(env, halfOff), heads, tails, headTag, n);
+                list.count = 0u;
             }
         };
 
@@ -1967,21 +2018,6 @@ namespace kamite::native::packet
             const uint64_t tag = t.u64(last);
             t.w64(last, (tag & 0x0FFFFFFFu) | 0x20000000u | (before << 32));
         }
-        // Step b (draw_list.h): the packets a live tagSetRate call queues, registered once it commits. Set only while a
-        // RealEnv tagSetRate runs with the draw list on; its node / model packets and (b2) the texture uploads its
-        // texture-cache misses queue (txnQueueKind) land here.
-        struct ListCollect
-        {
-            static constexpr uint32_t kMax = 512u;
-            uint32_t head[kMax], tail[kMax];
-            uint32_t count = 0u;
-            void add(uint32_t h, uint32_t t)
-            {
-                if (count < kMax)
-                    head[count] = h, tail[count++] = t;
-            }
-        };
-        ListCollect *g_listCollect = nullptr;
 
         // The three upload functions' queue: kind 0 / 3 bucket 1 order 0xE, 2: 6 / 8, 1: 1 / 2, else none (a 64-bit
         // compare of the kind register). The record: a NEXT head to +0x70 (the GS packet inline), a REF to the pixels at
@@ -2000,8 +2036,12 @@ namespace kamite::native::packet
             {
                 txnQueue(t, bucket, order, record, record + 0x80u);
                 if constexpr (std::is_same_v<std::remove_reference_t<decltype(t.env)>, RealEnv>)
+                {
                     if (g_listCollect)
                         g_listCollect->add(record, record + 0x80u);
+                    else if (draw_list::g_on)
+                        ++draw_list::g_uploadsUnlisted;
+                }
             }
         }
         // The upload functions' head: -1 when the GS flag 0x800 is set (unless `sign` < 0) or the object's 0x280

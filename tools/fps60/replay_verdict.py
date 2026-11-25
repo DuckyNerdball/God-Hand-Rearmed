@@ -90,7 +90,7 @@ def drawlist_totals(paths):
                     add(key, value)
             elif f[0] == "copiedafter" and len(f) == 5:  # copiedafter HEAD BYTES caller CALLER
                 add(f"copiedafter {f[1]} {f[4]}", f[2])
-            elif f[0] in ("parse", "ops", "cache", "kinds", "inplace", "rewrites", "executor", "copiedwhy", "copiedgap",
+            elif f[0] in ("parse", "ops", "cache", "kinds", "inplace", "rewrites", "executor", "uploads", "copiedwhy", "copiedgap",
                           "copiedops", "copiedunlisted"):
                 for key, value in zip(f[1::2], f[2::2]):
                     add(f"{f[0]}-{key}", value)
@@ -285,6 +285,8 @@ def main():
                   f"waits for the VU {g('rewrites-waits')}, timeouts {g('rewrites-timeouts')}"
                   f"{'  <-- TIMEOUTS' if g('rewrites-timeouts') else ''}")
         print(f"  VIF executor: packets whose rest was gathered {g('executor-gathers')} (0 expected: every split is VIFcode | payload)")
+        print(f"  texture uploads queued with nothing listing them: {g('uploads-unlisted')} (0 expected since the Txn lists its own)"
+              f"{'  <-- UNLISTED' if g('uploads-unlisted') else ''}")
         if "shadow" in modes or g('kinds-shadow'):
             print(f"  bytes in RAM = the walker's copy: job start {g('live-start-same')} same / {g('live-start-differ')} "
                   f"differ, job end {g('live-end-same')} same / {g('live-end-differ')} differ (marked, not compared: "

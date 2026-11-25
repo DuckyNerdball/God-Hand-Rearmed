@@ -37,6 +37,9 @@ namespace kamite::native::draw_list
     // The guest caller (ra) of the queue native running now (game thread; set by packet.cpp's queue natives): kept with
     // each Source::Queue head for the dev report.
     extern uint32_t g_queueCaller;
+    // Upload records a live native queued with nothing collecting them (packet.cpp txnQueueKind; EE thread; dev report
+    // "uploads unlisted": 0 expected since the Txn collects its own, Nov 25)
+    extern uint64_t g_uploadsUnlisted;
     // After a native committed (game thread): `count` packets it queued for frame half `half`, each as its head tag's
     // address, its tail tag's address and the head tag's first 8 bytes as now in RAM.
     void listPackets(uint32_t half, const uint32_t *heads, const uint32_t *tails, const uint64_t *headTags, uint32_t count,

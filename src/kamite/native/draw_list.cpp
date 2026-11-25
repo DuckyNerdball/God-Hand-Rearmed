@@ -21,6 +21,7 @@ namespace kamite::native::draw_list
 {
     bool g_on = false;
     uint32_t g_queueCaller = 0u;
+    uint64_t g_uploadsUnlisted = 0u;
 
     namespace
     {
@@ -718,6 +719,7 @@ namespace kamite::native::draw_list
                      static_cast<unsigned long long>(st.liveDiffer));
         std::fprintf(f, "rewrites marks %llu waits %llu timeouts %llu\n", static_cast<unsigned long long>(g_rewriteMarks),
                      static_cast<unsigned long long>(g_rewriteWaits), static_cast<unsigned long long>(g_rewriteTimeouts));
+        std::fprintf(f, "uploads unlisted %llu\n", static_cast<unsigned long long>(g_uploadsUnlisted));
         std::fprintf(f, "executor gathers %llu\n",
                      static_cast<unsigned long long>(ps2x::listed::executorGathers.load(std::memory_order_relaxed)));
         for (const uint32_t head : st.liveDiffs)
