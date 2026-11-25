@@ -2043,7 +2043,9 @@ namespace
                 order |= g_rng() & ~0xFFull;
             switch (g_rng() % 12u)
             {
-            case 0: t = out + 0x30u; break;        // read after out's first rows: declined
+            case 0: t = out + 0x30u; break;        // &out[12], as cModel's pos: read before its words are written
+            case 6: t = out + 0x2Cu; break;        // its first word is out[11], written first: declined
+            case 7: t = out + 0x34u; break;
             case 1: angles = out + 0x10u; break;   // declined
             case 2: scale = out + 0x20u; break;    // declined
             case 3: scale = sp - 0x30u; break;     // in the frames: declined
@@ -2078,6 +2080,8 @@ namespace
             switch (g_rng() % 12u)
             {
             case 0: anchor = part + 0x20u; break;   // calcLocal: inside the local rows written first (declined)
+            case 6: case 7: case 8: case 9: anchor = part + 0x30u; break; // &mtxLocal[12]: the game's own anchor
+            case 10: anchor = part + 0x2Cu; break;  // calcLocal: overlaps mtxLocal[11] (declined)
             case 1: anchor = part + 0x124u; break;  // 0x1501D0: inside scaleCalc written first (declined)
             case 2: anchor = sp - 0x40u; break;     // in the frames: declined
             case 3: parent = part; break;           // declined

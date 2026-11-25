@@ -327,6 +327,9 @@ namespace kamite::native::motion
             return multiplyStep(m, m, r);
         }
         // A word-aligned 12-byte vector in plain RAM, clear of the frames and of what the call writes before reading it.
+        // MtxInitTransVec's t: only out +0x00..+0x2F come before its reads (each later word is written after the read
+        // it could alias), so t may sit at out +0x30 (the game's anchor is &mtxLocal[12]; a model's pos &mtx[12]).
+        constexpr uint32_t kTransReadAfter = 0x30u;
         template <class Env>
         bool vec3(Env &env, uint32_t address, uint32_t frame, uint32_t frameSize, uint32_t written, uint32_t writtenSize,
                   uint32_t (&w)[3])
@@ -417,7 +420,7 @@ namespace kamite::native::motion
 
         // ---- MtxInitCoord 0x147A48 (a0 = out, a1 = t, a2 = angles, a3 = scale, t0 = rotOrder; src/cod/0012cc00.c) ---
         // A 0x50 frame: MtxInitTransVec(a0, a1); MtxMulRotVec(a0, a0, a2, t0 & 0xFF); MtxMulScaleVec(a0, a0, a3). The
-        // angles and scale are read after a0 is written: they may not touch it.
+        // angles and scale are read after a0 is written: they may not touch it (t only its first 0x30 bytes).
         constexpr uint32_t kInitCoord = 0x147A48u, kInitCoordFrames = 0x50u + kMulRotFrames;
         template <class Env>
         bool initCoord(Env &env, R5900Context *ctx)
@@ -429,7 +432,7 @@ namespace kamite::native::motion
             float angles[3] = {};
             if ((sp0 & 0xFu) != 0u || (a0 & 0xFu) != 0u || !plainRam(sp0 - kInitCoordFrames, kInitCoordFrames, frame) ||
                 !e::vf0Constant(ctx) || !plainRam(a0, 64u, out) || e::overlaps(out, 64u, frame, kInitCoordFrames) ||
-                addiOverflows(a0, 64u) || !vec3(env, e::u32(ctx, e::a1), frame, kInitCoordFrames, out, 64u, t) ||
+                addiOverflows(a0, 64u) || !vec3(env, e::u32(ctx, e::a1), frame, kInitCoordFrames, out, kTransReadAfter, t) ||
                 !vec3(env, e::u32(ctx, e::a3), frame, kInitCoordFrames, out, 64u, s))
                 return false;
             if (order <= 5u)
@@ -454,7 +457,7 @@ namespace kamite::native::motion
         // ---- cParts_calcLocal 0x150138 (a0 = a cParts; src/cod/00150138.c) -----------------------------------------------
         // rot = rot +0x100 + rotAdd +0x130 (w = 1) in a 0x30 frame, Adjust_theta_vec(rot); MtxInitTransVec(part,
         // anchor *(part +0xD0)); MtxMulRotVec(part, part, rot, 0); MtxMulScaleVec(part, part, scale +0x110). The local
-        // matrix is part +0x00..+0x3F; the anchor is read after its first rows are written: it may not touch them.
+        // matrix is part +0x00..+0x3F; the anchor (normally part +0x30) is read after its first 0x30 bytes are written.
         constexpr uint32_t kCalcLocal = 0x150138u, kCalcLocalFrames = 0x30u + kMulRotFrames;
         template <class Env>
         bool calcLocal(Env &env, R5900Context *ctx)
@@ -467,7 +470,7 @@ namespace kamite::native::motion
             if ((sp0 & 0xFu) != 0u || (a0 & 0xFu) != 0u || !plainRam(sp0 - kCalcLocalFrames, kCalcLocalFrames, frame) ||
                 !e::vf0Constant(ctx) || !plainRam(a0, 0x140u, part) || e::overlaps(part, 0x140u, frame, kCalcLocalFrames) ||
                 addiOverflows(a0, 64u) || !partAngles(env, part, angles) ||
-                !vec3(env, e::read32(env, part + 0xD0u), frame, kCalcLocalFrames, part, 64u, t) ||
+                !vec3(env, e::read32(env, part + 0xD0u), frame, kCalcLocalFrames, part, kTransReadAfter, t) ||
                 !vec3(env, a0 + 0x110u, frame, kCalcLocalFrames, part, 64u, s))
                 return false;
             Mat4 m = translation(t[0], t[1], t[2]);
@@ -589,11 +592,14 @@ namespace kamite::native::motion
         add("MtxInitScaleVec", 0x147A08u, &initScaleVec<RealEnv>, &initScaleVec<ShadowEnv>, true);
         add("MtxMulRotVec", kMulRotVec, &mulRotVec<RealEnv>, &mulRotVec<ShadowEnv>, true);
         add("MtxMulScaleVec", kMulScaleVec, &mulScaleVec<RealEnv>, &mulScaleVec<ShadowEnv>, true);
-        // M1 batch 2 (Nov 25): shadowed (unchecked) until a K build shows 0 mismatches over the replays.
-        add("MtxMulTransVec", kMulTransVec, &mulTransVec<RealEnv>, &mulTransVec<ShadowEnv>, false);
+        // M1 batch 2: MtxMulTransVec, MtxInverse and func_001501D0 checked since K's 17:31 Twice of d8151b0 (0.18M /
+        // 0.74M / 10.77M calls compared, 0 mismatches; 0x1501D0 declined 0.72M: the twist). MtxInitCoord (2.80M, 0
+        // mismatches) and cParts_calcLocal (declined all 7.5M: its anchor is &mtxLocal[12]) shadowed again with the
+        // read-after rule kTransReadAfter.
+        add("MtxMulTransVec", kMulTransVec, &mulTransVec<RealEnv>, &mulTransVec<ShadowEnv>, true);
         add("MtxInitCoord", kInitCoord, &initCoord<RealEnv>, &initCoord<ShadowEnv>, false);
         add("cParts_calcLocal", kCalcLocal, &calcLocal<RealEnv>, &calcLocal<ShadowEnv>, false);
-        add("MtxInverse", kInverse, &mtxInverse<RealEnv>, &mtxInverse<ShadowEnv>, false);
-        add("func_001501D0", kPartWorld, &partWorld<RealEnv>, &partWorld<ShadowEnv>, false);
+        add("MtxInverse", kInverse, &mtxInverse<RealEnv>, &mtxInverse<ShadowEnv>, true);
+        add("func_001501D0", kPartWorld, &partWorld<RealEnv>, &partWorld<ShadowEnv>, true);
     }
 }
