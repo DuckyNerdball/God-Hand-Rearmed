@@ -2,15 +2,26 @@
 the caller read a scratch register after the call before writing it? Natives compared by what lasts (kRenderPath's
 rule) need 0 such sites; run it per batch, on the ELF here and on the room DLLs too.
 
-python3 -I tools/native/caller_scan.py <SLUS_215.03> <repo> <addr[:returns]> ...   returns: v (v0), f (f0), n (none)
+python3 -I tools/native/caller_scan.py <SLUS_215.03> <repo> [--rels <dir>] <addr[:returns]> ...
+returns: v (v0), f (f0), n (none)
 Scratch = at, a0-a3, t0-t9, v0/v1 (unless returned), hi/lo, f1-f19 (f0 unless returned), vf1-vf31, ACC, Q, vi1-vi15.
 Bounded walk of the caller's control flow (both branch ways) from the return point, 96 instructions a path.
+--rels <dir>: also every DLL in <dir> (God Hand Extract\\dll\\debugoptimize: 79 rooms, event, mcport), each linked at
+its slot base by tools/snr2 (rooms 0x799080, event 0x7A8080, mcport 0x7C0080; raw .rel immediates are 0 + relocations,
+so only linked images are scanned). For the ELF and every DLL it also counts code pointers to the functions (lui +
+addiu / ori pairs, data words outside the ELF's SNR2 export table): a pointer means calls the scan can't see (jalr).
 """
-import csv, re, sys, bisect
+import csv, os, re, sys, bisect
 import rabbitizer as rz
 from elftools.elf.elffile import ELFFile
 
-elf, repo = sys.argv[1:3]
+args = sys.argv[1:]
+rels = None
+if "--rels" in args:
+    k = args.index("--rels")
+    rels = args[k + 1]
+    del args[k:k + 2]
+elf, repo = args[:2]
 funcs = {}
 with open(f"{repo}/recomp/kamite_functions.csv") as f:
     for r in csv.DictReader(f):
@@ -18,6 +29,7 @@ with open(f"{repo}/recomp/kamite_functions.csv") as f:
 starts = sorted(funcs)
 with open(elf, "rb") as f:
     segs = [(s["p_vaddr"], s.data()) for s in ELFFile(f).iter_segments() if s["p_type"] == "PT_LOAD"]
+elf_segs = list(segs)
 
 
 def word(a):
@@ -149,25 +161,123 @@ def walk(pc, end, ret, written, budget, seen, flags):
         pc += 4
 
 
-for arg in sys.argv[3:]:
-    a, _, ret = arg.partition(":")
-    a = int(a, 16)
-    ret = ret or "n"
-    sites = []
-    for v, d in segs:
+def transfers(code, a):
+    """jal and j sites to a in the [(vaddr, bytes)] ranges."""
+    jal, j = [], []
+    for v, d in code:
         for off in range(0, len(d) - 3, 4):
             w = int.from_bytes(d[off:off + 4], "little")
-            if (w >> 26) == 3 and (((v + off) & 0xF0000000) | ((w & 0x3FFFFFF) << 2)) == a:
-                sites.append(v + off)
+            if (w >> 26) in (2, 3) and (((v + off) & 0xF0000000) | ((w & 0x3FFFFFF) << 2)) == a:
+                (jal if (w >> 26) == 3 else j).append(v + off)
+    return jal, j
+
+
+def pointers(code, data, a, skip=range(0)):
+    """lui + addiu / ori pairs (within 16 instructions, same register) and data words equal to a."""
+    hi_add, hi_or, lo = ((a + 0x8000) >> 16) & 0xFFFF, a >> 16, a & 0xFFFF
+    out = []
+    for v, d in code:
+        for off in range(0, len(d) - 3, 4):
+            w = int.from_bytes(d[off:off + 4], "little")
+            if (w >> 26) != 0x0F or (w & 0xFFFF) not in (hi_add, hi_or):
+                continue
+            rt = (w >> 16) & 31
+            for k in range(1, 17):
+                o2 = off + 4 * k
+                if o2 + 4 > len(d):
+                    break
+                w2 = int.from_bytes(d[o2:o2 + 4], "little")
+                if (w2 >> 21) & 31 == rt and (w2 & 0xFFFF) == lo and (
+                        ((w2 >> 26) == 0x09 and (w & 0xFFFF) == hi_add) or ((w2 >> 26) == 0x0D and (w & 0xFFFF) == hi_or)):
+                    out.append(v + off)
+                    break
+    pat = a.to_bytes(4, "little")
+    for v, d in data:
+        i = d.find(pat)
+        while i >= 0:
+            if i % 4 == 0 and v + i not in skip:
+                out.append(v + i)
+            i = d.find(pat, i + 1)
+    return out
+
+
+def scan(label, code, data, owner, a, ret, skip=range(0)):
+    """(jal sites, j sites, sites read after, pointer refs); prints the flagged sites."""
+    jal, j = transfers(code, a)
     bad = []
-    for s in sites:
-        k = bisect.bisect_right(starts, s) - 1
-        fs = starts[k]
-        end = funcs[fs][1]
+    for s in jal:
+        name, end = owner(s)
         flags = set()
         walk(s + 8, end, ret, set(), 96, set(), flags)
         if flags:
-            bad.append((s, funcs[fs][0], sorted(flags)[:3]))
-    print(f"{a:06X} {funcs[a][0]}: {len(sites)} call sites, {len(bad)} read a scratch register after the call")
+            bad.append((s, name, sorted(flags)[:3]))
+    ptr = pointers(code, data, a, skip)
     for s, n, fl in bad[:8]:
-        print(f"   {s:X} in {n}: " + "; ".join(f"{p:X} {r} [{t}]" for p, r, t in fl))
+        print(f"   {label} {s:X} in {n}: " + "; ".join(f"{p:X} {r} [{t}]" for p, r, t in fl))
+    for s in j[:4]:
+        print(f"   {label} {s:X} in {owner(s)[0]}: j (tail call: its caller's callers see the state)")
+    for s in ptr[:4]:
+        print(f"   {label} {s:X}: code pointer")
+    return len(jal), len(j), len(bad), len(ptr)
+
+
+def elf_owner(s):
+    k = bisect.bisect_right(starts, s) - 1
+    return funcs[starts[k]][0], funcs[starts[k]][1]
+
+
+targets = []
+for arg in args[2:]:
+    a, _, ret = arg.partition(":")
+    targets.append((int(a, 16), ret or "n"))
+
+# the ELF's SNR2 export table ({name, address, hash, type, flag} x count at .sndata 0x40A400's +0x0C / +0x10): its
+# address words are the room DLLs' import resolution, not code pointers
+exp = range(0)
+for v, d in elf_segs:
+    if v <= 0x40A400 < v + len(d) - 20:
+        fa = int.from_bytes(d[0x40A400 - v + 0x0C:0x40A400 - v + 0x10], "little")
+        fc = int.from_bytes(d[0x40A400 - v + 0x10:0x40A400 - v + 0x14], "little")
+        exp = range(fa, fa + 12 * fc)
+for a, ret in targets:
+    n_jal, n_j, n_bad, n_ptr = scan("ELF", elf_segs, elf_segs, elf_owner, a, ret, exp)
+    print(f"{a:06X} {funcs[a][0]}: {n_jal} call sites, {n_bad} read a scratch register after the call"
+          f"{f', {n_j} j' if n_j else ''}{f', {n_ptr} code pointers' if n_ptr else ''}")
+
+if rels:
+    sys.path.insert(0, os.path.join(repo, "tools", "snr2"))
+    import snr2  # noqa: E402
+    from snr2fmt import Module  # noqa: E402
+    from snr2link import Registry  # noqa: E402
+    with open(elf, "rb") as f:
+        reg = Registry.from_boot_elf(f.read())
+    total = {a: [0, 0, 0, 0, []] for a, _ in targets}
+    names = sorted(n for n in os.listdir(rels) if n.lower().endswith(".rel"))
+    for nm in names:
+        base = {"event.rel": 0x7A8080, "mcport.rel": 0x7C0080}.get(nm.lower(), 0x799080)
+        with open(os.path.join(rels, nm), "rb") as f:
+            an = snr2.Analysis(Module(f.read(), nm), base, reg)
+        img = bytes(an.L.img)
+        code = [(base + an.cs, img[an.cs:an.ce])]
+        fstarts = [fn["start"] for fn in an.functions]
+
+        def owner(s, fl=an.functions, fs=fstarts):
+            i = bisect.bisect_right(fs, s) - 1
+            return fl[i]["name"], fl[i]["end"]
+
+        segs = elf_segs + [(base, img)]
+        h = an.m.h  # the DLL's own symbol table holds its resolved imports: not pointers
+        own = range(base + h["funcs_off"], base + h["funcs_off"] + 12 * h["func_count"])
+        for a, ret in targets:
+            r = scan(nm, code, [(base, img)], owner, a, ret, own)
+            for k in range(4):
+                total[a][k] += r[k]
+            if r[0] or r[1] or r[3]:
+                total[a][4].append(nm[:-4])
+    segs = elf_segs
+    print(f"DLLs: {len(names)} linked")
+    for a, ret in targets:
+        n_jal, n_j, n_bad, n_ptr, mods = total[a]
+        print(f"{a:06X} {funcs[a][0]}: {n_jal} DLL call sites, {n_bad} read a scratch register after the call"
+              f"{f', {n_j} j' if n_j else ''}{f', {n_ptr} code pointers' if n_ptr else ''}"
+              f"{' (' + ' '.join(mods) + ')' if mods else ''}")
