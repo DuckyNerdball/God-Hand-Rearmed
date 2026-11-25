@@ -1785,6 +1785,15 @@ namespace kamite::native::packet
             }
         };
         ListCollect *g_listCollect = nullptr;
+        // A fused native's collect while it runs (the previous one back after)
+        struct CollectScope
+        {
+            ListCollect *previous;
+            explicit CollectScope(ListCollect *c) : previous(g_listCollect) { g_listCollect = c; }
+            ~CollectScope() { g_listCollect = previous; }
+            CollectScope(const CollectScope &) = delete;
+            CollectScope &operator=(const CollectScope &) = delete;
+        };
 
         // The Txn's working storage, one per thread, reused (a native never opens a second one while one is open:
         // busy declines).
@@ -4864,11 +4873,7 @@ namespace kamite::native::packet
             // committed (live calls only: the shadow harness's runs are scratch)
             ListCollect list;
             const bool listing = std::is_same_v<Env, RealEnv> && draw_list::g_on;
-            struct CollectScope
-            {
-                explicit CollectScope(ListCollect *c) { g_listCollect = c; }
-                ~CollectScope() { g_listCollect = nullptr; }
-            } collectScope(listing ? &list : nullptr);
+            CollectScope collectScope(listing ? &list : nullptr);
 
             // the nodes' countdowns: ForwardNodeUpdate (objFlags 0x10), or its own walk (getMeshPtr twice: the head's
             // byte +0x380 bit 7 picks between two identical calls)
@@ -5709,6 +5714,10 @@ namespace kamite::native::packet
                 return false;
             ListCollect list;
             const bool listing = std::is_same_v<Env, RealEnv> && draw_list::g_on;
+            // the texture uploads its materials' cache misses queue (txnQueueKind, the bodies of setNodeMaterial /
+            // ForwardAttackByMode below): listed in place after commit, as b2's (the copy map's chain-start run, Nov 25)
+            ListCollect uploads;
+            CollectScope uploadScope(listing ? &uploads : nullptr);
 
             // func_0014D0E8: the model's matrices (its getMeshPtr's observers first: that call comes before its writes)
             env.call();
@@ -5830,6 +5839,14 @@ namespace kamite::native::packet
                     draw_list::g_queueCaller = 0x14AC30u; // (dev report: Tag_set_scr's queue)
                     draw_list::listPackets(half, list.head, list.tail, headTag, list.count, draw_list::Source::Queue);
                 }
+            }
+            if (listing && uploads.count != 0u)
+            {
+                uint64_t headTag[ListCollect::kMax];
+                for (uint32_t i = 0; i < uploads.count; ++i)
+                    headTag[i] = t.u64(uploads.head[i]);
+                if (t.ok)
+                    draw_list::listPackets(half, uploads.head, uploads.tail, headTag, uploads.count);
             }
             returnToCaller(ctx);
             return true;
