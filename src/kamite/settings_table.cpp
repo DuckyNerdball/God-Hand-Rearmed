@@ -242,7 +242,7 @@ namespace kamite::settings
         live(toggle(Tab::Controls, "Controller", "Swap Sticks",
                     "For lefties: the right stick moves Gene, the left one dodges and aims.\nStick presses: swap them in Button Mapping.",
                     "Game", "SwapSticks", false)),
-        live(toggle(Tab::Controls, "Controller", "Mash Assistic", "Are ya winning, dad?\nWaggle and mash events are easier.",
+        live(toggle(Tab::Controls, "Controller", "Mash Assistic", "Are ya winning, dad?\nEasy stick waggles & hold to auto-mash.",
                     "Game", "MashAssist", false)),
 
         // ---- Display --------------------------------------------------------------------------------------------

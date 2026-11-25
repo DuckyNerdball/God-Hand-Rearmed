@@ -46,8 +46,9 @@ namespace kamite::mash_assist
         constexpr int kStickOffCentre = 16; // of 128: drift is the stick deadzone's job; anything past this is held
         // The direction bits as func_0031B560 sets them (lui 0x80 / 0x40 / 0x10 / 0x20 at 0x31B7A8..0x31B7FC).
         constexpr uint32_t kStickRight = 0x800000u, kStickLeft = 0x400000u, kStickUp = 0x100000u, kStickDown = 0x200000u;
-        // Spacing in 30 FPS game frames as num / den: face 30/7 (7 presses a second, K), stick 4.
-        constexpr uint32_t kFaceNum = 30u, kFaceDen = 7u, kStickNum = 4u, kStickDen = 1u;
+        // Spacing in 30 FPS game frames as num / den: face 30/7 (7 presses a second, K), stick every frame (K, Nov 25:
+        // every 4 wasn't strong enough; a stick press is worth 4 face presses in a grab, 20 frames in the mash-out).
+        constexpr uint32_t kFaceNum = 30u, kFaceDen = 7u, kStickNum = 1u, kStickDen = 1u;
 
         std::atomic<bool> g_on{false};
         // The last press given (EE thread only): its 30 FPS frame (the spacing) and its main loop (other reads in the

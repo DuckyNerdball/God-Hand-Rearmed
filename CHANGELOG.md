@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 25, 2026
 
+- Mash Assistic: holding the stick counts as a waggle every frame (was every fourth); new help text.
 - Performance: the matrix helpers behind every bone's pose (rotation, scale and translation matrices, the angle wrap) run as native code.
 - Performance: each bone's world matrix (from its parent's) and the matrix inverse run as native code.
 - Performance: each bone's local matrix (from its position, rotation and scale) runs as native code.
