@@ -39,6 +39,17 @@ namespace kamite::native::draw_list
             uint8_t half = 0u;
             bool seen = false;
             bool shadow = false; // a source not proven yet: copied and checked, not read in place
+            uint8_t why = 0u;    // shadow: why it is copied (Why; the dev report's copied-bytes map)
+        };
+        // Why a registered packet is copied (dev report): the queue rule's first frames, a buffer queued in both halves /
+        // twice a frame, a both-halves writer's mark (b3 B), a source still shadowed
+        enum Why : uint8_t
+        {
+            kWhyLive = 0,
+            kWhyFirst,
+            kWhyReused,
+            kWhyMarked,
+            kWhyShadow,
         };
         constexpr uint32_t kSlots = 1u << 14;
         constexpr uint32_t kRamMask = 0x01FFFFFFu;
@@ -203,8 +214,11 @@ namespace kamite::native::draw_list
             const uint32_t key = (heads[i] & kRamMask) | 1u;
             // a packet a both-halves writer changed (b3 B) is copied for good, whatever its source
             bool sticky = rewrittenBit(key);
+            const bool marked = sticky;
             const bool shadow = sticky || source == Source::Shadow ||
                                 (source == Source::Queue && !reuseOk(key, half, g_gen[half], sticky));
+            const uint8_t why = !shadow ? kWhyLive : marked ? kWhyMarked : source == Source::Shadow ? kWhyShadow
+                                : sticky ? kWhyReused : kWhyFirst;
             // the same packet's slot if it has one (its new entry replaces the old), else the first empty or retired one
             uint32_t found = kSlots, free = kSlots;
             for (uint32_t s = slotOf(key), n = 0; n < kSlots; s = (s + 1u) & (kSlots - 1u), ++n)
@@ -245,6 +259,7 @@ namespace kamite::native::draw_list
             e.gen = g_gen[half];
             e.seen = false;
             e.shadow = shadow;
+            e.why = why;
             ++(shadow ? g_registeredShadow : g_registered);
         }
     }
@@ -268,6 +283,14 @@ namespace kamite::native::draw_list
             uint64_t parseOk = 0u, parseFail = 0u, unpackBeforeCycle = 0u, maskedUnpacks = 0u;
             uint64_t same[2] = {0u, 0u}, differ[2] = {0u, 0u};
             uint64_t marked = 0u; // shadow packets copied for a both-halves writer: not compared
+            // the copied bytes' map (the gathered chain, at job start): registered packets by why they are copied, the
+            // rest in gaps (DMA tags between packets and what no queue registers) by size and by VIF command
+            uint64_t whyPackets[5] = {}, whyBytes[5] = {};
+            uint64_t gapRuns[5] = {}, gapBytes[5] = {}; // <= 16, <= 64, <= 1 KB, <= 16 KB, bigger
+            uint64_t gapOps[5] = {}; // DIRECT/DIRECTHL, UNPACK, MPG, other, unparsed (bytes)
+            // VIF1 chains with no registered packet at all (all copied): their count, bytes and commands
+            uint64_t unlistedItems = 0u, unlistedBytes = 0u, unlistedOps[5] = {};
+            std::map<uint32_t, std::pair<uint64_t, uint64_t>> gapAfter; // the packet before a gap of > 1 KB -> runs, bytes
             uint64_t mscal = 0u, mscnt = 0u, mpg = 0u, direct = 0u, unpack = 0u, segmentsWithoutMpg = 0u;
             std::map<uint32_t, uint64_t> microcode; // MPG source (guest address) -> uploads
             std::vector<Diff> diffs;                 // the first few
@@ -397,14 +420,117 @@ namespace kamite::native::draw_list
 
         thread_local std::unordered_map<const void *, std::vector<uint64_t>> t_starts; // live packets' job-start hashes
 
+        // The registry's entry for a head (read from the VU thread: dev only, a racy read of a byte)
+        uint8_t whyOf(uint32_t head)
+        {
+            const uint32_t key = (head & kRamMask) | 1u;
+            for (uint32_t s = slotOf(key), n = 0; n < kSlots; s = (s + 1u) & (kSlots - 1u), ++n)
+            {
+                const Entry &e = g_table[s];
+                if (e.key == key)
+                    return e.why;
+                if (e.key == 0u)
+                    break;
+            }
+            return kWhyShadow;
+        }
+        // A gap's VIF commands (it starts and ends on command edges: the packets around it do): their bytes by kind
+        void vifOps(uint64_t *ops, const uint8_t *d, uint32_t n)
+        {
+            uint32_t pos = 0u, cycle = 0x0101u;
+            while (pos + 4u <= n)
+            {
+                uint32_t cmd;
+                std::memcpy(&cmd, d + pos, 4);
+                const uint32_t op = (cmd >> 24) & 0x7Fu, imm = cmd & 0xFFFFu, num = (cmd >> 16) & 0xFFu;
+                uint32_t len = 0u;
+                uint64_t *bucket = &ops[3];
+                if (op == 0x20u)
+                    len = 4u;
+                else if (op == 0x30u || op == 0x31u)
+                    len = 16u;
+                else if (op == 0x01u)
+                    cycle = imm;
+                else if (op == 0x4Au)
+                    len = (num ? num : 256u) * 8u, bucket = &ops[2];
+                else if (op == 0x50u || op == 0x51u)
+                    len = (imm ? imm : 65536u) * 16u, bucket = &ops[0];
+                else if ((op & 0x60u) == 0x60u)
+                {
+                    const uint32_t vn = (op >> 2) & 3u, vl = op & 3u;
+                    const uint32_t bpc = vl == 0 ? 32u : vl == 1 ? 16u : vl == 2 ? 8u : (vn == 3 ? 4u : 16u);
+                    const uint32_t bpv = (vl == 3 && vn == 3) ? 16u : (vn + 1u) * bpc;
+                    const uint32_t w = num ? num : 256u;
+                    uint32_t cl = cycle & 0xFFu, wl = (cycle >> 8) & 0xFFu, src = w;
+                    if (!cl)
+                        cl = 1u;
+                    if (!wl)
+                        wl = 1u;
+                    if (cl < wl)
+                        src = (w / wl) * cl + std::min(w % wl, cl);
+                    len = (src * ((bpv + 7u) / 8u) + 3u) & ~3u;
+                    bucket = &ops[1];
+                }
+                if (pos + 4u + len > n)
+                    break;
+                *bucket += 4u + len;
+                pos += 4u + len;
+            }
+            ops[4] += n - pos;
+        }
+        void gapRun(Stats &st, const uint8_t *data, uint32_t from, uint32_t to, uint32_t before)
+        {
+            if (to <= from)
+                return;
+            const uint32_t n = to - from;
+            const int b = n <= 16u ? 0 : n <= 64u ? 1 : n <= 1024u ? 2 : n <= 16384u ? 3 : 4;
+            ++st.gapRuns[b];
+            st.gapBytes[b] += n;
+            if (n > 1024u && st.gapAfter.size() < 4096u)
+            {
+                auto &g = st.gapAfter[before];
+                ++g.first;
+                g.second += n;
+            }
+            vifOps(st.gapOps, data + from, n);
+        }
+
         void observe(const ps2x::listed::Segments &l, const uint8_t *data, size_t size, int phase)
         {
             std::lock_guard<std::mutex> lock(g_statsMutex);
             Stats &st = g_stats;
+            if (l.segments.empty())
+            {
+                // a chain no queue registers (the async VIF thread hands these over too when an observer is set)
+                if (phase == 0)
+                {
+                    ++st.unlistedItems;
+                    st.unlistedBytes += size;
+                    vifOps(st.unlistedOps, data, static_cast<uint32_t>(size));
+                }
+                return;
+            }
             if (phase == 0)
             {
                 ++st.items;
                 st.chainBytes += size;
+                // the copied bytes' map: segments in chain order (live ones mark where their bytes belong)
+                uint32_t at = 0u, before = 0u;
+                for (const ps2x::listed::Segment &s : l.segments)
+                {
+                    const uint32_t start = std::min<uint32_t>(s.start, static_cast<uint32_t>(size));
+                    gapRun(st, data, at, start, before);
+                    at = std::max(at, start);
+                    before = s.head;
+                    if (s.live)
+                        continue;
+                    const uint32_t end = s.closed ? std::min<uint32_t>(s.end, static_cast<uint32_t>(size)) : start;
+                    const uint8_t why = whyOf(s.head);
+                    ++st.whyPackets[why];
+                    st.whyBytes[why] += end > start ? end - start : 0u;
+                    at = std::max(at, end);
+                }
+                gapRun(st, data, at, static_cast<uint32_t>(size), before);
             }
             for (const ps2x::listed::Segment &s : l.segments)
             {
@@ -551,18 +677,43 @@ namespace kamite::native::draw_list
                      static_cast<unsigned long long>(st.same[0]), static_cast<unsigned long long>(st.differ[0]),
                      static_cast<unsigned long long>(st.same[1]), static_cast<unsigned long long>(st.differ[1]),
                      static_cast<unsigned long long>(st.marked));
-        std::fprintf(f, "ops mscal %llu mscnt %llu mpg %llu direct %llu unpack %llu nompg %llu\n",
-                     static_cast<unsigned long long>(st.mscal), static_cast<unsigned long long>(st.mscnt),
-                     static_cast<unsigned long long>(st.mpg), static_cast<unsigned long long>(st.direct),
-                     static_cast<unsigned long long>(st.unpack), static_cast<unsigned long long>(st.segmentsWithoutMpg));
-        for (const auto &[src, n] : st.microcode)
-            std::fprintf(f, "microcode 0x%07x %llu\n", src, static_cast<unsigned long long>(n));
         // a queue packet's record: halves 3 or twice 1 = the reused buffer the rule keeps copied, as it should
         auto reuseOf = [](uint32_t head)
         {
             const auto r = g_reuse.find((head & kRamMask) | 1u);
             return r == g_reuse.end() ? Reuse{} : r->second;
         };
+        auto ull = [](uint64_t v) { return static_cast<unsigned long long>(v); };
+        std::fprintf(f, "copiedwhy firstn %llu firstb %llu reusedn %llu reusedb %llu markedn %llu markedb %llu shadown %llu "
+                        "shadowb %llu\n",
+                     ull(st.whyPackets[kWhyFirst]), ull(st.whyBytes[kWhyFirst]), ull(st.whyPackets[kWhyReused]),
+                     ull(st.whyBytes[kWhyReused]), ull(st.whyPackets[kWhyMarked]), ull(st.whyBytes[kWhyMarked]),
+                     ull(st.whyPackets[kWhyShadow]), ull(st.whyBytes[kWhyShadow]));
+        std::fprintf(f, "copiedgap n16 %llu b16 %llu n64 %llu b64 %llu n1k %llu b1k %llu n16k %llu b16k %llu nbig %llu bbig %llu\n",
+                     ull(st.gapRuns[0]), ull(st.gapBytes[0]), ull(st.gapRuns[1]), ull(st.gapBytes[1]), ull(st.gapRuns[2]),
+                     ull(st.gapBytes[2]), ull(st.gapRuns[3]), ull(st.gapBytes[3]), ull(st.gapRuns[4]), ull(st.gapBytes[4]));
+        std::fprintf(f, "copiedops direct %llu unpack %llu mpg %llu other %llu unparsed %llu\n", ull(st.gapOps[0]),
+                     ull(st.gapOps[1]), ull(st.gapOps[2]), ull(st.gapOps[3]), ull(st.gapOps[4]));
+        std::fprintf(f, "copiedunlisted items %llu bytes %llu direct %llu unpack %llu mpg %llu other %llu unparsed %llu\n",
+                     ull(st.unlistedItems), ull(st.unlistedBytes), ull(st.unlistedOps[0]), ull(st.unlistedOps[1]),
+                     ull(st.unlistedOps[2]), ull(st.unlistedOps[3]), ull(st.unlistedOps[4]));
+        {
+            std::vector<std::pair<uint64_t, uint32_t>> big; // bytes, the packet before
+            for (const auto &[head, g] : st.gapAfter)
+                big.emplace_back(g.second, head);
+            std::sort(big.rbegin(), big.rend());
+            for (size_t i = 0; i < big.size() && i < 8u; ++i)
+            {
+                const Reuse r = reuseOf(big[i].second);
+                std::fprintf(f, "copiedafter 0x%07x %llu caller 0x%06x\n", big[i].second, ull(big[i].first), r.caller);
+            }
+        }
+        std::fprintf(f, "ops mscal %llu mscnt %llu mpg %llu direct %llu unpack %llu nompg %llu\n",
+                     static_cast<unsigned long long>(st.mscal), static_cast<unsigned long long>(st.mscnt),
+                     static_cast<unsigned long long>(st.mpg), static_cast<unsigned long long>(st.direct),
+                     static_cast<unsigned long long>(st.unpack), static_cast<unsigned long long>(st.segmentsWithoutMpg));
+        for (const auto &[src, n] : st.microcode)
+            std::fprintf(f, "microcode 0x%07x %llu\n", src, static_cast<unsigned long long>(n));
         std::fprintf(f, "inplace same %llu differ %llu\n", static_cast<unsigned long long>(st.liveSame),
                      static_cast<unsigned long long>(st.liveDiffer));
         std::fprintf(f, "rewrites marks %llu waits %llu timeouts %llu\n", static_cast<unsigned long long>(g_rewriteMarks),

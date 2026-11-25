@@ -238,8 +238,8 @@ namespace ps2x::asyncvif
                 const ListedObserver listedObserver = s_listedObserver.load(std::memory_order_relaxed);
                 if (listedObserver)
                     for (const Item &item : job.items)
-                        if (item.kind == ItemKind::Vif1 && !item.listed.empty())
-                            listedObserver(item.listed, item.data.data(), item.data.size(), 0);
+                        if (item.kind == ItemKind::Vif1 && (!item.listed.empty() || !item.data.empty()))
+                            listedObserver(item.listed, item.data.data(), item.data.size(), 0); // unlisted: the copy map
                 for (Item &item : job.items)
                 {
                     if (item.data.empty() && !item.listed.live)

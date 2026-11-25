@@ -28,7 +28,7 @@ namespace ps2x::asyncvif
 
     // Dev tooling, nothing in play (claude/native-next.md rung 3 step b). ListedObserver: for each VIF1 item that carries
     // listed packets, on the VU worker, before the job's items run (phase 0) and after them (phase 1); data = the
-    // gathered chain. GifObservers (gs.bin, the GS-input digest): packet = every packet the VU worker hands the GIF stage
+    // gathered chain. Phase 0 also gets the items with none (listed empty, data the whole chain: the copy map). GifObservers (gs.bin, the GS-input digest): packet = every packet the VU worker hands the GIF stage
     // (all paths, in the order the GS gets them; path = GifPathId); jobEnd = once a job is done, with the tag jobTag()
     // gave on the EE thread when the job was queued. nullptr = off.
     using ListedObserver = void (*)(const ps2x::listed::Segments &listed, const uint8_t *data, size_t size, int phase);

@@ -88,7 +88,10 @@ def drawlist_totals(paths):
             elif f[0] in ("registered", "segments"):
                 for key, value in zip(f[0::2], f[1::2]):
                     add(key, value)
-            elif f[0] in ("parse", "ops", "cache", "kinds", "inplace", "rewrites", "executor"):
+            elif f[0] == "copiedafter" and len(f) == 5:  # copiedafter HEAD BYTES caller CALLER
+                add(f"copiedafter {f[1]} {f[4]}", f[2])
+            elif f[0] in ("parse", "ops", "cache", "kinds", "inplace", "rewrites", "executor", "copiedwhy", "copiedgap",
+                          "copiedops", "copiedunlisted"):
                 for key, value in zip(f[1::2], f[2::2]):
                     add(f"{f[0]}-{key}", value)
             elif f[0] == "live":  # live start same N differ N end same N differ N
@@ -287,6 +290,31 @@ def main():
         print(f"  ops: MSCAL {g('ops-mscal')}, MSCNT {g('ops-mscnt')}, MPG {g('ops-mpg')} (packets without one "
               f"{g('ops-nompg')}), DIRECT {g('ops-direct')}, UNPACK {g('ops-unpack')}; unpack before STCYCL "
               f"{g('parse-unpackbeforecycle')}, masked {g('parse-maskedunpacks')}")
+        copied = g('chainbytes') + g('copiedunlisted-bytes')
+        if copied:
+            mb = lambda b: f"{b / 1048576.0:.2f} MB"
+            pc = lambda b: f"{100.0 * b / copied:.1f}%"
+            gaps = sum(g(f'copiedgap-b{k}') for k in ("16", "64", "1k", "16k", "big"))
+            print(f"  copied on the game thread: {mb(copied)} (chains with packets {mb(g('chainbytes'))}, without "
+                  f"{mb(g('copiedunlisted-bytes'))} in {g('copiedunlisted-items')} chains)")
+            for label, k in (("first frames (queue rule)", "first"), ("one buffer for both halves / twice", "reused"),
+                             ("both-halves writers' marks", "marked"), ("shadowed sources", "shadow")):
+                print(f"    {label:36} {g(f'copiedwhy-{k}n'):>7} packets  {mb(g(f'copiedwhy-{k}b')):>9}  "
+                      f"{pc(g(f'copiedwhy-{k}b'))}")
+            print(f"    {'between packets (not registered)':36} {sum(g(f'copiedgap-n{k}') for k in ('16', '64', '1k', '16k', 'big')):>7}"
+                  f" runs     {mb(gaps):>9}  {pc(gaps)}: <=16 B {g('copiedgap-n16')}, <=64 B {g('copiedgap-n64')}, "
+                  f"<=1 KB {g('copiedgap-n1k')}, <=16 KB {g('copiedgap-n16k')} ({mb(g('copiedgap-b16k'))}), "
+                  f"bigger {g('copiedgap-nbig')} ({mb(g('copiedgap-bbig'))})")
+            ops = lambda pre: ", ".join(f"{n} {mb(g(f'{pre}-{k}'))}" for n, k in (("DIRECT", "direct"), ("UNPACK", "unpack"),
+                                        ("MPG", "mpg"), ("other", "other"), ("unparsed", "unparsed")))
+            print(f"    between packets by command: {ops('copiedops')}")
+            if g('copiedunlisted-bytes'):
+                print(f"    chains without packets by command: {ops('copiedunlisted')}")
+            after = sorted(((v, k.split()[1], k.split()[2]) for k, v in t.items() if k.startswith("copiedafter ")),
+                           reverse=True)[:8]
+            if after:
+                print("    biggest runs (> 1 KB) after packet (head, its queue caller): " +
+                      ", ".join(f"{h} {c} {mb(v)}" for v, h, c in after))
         micro = sorted((k.split()[1], v) for k, v in t.items() if k.startswith("microcode "))
         if micro:
             print("  microcode uploads (source: count): " + ", ".join(f"{k}: {v}" for k, v in micro))
