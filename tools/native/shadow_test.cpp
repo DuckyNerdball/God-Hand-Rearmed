@@ -119,6 +119,14 @@ KM_RECOMPILED(cModel_queuePacket_0x14c6b8)
 KM_RECOMPILED(cModel_Tag_set_scr_0x14aab8)
 KM_RECOMPILED(SearchDataByTwoNames_0x31cdc0)
 KM_RECOMPILED(cIDBase_getSlotPtr_0x1522c0)
+// rung 4, M1 batch 1: the hierarchy leaves (+ sceVu0RotMatrix, MtxInitRotVec's callee for order 5)
+KM_RECOMPILED(Adjust_theta_vec_0x1f7da0)
+KM_RECOMPILED(MtxInitTransVec_0x1476d0)
+KM_RECOMPILED(MtxInitRotVec_0x147728)
+KM_RECOMPILED(MtxInitScaleVec_0x147a08)
+KM_RECOMPILED(MtxMulRotVec_0x147b60)
+KM_RECOMPILED(MtxMulScaleVec_0x147bf8)
+KM_RECOMPILED(sceVu0RotMatrix_0x30a870)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -316,7 +324,9 @@ namespace
                                    // step a: func_00154240's constants (D_003BD870..89F, D_004A6940) and the light set
                                    {0x3BD800u, 0x100u}, {0x4A6900u, 0x100u}, {0x604700u, 0x80u}, {0x61A800u, 0x200u},
                                    // the 0x14C7E8 batch: tanf's T table, the screen values D_003C1180 / 1190, D_00586B88
-                                   {0x45EF00u, 0x100u}, {0x3C1100u, 0x100u}, {0x586B00u, 0x100u}};
+                                   {0x45EF00u, 0x100u}, {0x3C1100u, 0x100u}, {0x586B00u, 0x100u},
+                                   // rung 4: Adjust_theta_vec's table (0x3BF110)
+                                   {0x3BF100u, 0x40u}, {0x41EA00u, 0x20u}}; // + MtxInitRotVec's switch
     constexpr uint32_t usedBytes()
     {
         uint32_t total = 0;
@@ -1873,6 +1883,114 @@ namespace
     }
 
     // Picks the argument addresses for a function: a0 = out, a1 = matrix, a2 = matrix / vector; sometimes aliased.
+
+    // ---- rung 4, M1 batch 1: the hierarchy leaves (motion.cpp) -------------------------------------------------------
+    // Angles as the game passes them (angle(): radians, -0, denormals, some past the limits), the tables mostly the
+    // ELF's (Adjust_theta_vec's 0x3BF110, ecossin's sin polynomial 0x3C3C90), rotOrders 0-5 mostly (some above, upper
+    // bits random), aliasing (an input inside the output or the frames), misaligned pointers, KSEG mirrors.
+    constexpr uint32_t kThetaTable[12] = {0x3EA2F983u, 0x40490FDBu, 0u, 0u, 1u, 1u, 1u, 1u,
+                                          0xFFFFFFFEu, 0xFFFFFFFEu, 0xFFFFFFFEu, 0xFFFFFFFEu};
+    constexpr uint32_t kSinPolynomial[4] = {0x362E9C14u, 0xB94FB21Fu, 0x3C08873Eu, 0xBE2AAAA4u};
+    void setAngles(uint32_t at)
+    {
+        for (uint32_t i = 0; i < 3u; ++i)
+            setFloat(at + 4u * i, angle());
+    }
+    void setupMotion(const NativeFunction &fn, Call &call, bool wild, uint32_t base, uint32_t seg)
+    {
+        // Other natives: untouched, and no draws from g_rng (their setups stay the sequence they were proven on).
+        if (fn.address != 0x1F7DA0u && fn.address != 0x1476D0u && fn.address != 0x147A08u && fn.address != 0x147728u &&
+            fn.address != 0x147B60u && fn.address != 0x147BF8u)
+            return;
+        R5900Context &ctx = call.ctx;
+        const uint32_t sp = 0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u);
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 16u);
+        if (g_rng() % 8u) // ecossin's own polynomial (else setupCall's ordinary values)
+            for (uint32_t i = 0; i < 4u; ++i)
+                setU32(0x3C3C90u + 4u * i, kSinPolynomial[i]);
+        switch (fn.address)
+        {
+        case 0x1F7DA0u: // Adjust_theta_vec(v)
+        {
+            if (g_rng() % 8u)
+                for (uint32_t i = 0; i < 12u; ++i)
+                    setU32(0x3BF110u + 4u * i, kThetaTable[i]);
+            else
+                floatsAt(0x3BF110u, 4, false), randomBytes(0x3BF120u, 32u);
+            const uint32_t v = base + 0x10u * static_cast<uint32_t>(g_rng() % 8u);
+            const float scale = (g_rng() % 4u) ? 1.0f : 16.0f; // several turns
+            for (uint32_t i = 0; i < 3u; ++i)
+                if (wild && g_rng() % 2u)
+                    setU32(v + 4u * i, gameFloat());
+                else
+                    setFloat(v + 4u * i, angle() * scale);
+            setU32(v + 12u, (g_rng() % 4u) ? gameFloat() : static_cast<uint32_t>(g_rng())); // w: carried as is
+            setGpr(ctx, 4, (v + (pick == 0 ? 4u : 0u)) | seg); // unaligned: lqc2 / sqc2 take it masked
+            return;
+        }
+        case 0x1476D0u: // MtxInitTransVec(out, t)
+        case 0x147A08u: // MtxInitScaleVec(out, s)
+        {
+            uint32_t out = base, src = base + 0x100u;
+            if (pick == 0)
+                src = out + 0x30u; // t inside out: read after the writes before it
+            else if (pick == 1)
+                src = out + 0x34u;
+            else if (pick == 2)
+                src = out + 4u * static_cast<uint32_t>(g_rng() % 14u);
+            else if (pick == 3)
+                out += 4u * (1u + static_cast<uint32_t>(g_rng() % 3u)); // word-aligned only (Scale: rows at out & ~0xF)
+            else if (pick == 4)
+                out += 2u; // declined
+            else if (pick == 5)
+                src += 1u; // declined
+            setGpr(ctx, 4, out | seg);
+            setGpr(ctx, 5, src | seg);
+            return;
+        }
+        case 0x147728u: // MtxInitRotVec(out, angles, order)
+        case 0x147B60u: // MtxMulRotVec(out, A, angles, order)
+        case 0x147BF8u: // MtxMulScaleVec(out, A, scale)
+        {
+            const bool rot = fn.address != 0x147BF8u, mul = fn.address != 0x147728u;
+            setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
+            // MtxInitRotVec's jump table (the ELF's .rodata); sometimes two cases swapped (the native declines)
+            static constexpr uint32_t kCases[6] = {0x147788u, 0x1477B0u, 0x1477D8u, 0x147810u, 0x147848u, 0x147880u};
+            const uint32_t swap = g_rng() % 32u == 0u ? static_cast<uint32_t>(g_rng() % 6u) : 6u;
+            for (uint32_t k = 0; k < 6u; ++k)
+                setU32(0x41EA00u + 4u * k, kCases[k == swap ? (k + 1u) % 6u : k]);
+            uint32_t out = base, a = base + 0x100u, in = base + 0x200u;
+            if (rot)
+                setAngles(in);
+            uint64_t order = pick < 11 ? g_rng() % 6u : pick < 13 ? 6u + g_rng() % 250u : g_rng() % 6u;
+            if (g_rng() % 4u == 0u)
+                order |= g_rng() & ~0xFFull; // andi 0xFF
+            switch (g_rng() % 16u)
+            {
+            case 0: in = out + 4u; break;               // angles / scale inside out (InitRotVec declines)
+            case 1: in = sp - 0x20u; break;             // in the frames: declined
+            case 2: out = sp - 0x40u; break;            // out in the frames: declined
+            case 3: out = a; break;                     // out = A
+            case 4: out = a + 0x10u; break;             // out overlapping A
+            case 5: a = sp - 0x80u; break;              // A in the frames: declined
+            case 6: out = base + 4u; break;             // unaligned out: masked
+            case 7: in = base + 0x202u; break;          // unaligned angles / scale: declined
+            case 8: setU32(0x3C3C90u, 0x7F800001u); break; // a NaN coefficient: declined
+            default: break;
+            }
+            setGpr(ctx, 4, out | seg);
+            if (mul)
+                setGpr(ctx, 5, a | seg);
+            setGpr(ctx, mul ? 6 : 5, in | seg);
+            if (rot)
+                setGpr64(ctx, mul ? 7 : 6, order);
+            return;
+        }
+        default:
+            return;
+        }
+    }
+
     void setupCall(const NativeFunction &fn, Call &call, bool wild)
     {
         randomContext(call.ctx);
@@ -1907,6 +2025,7 @@ namespace
         call.dueAt = static_cast<int>(g_rng() % 5u); // 0 = none, else the checkpoint that comes due
         setupBatch1(fn, call, wild, base, seg);
         setupBatch2(fn, call, wild, base, seg);
+        setupMotion(fn, call, wild, base, seg);
     }
 
     // Runs `run` from the call's state on `ram`; returns the context after, the cycles and checkpoint calls.
@@ -2148,7 +2267,11 @@ namespace
             }
             ++ran;
             early += original.ctx.pc != 0x00123450u;
-            if ((fn.flags & NativeFunction::kChargeAtEnd) && original.ctx.pc != native.ctx.pc)
+            // Interrupted = the original's own checkpoint came due (it stops on the dueAt-th call), not merely a pc
+            // that differs: a native that leaves a different pc (e.g. the original restored a frame it had overwritten,
+            // so its ra differs) must be compared and fail (rung 4, Nov 25; planted: MtxMulScaleVec's out in its frame).
+            const bool cameDue = call.dueAt != 0 && original.checkpointCalls == call.dueAt;
+            if ((fn.flags & NativeFunction::kChargeAtEnd) && cameDue)
             {
                 // the original stopped at one of its own checkpoints; the native ran through (the harness's
                 // "interrupted"): the native must still have run to the return, its whole sum charged
@@ -2627,6 +2750,59 @@ namespace
         }
         std::fclose(f);
         std::printf("wrote %d batch-2 maths vectors to %s\n", written, b2Path.c_str());
+
+        // Rung 4 (<path>.motion, libvu0_check replays them on motion_core.h): the recompiled Adjust_theta_vec,
+        // MtxInitRotVec, MtxMulRotVec and MtxMulScaleVec on clean contexts. A record: kind, order, in (v / angles /
+        // scale), the theta table, the coefficients, A, then the original's 64 result bytes (theta: 16).
+        const std::string motionPath = std::string(path) + ".motion";
+        f = std::fopen(motionPath.c_str(), "wb");
+        written = 0;
+        const Recompiled motionFns[4] = {&Adjust_theta_vec_0x1f7da0, &MtxInitRotVec_0x147728, &MtxMulRotVec_0x147b60,
+                                         &MtxMulScaleVec_0x147bf8};
+        for (int i = 0; i < count; ++i)
+        {
+            const uint32_t kind = static_cast<uint32_t>(i % 4);
+            R5900Context ctx;
+            randomContext(ctx);
+            const uint32_t out = 0x20000u, a = 0x20100u, in = 0x20200u;
+            for (uint32_t k = 0; k < 12u; ++k)
+                setU32(0x3BF110u + 4u * k, kThetaTable[k]);
+            for (uint32_t k = 0; k < 4u; ++k)
+                setU32(0x3C3C90u + 4u * k, kSinPolynomial[k]);
+            for (uint32_t k = 0; k < 6u; ++k)
+                setU32(0x41EA00u + 4u * k, 0x147788u + (k == 0u ? 0u : k == 1u ? 0x28u : k == 2u ? 0x50u : k == 3u ? 0x88u : k == 4u ? 0xC0u : 0xF8u));
+            fillFloats(g_ramA, a, 16, false);
+            const uint32_t order = static_cast<uint32_t>(g_rng() % 7u);
+            if (kind == 0u)
+                for (uint32_t k = 0; k < 4u; ++k)
+                    setFloat(out + 4u * k, angle() * ((g_rng() % 4u) ? 1.0f : 16.0f));
+            else if (kind == 3u)
+                fillFloats(g_ramA, in, 3, false);
+            else
+                for (uint32_t k = 0; k < 3u; ++k)
+                    setFloat(in + 4u * k, angle());
+            uint8_t record[4 + 4 + 16 + 48 + 16 + 64 + 64] = {};
+            std::memcpy(record, &kind, 4);
+            std::memcpy(record + 4, &order, 4);
+            std::memcpy(record + 8, g_ramA + (kind == 0u ? out : in), 16);
+            std::memcpy(record + 24, g_ramA + 0x3BF110u, 48);
+            std::memcpy(record + 72, g_ramA + 0x3C3C90u, 16);
+            std::memcpy(record + 88, g_ramA + a, 64);
+            setGpr(ctx, 29, 0xF0000u);
+            setGpr(ctx, 31, 0x00123450u);
+            setGpr(ctx, 4, kind == 1u ? in + 0x100u : out); // InitRotVec: its own out, clear of its angles
+            setGpr(ctx, 5, kind == 1u ? in : a);
+            setGpr(ctx, 6, kind == 1u ? order : in);
+            setGpr(ctx, 7, order);
+            ctx.pc = kind == 0u ? 0x1F7DA0u : kind == 1u ? 0x147728u : kind == 2u ? 0x147B60u : 0x147BF8u;
+            g_dueAt = 0;
+            motionFns[kind](g_ramA, &ctx, g_rt);
+            std::memcpy(record + 152, g_ramA + (kind == 1u ? in + 0x100u : out), kind == 0u ? 16u : 64u);
+            std::fwrite(record, 1, sizeof(record), f);
+            ++written;
+        }
+        std::fclose(f);
+        std::printf("wrote %d motion vectors to %s\n", written, motionPath.c_str());
         resetRam();
     }
 }
@@ -2777,6 +2953,7 @@ int main(int argc, char **argv)
     _mm_setcsr((_mm_getcsr() & ~0x6000u) | 0x6000u | 0x8040u);
     kamite::native::libvu0::registerFunctions();
     kamite::native::packet::registerFunctions();
+    kamite::native::motion::registerFunctions();
     const NativeFunction &apply = g_natives[1];
     // Every native with its recompiled function.
     const std::vector<std::pair<uint32_t, Recompiled>> recompiled = {
@@ -2812,12 +2989,16 @@ int main(int argc, char **argv)
         {0x14D0E8u, &func_0014D0E8_0x14d0e8},    {0x153B00u, &func_00153B00_0x153b00},
         {0x2D81A0u, &func_002D81A0_0x2d81a0},    {0x14BEF8u, &cModel_nodeLayer_0x14bef8},
         {0x14B810u, &func_0014B810_0x14b810},    {0x14C6B8u, &cModel_queuePacket_0x14c6b8},
-        {0x14AAB8u, &cModel_Tag_set_scr_0x14aab8}};
+        {0x14AAB8u, &cModel_Tag_set_scr_0x14aab8},
+        {0x1F7DA0u, &Adjust_theta_vec_0x1f7da0}, {0x1476D0u, &MtxInitTransVec_0x1476d0},
+        {0x147728u, &MtxInitRotVec_0x147728},    {0x147A08u, &MtxInitScaleVec_0x147a08},
+        {0x147B60u, &MtxMulRotVec_0x147b60},     {0x147BF8u, &MtxMulScaleVec_0x147bf8}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
     g_callees.push_back({0x31CDC0u, &SearchDataByTwoNames_0x31cdc0});
     g_callees.push_back({0x1522C0u, &cIDBase_getSlotPtr_0x1522c0});
+    g_callees.push_back({0x30A870u, &sceVu0RotMatrix_0x30a870}); // MtxInitRotVec's order 5
     for (const auto &[address, f] : std::initializer_list<std::pair<uint32_t, void (*)(uint8_t *, R5900Context *, PS2Runtime *)>>{
              {0x3A4830u, &ps2___kernel_tanf_0x3a4830}, {0x3A3768u, &ps2___ieee754_rem_pio2f_0x3a3768},
              {0x3A3DD8u, &ps2___kernel_rem_pio2f_0x3a3dd8}, {0x3A19D8u, &func_003A19D8_0x3a19d8},
@@ -2910,7 +3091,7 @@ int main(int argc, char **argv)
         for (uint32_t caller : {0x30A8C8u, 0x30A978u, 0x147528u, 0x147548u, 0x101E28u, 0x31A650u, 0x31A600u, 0x14D768u,
                                 0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u,
                                 0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u, 0x14D0E8u, 0x153B00u, 0x14B810u,
-                                0x14C6B8u, 0x14AAB8u})
+                                0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u})
             if (fn.address == caller)
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;

@@ -30,11 +30,14 @@ with kamite/git_commit.h):
        cModel_setNodeMaterial_0x14b4d0 ForwardAttackByMode_14B5D8_0x14b5d8 func_00154240_0x154240
        tanf_0x3a1ae8 ps2___kernel_tanf_0x3a4830 ps2___ieee754_rem_pio2f_0x3a3768 ps2___kernel_rem_pio2f_0x3a3dd8
        func_003A19D8_0x3a19d8 scalbnf_0x3a4e28 floorf_0x3a4d18 copysignf_0x3a4f88 func_0030AA40_0x30aa40
-       func_0014C7E8_0x14c7e8 cModel_Tag_set_rate_0x14ac90"
+       func_0014C7E8_0x14c7e8 cModel_Tag_set_rate_0x14ac90 func_0014D0E8_0x14d0e8 func_00153B00_0x153b00
+       func_002D81A0_0x2d81a0 cModel_nodeLayer_0x14bef8 func_0014B810_0x14b810 cModel_queuePacket_0x14c6b8
+       cModel_Tag_set_scr_0x14aab8 Adjust_theta_vec_0x1f7da0 MtxInitTransVec_0x1476d0 MtxInitRotVec_0x147728
+       MtxInitScaleVec_0x147a08 MtxMulRotVec_0x147b60 MtxMulScaleVec_0x147bf8 sceVu0RotMatrix_0x30a870"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
-        src/kamite/native/libvu0.cpp src/kamite/native/packet.cpp src/kamite/native/recording.cpp \
+        src/kamite/native/libvu0.cpp src/kamite/native/packet.cpp src/kamite/native/motion.cpp src/kamite/native/recording.cpp \
         src/kamite/texture_slots.cpp src/kamite/model_detail.cpp runtime/ps2xRuntime/src/lib/ps2_ee_float.cpp \
         /tmp/nt/*.o -o /tmp/nt/shadow_test
     /tmp/nt/shadow_test 20000 /tmp/nt/vectors.bin    # natives, footprints, invisibility, detection; writes vectors
@@ -150,3 +153,16 @@ camera, its parts; ordinary screen values and the ELF's T table unless wild) and
 each its own flags), with each pass's flags at random. A lesson from it: func_001F8DF8's corners go through the frame's
 copy of the world matrix, whose last row's xyz its own corner stores zero (+0x60..+0x6B).
 
+## Rung 4: motion (M1, Nov 25)
+
+src/kamite/native/motion.cpp + motion_core.h (claude/rung4-motion-map.md), switch KAMITE_NATIVE_MOTION; every motion
+native kRenderPath | kChargeAtEnd with returns = 0, allowed per batch by `caller_scan.py <ELF> <repo> --rels <God Hand
+Extract\dll\debugoptimize> <addr>...` (0 sites reading a scratch register after the call, ELF and the 81 DLLs).
+setupMotion gives them angles / orders / aliasing / frames; MtxInitRotVec's jump table (0x41EA00) and Adjust_theta_vec's
+table (0x3BF110) are test regions. `<vectors>.motion` (Adjust_theta_vec, MtxInitRotVec, MtxMulRotVec, MtxMulScaleVec
+from the recompiled functions) runs in libvu0_check on SSE / plain C++ / NEON. checkNative counts a call as interrupted
+only when the original's own checkpoint came due (its dueAt-th call), not on any differing pc: a native whose original
+restores a frame it overwrote (another ra) is compared and fails (planted: MtxMulScaleVec's out in its frame).
+New setups draw from g_rng only for their own functions: a draw for every native shifts all later inputs, and on a
+shifted sequence a batch-3 setup drove the recompiled func_00151398 to a special address (the stub's abort, pc 0x1514E0)
+in checkInvisible.

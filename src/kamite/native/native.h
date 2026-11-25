@@ -28,4 +28,8 @@ namespace kamite::native
     {
         void registerFunctions();
     }
+    namespace motion
+    {
+        void registerFunctions();
+    }
 }

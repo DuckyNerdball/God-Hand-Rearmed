@@ -157,6 +157,7 @@ namespace kamite::native
     {
         libvu0::registerFunctions();
         packet::registerFunctions();
+        motion::registerFunctions();
         // Rung 3 step b's draw list (draw_list.h): live in every build unless KAMITE_NATIVE_DRAWLIST=0.
         draw_list::begin(runtime.memory().getRDRAM());
 

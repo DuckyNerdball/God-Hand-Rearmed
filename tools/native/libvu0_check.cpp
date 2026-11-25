@@ -3,6 +3,7 @@
 // float rules) and compares bit for bit. Plain C++ and the core header only, so it builds for any target (README.md):
 // SSE, plain C++ (-DKAMITE_VU_SCALAR) and AArch64 NEON under qemu.
 #include "kamite/native/libvu0_core.h"
+#include "kamite/native/motion_core.h"
 
 #include <cstdio>
 #include <cstring>
@@ -281,8 +282,65 @@ int main(int argc, char **argv)
         std::fclose(o);
     }
     bad += b2Bad;
+
+    // Rung 4 (<vectors>.motion, motion_core.h): Adjust_theta_vec, MtxInitRotVec, MtxMulRotVec, MtxMulScaleVec against
+    // the recompiled functions' results; records the natives would decline are skipped.
+    int motionCount = 0, motionBad = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".motion").c_str(), "rb"))
+    {
+        unsigned char rec[4 + 4 + 16 + 48 + 16 + 64 + 64];
+        while (std::fread(rec, 1, sizeof(rec), o) == sizeof(rec))
+        {
+            uint32_t kind, order;
+            std::memcpy(&kind, rec, 4), std::memcpy(&order, rec + 4, 4);
+            unsigned char got[64] = {};
+            if (kind == 0u)
+            {
+                motion::ThetaTable t;
+                t.c = load(rec + 24);
+                std::memcpy(t.one, rec + 40, 16), std::memcpy(t.mask, rec + 56, 16);
+                const Vec4 v = load(rec + 8);
+                if (!motion::thetaInputs(v, t))
+                    continue;
+                store(got, motion::adjustTheta(v, t));
+            }
+            else
+            {
+                motion::Mat4 b = motion::unit();
+                if (kind == 3u)
+                {
+                    uint32_t s3[3];
+                    std::memcpy(s3, rec + 8, 12);
+                    b.r[0] = bitsOf(s3[0], 0u, 0u, 0u), b.r[1] = bitsOf(0u, s3[1], 0u, 0u), b.r[2] = bitsOf(0u, 0u, s3[2], 0u);
+                }
+                else
+                {
+                    float angles[3];
+                    std::memcpy(angles, rec + 8, 12);
+                    const Vec4 coefficients = load(rec + 72);
+                    if ((order <= 5u && !libvu0::finiteInputs(coefficients)) ||
+                        !motion::rotationByOrder(b, order, angles, motion::vf0Constant(), coefficients))
+                        continue;
+                }
+                if (kind != 1u)
+                {
+                    const motion::Mat4 a{{load(rec + 88), load(rec + 104), load(rec + 120), load(rec + 136)}};
+                    if (!motion::productInputs(a, b))
+                        continue;
+                    b = motion::product(a, b);
+                }
+                for (int k = 0; k < 4; ++k)
+                    store(got + 16 * k, b.r[k]);
+            }
+            ++motionCount;
+            if (std::memcmp(got, rec + 152, kind == 0u ? 16u : 64u) != 0 && ++motionBad <= 5)
+                std::printf("motion vector %d (kind %u, order %u) differs\n", motionCount, kind, order);
+        }
+        std::fclose(o);
+    }
+    bad += motionBad;
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
-                "maths %d vectors, %d differ\n", path, count, bad - rotBad - opsBad - b2Bad, rotCount, rotBad, opsCount, opsBad,
-                b2Count, b2Bad);
+                "maths %d vectors, %d differ; motion %d vectors, %d differ\n", path, count, bad - rotBad - opsBad - b2Bad - motionBad,
+                rotCount, rotBad, opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad);
     return bad ? 1 : 0;
 }

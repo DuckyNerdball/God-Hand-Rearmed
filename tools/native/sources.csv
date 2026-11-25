@@ -67,3 +67,9 @@ func_002D81A0,0x002D81A0,asm,,,,,b3 B: the light set's fog colour and range (unm
 cModel_nodeLayer,0x0014BEF8,decomp,cModel_nodeLayer,src/cod/0014b4d0.c,59fb572,39544284dd30,b3 B readable; kRenderPath|kChargeAtEnd
 cModel_queuePacket,0x0014C6B8,decomp,cModel_queuePacket,src/cod/00149be8.c,59fb572,7a5c4e36fbcc,b3 B readable; kRenderPath|kChargeAtEnd
 func_0014B810,0x0014B810,asm,,,,,b3 B: queue a scenery node's packet (unmatched at 59fb572; = cModel_Tag_set_rate's inline node queue); kRenderPath|kChargeAtEnd
+Adjust_theta_vec,0x001F7DA0,asm,,,,,rung 4 M1 batch 1: the angle wrap (vftoi0 / pcgtw / paddw / pand / vitof0; unmatched at eed8dc0); kRenderPath|kChargeAtEnd
+MtxInitTransVec,0x001476D0,decomp,MtxInitTransVec,src/cod/0013c930.c,eed8dc0,f6e988c88c89,rung 4 M1 batch 1: readable; word by word in the original's order; kRenderPath|kChargeAtEnd
+MtxInitRotVec,0x00147728,decomp,MtxInitRotVec,src/cod/00147728.c,eed8dc0,a787fcff134d,rung 4 M1 batch 1: unit + RotMatrixX / Y / Z (order 5 sceVu0RotMatrix) inline on motion_core.h; kRenderPath|kChargeAtEnd
+MtxInitScaleVec,0x00147A08,decomp,MtxInitScaleVec,src/cod/00147a08.c,eed8dc0,e37dd1a07c40,rung 4 M1 batch 1: readable; kRenderPath|kChargeAtEnd
+MtxMulRotVec,0x00147B60,decomp,MtxMulRotVec,src/cod/00134880.c,eed8dc0,c9a8d6405a19,rung 4 M1 batch 1: MtxInitRotVec + MtxMultiply inline (buf in registers); kRenderPath|kChargeAtEnd
+MtxMulScaleVec,0x00147BF8,decomp,MtxMulScaleVec,src/cod/00147bb0.c,eed8dc0,3d3a8e1053ed,rung 4 M1 batch 1: MtxInitScaleVec + MtxMultiply inline (buf in registers); kRenderPath|kChargeAtEnd
