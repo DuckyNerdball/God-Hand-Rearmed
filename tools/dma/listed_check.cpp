@@ -36,6 +36,7 @@ void ps2x::listed::setLookup(Lookup lookup, bool live) { g_lookup = lookup, g_li
 ps2x::listed::Lookup ps2x::listed::lookup() { return g_lookup; }
 bool ps2x::listed::live() { return g_liveMode; }
 void ps2x::asyncvif::setListedObserver(ListedObserver observer) { g_observer = observer; }
+bool ps2x::asyncvif::waitVuIdle(std::chrono::microseconds) { return true; } // (no VU worker here)
 namespace
 {
     ps2x::listed::Cache g_cache;
