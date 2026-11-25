@@ -256,12 +256,15 @@ def main():
     if drawlists:
         t, notes = drawlist_totals(drawlists)
         g = lambda k: t.get(k, 0)
-        share = 100.0 * g("bytes") / g("chainbytes") if g("chainbytes") else 0.0
+        whyb = sum(g(f'copiedwhy-{k}b') for k in ("first", "reused", "marked", "shadow"))
+        gaps = sum(g(f'copiedgap-b{k}') for k in ("16", "64", "1k", "16k", "big"))
+        # packets' bytes = in place + the registered ones still copied (chainbytes = copied + in place)
+        share = 100.0 * (g("bytes") - whyb) / g("chainbytes") if g("chainbytes") else 0.0
         modes = sorted({open(p, encoding="utf-8", errors="replace").readline().split()[4] for p in drawlists})
         print(f"draw list {'/'.join(modes)} ({len(drawlists)} replays): registered {g('registered')}, walked "
               f"{g('found')}, never walked {g('unseen')}, head / tail changed {g('tagchanged')}, table full {g('full')}")
         print(f"  packets {g('segments')} (unclosed {g('unclosed')}), {share:.1f}% of the VIF1 chain bytes"
-              f"{' (read in place, not copied)' if modes == ['live'] else ''}; VIF commands on the edges: ok "
+              f"{' read in place, not copied' if modes == ['live'] else ' in packets'}; VIF commands on the edges: ok "
               f"{g('parse-ok')}, fail {g('parse-fail')}{'  <-- PARSE FAILURES' if g('parse-fail') or g('unclosed') else ''}")
         if g("cache-hits") or g("cache-misses"):
             hm = g("cache-hits") + g("cache-misses")
@@ -290,13 +293,14 @@ def main():
         print(f"  ops: MSCAL {g('ops-mscal')}, MSCNT {g('ops-mscnt')}, MPG {g('ops-mpg')} (packets without one "
               f"{g('ops-nompg')}), DIRECT {g('ops-direct')}, UNPACK {g('ops-unpack')}; unpack before STCYCL "
               f"{g('parse-unpackbeforecycle')}, masked {g('parse-maskedunpacks')}")
-        copied = g('chainbytes') + g('copiedunlisted-bytes')
+        copied = whyb + gaps + g('copiedunlisted-bytes')
         if copied:
             mb = lambda b: f"{b / 1048576.0:.2f} MB"
             pc = lambda b: f"{100.0 * b / copied:.1f}%"
-            gaps = sum(g(f'copiedgap-b{k}') for k in ("16", "64", "1k", "16k", "big"))
-            print(f"  copied on the game thread: {mb(copied)} (chains with packets {mb(g('chainbytes'))}, without "
-                  f"{mb(g('copiedunlisted-bytes'))} in {g('copiedunlisted-items')} chains)")
+            total = g('chainbytes') + g('copiedunlisted-bytes')
+            print(f"  copied on the game thread: {mb(copied)} = {100.0 * copied / total:.1f}% of {mb(total)} chain bytes "
+                  f"(% below: of the copied bytes; chains without packets {mb(g('copiedunlisted-bytes'))} in "
+                  f"{g('copiedunlisted-items')} chains)")
             for label, k in (("first frames (queue rule)", "first"), ("one buffer for both halves / twice", "reused"),
                              ("both-halves writers' marks", "marked"), ("shadowed sources", "shadow")):
                 print(f"    {label:36} {g(f'copiedwhy-{k}n'):>7} packets  {mb(g(f'copiedwhy-{k}b')):>9}  "
