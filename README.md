@@ -71,7 +71,7 @@ Recompiled as a native program under Vulkan or DX11 (Windows); PCSX2 as the rend
 
 Available on or planned for the following platforms:
 
-![God Hand: Rearmed](assets/platforms_release.webp)
+![God Hand: Rearmed](assets/platforms.webp)
 ---
 
 ### You've Been Hit by, You've Been Struck by, My Smooth Visuals!
