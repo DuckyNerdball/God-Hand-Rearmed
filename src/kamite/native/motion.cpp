@@ -267,19 +267,20 @@ namespace kamite::native::motion
 
     void registerFunctions()
     {
-        // M1 batch 1 (Nov 25): shadowed (unchecked) until a K build shows 0 mismatches over the replays.
+        // M1 batch 1: checked (on by default) since K's 15:56 build of 1db9184 shadowed them in every replay: ~76.8M
+        // calls, 0 mismatches, 0 declines, 0 skipped (3,705 interrupted), every .ram.bin the reference's.
         auto add = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
-                      bool (*shadow)(ShadowEnv &, R5900Context *)) {
-            NativeFunction fn{name, address, "motion", false, real, shadow, nullptr};
+                      bool (*shadow)(ShadowEnv &, R5900Context *), bool checked) {
+            NativeFunction fn{name, address, "motion", checked, real, shadow, nullptr};
             fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
             fn.returns = 0u;
             registerFunction(fn);
         };
-        add("Adjust_theta_vec", kAdjustTheta, &adjustThetaVec<RealEnv>, &adjustThetaVec<ShadowEnv>);
-        add("MtxInitTransVec", 0x1476D0u, &initTransVec<RealEnv>, &initTransVec<ShadowEnv>);
-        add("MtxInitRotVec", kInitRotVec, &initRotVec<RealEnv>, &initRotVec<ShadowEnv>);
-        add("MtxInitScaleVec", 0x147A08u, &initScaleVec<RealEnv>, &initScaleVec<ShadowEnv>);
-        add("MtxMulRotVec", kMulRotVec, &mulRotVec<RealEnv>, &mulRotVec<ShadowEnv>);
-        add("MtxMulScaleVec", kMulScaleVec, &mulScaleVec<RealEnv>, &mulScaleVec<ShadowEnv>);
+        add("Adjust_theta_vec", kAdjustTheta, &adjustThetaVec<RealEnv>, &adjustThetaVec<ShadowEnv>, true);
+        add("MtxInitTransVec", 0x1476D0u, &initTransVec<RealEnv>, &initTransVec<ShadowEnv>, true);
+        add("MtxInitRotVec", kInitRotVec, &initRotVec<RealEnv>, &initRotVec<ShadowEnv>, true);
+        add("MtxInitScaleVec", 0x147A08u, &initScaleVec<RealEnv>, &initScaleVec<ShadowEnv>, true);
+        add("MtxMulRotVec", kMulRotVec, &mulRotVec<RealEnv>, &mulRotVec<ShadowEnv>, true);
+        add("MtxMulScaleVec", kMulScaleVec, &mulScaleVec<RealEnv>, &mulScaleVec<ShadowEnv>, true);
     }
 }
