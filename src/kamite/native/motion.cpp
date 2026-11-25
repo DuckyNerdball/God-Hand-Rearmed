@@ -573,6 +573,147 @@ namespace kamite::native::motion
             returnFrom(ctx);
             return true;
         }
+
+        // ==== M1's blend batch: func_00156D70 fused (its helpers inline), and the quaternion helpers on their own =====
+        constexpr uint32_t kAtanTable = 0x42C350u, kNextTable = 0x41EE48u;
+        // capVu0Atan2's coefficients (c0..c7, pi/4) and 0x15A190's {1, 2, 0}: read as the originals read them; a different
+        // next table declines (it would index past the 3x3).
+        template <class Env>
+        bool blendTables(Env &env, BlendTables &tb)
+        {
+            uint32_t atan, next;
+            if (!plainRam(kAtanTable, 36u, atan) || !plainRam(kNextTable, 12u, next))
+                return false;
+            std::memcpy(tb.atan, env.at(atan, 36u), 36);
+            std::memcpy(tb.next, env.at(next, 12u), 12);
+            return tb.next[0] == 1u && tb.next[1] == 2u && tb.next[2] == 0u;
+        }
+        template <class Env>
+        void writeWords(Env &env, uint32_t offset, const float *w, int count)
+        {
+            std::memcpy(env.at(offset, 4u * static_cast<uint32_t>(count)), w, 4u * static_cast<uint32_t>(count));
+        }
+
+        // ---- func_00156D70 (a0 = out, a1 = A, a2 = B, f12 = t; asm): blendTrs ---------------------------------------------
+        // A 0x1E0 frame; the deepest callee chain slerp 0x70 -> sinf 0x20 -> rem_pio2f 0x50 below it. A and B are read
+        // whole before out is written (out may be either); all three quadword-aligned (lqc2 / sqc2 and the FPU's swc1 must
+        // address the same words), clear of the frames.
+        constexpr uint32_t kBlend = 0x156D70u, kBlendFrames = 0x1E0u + 0xE0u;
+        template <class Env>
+        bool blendNative(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp0 = e::u32(ctx, e::sp), a0 = e::u32(ctx, e::a0), a1 = e::u32(ctx, e::a1), a2 = e::u32(ctx, e::a2);
+            uint32_t frame, out, ma, mb;
+            BlendTables tb;
+            if ((sp0 & 0xFu) != 0u || ((a0 | a1 | a2) & 0xFu) != 0u || !plainRam(sp0 - kBlendFrames, kBlendFrames, frame) ||
+                !e::vf0Constant(ctx) || !plainRam(a0, 64u, out) || !plainRam(a1, 64u, ma) || !plainRam(a2, 64u, mb) ||
+                e::overlaps(out, 64u, frame, kBlendFrames) || e::overlaps(ma, 64u, frame, kBlendFrames) ||
+                e::overlaps(mb, 64u, frame, kBlendFrames) || !blendTables(env, tb))
+                return false;
+            Exact x;
+            int calls = 0;
+            const Mat4 m = blendTrs(x, readMat(env, ma), readMat(env, mb), ctx->f[12], tb, calls);
+            if (!x.ok)
+                return false;
+            for (int k = 0; k < calls; ++k)
+                env.call();
+            writeMat(env, out, m);
+            returnFrom(ctx);
+            return true;
+        }
+
+        // ---- func_0015A6A0 (a0 = out, a1 = q1, a2 = q2, f12 = t; asm): slerp ---------------------------------------------
+        // A 0x70 frame, sinf's 0x20 and rem_pio2f's 0x50 below. out[k] is written after q1[k] / q2[k] are read and before
+        // q1[k + 1]: out may be q1 or q2, never a partial overlap.
+        constexpr uint32_t kSlerp = 0x15A6A0u, kSlerpFrames = 0xE0u;
+        bool sameOrApart(uint32_t a, uint32_t b) { return a == b || !e::overlaps(a, 16u, b, 16u); }
+        template <class Env>
+        bool slerpNative(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp0 = e::u32(ctx, e::sp), a0 = e::u32(ctx, e::a0), a1 = e::u32(ctx, e::a1), a2 = e::u32(ctx, e::a2);
+            uint32_t frame, out, p1, p2, atan;
+            if ((sp0 & 0xFu) != 0u || ((a0 | a1 | a2) & 3u) != 0u || !e::vf0Constant(ctx) ||
+                !plainRam(sp0 - kSlerpFrames, kSlerpFrames, frame) || !plainRam(a0, 16u, out) || !plainRam(a1, 16u, p1) || !plainRam(a2, 16u, p2) || !plainRam(kAtanTable, 36u, atan) ||
+                e::overlaps(out, 16u, frame, kSlerpFrames) || e::overlaps(p1, 16u, frame, kSlerpFrames) ||
+                e::overlaps(p2, 16u, frame, kSlerpFrames) || !sameOrApart(out, p1) || !sameOrApart(out, p2))
+                return false;
+            float q1[4], q2[4], c[9], q[4];
+            std::memcpy(q1, env.at(p1, 16u), 16);
+            std::memcpy(q2, env.at(p2, 16u), 16);
+            std::memcpy(c, env.at(atan, 36u), 36);
+            Exact x;
+            int calls = 0;
+            slerp(x, q1, q2, ctx->f[12], c, calls, q);
+            if (!x.ok)
+                return false;
+            for (int k = 0; k < calls; ++k)
+                env.call();
+            writeWords(env, out, q, 4);
+            returnFrom(ctx);
+            return true;
+        }
+
+        // ---- func_0015A190 (a0 = q, a1 = m; asm): a quaternion from m's 3x3 ----------------------------------------------
+        // A 0x80 frame. q is written between m's reads: q may not touch m's 3x3 words (+0x00..+0x2B).
+        constexpr uint32_t kMatToQuat = 0x15A190u, kMatToQuatFrame = 0x80u;
+        template <class Env>
+        bool matToQuatNative(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp0 = e::u32(ctx, e::sp), a0 = e::u32(ctx, e::a0), a1 = e::u32(ctx, e::a1);
+            uint32_t frame, out, m;
+            BlendTables tb;
+            if ((sp0 & 0xFu) != 0u || ((a0 | a1) & 3u) != 0u || !plainRam(sp0 - kMatToQuatFrame, kMatToQuatFrame, frame) ||
+                !plainRam(a0, 16u, out) || !plainRam(a1, 0x2Cu, m) || e::overlaps(out, 16u, m, 0x2Cu) ||
+                e::overlaps(out, 16u, frame, kMatToQuatFrame) || e::overlaps(m, 0x2Cu, frame, kMatToQuatFrame) ||
+                !blendTables(env, tb))
+                return false;
+            Mat4 mm;
+            const uint8_t *p = env.at(m, 0x2Cu);
+            for (int r = 0; r < 3; ++r)
+            {
+                uint32_t w[4] = {0u, 0u, 0u, 0u};
+                std::memcpy(w, p + 16 * r, r == 2 ? 12u : 16u);
+                mm.r[r] = bitsOf(w[0], w[1], w[2], w[3]);
+            }
+            Exact x;
+            float q[4];
+            mat2quat(x, mm, tb.next, q);
+            if (!x.ok)
+                return false;
+            writeWords(env, out, q, 4);
+            returnFrom(ctx);
+            return true;
+        }
+
+        // ---- MtxInitRotQuaternion 0x1478A8 (a0 = out, a1 = q; asm, no frame): q is read whole first ------------------------
+        constexpr uint32_t kQuatToMat = 0x1478A8u;
+        template <class Env>
+        bool quatToMatNative(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t a0 = e::u32(ctx, e::a0), a1 = e::u32(ctx, e::a1);
+            uint32_t out, in;
+            if (((a0 | a1) & 3u) != 0u || !plainRam(a0, 64u, out) || !plainRam(a1, 16u, in))
+                return false;
+            float q[4];
+            std::memcpy(q, env.at(in, 16u), 16);
+            Exact x;
+            const Mat4 m = quat2mat(x, q);
+            if (!x.ok)
+                return false;
+            uint8_t *dst = env.at(out, 64u);
+            for (int k = 0; k < 4; ++k)
+                store(dst + 16 * k, m.r[k]);
+            returnFrom(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -601,5 +742,10 @@ namespace kamite::native::motion
         add("cParts_calcLocal", kCalcLocal, &calcLocal<RealEnv>, &calcLocal<ShadowEnv>, true);
         add("MtxInverse", kInverse, &mtxInverse<RealEnv>, &mtxInverse<ShadowEnv>, true);
         add("func_001501D0", kPartWorld, &partWorld<RealEnv>, &partWorld<ShadowEnv>, true);
+        // M1's blend batch (Nov 25): shadowed (unchecked) until a K build shows 0 mismatches over the replays.
+        add("func_00156D70", kBlend, &blendNative<RealEnv>, &blendNative<ShadowEnv>, false);
+        add("func_0015A6A0", kSlerp, &slerpNative<RealEnv>, &slerpNative<ShadowEnv>, false);
+        add("func_0015A190", kMatToQuat, &matToQuatNative<RealEnv>, &matToQuatNative<ShadowEnv>, false);
+        add("MtxInitRotQuaternion", kQuatToMat, &quatToMatNative<RealEnv>, &quatToMatNative<ShadowEnv>, false);
     }
 }

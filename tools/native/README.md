@@ -37,7 +37,9 @@ with kamite/git_commit.h):
        MtxMulTransVec_0x147b18 MtxInitCoord_0x147a48 cParts_calcLocal_0x150138 MtxInverse_0x147568
        func_001501D0_0x1501d0 MtxInitRotQuaternion_0x1478a8 CopyVec3ToField30_147C40_0x147c40
        ForwardVec3At30_147C60_0x147c60 func_00150710_0x150710 Quaternion_SetRotationAxis_0x159fc8 capVu0Cos_0x1f7fb8
-       sinf_0x3a19f8 ps2___kernel_cosf_0x3a3c80 ps2___kernel_sinf_0x3a4728"
+       sinf_0x3a19f8 ps2___kernel_cosf_0x3a3c80 ps2___kernel_sinf_0x3a4728 func_00156D70_0x156d70
+       func_0015A6A0_0x15a6a0 func_0015A190_0x15a190 capVu0LengthSq_0x1f7e28 sceVu0ScaleVectorXYZ_0x30aba0
+       capVu0Atan2_0x1f8180"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \

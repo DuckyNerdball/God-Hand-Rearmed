@@ -142,6 +142,13 @@ KM_RECOMPILED(capVu0Cos_0x1f7fb8)
 KM_RECOMPILED(sinf_0x3a19f8)
 KM_RECOMPILED(ps2___kernel_cosf_0x3a3c80)
 KM_RECOMPILED(ps2___kernel_sinf_0x3a4728)
+// M1's blend batch (+ its callees: capVu0LengthSq, sceVu0ScaleVectorXYZ, capVu0Atan2)
+KM_RECOMPILED(func_00156D70_0x156d70)
+KM_RECOMPILED(func_0015A6A0_0x15a6a0)
+KM_RECOMPILED(func_0015A190_0x15a190)
+KM_RECOMPILED(capVu0LengthSq_0x1f7e28)
+KM_RECOMPILED(sceVu0ScaleVectorXYZ_0x30aba0)
+KM_RECOMPILED(capVu0Atan2_0x1f8180)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -341,7 +348,8 @@ namespace
                                    // the 0x14C7E8 batch: tanf's T table, the screen values D_003C1180 / 1190, D_00586B88
                                    {0x45EF00u, 0x100u}, {0x3C1100u, 0x100u}, {0x586B00u, 0x100u},
                                    // rung 4: Adjust_theta_vec's table (0x3BF110)
-                                   {0x3BF100u, 0x40u}, {0x41EA00u, 0x20u}}; // + MtxInitRotVec's switch
+                                   {0x3BF100u, 0x40u}, {0x41EA00u, 0x20u}, // + MtxInitRotVec's switch
+                                   {0x42C340u, 0x40u}, {0x41EE40u, 0x20u}}; // + capVu0Atan2's table, 0x15A190's next
     constexpr uint32_t usedBytes()
     {
         uint32_t total = 0;
@@ -1943,6 +1951,53 @@ namespace
         else
             floatsAt(0x3BF110u, 4, false), randomBytes(0x3BF120u, 32u);
     }
+    // The blend batch's tables (the ELF's): capVu0Atan2's c0..c7, pi/4 at 0x42C350; 0x15A190's next index {1, 2, 0}.
+    constexpr uint32_t kAtanTable[9] = {0x3F7FFFF5u, 0xBEAAA61Cu, 0x3E4C40A6u, 0xBE0E6C63u, 0x3DC577DFu,
+                                        0xBD6501C4u, 0x3CB31652u, 0xBB84D7E7u, 0x3F490FDBu};
+    void setBlendTables(bool sometimesWrong)
+    {
+        for (uint32_t k = 0; k < 9u; ++k)
+            setU32(0x42C350u + 4u * k, kAtanTable[k]);
+        const bool wrong = sometimesWrong && g_rng() % 32u == 0u;
+        setU32(0x41EE48u, wrong ? 2u : 1u), setU32(0x41EE4Cu, 2u), setU32(0x41EE50u, 0u);
+    }
+    // A TRS matrix: a rotation, each row scaled on its own (0.25-4.25 x 0.5-2), a translation.
+    void randomTrs(Mat4f &m)
+    {
+        randomRigid(m);
+        for (int i = 0; i < 3; ++i)
+        {
+            const float f = 0.5f + static_cast<float>(g_rng() % 1000u) / 666.0f;
+            for (int j = 0; j < 3; ++j)
+                m.v[4 * i + j] *= f;
+        }
+    }
+    void setMat4f(uint32_t at, const Mat4f &m)
+    {
+        for (uint32_t k = 0; k < 16u; ++k)
+            setFloat(at + 4u * k, m.v[k]);
+    }
+    // A blend / slerp weight: mostly 0-1, sometimes exactly 0 or 1, sometimes outside.
+    float blendWeight()
+    {
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 16u);
+        if (pick == 0)
+            return 0.0f;
+        if (pick == 1)
+            return 1.0f;
+        if (pick == 2)
+            return static_cast<float>(g_rng() % 2001u) / 1000.0f - 0.5f;
+        return static_cast<float>(g_rng() % 100001u) / 100000.0f;
+    }
+    void setQuat(uint32_t at)
+    {
+        double q[4], n = 0.0;
+        for (double &c : q)
+            c = static_cast<double>(static_cast<int>(g_rng() % 2001u) - 1000) / 1000.0, n += c * c;
+        n = n > 0.0 ? std::sqrt(n) : 1.0;
+        for (uint32_t k = 0; k < 4u; ++k)
+            setFloat(at + 4u * k, static_cast<float>(q[k] / n));
+    }
     void setAngles(uint32_t at)
     {
         for (uint32_t i = 0; i < 3u; ++i)
@@ -1953,7 +2008,8 @@ namespace
         // Other natives: untouched, and no draws from g_rng (their setups stay the sequence they were proven on).
         if (fn.address != 0x1F7DA0u && fn.address != 0x1476D0u && fn.address != 0x147A08u && fn.address != 0x147728u &&
             fn.address != 0x147B60u && fn.address != 0x147BF8u && fn.address != 0x147B18u && fn.address != 0x147A48u &&
-            fn.address != 0x150138u && fn.address != 0x147568u && fn.address != 0x1501D0u)
+            fn.address != 0x150138u && fn.address != 0x147568u && fn.address != 0x1501D0u && fn.address != 0x156D70u &&
+            fn.address != 0x15A6A0u && fn.address != 0x15A190u && fn.address != 0x1478A8u)
             return;
         R5900Context &ctx = call.ctx;
         const uint32_t sp = 0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u);
@@ -2030,6 +2086,115 @@ namespace
             setGpr(ctx, mul ? 6 : 5, in | seg);
             if (rot)
                 setGpr64(ctx, mul ? 7 : 6, order);
+            return;
+        }
+        case 0x156D70u: // func_00156D70(out, A, B; f12 = t): the blend
+        {
+            setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
+            setBlendTables(false);
+            uint32_t out = base, a = base + 0x100u, b = base + 0x200u;
+            Mat4f ma, mb;
+            randomTrs(ma);
+            const uint32_t shape = static_cast<uint32_t>(g_rng() % 16u);
+            if (shape == 0)
+                mb = ma;                              // the same pose: dot 1, the lerp path
+            else
+            {
+                randomTrs(mb);
+                if (shape < 4)                        // a pose close to A
+                    for (int k = 0; k < 16; ++k)
+                        mb.v[k] = ma.v[k] + (mb.v[k] - ma.v[k]) * 0.01f;
+            }
+            if (g_rng() % 4u) // TRS matrices (else setupCall's random words: declines and odd quaternions)
+                setMat4f(a, ma), setMat4f(b, mb);
+            if (shape == 4)
+                for (uint32_t k = 0; k < 4u; ++k)
+                    setU32(a + 0x10u + 4u * k, 0u);   // a zero row: sqrt(0), declined
+            switch (g_rng() % 12u)
+            {
+            case 0: out = a; break;
+            case 1: out = b; break;
+            case 2: out = sp - 0x40u; break;          // in the frames: declined
+            case 3: a = sp - 0x100u; break;           // declined
+            case 4: b = base + 0x208u; break;         // unaligned: declined
+            case 5: a = sp - 0x1E0u; break;           // its own frame's bottom (the saved ra): declined
+            default: break;
+            }
+            setGpr(ctx, 4, out | seg), setGpr(ctx, 5, a | seg), setGpr(ctx, 6, b | seg);
+            ctx.f[12] = blendWeight();
+            return;
+        }
+        case 0x15A6A0u: // func_0015A6A0(out, q1, q2; f12 = t): slerp
+        {
+            setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
+            setBlendTables(false);
+            uint32_t out = base, q1 = base + 0x100u, q2 = base + 0x200u;
+            setQuat(q1);
+            const uint32_t shape = static_cast<uint32_t>(g_rng() % 8u);
+            if (shape <= 1) // q2 = q1 (the lerp path) or -q1 (the sign flip)
+                for (uint32_t k = 0; k < 4u; ++k)
+                {
+                    uint32_t w;
+                    std::memcpy(&w, g_ramA + q1 + 4u * k, 4);
+                    setU32(q2 + 4u * k, shape == 0 ? w : w ^ 0x80000000u);
+                }
+            else
+                setQuat(q2);
+            switch (g_rng() % 10u)
+            {
+            case 0: out = q1; break;
+            case 1: out = q2; break;
+            case 2: out = q1 + 8u; break;             // a partial overlap: declined
+            case 3: out = sp - 0x30u; break;          // declined
+            case 4: q1 = sp - 0x70u; break;           // its own frame's bottom (the saved ra): declined
+            default: break;
+            }
+            setGpr(ctx, 4, out | seg), setGpr(ctx, 5, q1 | seg), setGpr(ctx, 6, q2 | seg);
+            ctx.f[12] = blendWeight();
+            return;
+        }
+        case 0x15A190u: // func_0015A190(q, m): a quaternion from m's 3x3
+        {
+            setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
+            setBlendTables(true);
+            uint32_t out = base, m = base + 0x100u;
+            if (g_rng() % 4u)
+            {
+                Mat4f r;
+                randomRigid(r);
+                if (g_rng() % 2u) // unit scale: a pure rotation (all four branches show up)
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        double n = 0.0;
+                        for (int j = 0; j < 3; ++j)
+                            n += static_cast<double>(r.v[4 * i + j]) * r.v[4 * i + j];
+                        for (int j = 0; j < 3; ++j)
+                            r.v[4 * i + j] = static_cast<float>(r.v[4 * i + j] / std::sqrt(n));
+                    }
+                setMat4f(m, r);
+            }
+            switch (g_rng() % 10u)
+            {
+            case 0: out = m + 0x20u; break;           // q inside m's 3x3: declined
+            case 1: out = m + 0x30u; break;           // row 3: not read
+            case 2: out = sp - 0x20u; break;          // declined
+            case 3: m = sp - 0x80u; break;            // its own frame's bottom: declined
+            default: break;
+            }
+            setGpr(ctx, 4, out | seg), setGpr(ctx, 5, m | seg);
+            return;
+        }
+        case 0x1478A8u: // MtxInitRotQuaternion(out, q)
+        {
+            uint32_t out = base, q = base + 0x100u;
+            if (g_rng() % 2u)
+                setQuat(q);
+            const uint32_t pick2 = static_cast<uint32_t>(g_rng() % 8u);
+            if (pick2 == 0)
+                q = out + 0x14u;                      // q inside out: read whole first
+            else if (pick2 == 1)
+                out = base + 2u;                      // declined
+            setGpr(ctx, 4, out | seg), setGpr(ctx, 5, q | seg);
             return;
         }
         case 0x147A48u: // MtxInitCoord(out, t, angles, scale, t0 = order)
@@ -2950,6 +3115,39 @@ namespace
         }
         std::fclose(f);
         std::printf("wrote %d motion vectors to %s\n", written, motionPath.c_str());
+
+        // The blend (<path>.blend): A, B, t, capVu0Atan2's table, 0x15A190's next -> the recompiled func_00156D70's out.
+        const std::string blendPath = std::string(path) + ".blend";
+        f = std::fopen(blendPath.c_str(), "wb");
+        written = 0;
+        for (int i = 0; i < count; ++i)
+        {
+            R5900Context ctx;
+            randomContext(ctx);
+            setBlendTables(false);
+            const uint32_t out = 0x20000u, a = 0x20100u, b = 0x20200u;
+            Mat4f ma, mb;
+            randomTrs(ma);
+            randomTrs(mb);
+            if (i % 8 == 0)
+                mb = ma;
+            setMat4f(a, ma), setMat4f(b, mb);
+            setGpr(ctx, 29, 0xF0000u), setGpr(ctx, 31, 0x00123450u);
+            setGpr(ctx, 4, out), setGpr(ctx, 5, a), setGpr(ctx, 6, b);
+            const float t = blendWeight();
+            ctx.f[12] = t;
+            ctx.pc = 0x156D70u;
+            uint8_t record[64 + 64 + 4 + 36 + 12 + 64];
+            std::memcpy(record, g_ramA + a, 64), std::memcpy(record + 64, g_ramA + b, 64), std::memcpy(record + 128, &t, 4);
+            std::memcpy(record + 132, g_ramA + 0x42C350u, 36), std::memcpy(record + 168, g_ramA + 0x41EE48u, 12);
+            g_dueAt = 0;
+            func_00156D70_0x156d70(g_ramA, &ctx, g_rt);
+            std::memcpy(record + 180, g_ramA + out, 64);
+            std::fwrite(record, 1, sizeof(record), f);
+            ++written;
+        }
+        std::fclose(f);
+        std::printf("wrote %d blend vectors to %s\n", written, blendPath.c_str());
         resetRam();
     }
 }
@@ -3142,7 +3340,9 @@ int main(int argc, char **argv)
         {0x147B60u, &MtxMulRotVec_0x147b60},     {0x147BF8u, &MtxMulScaleVec_0x147bf8},
         {0x147B18u, &MtxMulTransVec_0x147b18},   {0x147A48u, &MtxInitCoord_0x147a48},
         {0x150138u, &cParts_calcLocal_0x150138}, {0x147568u, &MtxInverse_0x147568},
-        {0x1501D0u, &func_001501D0_0x1501d0}};
+        {0x1501D0u, &func_001501D0_0x1501d0},    {0x156D70u, &func_00156D70_0x156d70},
+        {0x15A6A0u, &func_0015A6A0_0x15a6a0},    {0x15A190u, &func_0015A190_0x15a190},
+        {0x1478A8u, &MtxInitRotQuaternion_0x1478a8}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
@@ -3156,6 +3356,10 @@ int main(int argc, char **argv)
              {0x3A19F8u, &sinf_0x3a19f8}, {0x3A3C80u, &ps2___kernel_cosf_0x3a3c80},
              {0x3A4728u, &ps2___kernel_sinf_0x3a4728}})
         g_callees.push_back({address, f}); // func_001501D0's twist path (no natives: the native declines it)
+    for (const auto &[address, f] : std::initializer_list<std::pair<uint32_t, void (*)(uint8_t *, R5900Context *, PS2Runtime *)>>{
+             {0x1F7E28u, &capVu0LengthSq_0x1f7e28}, {0x30ABA0u, &sceVu0ScaleVectorXYZ_0x30aba0},
+             {0x1F8180u, &capVu0Atan2_0x1f8180}})
+        g_callees.push_back({address, f}); // the blend's inline helpers (no natives of their own yet)
     for (const auto &[address, f] : std::initializer_list<std::pair<uint32_t, void (*)(uint8_t *, R5900Context *, PS2Runtime *)>>{
              {0x3A4830u, &ps2___kernel_tanf_0x3a4830}, {0x3A3768u, &ps2___ieee754_rem_pio2f_0x3a3768},
              {0x3A3DD8u, &ps2___kernel_rem_pio2f_0x3a3dd8}, {0x3A19D8u, &func_003A19D8_0x3a19d8},
@@ -3249,7 +3453,7 @@ int main(int argc, char **argv)
                                 0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u,
                                 0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u, 0x14D0E8u, 0x153B00u, 0x14B810u,
                                 0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u, 0x147B18u, 0x147A48u,
-                                0x150138u, 0x1501D0u})
+                                0x150138u, 0x1501D0u, 0x156D70u, 0x15A6A0u})
             if (fn.address == caller)
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;

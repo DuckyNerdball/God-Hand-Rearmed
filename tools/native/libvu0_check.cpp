@@ -348,8 +348,37 @@ int main(int argc, char **argv)
         std::fclose(o);
     }
     bad += motionBad;
+
+    // The blend (<vectors>.blend: A, B, t, the atan table, next -> func_00156D70's out), motion_core.h's blendTrs.
+    int blendCount = 0, blendBad = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".blend").c_str(), "rb"))
+    {
+        unsigned char rec[64 + 64 + 4 + 36 + 12 + 64];
+        while (std::fread(rec, 1, sizeof(rec), o) == sizeof(rec))
+        {
+            const motion::Mat4 a{{load(rec), load(rec + 16), load(rec + 32), load(rec + 48)}};
+            const motion::Mat4 b{{load(rec + 64), load(rec + 80), load(rec + 96), load(rec + 112)}};
+            float t;
+            motion::BlendTables tb;
+            std::memcpy(&t, rec + 128, 4), std::memcpy(tb.atan, rec + 132, 36), std::memcpy(tb.next, rec + 168, 12);
+            motion::Exact x;
+            int calls = 0;
+            const motion::Mat4 m = motion::blendTrs(x, a, b, t, tb, calls);
+            if (!x.ok)
+                continue;
+            unsigned char got[64];
+            for (int k = 0; k < 4; ++k)
+                store(got + 16 * k, m.r[k]);
+            ++blendCount;
+            if (std::memcmp(got, rec + 180, 64) != 0 && ++blendBad <= 5)
+                std::printf("blend vector %d differs\n", blendCount);
+        }
+        std::fclose(o);
+    }
+    bad += blendBad;
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
-                "maths %d vectors, %d differ; motion %d vectors, %d differ\n", path, count, bad - rotBad - opsBad - b2Bad - motionBad,
-                rotCount, rotBad, opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad);
+                "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ\n", path, count,
+                bad - rotBad - opsBad - b2Bad - motionBad - blendBad, rotCount, rotBad, opsCount, opsBad, b2Count, b2Bad, motionCount,
+                motionBad, blendCount, blendBad);
     return bad ? 1 : 0;
 }

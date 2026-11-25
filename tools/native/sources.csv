@@ -78,3 +78,7 @@ MtxInitCoord,0x00147A48,decomp,MtxInitCoord,src/cod/0012cc00.c,eed8dc0,791421494
 cParts_calcLocal,0x00150138,decomp,cParts_calcLocal,src/cod/00150138.c,eed8dc0,beabbd92f2ae,rung 4 M1 batch 2: rot + rotAdd (add.s) wrapped, T(anchor) x R x S in registers; kRenderPath|kChargeAtEnd
 MtxInverse,0x00147568,asm,,,,,rung 4 M1 batch 2: FPU det + VU0 cofactors / Q / transposition (unmatched at eed8dc0); kRenderPath|kChargeAtEnd
 func_001501D0,0x001501D0,asm,,,,,rung 4 M1 batch 2: a part's world matrix from its parent's, both paths (unmatched at eed8dc0); the +0x154 & 0x800 twist declined; kRenderPath|kChargeAtEnd
+func_00156D70,0x00156D70,asm,,,,,rung 4 M1 blend batch: fused (translation lerp; row lengths via capVu0LengthSq + sqrt.s; 0x15A190 x2; slerp; MtxInitRotQuaternion; scale lerp) (unmatched at eed8dc0); kRenderPath|kChargeAtEnd
+func_0015A6A0,0x0015A6A0,decomp,func_0015A6A0,src/cod/0015a6a0.c,eed8dc0,7b94179f900b,rung 4 M1 blend batch: the C's FPU order (sqrt.s; capVu0Atan2 + 2 sinf: libm's paths inline, n = +-1 only); vf0 checked (capVu0Atan2's vmaddw); kRenderPath|kChargeAtEnd
+func_0015A190,0x0015A190,decomp,func_0015A190,src/cod/0015a190.c,eed8dc0,02dfc0e30a8e,rung 4 M1 blend batch: Shoemake in the C's order; the {1, 2, 0} table checked; kRenderPath|kChargeAtEnd
+MtxInitRotQuaternion,0x001478A8,decomp,MtxInitRotQuaternion,src/cod/001478a8.c,eed8dc0,5de34f40e54f,rung 4 M1 blend batch: the C's FPU order; kRenderPath|kChargeAtEnd

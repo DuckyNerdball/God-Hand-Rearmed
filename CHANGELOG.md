@@ -6,6 +6,7 @@ Newest first, one line per change; the code comments say how.
 
 - Performance: the matrix helpers behind every bone's pose (rotation, scale and translation matrices, the angle wrap) run as native code.
 - Performance: each bone's world matrix (from its parent's) and the matrix inverse run as native code.
+- Performance: each bone's local matrix (from its position, rotation and scale) runs as native code.
 - Performance: the vector unit's thread runs the draw packets straight from memory instead of copying them first.
 - Performance: the texture uploads that effects and other objects ask for go to the vector unit straight from memory too.
 - 60 FPS: four more rooms that keep sending enemies (stages 2 and 7) wait as long between them as on the PS2 (they waited half as long).
