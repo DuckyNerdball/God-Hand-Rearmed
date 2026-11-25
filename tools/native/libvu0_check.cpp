@@ -283,7 +283,7 @@ int main(int argc, char **argv)
     }
     bad += b2Bad;
 
-    // Rung 4 (<vectors>.motion, motion_core.h): Adjust_theta_vec, MtxInitRotVec, MtxMulRotVec, MtxMulScaleVec against
+    // Rung 4 (<vectors>.motion, motion_core.h): Adjust_theta_vec, MtxInitRotVec, MtxMulRotVec, MtxMulScaleVec, MtxInverse against
     // the recompiled functions' results; records the natives would decline are skipped.
     int motionCount = 0, motionBad = 0;
     if (std::FILE *o = std::fopen((std::string(argv[1]) + ".motion").c_str(), "rb"))
@@ -294,7 +294,16 @@ int main(int argc, char **argv)
             uint32_t kind, order;
             std::memcpy(&kind, rec, 4), std::memcpy(&order, rec + 4, 4);
             unsigned char got[64] = {};
-            if (kind == 0u)
+            if (kind == 4u)
+            {
+                const motion::Mat4 a{{load(rec + 88), load(rec + 104), load(rec + 120), load(rec + 136)}};
+                motion::Mat4 m;
+                if (!motion::inverseInputs(a) || !motion::inverse(a, m))
+                    continue;
+                for (int k = 0; k < 4; ++k)
+                    store(got + 16 * k, m.r[k]);
+            }
+            else if (kind == 0u)
             {
                 motion::ThetaTable t;
                 t.c = load(rec + 24);

@@ -105,6 +105,74 @@ namespace kamite::native::motion
         return true;
     }
 
+    // MtxInitTransVec's matrix: the unit rows with row 3 = (t.xyz, 1.0), the words as copied.
+    inline Mat4 translation(uint32_t x, uint32_t y, uint32_t z)
+    {
+        Mat4 m = unit();
+        m.r[3] = bitsOf(x, y, z, 0x3F800000u);
+        return m;
+    }
+    // MtxInitScaleVec's: the unit rows with the diagonal's xyz = s.
+    inline Mat4 scaling(uint32_t x, uint32_t y, uint32_t z)
+    {
+        Mat4 m = unit();
+        m.r[0] = bitsOf(x, 0u, 0u, 0u);
+        m.r[1] = bitsOf(0u, y, 0u, 0u);
+        m.r[2] = bitsOf(0u, 0u, z, 0u);
+        return m;
+    }
+
+    // ---- MtxInverse 0x147568 (asm; a rigid-ish 4x4 with row 3 the translation) --------------------------------------
+    // det by the FPU in the asm's order (mul.s / add.s / sub.s); det with exponent 0 (c.eq.s against 0) -> the unit
+    // matrix; else Q = 1 / det (vdiv), rows' cofactors by vopmula / vopmsub (r1 x r2, r2 x r0, r0 x r1) times Q, their
+    // dots with row 3 (x + z, then + y) negated into w (0 - dot), and the four transposed (pextlw / pcpyld: row k =
+    // (c0[k], c1[k], c2[k], vf0[k])). Inputs: the nine rotation entries below 2^41 (det's products below 2^123);
+    // false = a result at 2^126 or more (the runtime's exact path could differ there): decline.
+    inline bool inverseInputs(const Mat4 &a)
+    {
+        return magnitudesBelow(blend<7>(splat(0.0f), a.r[0]), 0x54000000u) &&
+               magnitudesBelow(blend<7>(splat(0.0f), a.r[1]), 0x54000000u) &&
+               magnitudesBelow(blend<7>(splat(0.0f), a.r[2]), 0x54000000u);
+    }
+    inline bool below126(Vec4 v) { return magnitudesBelow(v, 0x7E800000u); }
+    inline bool inverse(const Mat4 &a, Mat4 &out)
+    {
+        const float m00 = lane<0>(a.r[0]), m01 = lane<1>(a.r[0]), m02 = lane<2>(a.r[0]);
+        const float m10 = lane<0>(a.r[1]), m11 = lane<1>(a.r[1]), m12 = lane<2>(a.r[1]);
+        const float m20 = lane<0>(a.r[2]), m21 = lane<1>(a.r[2]), m22 = lane<2>(a.r[2]);
+        float d = addScalar(mulScalar(mulScalar(m00, m11), m22), mulScalar(mulScalar(m10, m21), m02));
+        d = addScalar(d, mulScalar(mulScalar(m20, m01), m12));
+        d = subScalar(d, mulScalar(mulScalar(m02, m11), m20));
+        d = subScalar(d, mulScalar(mulScalar(m01, m10), m22));
+        d = subScalar(d, mulScalar(mulScalar(m00, m12), m21));
+        if ((floatBits(d) & 0x7F800000u) == 0u)
+        {
+            out = unit();
+            return true;
+        }
+        uint16_t status = 0;
+        const float q = libvu0::vuDiv(status, 1.0f, d);
+        const Vec4 c0 = libvu0::outerProduct(a.r[1], a.r[2]).r, c1 = libvu0::outerProduct(a.r[2], a.r[0]).r,
+                   c2 = libvu0::outerProduct(a.r[0], a.r[1]).r;
+        const Vec4 v4 = mul(c0, splat(q)), v5 = mul(c1, splat(q)), v6 = mul(c2, splat(q));
+        const Vec4 p4 = mul(v4, a.r[3]), p5 = mul(v5, a.r[3]), p6 = mul(v6, a.r[3]);
+        const Vec4 zero = splat(0.0f);
+        if (!below126(blend<7>(zero, v4)) || !below126(blend<7>(zero, v5)) || !below126(blend<7>(zero, v6)) ||
+            !below126(blend<7>(zero, p4)) || !below126(blend<7>(zero, p5)) || !below126(blend<7>(zero, p6)))
+            return false;
+        const float d4 = addScalar(addScalar(lane<0>(p4), lane<2>(p4)), lane<1>(p4));
+        const float d5 = addScalar(addScalar(lane<0>(p5), lane<2>(p5)), lane<1>(p5));
+        const float d6 = addScalar(addScalar(lane<0>(p6), lane<2>(p6)), lane<1>(p6));
+        const float w4 = subScalar(0.0f, d4), w5 = subScalar(0.0f, d5), w6 = subScalar(0.0f, d6);
+        uint32_t x[4], y[4], z[4];
+        store(x, v4), store(y, v5), store(z, v6);
+        out.r[0] = bitsOf(x[0], y[0], z[0], 0u);
+        out.r[1] = bitsOf(x[1], y[1], z[1], 0u);
+        out.r[2] = bitsOf(x[2], y[2], z[2], 0u);
+        out.r[3] = bitsOf(floatBits(w4), floatBits(w5), floatBits(w6), 0x3F800000u);
+        return true;
+    }
+
     // MtxMultiply(out, A, B) = sceVu0MulMatrix: out row k = A's rows weighted by B row k (mulRow). Both below 2^62.
     inline bool productInputs(const Mat4 &a, const Mat4 &b)
     {

@@ -73,3 +73,8 @@ MtxInitRotVec,0x00147728,decomp,MtxInitRotVec,src/cod/00147728.c,eed8dc0,a787fcf
 MtxInitScaleVec,0x00147A08,decomp,MtxInitScaleVec,src/cod/00147a08.c,eed8dc0,e37dd1a07c40,rung 4 M1 batch 1: readable; kRenderPath|kChargeAtEnd
 MtxMulRotVec,0x00147B60,decomp,MtxMulRotVec,src/cod/00134880.c,eed8dc0,c9a8d6405a19,rung 4 M1 batch 1: MtxInitRotVec + MtxMultiply inline (buf in registers); kRenderPath|kChargeAtEnd
 MtxMulScaleVec,0x00147BF8,decomp,MtxMulScaleVec,src/cod/00147bb0.c,eed8dc0,3d3a8e1053ed,rung 4 M1 batch 1: MtxInitScaleVec + MtxMultiply inline (buf in registers); kRenderPath|kChargeAtEnd
+MtxMulTransVec,0x00147B18,decomp,MtxMulTransVec,src/cod/00137aa0.c,eed8dc0,d8c991a8752a,rung 4 M1 batch 2: MtxInitTransVec + MtxMultiply inline (buf in registers); kRenderPath|kChargeAtEnd
+MtxInitCoord,0x00147A48,decomp,MtxInitCoord,src/cod/0012cc00.c,eed8dc0,791421494e24,rung 4 M1 batch 2: T x R(order) x S chained in registers on batch 1's bodies; kRenderPath|kChargeAtEnd
+cParts_calcLocal,0x00150138,decomp,cParts_calcLocal,src/cod/00150138.c,eed8dc0,beabbd92f2ae,rung 4 M1 batch 2: rot + rotAdd (add.s) wrapped, T(anchor) x R x S in registers; kRenderPath|kChargeAtEnd
+MtxInverse,0x00147568,asm,,,,,rung 4 M1 batch 2: FPU det + VU0 cofactors / Q / transposition (unmatched at eed8dc0); kRenderPath|kChargeAtEnd
+func_001501D0,0x001501D0,asm,,,,,rung 4 M1 batch 2: a part's world matrix from its parent's, both paths (unmatched at eed8dc0); the +0x154 & 0x800 twist declined; kRenderPath|kChargeAtEnd

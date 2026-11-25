@@ -127,6 +127,21 @@ KM_RECOMPILED(MtxInitScaleVec_0x147a08)
 KM_RECOMPILED(MtxMulRotVec_0x147b60)
 KM_RECOMPILED(MtxMulScaleVec_0x147bf8)
 KM_RECOMPILED(sceVu0RotMatrix_0x30a870)
+// M1 batch 2 (+ func_001501D0's twist path: callees only)
+KM_RECOMPILED(MtxMulTransVec_0x147b18)
+KM_RECOMPILED(MtxInitCoord_0x147a48)
+KM_RECOMPILED(cParts_calcLocal_0x150138)
+KM_RECOMPILED(MtxInverse_0x147568)
+KM_RECOMPILED(func_001501D0_0x1501d0)
+KM_RECOMPILED(MtxInitRotQuaternion_0x1478a8)
+KM_RECOMPILED(CopyVec3ToField30_147C40_0x147c40)
+KM_RECOMPILED(ForwardVec3At30_147C60_0x147c60)
+KM_RECOMPILED(func_00150710_0x150710)
+KM_RECOMPILED(Quaternion_SetRotationAxis_0x159fc8)
+KM_RECOMPILED(capVu0Cos_0x1f7fb8)
+KM_RECOMPILED(sinf_0x3a19f8)
+KM_RECOMPILED(ps2___kernel_cosf_0x3a3c80)
+KM_RECOMPILED(ps2___kernel_sinf_0x3a4728)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -1891,6 +1906,43 @@ namespace
     constexpr uint32_t kThetaTable[12] = {0x3EA2F983u, 0x40490FDBu, 0u, 0u, 1u, 1u, 1u, 1u,
                                           0xFFFFFFFEu, 0xFFFFFFFEu, 0xFFFFFFFEu, 0xFFFFFFFEu};
     constexpr uint32_t kSinPolynomial[4] = {0x362E9C14u, 0xB94FB21Fu, 0x3C08873Eu, 0xBE2AAAA4u};
+    // A rotation (three random angles, the textbook way) times a scale, with a translation: MtxInverse's usual input.
+    struct Mat4f
+    {
+        float v[16];
+    };
+    void randomRigid(Mat4f &m)
+    {
+        const double a = angle(), b = angle(), c = angle();
+        const double s = 0.25 + static_cast<double>(g_rng() % 1000u) / 250.0;
+        const double ca = std::cos(a), sa = std::sin(a), cb = std::cos(b), sb = std::sin(b), cc = std::cos(c), sc = std::sin(c);
+        const double r[9] = {cb * cc, cb * sc, -sb, sa * sb * cc - ca * sc, sa * sb * sc + ca * cc, sa * cb,
+                             ca * sb * cc + sa * sc, ca * sb * sc - sa * cc, ca * cb};
+        for (int i = 0; i < 3; ++i)
+        {
+            for (int j = 0; j < 3; ++j)
+                m.v[4 * i + j] = static_cast<float>(r[3 * i + j] * s);
+            m.v[4 * i + 3] = 0.0f;
+            m.v[12 + i] = static_cast<float>((static_cast<double>(g_rng() % 2001u) - 1000.0) / 8.0);
+        }
+        m.v[15] = 1.0f;
+    }
+    // MtxInitRotVec's jump table (the ELF's .rodata); sometimes two cases swapped (the natives decline)
+    void setRotOrderTable()
+    {
+        static constexpr uint32_t kCases[6] = {0x147788u, 0x1477B0u, 0x1477D8u, 0x147810u, 0x147848u, 0x147880u};
+        const uint32_t swap = g_rng() % 32u == 0u ? static_cast<uint32_t>(g_rng() % 6u) : 6u;
+        for (uint32_t k = 0; k < 6u; ++k)
+            setU32(0x41EA00u + 4u * k, kCases[k == swap ? (k + 1u) % 6u : k]);
+    }
+    void setThetaTable()
+    {
+        if (g_rng() % 8u)
+            for (uint32_t i = 0; i < 12u; ++i)
+                setU32(0x3BF110u + 4u * i, kThetaTable[i]);
+        else
+            floatsAt(0x3BF110u, 4, false), randomBytes(0x3BF120u, 32u);
+    }
     void setAngles(uint32_t at)
     {
         for (uint32_t i = 0; i < 3u; ++i)
@@ -1900,7 +1952,8 @@ namespace
     {
         // Other natives: untouched, and no draws from g_rng (their setups stay the sequence they were proven on).
         if (fn.address != 0x1F7DA0u && fn.address != 0x1476D0u && fn.address != 0x147A08u && fn.address != 0x147728u &&
-            fn.address != 0x147B60u && fn.address != 0x147BF8u)
+            fn.address != 0x147B60u && fn.address != 0x147BF8u && fn.address != 0x147B18u && fn.address != 0x147A48u &&
+            fn.address != 0x150138u && fn.address != 0x147568u && fn.address != 0x1501D0u)
             return;
         R5900Context &ctx = call.ctx;
         const uint32_t sp = 0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u);
@@ -1912,11 +1965,7 @@ namespace
         {
         case 0x1F7DA0u: // Adjust_theta_vec(v)
         {
-            if (g_rng() % 8u)
-                for (uint32_t i = 0; i < 12u; ++i)
-                    setU32(0x3BF110u + 4u * i, kThetaTable[i]);
-            else
-                floatsAt(0x3BF110u, 4, false), randomBytes(0x3BF120u, 32u);
+            setThetaTable();
             const uint32_t v = base + 0x10u * static_cast<uint32_t>(g_rng() % 8u);
             const float scale = (g_rng() % 4u) ? 1.0f : 16.0f; // several turns
             for (uint32_t i = 0; i < 3u; ++i)
@@ -1951,14 +2000,11 @@ namespace
         case 0x147728u: // MtxInitRotVec(out, angles, order)
         case 0x147B60u: // MtxMulRotVec(out, A, angles, order)
         case 0x147BF8u: // MtxMulScaleVec(out, A, scale)
+        case 0x147B18u: // MtxMulTransVec(out, A, t)
         {
-            const bool rot = fn.address != 0x147BF8u, mul = fn.address != 0x147728u;
+            const bool rot = fn.address == 0x147728u || fn.address == 0x147B60u, mul = fn.address != 0x147728u;
             setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
-            // MtxInitRotVec's jump table (the ELF's .rodata); sometimes two cases swapped (the native declines)
-            static constexpr uint32_t kCases[6] = {0x147788u, 0x1477B0u, 0x1477D8u, 0x147810u, 0x147848u, 0x147880u};
-            const uint32_t swap = g_rng() % 32u == 0u ? static_cast<uint32_t>(g_rng() % 6u) : 6u;
-            for (uint32_t k = 0; k < 6u; ++k)
-                setU32(0x41EA00u + 4u * k, kCases[k == swap ? (k + 1u) % 6u : k]);
+            setRotOrderTable();
             uint32_t out = base, a = base + 0x100u, in = base + 0x200u;
             if (rot)
                 setAngles(in);
@@ -1984,6 +2030,96 @@ namespace
             setGpr(ctx, mul ? 6 : 5, in | seg);
             if (rot)
                 setGpr64(ctx, mul ? 7 : 6, order);
+            return;
+        }
+        case 0x147A48u: // MtxInitCoord(out, t, angles, scale, t0 = order)
+        {
+            setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
+            setRotOrderTable();
+            uint32_t out = base, t = base + 0x100u, angles = base + 0x200u, scale = base + 0x300u;
+            setAngles(angles);
+            uint64_t order = pick < 13 ? g_rng() % 6u : 6u + g_rng() % 250u;
+            if (g_rng() % 4u == 0u)
+                order |= g_rng() & ~0xFFull;
+            switch (g_rng() % 12u)
+            {
+            case 0: t = out + 0x30u; break;        // read after out's first rows: declined
+            case 1: angles = out + 0x10u; break;   // declined
+            case 2: scale = out + 0x20u; break;    // declined
+            case 3: scale = sp - 0x30u; break;     // in the frames: declined
+            case 4: out = base + 8u; break;        // unaligned out: declined
+            case 5: t = base + 0x101u; break;      // declined
+            default: break;
+            }
+            setGpr(ctx, 4, out | seg), setGpr(ctx, 5, t | seg), setGpr(ctx, 6, angles | seg), setGpr(ctx, 7, scale | seg);
+            setGpr64(ctx, 8, order);
+            return;
+        }
+        case 0x150138u: // cParts_calcLocal(part)
+        case 0x1501D0u: // func_001501D0(part, flags): the world matrix from the parent's
+        {
+            setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
+            setRotOrderTable();
+            setThetaTable();
+            const uint32_t part = base + (pick == 0 ? 4u : 0u); // unaligned: declined (the fields follow a0)
+            uint32_t anchor = base + 0x380u, parent = base + 0x200u;
+            for (uint32_t i = 0; i < 3u; ++i)
+            {
+                setFloat(part + 0x100u + 4u * i, angle());
+                setFloat(part + 0x130u + 4u * i, (g_rng() % 4u) ? angle() * 0.0625f : 0.0f);
+            }
+            if (g_rng() % 4u) // ordinary scales (some 0: declined reciprocals)
+                for (uint32_t i = 0; i < 3u; ++i)
+                {
+                    setFloat(part + 0x110u + 4u * i, 0.5f + static_cast<float>(g_rng() % 1000u) / 500.0f);
+                    setFloat(parent + 0x120u + 4u * i, (g_rng() % 64u) ? 0.5f + static_cast<float>(g_rng() % 1000u) / 500.0f : 0.0f);
+                }
+            setU32(part + 0x154u, (g_rng() % 8u == 0u) ? 0x800u : static_cast<uint32_t>(g_rng()) & ~0x800u);
+            switch (g_rng() % 12u)
+            {
+            case 0: anchor = part + 0x20u; break;   // calcLocal: inside the local rows written first (declined)
+            case 1: anchor = part + 0x124u; break;  // 0x1501D0: inside scaleCalc written first (declined)
+            case 2: anchor = sp - 0x40u; break;     // in the frames: declined
+            case 3: parent = part; break;           // declined
+            case 4: parent = sp - 0x100u; break;    // declined
+            case 5: parent = base + 0x208u; break;  // unaligned: declined
+            default: break;
+            }
+            setU32(part + 0xD0u, anchor | seg);
+            setU32(part + 0x148u, parent | seg);
+            setGpr(ctx, 4, part | seg);
+            const uint32_t flags = (g_rng() % 2u) ? 0x40000u : static_cast<uint32_t>(g_rng() % 4u == 0u ? g_rng() : 0x40004u);
+            setGpr64(ctx, 5, flags | (g_rng() & 0xFFFFFFFF00000000ull));
+            return;
+        }
+        case 0x147568u: // MtxInverse(out, in)
+        {
+            uint32_t out = base, in = base + 0x100u;
+            if (g_rng() % 2u) // a rotation x scale with a translation, as the game inverts
+            {
+                Mat4f m;
+                randomRigid(m);
+                for (uint32_t k = 0; k < 16u; ++k)
+                    setFloat(in + 4u * k, m.v[k]);
+            }
+            const uint32_t pick2 = static_cast<uint32_t>(g_rng() % 16u);
+            if (pick2 == 0)
+                for (uint32_t k = 0; k < 12u; ++k)
+                    setU32(in + 4u * k, 0u); // det 0: the unit matrix
+            else if (pick2 == 1)
+                for (uint32_t k = 0; k < 4u; ++k)
+                {
+                    uint32_t w;
+                    std::memcpy(&w, g_ramA + in + 4u * k, 4);
+                    setU32(in + 0x20u + 4u * k, w); // row 2 = row 0
+                }
+            else if (pick2 == 2)
+                out = in;                                // in place
+            else if (pick2 == 3)
+                in += 4u;                                // unaligned: declined
+            else if (pick2 == 4)
+                setFloat(in + 4u * static_cast<uint32_t>(g_rng() % 11u), 1.0e13f); // past 2^41: declined
+            setGpr(ctx, 4, out | seg), setGpr(ctx, 5, in | seg);
             return;
         }
         default:
@@ -2752,16 +2888,16 @@ namespace
         std::printf("wrote %d batch-2 maths vectors to %s\n", written, b2Path.c_str());
 
         // Rung 4 (<path>.motion, libvu0_check replays them on motion_core.h): the recompiled Adjust_theta_vec,
-        // MtxInitRotVec, MtxMulRotVec and MtxMulScaleVec on clean contexts. A record: kind, order, in (v / angles /
+        // MtxInitRotVec, MtxMulRotVec, MtxMulScaleVec and MtxInverse (kind 4: A -> out) on clean contexts. A record: kind, order, in (v / angles /
         // scale), the theta table, the coefficients, A, then the original's 64 result bytes (theta: 16).
         const std::string motionPath = std::string(path) + ".motion";
         f = std::fopen(motionPath.c_str(), "wb");
         written = 0;
-        const Recompiled motionFns[4] = {&Adjust_theta_vec_0x1f7da0, &MtxInitRotVec_0x147728, &MtxMulRotVec_0x147b60,
-                                         &MtxMulScaleVec_0x147bf8};
+        const Recompiled motionFns[5] = {&Adjust_theta_vec_0x1f7da0, &MtxInitRotVec_0x147728, &MtxMulRotVec_0x147b60,
+                                         &MtxMulScaleVec_0x147bf8, &MtxInverse_0x147568};
         for (int i = 0; i < count; ++i)
         {
-            const uint32_t kind = static_cast<uint32_t>(i % 4);
+            const uint32_t kind = static_cast<uint32_t>(i % 5);
             R5900Context ctx;
             randomContext(ctx);
             const uint32_t out = 0x20000u, a = 0x20100u, in = 0x20200u;
@@ -2772,6 +2908,13 @@ namespace
             for (uint32_t k = 0; k < 6u; ++k)
                 setU32(0x41EA00u + 4u * k, 0x147788u + (k == 0u ? 0u : k == 1u ? 0x28u : k == 2u ? 0x50u : k == 3u ? 0x88u : k == 4u ? 0xC0u : 0xF8u));
             fillFloats(g_ramA, a, 16, false);
+            if (kind == 4u && g_rng() % 2u)
+            {
+                Mat4f m;
+                randomRigid(m);
+                for (uint32_t k = 0; k < 16u; ++k)
+                    setFloat(a + 4u * k, m.v[k]);
+            }
             const uint32_t order = static_cast<uint32_t>(g_rng() % 7u);
             if (kind == 0u)
                 for (uint32_t k = 0; k < 4u; ++k)
@@ -2794,7 +2937,7 @@ namespace
             setGpr(ctx, 5, kind == 1u ? in : a);
             setGpr(ctx, 6, kind == 1u ? order : in);
             setGpr(ctx, 7, order);
-            ctx.pc = kind == 0u ? 0x1F7DA0u : kind == 1u ? 0x147728u : kind == 2u ? 0x147B60u : 0x147BF8u;
+            ctx.pc = kind == 0u ? 0x1F7DA0u : kind == 1u ? 0x147728u : kind == 2u ? 0x147B60u : kind == 3u ? 0x147BF8u : 0x147568u;
             g_dueAt = 0;
             motionFns[kind](g_ramA, &ctx, g_rt);
             std::memcpy(record + 152, g_ramA + (kind == 1u ? in + 0x100u : out), kind == 0u ? 16u : 64u);
@@ -2992,13 +3135,23 @@ int main(int argc, char **argv)
         {0x14AAB8u, &cModel_Tag_set_scr_0x14aab8},
         {0x1F7DA0u, &Adjust_theta_vec_0x1f7da0}, {0x1476D0u, &MtxInitTransVec_0x1476d0},
         {0x147728u, &MtxInitRotVec_0x147728},    {0x147A08u, &MtxInitScaleVec_0x147a08},
-        {0x147B60u, &MtxMulRotVec_0x147b60},     {0x147BF8u, &MtxMulScaleVec_0x147bf8}};
+        {0x147B60u, &MtxMulRotVec_0x147b60},     {0x147BF8u, &MtxMulScaleVec_0x147bf8},
+        {0x147B18u, &MtxMulTransVec_0x147b18},   {0x147A48u, &MtxInitCoord_0x147a48},
+        {0x150138u, &cParts_calcLocal_0x150138}, {0x147568u, &MtxInverse_0x147568},
+        {0x1501D0u, &func_001501D0_0x1501d0}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
     g_callees.push_back({0x31CDC0u, &SearchDataByTwoNames_0x31cdc0});
     g_callees.push_back({0x1522C0u, &cIDBase_getSlotPtr_0x1522c0});
     g_callees.push_back({0x30A870u, &sceVu0RotMatrix_0x30a870}); // MtxInitRotVec's order 5
+    for (const auto &[address, f] : std::initializer_list<std::pair<uint32_t, void (*)(uint8_t *, R5900Context *, PS2Runtime *)>>{
+             {0x1478A8u, &MtxInitRotQuaternion_0x1478a8}, {0x147C40u, &CopyVec3ToField30_147C40_0x147c40},
+             {0x147C60u, &ForwardVec3At30_147C60_0x147c60}, {0x150710u, &func_00150710_0x150710},
+             {0x159FC8u, &Quaternion_SetRotationAxis_0x159fc8}, {0x1F7FB8u, &capVu0Cos_0x1f7fb8},
+             {0x3A19F8u, &sinf_0x3a19f8}, {0x3A3C80u, &ps2___kernel_cosf_0x3a3c80},
+             {0x3A4728u, &ps2___kernel_sinf_0x3a4728}})
+        g_callees.push_back({address, f}); // func_001501D0's twist path (no natives: the native declines it)
     for (const auto &[address, f] : std::initializer_list<std::pair<uint32_t, void (*)(uint8_t *, R5900Context *, PS2Runtime *)>>{
              {0x3A4830u, &ps2___kernel_tanf_0x3a4830}, {0x3A3768u, &ps2___ieee754_rem_pio2f_0x3a3768},
              {0x3A3DD8u, &ps2___kernel_rem_pio2f_0x3a3dd8}, {0x3A19D8u, &func_003A19D8_0x3a19d8},
@@ -3091,7 +3244,8 @@ int main(int argc, char **argv)
         for (uint32_t caller : {0x30A8C8u, 0x30A978u, 0x147528u, 0x147548u, 0x101E28u, 0x31A650u, 0x31A600u, 0x14D768u,
                                 0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u,
                                 0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u, 0x14D0E8u, 0x153B00u, 0x14B810u,
-                                0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u})
+                                0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u, 0x147B18u, 0x147A48u,
+                                0x150138u, 0x1501D0u})
             if (fn.address == caller)
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;

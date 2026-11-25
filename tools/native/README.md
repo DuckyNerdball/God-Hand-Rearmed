@@ -33,7 +33,11 @@ with kamite/git_commit.h):
        func_0014C7E8_0x14c7e8 cModel_Tag_set_rate_0x14ac90 func_0014D0E8_0x14d0e8 func_00153B00_0x153b00
        func_002D81A0_0x2d81a0 cModel_nodeLayer_0x14bef8 func_0014B810_0x14b810 cModel_queuePacket_0x14c6b8
        cModel_Tag_set_scr_0x14aab8 Adjust_theta_vec_0x1f7da0 MtxInitTransVec_0x1476d0 MtxInitRotVec_0x147728
-       MtxInitScaleVec_0x147a08 MtxMulRotVec_0x147b60 MtxMulScaleVec_0x147bf8 sceVu0RotMatrix_0x30a870"
+       MtxInitScaleVec_0x147a08 MtxMulRotVec_0x147b60 MtxMulScaleVec_0x147bf8 sceVu0RotMatrix_0x30a870
+       MtxMulTransVec_0x147b18 MtxInitCoord_0x147a48 cParts_calcLocal_0x150138 MtxInverse_0x147568
+       func_001501D0_0x1501d0 MtxInitRotQuaternion_0x1478a8 CopyVec3ToField30_147C40_0x147c40
+       ForwardVec3At30_147C60_0x147c60 func_00150710_0x150710 Quaternion_SetRotationAxis_0x159fc8 capVu0Cos_0x1f7fb8
+       sinf_0x3a19f8 ps2___kernel_cosf_0x3a3c80 ps2___kernel_sinf_0x3a4728"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -159,8 +163,10 @@ src/kamite/native/motion.cpp + motion_core.h (claude/rung4-motion-map.md), switc
 native kRenderPath | kChargeAtEnd with returns = 0, allowed per batch by `caller_scan.py <ELF> <repo> --rels <God Hand
 Extract\dll\debugoptimize> <addr>...` (0 sites reading a scratch register after the call, ELF and the 81 DLLs).
 setupMotion gives them angles / orders / aliasing / frames; MtxInitRotVec's jump table (0x41EA00) and Adjust_theta_vec's
-table (0x3BF110) are test regions. `<vectors>.motion` (Adjust_theta_vec, MtxInitRotVec, MtxMulRotVec, MtxMulScaleVec
-from the recompiled functions) runs in libvu0_check on SSE / plain C++ / NEON. checkNative counts a call as interrupted
+table (0x3BF110) are test regions. `<vectors>.motion` (Adjust_theta_vec, MtxInitRotVec, MtxMulRotVec, MtxMulScaleVec,
+MtxInverse from the recompiled functions) runs in libvu0_check on SSE / plain C++ / NEON. Batch 2's composites chain
+batch 1's bodies in registers (motion.cpp multiplyStep / rotationStep, each step checked as its own native checks it);
+func_001501D0's twist path (+0x154 & 0x800) is declined, its callees are in the test as recompiled-only. checkNative counts a call as interrupted
 only when the original's own checkpoint came due (its dueAt-th call), not on any differing pc: a native whose original
 restores a frame it overwrote (another ra) is compared and fails (planted: MtxMulScaleVec's out in its frame).
 New setups draw from g_rng only for their own functions: a draw for every native shifts all later inputs, and on a
