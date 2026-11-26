@@ -833,13 +833,19 @@
     {
       "id": "GraphicsAPI",
       "label": "Graphics API",
-      "help": "Vulkan: the renderer on Linux",
+      "help": "Default: Vulkan | Fallback: DX11",
       "group": "Renderer",
       "choices": [
         {
           "label": "Vulkan",
           "set": {
             "Video/GraphicsAPI": "vulkan"
+          }
+        },
+        {
+          "label": "Direct3D 11",
+          "set": {
+            "Video/GraphicsAPI": "dx11"
           }
         }
       ],
