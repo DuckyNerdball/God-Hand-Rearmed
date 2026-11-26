@@ -29,6 +29,9 @@ namespace ps2_host_input
     void setMouseCameraEnabled(bool enabled);
     void setMouseStickEnabled(bool enabled);
     [[nodiscard]] MouseCameraInput consumeMouseCameraInput();
+    // Player 1's controller touchpad since the last call (Trackpad Tango, K Nov 26): x / y in touchpad widths / heights
+    // (right and down positive), active while a finger is down. Any thread.
+    [[nodiscard]] MouseCameraInput consumeTouchpadInput();
 
     // Controller pad (0-based) settings when controls.ini has no [Pad<pad+1>] section: PCSX2's [PadN] keys in file
     // order, a key repeated once per binding. urban.exe writes controls.ini with them.

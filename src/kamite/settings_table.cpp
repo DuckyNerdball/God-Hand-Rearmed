@@ -354,6 +354,14 @@ namespace kamite::settings
                                  "ModernAutoHold"),
                           "ControlStyle", "hold"),
                       kPad)),
+        // Trackpad Tango (K, Nov 25-26): under either Modern (parentAllows); the touchpad's speed is F2's / GHR.ini's.
+        live(onDevice(note(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Trackpad Tango",
+                                      "Trackpad or mouse turns the freecam & RS dodges.\n"
+                                      "For Steam pads, Steam Deck & PlayStation touchpads.",
+                                      "Game", "TrackpadTango", false),
+                               "ControlStyle"),
+                           "F2 > Controls sets the touchpad speed."),
+                      kPad)),
         live(onDevice(gameList(choice(Tab::Gameplay, "Move & Groove", "Control Style: KBM",
                                       "Keyboard & mouse.\nClassic: PS2's OG brawling. Modern: mouse freecam.",
                                       "Game", "KbmControlStyle", "modern", kKbmControlStyles)),
@@ -541,6 +549,8 @@ namespace kamite::settings
             return false;
         if (!setting.parent)
             return true;
+        if (std::strcmp(setting.id, "TrackpadTango") == 0) // both Modern styles (Toggle, Hold), not Classic
+            return modernStyle(ini, kPad);
         if (std::strcmp(setting.parent, "DisplayMode") == 0) // two keys in GHR.ini (StartFullscreen, StartMaximized)
             return !ini.getBool("Video", "StartFullscreen", true) && !ini.getBool("Video", "StartMaximized", false);
         // Hold's Auto: not under Hold to Cam (brawl mode is its rest state; K, Nov 20).

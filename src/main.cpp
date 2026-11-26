@@ -474,6 +474,8 @@ namespace
         {"game", "camerainverty", "KAMITE_CAMERA_INVERT_Y"},
         {"game", "mousecamera", "KAMITE_MOUSE_CAMERA"},
         {"game", "mousesensitivity", "KAMITE_MOUSE_SENSITIVITY"},
+        {"game", "trackpadtango", "KAMITE_TRACKPAD_TANGO"},
+        {"game", "touchpadsensitivity", "KAMITE_TOUCHPAD_SENSITIVITY"},
         {"video", "startfullscreen", "KAMITE_START_FULLSCREEN"},
         {"video", "posteffects", "PS2X_PCSX2_NATIVE_SCALING"},
         {"video", "depthoffield", "PS2X_PCSX2_DOF"},

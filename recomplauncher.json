@@ -1400,6 +1400,32 @@
       }
     },
     {
+      "id": "TrackpadTango",
+      "label": "Modern: Trackpad Tango",
+      "help": "Trackpad or mouse turns the freecam & RS dodges. For Steam pads, Steam Deck & PlayStation touchpads.",
+      "group": "Move & Groove",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "Game/TrackpadTango": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "Game/TrackpadTango": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/TrackpadTango": "0"
+      },
+      "when": {
+        "Game/ControlStyle": "1"
+      }
+    },
+    {
       "id": "KbmControlStyle",
       "label": "Control Style: KBM",
       "help": "Keyboard & mouse. Classic: PS2's OG brawling. Modern: mouse freecam.",

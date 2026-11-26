@@ -325,6 +325,32 @@ namespace ps2_host_gamepads
         return kGlfwButtons[static_cast<size_t>(button)] >= 0 && glfwJoystickIsGamepad(device) != 0;
     }
 
+    bool touchpad(int device, float &x, float &y)
+    {
+        if (device < 0 || device >= kMaxDevices)
+            return false;
+#if defined(PS2X_HAS_SDL3)
+        if (g_sdl)
+        {
+            SDL_Gamepad *gamepad = g_devices[static_cast<size_t>(device)].gamepad;
+            const int pads = gamepad ? SDL_GetNumGamepadTouchpads(gamepad) : 0;
+            if (pads < 1)
+                return false;
+            bool down = false;
+            float px = 0.0f, py = 0.0f, pressure = 0.0f;
+            if (!SDL_GetGamepadTouchpadFinger(gamepad, pads - 1, 0, &down, &px, &py, &pressure) || !down)
+                return false;
+            x = px;
+            y = py;
+            return true;
+        }
+#else
+        (void)x;
+        (void)y;
+#endif
+        return false;
+    }
+
     float axis(int device, Axis axis)
     {
         if (device < 0 || device >= kMaxDevices || axis < 0 || axis >= AxisCount)

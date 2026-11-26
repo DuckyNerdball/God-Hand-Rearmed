@@ -2369,6 +2369,40 @@ namespace ps2_host_input
         g_mouseCameraEnabled.store(enabled, std::memory_order_relaxed);
     }
 
+    namespace
+    {
+        // Player 1's touchpad (Trackpad Tango): the finger's movement between samples, gathered until taken.
+        std::mutex g_touchMutex;
+        MouseCameraInput g_touchInput;
+        bool g_touchWas = false;
+        float g_touchLastX = 0.0f, g_touchLastY = 0.0f;
+
+        void updateTouchpad(int device)
+        {
+            float x = 0.0f, y = 0.0f;
+            const bool down = device >= 0 && ps2_host_gamepads::touchpad(device, x, y);
+            std::lock_guard<std::mutex> lock(g_touchMutex);
+            if (down && g_touchWas)
+            {
+                g_touchInput.x += x - g_touchLastX;
+                g_touchInput.y += y - g_touchLastY;
+            }
+            g_touchInput.active = down;
+            g_touchWas = down;
+            g_touchLastX = x;
+            g_touchLastY = y;
+        }
+    }
+
+    MouseCameraInput consumeTouchpadInput()
+    {
+        std::lock_guard<std::mutex> lock(g_touchMutex);
+        MouseCameraInput input = g_touchInput;
+        g_touchInput.x = 0.0f;
+        g_touchInput.y = 0.0f;
+        return input;
+    }
+
     void setFieldCounter(const std::atomic<uint64_t> *counter)
     {
         g_fieldCounter.store(counter);
@@ -2391,6 +2425,7 @@ namespace ps2_host_input
         const uint32_t players = 2u + ((taps & 1u) ? 3u : 0u) + ((taps & 2u) ? 3u : 0u);
         updateActivePad();
         updateExtra();
+        updateTouchpad(playerOneDevice());
         if (g_menuKeysChanged.exchange(false, std::memory_order_acq_rel))
             rebuildConfigs(); // Menu Controls changed: the keyboard's confirm and cancel keys follow
         std::array<PadInputState, kMaxPlayers> state{};

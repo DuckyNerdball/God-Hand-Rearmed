@@ -114,6 +114,11 @@ namespace kamite::modern
         std::atomic<bool> g_invertY{false};
         std::atomic<bool> g_mouseCamera{true};
         std::atomic<float> g_mouseSensitivity{0.1f}; // degrees per pixel
+        // Trackpad Tango (K, Nov 25-26; later.md "Control styles redesign"): the controller's free camera on the mouse
+        // (a Steam pad's trackpad through Steam Input) and the controller's own touchpad (SDL: a DualShock 4 /
+        // DualSense, a Steam pad without Steam Input), the right stick the game's dodge toward screen directions.
+        std::atomic<bool> g_tango{false};
+        std::atomic<float> g_touchSensitivity{180.0f}; // degrees per touchpad width
 
         // Camera side -> input side.
         std::atomic<bool> g_battleCamera{false};
@@ -160,6 +165,8 @@ namespace kamite::modern
             return ps2_host_input::prompts::lastDevice() == ps2_host_input::prompts::Device::Keys ? 1 : 0;
         }
         bool modernNow() { return (device() ? g_kbmModern : g_modern).load(std::memory_order_relaxed); }
+        // Trackpad Tango in effect: the controller in use under Modern with the option on.
+        bool tangoNow() { return device() == 0 && g_modern.load(std::memory_order_relaxed) && g_tango.load(std::memory_order_relaxed); }
         // Modern: Hold is in effect (the controller's style; the keyboard has no Hold).
         bool holdNow()
         {
@@ -350,15 +357,17 @@ namespace kamite::modern
                 }
                 return;
             }
-            if (keyDodge)
+            if (keyDodge || tangoNow())
             {
-                // Shift + the move keys in the free camera: the game's dodge from Gene's facing (the left stick's keys
-                // went to the right stick); the camera keeps still. The keys are the camera's directions, turned
-                // into his (K, Nov 26: free-camera dodges follow the camera, not wherever he faces; Modern and
-                // Strafing Tiger alike).
+                // Shift + the move keys in the free camera (the left stick's keys went to the right stick), or the
+                // right stick under Trackpad Tango (the camera is on the trackpad / mouse): the game's dodge, the
+                // camera's directions turned into his (K, Nov 26: free-camera dodges follow the camera, not wherever
+                // he faces; Modern and Strafing Tiger alike). The camera stick keeps still; Tango's left stick still
+                // moves him.
                 g_stickX = 0.0f;
                 g_stickY = 0.0f;
-                g_moving = false;
+                if (keyDodge)
+                    g_moving = false;
                 if (std::fmax(std::fabs(rx), std::fabs(ry)) > 0.2f)
                 {
                     const float m = std::fmin(std::sqrt(rx * rx + ry * ry), 1.0f);
@@ -367,13 +376,22 @@ namespace kamite::modern
                     state.rightX = static_cast<uint8_t>(std::lround(std::fmin(std::fmax(128.0f - std::sin(r) * m * 127.0f, 0.0f), 255.0f)));
                     state.rightY = static_cast<uint8_t>(std::lround(std::fmin(std::fmax(128.0f - std::cos(r) * m * 127.0f, 0.0f), 255.0f)));
                 }
-                return;
+                else if (!keyDodge)
+                {
+                    state.rightX = 0x80u; // Tango: a resting stick (inside the 0.2 the dodge needs) is no dodge
+                    state.rightY = 0x80u;
+                }
+                if (keyDodge)
+                    return;
             }
-            // The free camera has the right stick; the game sees it centred (no dodges).
-            g_stickX = stickAxis(state.rightX);
-            g_stickY = stickAxis(state.rightY);
-            state.rightX = 0x80u;
-            state.rightY = 0x80u;
+            else
+            {
+                // The free camera has the right stick; the game sees it centred (no dodges).
+                g_stickX = stickAxis(state.rightX);
+                g_stickY = stickAxis(state.rightY);
+                state.rightX = 0x80u;
+                state.rightY = 0x80u;
+            }
 
             if (g_controlsOff.load(std::memory_order_relaxed))
             {
@@ -434,7 +452,11 @@ namespace kamite::modern
         ps2_host_input::MouseCameraInput takeMouse()
         {
             // The mouse is the keyboard's: its camera follows the keyboard & mouse Control Style.
-            const int wanted = (g_kbmModern.load(std::memory_order_relaxed) && g_mouseCamera.load(std::memory_order_relaxed)) ? 1 : 0;
+            // Trackpad Tango gives the controller's Modern the mouse camera too (Steam Input's trackpad is a mouse).
+            const int wanted = ((g_kbmModern.load(std::memory_order_relaxed) && g_mouseCamera.load(std::memory_order_relaxed)) ||
+                                (g_modern.load(std::memory_order_relaxed) && g_tango.load(std::memory_order_relaxed)))
+                                   ? 1
+                                   : 0;
             if (wanted != g_mouseState)
             {
                 g_mouseState = wanted;
@@ -550,6 +572,8 @@ namespace kamite::modern
             ini.setBool("Game", "CameraInvertY", g_invertY.load());
             ini.setBool("Game", "MouseCamera", g_mouseCamera.load());
             ini.set("Game", "MouseSensitivity", number2(g_mouseSensitivity.load()));
+            ini.setBool("Game", "TrackpadTango", g_tango.load());
+            ini.set("Game", "TouchpadSensitivity", number(g_touchSensitivity.load()));
             ini.set("Game", "MenuButtons", menu_buttons::styleName(menu_buttons::styleSetting()));
             ini.set("Game", "ButtonPrompts", prompt_hd::choiceName(prompt_hd::choice()));
             setStatus(ini.save() ? "Saved to GHR.ini." : "Could not write GHR.ini.");
@@ -633,6 +657,11 @@ namespace kamite::modern
                 slider(ui, "Sensitivity##mousesens", g_mouseSensitivity, 0.02f, 0.5f, "%.3f deg/pixel");
                 ui->end_disabled();
                 ui->text_disabled("Click in the game to capture the mouse; Esc frees it (so does this menu).");
+                ui->separator_text("Trackpad Tango (controller, Modern)");
+                checkbox(ui, "The trackpad / mouse turns the free camera, the right stick dodges##tango", g_tango);
+                ui->begin_disabled(!g_tango.load());
+                slider(ui, "Touchpad speed##touchsens", g_touchSensitivity, 30.0f, 720.0f, "%.0f deg per width");
+                ui->end_disabled();
             }
 
             ui->separator_text("Now");
@@ -786,6 +815,7 @@ namespace kamite::modern
         FreeCamera out;
         g_geneYaw.store(geneYaw, std::memory_order_relaxed);
         const ps2_host_input::MouseCameraInput mouse = takeMouse();
+        const ps2_host_input::MouseCameraInput touch = ps2_host_input::consumeTouchpadInput(); // taken every frame
         if (!modernNow())
         {
             g_tracking = true;
@@ -839,6 +869,14 @@ namespace kamite::modern
                 const float perPixel = g_mouseSensitivity.load(std::memory_order_relaxed) * kDegToRad;
                 yawStep += mouse.x * perPixel * (g_invertX.load() ? -1.0f : 1.0f);
                 pitchStep += mouse.y * perPixel * (g_invertY.load() ? -1.0f : 1.0f);
+            }
+            if (tangoNow())
+            {
+                // Trackpad Tango: the controller's own touchpad as a mouse (a finger across its width = TouchpadSensitivity
+                // degrees; up / down at the same rate per its width).
+                const float perWidth = g_touchSensitivity.load(std::memory_order_relaxed) * kDegToRad;
+                yawStep += touch.x * perWidth * (g_invertX.load() ? -1.0f : 1.0f);
+                pitchStep += touch.y * perWidth * (g_invertY.load() ? -1.0f : 1.0f);
             }
             g_yaw = wrapAngle(g_yaw - yawStep);
             const float floor = std::fmax(kPitchMin, std::fmin(g_pitchFloor.load(std::memory_order_relaxed), 0.0f));
@@ -894,6 +932,7 @@ namespace kamite::modern
     void setKbmModern(bool on) { g_kbmModern = on; }
     void setKbmAuto(bool on) { g_kbmAuto = on; }
     void setMouseCamera(bool on) { g_mouseCamera = on; }
+    void setTrackpadTango(bool on) { g_tango = on; }
     void setInvertY(bool on) { g_invertY = on; }
 
     bool autoEnabled() { return autoNow(); }
@@ -934,6 +973,8 @@ namespace kamite::modern
         g_invertY = envBool("KAMITE_CAMERA_INVERT_Y", false);
         g_mouseCamera = envBool("KAMITE_MOUSE_CAMERA", true);
         g_mouseSensitivity = envFloat("KAMITE_MOUSE_SENSITIVITY", 0.1f, 0.01f, 1.0f);
+        g_tango = envBool("KAMITE_TRACKPAD_TANGO", false);
+        g_touchSensitivity = envFloat("KAMITE_TOUCHPAD_SENSITIVITY", 180.0f, 30.0f, 720.0f);
         g_iniPath = cameraIniPath();
         ps2_host_input::setPadFilter(&padFilter);
         KM_INFO(Game, "control style: controller " << (g_modern.load() ? (g_hold.load() ? (g_holdCam.load() ? "hold to cam" : g_auto.load() ? "hold, auto" : "hold")

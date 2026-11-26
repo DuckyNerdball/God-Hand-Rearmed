@@ -58,6 +58,9 @@ namespace ps2_host_gamepads
     [[nodiscard]] bool hasButton(int device, Button button);
     // Sticks -1..1 (down and right positive), triggers 0..1.
     [[nodiscard]] float axis(int device, Axis axis);
+    // A finger on the controller's touchpad (SDL3 only; the last touchpad, the right one on a pad with two): true and
+    // its place (0..1, right and down positive) while one is down; false without SDL, a touchpad or a finger.
+    [[nodiscard]] bool touchpad(int device, float &x, float &y);
     // 0..1 each (large = low frequency motor); sent when it changes and refreshed while it runs.
     void setRumble(int device, float large, float small);
 
