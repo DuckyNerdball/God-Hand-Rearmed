@@ -10,6 +10,10 @@ Bounded walk of the caller's control flow (both branch ways) from the return poi
 its slot base by tools/snr2 (rooms 0x799080, event 0x7A8080, mcport 0x7C0080; raw .rel immediates are 0 + relocations,
 so only linked images are scanned). For the ELF and every DLL it also counts code pointers to the functions (lui +
 addiu / ori pairs, data words outside the ELF's SNR2 export table): a pointer means calls the scan can't see (jalr).
+--table <addr>:<returns>: functions called through a jump table (rung 4 M3: the pose's interpolators at 0x3BD910): every
+lui + addiu / ori pair forming the table's address marks its function, and every jalr in that function is walked like
+a jal site (a function may keep the base in a saved register: the pose's s7); data words holding the table's address
+are listed (calls the scan can't follow).
 """
 import csv, os, re, sys, bisect
 import rabbitizer as rz
@@ -20,6 +24,12 @@ rels = None
 if "--rels" in args:
     k = args.index("--rels")
     rels = args[k + 1]
+    del args[k:k + 2]
+table = None
+if "--table" in args:
+    k = args.index("--table")
+    ta, _, tret = args[k + 1].partition(":")
+    table = (int(ta, 16), tret or "n")
     del args[k:k + 2]
 elf, repo = args[:2]
 funcs = {}
@@ -221,6 +231,38 @@ def scan(label, code, data, owner, a, ret, skip=range(0)):
     return len(jal), len(j), len(bad), len(ptr)
 
 
+def scan_table(label, code, data, owner, a, ret, skip=range(0)):
+    """(jalr sites, sites read after, data refs) for the jump table at a; prints the flagged sites."""
+    refs = pointers(code, data, a, skip)
+    code_refs = [r for r in refs if any(v <= r < v + len(d) for v, d in code)]
+    data_refs = [r for r in refs if r not in code_refs]
+    sites, bad, done = [], [], set()
+    for r in code_refs:
+        name, end = owner(r)
+        if name in done:
+            continue
+        done.add(name)
+        # every jalr of a function that loads the table (it may keep the base in a saved register: the pose's s7)
+        start = r
+        while start - 4 >= 0 and owner(start - 4)[0] == name and word(start - 4) is not None:
+            start -= 4
+        for pc in range(start, end, 4):
+            if word(pc) is None:
+                break
+            i = rz.Instruction(word(pc), pc, category=rz.InstrCategory.R5900)
+            if i.getOpcodeName() == "jalr":
+                sites.append(pc)
+                flags = set()
+                walk(pc + 8, end, ret, set(), 96, set(), flags)
+                if flags:
+                    bad.append((pc, name, sorted(flags)[:3]))
+    for s, n, fl in bad[:8]:
+        print(f"   {label} {s:X} in {n}: " + "; ".join(f"{p:X} {r} [{t}]" for p, r, t in fl))
+    for s in data_refs[:4]:
+        print(f"   {label} {s:X}: the table's address in data")
+    return len(done), len(sites), len(bad), len(data_refs)
+
+
 def elf_owner(s):
     k = bisect.bisect_right(starts, s) - 1
     return funcs[starts[k]][0], funcs[starts[k]][1]
@@ -243,6 +285,10 @@ for a, ret in targets:
     n_jal, n_j, n_bad, n_ptr = scan("ELF", elf_segs, elf_segs, elf_owner, a, ret, exp)
     print(f"{a:06X} {funcs[a][0]}: {n_jal} call sites, {n_bad} read a scratch register after the call"
           f"{f', {n_j} j' if n_j else ''}{f', {n_ptr} code pointers' if n_ptr else ''}")
+if table:
+    n_ref, n_sites, n_bad, n_data = scan_table("ELF", elf_segs, elf_segs, elf_owner, table[0], table[1], exp)
+    print(f"table {table[0]:06X}: {n_ref} functions load it, {n_sites} jalr sites, {n_bad} read a scratch register after the "
+          f"call{f', {n_data} data words' if n_data else ''}")
 
 if rels:
     sys.path.insert(0, os.path.join(repo, "tools", "snr2"))
@@ -252,6 +298,7 @@ if rels:
     with open(elf, "rb") as f:
         reg = Registry.from_boot_elf(f.read())
     total = {a: [0, 0, 0, 0, []] for a, _ in targets}
+    table_total = [0, 0, 0, 0, []]
     names = sorted(n for n in os.listdir(rels) if n.lower().endswith(".rel"))
     for nm in names:
         base = {"event.rel": 0x7A8080, "mcport.rel": 0x7C0080}.get(nm.lower(), 0x799080)
@@ -274,6 +321,12 @@ if rels:
                 total[a][k] += r[k]
             if r[0] or r[1] or r[3]:
                 total[a][4].append(nm[:-4])
+        if table:
+            r = scan_table(nm, code, [(base, img)], owner, table[0], table[1], own)
+            for k in range(4):
+                table_total[k] += r[k]
+            if any(r):
+                table_total[4].append(nm[:-4])
     segs = elf_segs
     print(f"DLLs: {len(names)} linked")
     for a, ret in targets:
@@ -281,3 +334,7 @@ if rels:
         print(f"{a:06X} {funcs[a][0]}: {n_jal} DLL call sites, {n_bad} read a scratch register after the call"
               f"{f', {n_j} j' if n_j else ''}{f', {n_ptr} code pointers' if n_ptr else ''}"
               f"{' (' + ' '.join(mods) + ')' if mods else ''}")
+    if table:
+        n_ref, n_sites, n_bad, n_data, mods = table_total
+        print(f"table {table[0]:06X}: {n_ref} DLL functions load it, {n_sites} jalr sites, {n_bad} read a scratch register "
+              f"after the call{f', {n_data} data words' if n_data else ''}{' (' + ' '.join(mods) + ')' if mods else ''}")

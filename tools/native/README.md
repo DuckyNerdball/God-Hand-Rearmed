@@ -39,7 +39,8 @@ with kamite/git_commit.h):
        ForwardVec3At30_147C60_0x147c60 func_00150710_0x150710 Quaternion_SetRotationAxis_0x159fc8 capVu0Cos_0x1f7fb8
        sinf_0x3a19f8 ps2___kernel_cosf_0x3a3c80 ps2___kernel_sinf_0x3a4728 func_00156D70_0x156d70
        func_0015A6A0_0x15a6a0 func_0015A190_0x15a190 capVu0LengthSq_0x1f7e28 sceVu0ScaleVectorXYZ_0x30aba0
-       capVu0Atan2_0x1f8180 cModel_calcParts_0x149eb8 cModel_calcWorldParts_0x14a038"
+       capVu0Atan2_0x1f8180 cModel_calcParts_0x149eb8 cModel_calcWorldParts_0x14a038
+       func_00156508_0x156508 func_00156550_0x156550 func_00158CD0_0x158cd0"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -193,3 +194,15 @@ The twist setups (setupMotion's twistSetup: the join and both passes) add twist 
 game's values, sinf's edges and past them) and the tables (setTwistTables: the axis 0x3BD8B0, capVu0Cos's 0x3BF140,
 both test regions), and now and then the part moved onto the axis (0x3BD800: declined). `<vectors>.twist` (the scaled
 path's product + the twist, from the recompiled func_001501D0) runs in libvu0_check.
+
+## M3 batch 1: the Hermite track (rung 4, Nov 26)
+
+func_00158CD0 (the pose's kind-1 interpolator: nearly every animated channel; kind 0, a constant, is the other) with
+its half-float unpacks func_00156508 / 00156550 inline and as natives of their own. The pose calls the interpolators
+through its table at 0x3BD910 (jalr): `caller_scan.py ... --table 3BD910:f <addr>[:returns]...` walks every jalr of the
+functions that load the table (the pose, setMotionInfo, MotionGetParam, func_00139180). setupMotion gives the track real
+Hermite tracks when `KM_TRACKS=<file>` names a pool (u32 n, u32 the motion's frames, u32 bytes, the track; written in the
+sandbox from the game's em00.dat / pl00.dat, never committed), else made-up ones; t at a key's time (the equal path),
+between keys, x.5, before / past the ends, specials. An unaligned record or track, or a record in the frame (the saved
+registers overwrite it before its offset is read), would make the original follow garbage: not set up. `<vectors>.track`
+(trackSample against the recompiled function) runs in libvu0_check.

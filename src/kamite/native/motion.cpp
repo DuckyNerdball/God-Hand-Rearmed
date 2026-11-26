@@ -743,6 +743,78 @@ namespace kamite::native::motion
             returnFrom(ctx);
             return true;
         }
+        // ==== M3 (batch 1): the Hermite track (the pose's kind-1 interpolator) and its half-float unpacks ============
+        // Called by the pose through its table at 0x3BD910 (jalr) and by each other (jal); caller_scan (ELF + DLLs, the
+        // table's 27 jalr sites): no caller reads a scratch register after them.
+        constexpr uint32_t kHalf = 0x156508u, kHalf4 = 0x156550u, kHalfTable = 0x41EDF0u, kTrack = 0x158CD0u;
+        // ---- func_00156508 (a0 = a 16-bit float; asm, jr ra + nop): f0 = halfBits(a0) -----------------------------------
+        template <class Env>
+        bool halfNative(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            e::setFBits(ctx, 0, halfBits(e::u32(ctx, e::a0)));
+            ctx->pc = e::u32(ctx, e::ra); // nop delay slot: in_delay_slot as it was
+            return true;
+        }
+        // ---- func_00156550 (a0 = out, a1 = in; asm, MMI, jr ra + nop): four halfBits by the table's lanes --------------
+        // lq in (a1 & ~0xF), the table's four quadwords, then sq out (a0 & ~0xF): all read before the write.
+        template <class Env>
+        bool half4Native(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            uint32_t in, out, table;
+            if (!plainRam(e::u32(ctx, e::a1) & ~0xFu, 16u, in) || !plainRam(e::u32(ctx, e::a0) & ~0xFu, 16u, out) ||
+                !plainRam(kHalfTable, 64u, table))
+                return false;
+            uint32_t x[4], t[16], r[4];
+            std::memcpy(x, env.at(in, 16u), 16);
+            std::memcpy(t, env.at(table, 64u), 64);
+            for (uint32_t q = 0; q < 4u; ++q)
+                r[q] = halfLane(x[q], t, q);
+            std::memcpy(env.at(out, 16u), r, 16);
+            ctx->pc = e::u32(ctx, e::ra);
+            return true;
+        }
+        // ---- func_00158CD0 (a0 = the motion, a1 = its record, f12 = t; asm): the track's value at t in f0 ----------------
+        // record: +2 the key count n (lhu), +8 the track's offset (lw); track = a0 + it (addu). motion_core trackSample.
+        // A 0xA0 frame, its saved registers stored before any read (the Hermite's four words at +0x00..+0x1F): the record,
+        // the track with its keys (+0xC + 4n) and 0x41EDF0's table clear of it.
+        constexpr uint32_t kTrackFrame = 0xA0u;
+        template <class Env>
+        bool trackNative(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp0 = e::u32(ctx, e::sp), a1 = e::u32(ctx, e::a1);
+            uint32_t frame, rec, table;
+            if ((sp0 & 0xFu) != 0u || (a1 & 3u) != 0u || !plainRam(sp0 - kTrackFrame, kTrackFrame, frame) ||
+                !plainRam(a1, 12u, rec) || e::overlaps(rec, 12u, frame, kTrackFrame) || !plainRam(kHalfTable, 64u, table) ||
+                e::overlaps(table, 64u, frame, kTrackFrame))
+                return false;
+            const uint32_t n = u16At(env.at(rec + 2u, 2u));
+            const uint32_t trackAddress = e::u32(ctx, e::a0) + e::read32(env, rec + 8u);
+            const uint32_t span = 0xCu + 4u * n;
+            uint32_t track;
+            if ((trackAddress & 1u) != 0u || !plainRam(trackAddress, span, track) || e::overlaps(track, span, frame, kTrackFrame))
+                return false;
+            uint32_t t[16];
+            std::memcpy(t, env.at(table, 64u), 64);
+            Exact x;
+            int calls = 0, loops = 0;
+            const float v = trackSample(x, env.at(track, span), n, bitsFloat(e::fBits(ctx, 12)), t, calls, loops);
+            if (!x.ok)
+                return false;
+            for (int k = 0; k < calls; ++k)
+                env.call();
+            for (int k = 0; k < loops; ++k)
+                env.checkpoint(32u);
+            e::setFBits(ctx, 0, floatBits(v));
+            returnFrom(ctx);
+            return true;
+        }
+
         // ==== M2 (batch 3): cModel_calcParts and cModel_calcWorldParts fused ===========================================
         // The whole per-model pass as one native: the model's own matrix (MtxInitCoord) and its parts' (Adjust_theta_vec,
         // cParts_calcLocal, the blend 0x156D70, the parent join 0x1501D0), each callee run by its own native's body on a
@@ -1074,5 +1146,16 @@ namespace kamite::native::motion
         addPass("cModel_calcParts", kCalcParts, &calcPartsNative<RealEnv>, &calcPartsNative<ShadowEnv>, true);
         addPass("cModel_calcWorldParts", kCalcWorldParts, &calcWorldPartsNative<RealEnv>, &calcWorldPartsNative<ShadowEnv>,
                 true);
+        // M3 (batch 1, Nov 26): the Hermite track and its half-float unpacks; f0 is the result of two of them.
+        auto addF = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
+                       bool (*shadow)(ShadowEnv &, R5900Context *), bool checked, uint32_t returns) {
+            NativeFunction fn{name, address, "motion", checked, real, shadow, nullptr};
+            fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
+            fn.returns = returns;
+            registerFunction(fn);
+        };
+        addF("func_00156508", kHalf, &halfNative<RealEnv>, &halfNative<ShadowEnv>, false, NativeFunction::kReturnsF0);
+        addF("func_00156550", kHalf4, &half4Native<RealEnv>, &half4Native<ShadowEnv>, false, 0u);
+        addF("func_00158CD0", kTrack, &trackNative<RealEnv>, &trackNative<ShadowEnv>, false, NativeFunction::kReturnsF0);
     }
 }

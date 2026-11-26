@@ -524,6 +524,130 @@ namespace kamite::native::motion
         return out;
     }
 
+    // ==== M3: the pose's leaves (rung 4, Nov 26; rung4-motion-map.md "M3") ============================================
+    // ---- func_00156508 (a0 = a PlatinumGames 16-bit float: sign 1, exponent 6 with bias 47, mantissa 9; asm): its f32
+    // bits by integer ops alone: s = a0 << 14; ((s & 0x1F800000) + 0x28000000) | (s & 0x7FFF00) | ((s << 2) & 0x80000000)
+    // (so 0 comes out as 2^-47, not 0).
+    inline uint32_t halfBits(uint32_t a0)
+    {
+        const uint32_t s = a0 << 14;
+        return (((s & 0x7FFF00u) | ((s & 0x1F800000u) + 0x28000000u)) | ((s << 2) & 0x80000000u));
+    }
+    // ---- func_00156550 (a0 = out, a1 = in: four words; asm, MMI): the same per 32-bit lane with the four quadwords at
+    // 0x41EDF0 (t = 16 words; lane q: T0[q] & s + T1[q] (paddw), | T2[q] & s, | T3[q] & (s << 2); the ELF's lanes are all
+    // 0x1F800000, 0x28000000, 0x7FFFFF, 0x80000000).
+    inline uint32_t halfLane(uint32_t x, const uint32_t t[16], uint32_t q)
+    {
+        const uint32_t s = x << 14;
+        return ((s & t[8 + q]) | ((s & t[q]) + t[4 + q])) | ((s << 2) & t[12 + q]);
+    }
+    inline uint16_t u16At(const uint8_t *p)
+    {
+        return static_cast<uint16_t>(p[0] | (p[1] << 8));
+    }
+    // c.eq.s: the runtime's compare key (exponent-0 values as 0)
+    inline bool fpuEqual(float a, float b) { return fpuKey(floatBits(a)) == fpuKey(floatBits(b)); }
+    // ---- func_00158CD0: a Hermite track at time t (the pose's kind-1 interpolator; asm) ----------------------------
+    // track (12-byte header: half floats pos, dpos, tan0, dtan0, tan1, dtan1) then n 4-byte keys (frames since the last
+    // key, value step, incoming and outgoing tangent steps). k = track + 0xC (key -1 = the header's last 4 bytes). In the
+    // asm's order and ops: frames summed (add.s of cvt.s.w) until the sum equals t (key value) or passes it; past it the
+    // sum steps back one key (sub.s) and sums again from that key (a second loop: the re-sum may land differently), then
+    // the segment's Hermite between key s3 (= the first loop's key - 1, kept) and the key the second loop stopped at; past
+    // the last key, the last key's value (key[n - 1], or the header's byte 9 when n = 0). value = byte dpos + pos (mul.s,
+    // add.s). calls: 2 (0x156508) + 1 (0x156550) on the Hermite path; loops: the taken back-edges.
+    inline float trackSample(Exact &x, const uint8_t *track, uint32_t n, float t, const uint32_t table[16], int &calls,
+                             int &loops)
+    {
+        const float pos = bitsFloat(halfBits(u16At(track))), dpos = bitsFloat(halfBits(u16At(track + 2)));
+        const uint8_t *k = track + 0xC;
+        calls = 2, loops = 0;
+        auto value = [&](int64_t key) { // key -1: the header's last 4 bytes
+            return x.add(x.mul(static_cast<float>(k[4 * key + 1]), dpos), pos);
+        };
+        float sum = bitsFloat(0u);
+        uint32_t v1 = 0;
+        if (n == 0u)
+            return value(-1);
+        for (;;)
+        {
+            const float dt = static_cast<float>(k[4u * v1]);
+            sum = x.add(sum, dt);
+            if (fpuEqual(sum, t))
+                return value(v1);
+            if (!fpuLess(sum, t))
+            {
+                // 0x158DA4: step back one key and sum again from it
+                const float before = x.sub(sum, dt);
+                const int32_t s3 = static_cast<int32_t>(v1) - 1;
+                sum = before;
+                uint32_t j = v1;
+                if (j < n)
+                    for (;;)
+                    {
+                        sum = x.add(sum, static_cast<float>(k[4u * j]));
+                        if (fpuEqual(sum, t))
+                            return value(j);
+                        ++v1;
+                        if (!fpuLess(sum, t))
+                        {
+                            // 0x158E58: the Hermite between key s3 and key j
+                            const uint8_t *a = k + 4 * s3, *b = k + 4u * j;
+                            uint32_t c[4];
+                            for (uint32_t q = 0; q < 4u; ++q)
+                                c[q] = halfLane(u16At(track + 4u + 2u * q), table, q);
+                            calls = 3;
+                            const float seg = x.sub(sum, before);
+                            const float u = x.div(x.sub(t, before), seg);
+                            const float tan0 = bitsFloat(c[0]), dtan0 = bitsFloat(c[1]), tan1 = bitsFloat(c[2]),
+                                        dtan1 = bitsFloat(c[3]);
+                            float f5 = x.mul(static_cast<float>(a[3]), dtan1);
+                            float f7 = x.mul(static_cast<float>(a[1]), dpos);
+                            float f2 = x.mul(u, u);
+                            float f4 = x.mul(static_cast<float>(b[1]), dpos);
+                            f7 = x.add(f7, pos);
+                            float f6 = x.mul(f2, u);
+                            const float f8 = x.mul(f2, bitsFloat(0x40400000u));
+                            f4 = x.add(f4, pos);
+                            float f0 = x.add(f6, f6);
+                            f6 = x.sub(f6, f2);
+                            float f1 = static_cast<float>(b[2]);
+                            float f3 = negBits(f0);
+                            f0 = x.sub(f0, f8);
+                            f2 = x.sub(f6, f2);
+                            f3 = x.add(f3, f8);
+                            f0 = x.mul(f0, f7);
+                            f1 = x.mul(f1, dtan0);
+                            f5 = x.add(f5, tan1);
+                            f2 = x.add(f2, u);
+                            f0 = x.add(f0, f7);
+                            f4 = x.mul(f4, f3);
+                            f1 = x.add(f1, tan0);
+                            f5 = x.mul(f5, f2);
+                            f0 = x.add(f0, f4);
+                            f1 = x.mul(f1, f6);
+                            f0 = x.add(f0, f5);
+                            return x.add(f0, f1);
+                        }
+                        ++j;
+                        if (v1 < n)
+                        {
+                            ++loops;
+                            continue;
+                        }
+                        break;
+                    }
+                return value(s3); // 0x158E14: past the last key on the second sum
+            }
+            ++v1;
+            if (v1 < n)
+            {
+                ++loops;
+                continue;
+            }
+            return value(static_cast<int64_t>(n) - 1); // 0x158D84
+        }
+    }
+
     // MtxMultiply(out, A, B) = sceVu0MulMatrix: out row k = A's rows weighted by B row k (mulRow). Both below 2^62.
     inline bool productInputs(const Mat4 &a, const Mat4 &b)
     {

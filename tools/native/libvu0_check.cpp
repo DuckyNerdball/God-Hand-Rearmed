@@ -406,9 +406,37 @@ int main(int argc, char **argv)
         std::fclose(o);
     }
     bad += twistBad;
+
+    // The track (<vectors>.track, M3: n, t, the 0x156550 table, the track -> func_00158CD0's f0), motion_core's
+    // trackSample.
+    int trackCount = 0, trackBad = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".track").c_str(), "rb"))
+    {
+        unsigned char rec[4 + 4 + 64 + 0xC + 4 * 64 + 4];
+        while (std::fread(rec, 1, sizeof(rec), o) == sizeof(rec))
+        {
+            uint32_t n, table[16], want;
+            float t;
+            std::memcpy(&n, rec, 4), std::memcpy(&t, rec + 4, 4), std::memcpy(table, rec + 8, 64);
+            std::memcpy(&want, rec + 72 + 0xC + 4 * 64, 4);
+            motion::Exact x;
+            int calls = 0, loops = 0;
+            const float v = motion::trackSample(x, rec + 72, n, t, table, calls, loops);
+            if (!x.ok)
+                continue;
+            ++trackCount;
+            uint32_t got;
+            std::memcpy(&got, &v, 4);
+            if (got != want && ++trackBad <= 5)
+                std::printf("track vector %d differs\n", trackCount);
+        }
+        std::fclose(o);
+    }
+    bad += trackBad;
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
                 "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ; twist %d vectors, "
-                "%d differ\n", path, count, bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad, rotCount, rotBad,
-                opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad);
+                "%d differ; track %d vectors, %d differ\n", path, count,
+                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad, rotCount, rotBad, opsCount, opsBad,
+                b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad, trackCount, trackBad);
     return bad ? 1 : 0;
 }

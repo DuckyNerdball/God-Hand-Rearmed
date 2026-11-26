@@ -85,3 +85,6 @@ func_0015A190,0x0015A190,decomp,func_0015A190,src/cod/0015a190.c,eed8dc0,02dfc0e
 MtxInitRotQuaternion,0x001478A8,decomp,MtxInitRotQuaternion,src/cod/001478a8.c,eed8dc0,5de34f40e54f,rung 4 M1 blend batch: the C's FPU order; kRenderPath|kChargeAtEnd
 cModel_calcParts,0x00149EB8,decomp,cModel_calcParts,src/cod/00149eb8.c,eed8dc0,c5d298b2a4a1,rung 4 M2 (batch 3): fused; MtxInitCoord / Adjust_theta_vec / calcLocal / the blend / 0x1501D0 by their natives on a JournalEnv; kRenderPath|kChargeAtEnd
 cModel_calcWorldParts,0x0014A038,decomp,cModel_calcWorldParts,src/cod/0014a038.c,eed8dc0,6418e7798a8c,rung 4 M2 (batch 3): fused as calcParts; the dead MtxInverse / sceVu0MulMatrix into its frame charged only; kRenderPath|kChargeAtEnd
+func_00156508,0x00156508,asm,,,,,rung 4 M3 batch 1: a 16-bit PlatinumGames float to f32 bits (integer ops); returns f0; kRenderPath|kChargeAtEnd
+func_00156550,0x00156550,asm,,,,,rung 4 M3 batch 1: four of them by the 0x41EDF0 table's lanes (MMI); kRenderPath|kChargeAtEnd
+func_00158CD0,0x00158CD0,asm,,,,,rung 4 M3 batch 1: the pose's kind-1 (Hermite) track: both key loops and the Hermite in the asm's order; 0x156508 / 0x156550 inline; returns f0; kRenderPath|kChargeAtEnd

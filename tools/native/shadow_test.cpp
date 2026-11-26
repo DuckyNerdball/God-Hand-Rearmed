@@ -152,6 +152,10 @@ KM_RECOMPILED(capVu0Atan2_0x1f8180)
 // M2 (batch 3): the per-model passes
 KM_RECOMPILED(cModel_calcParts_0x149eb8)
 KM_RECOMPILED(cModel_calcWorldParts_0x14a038)
+// M3 (batch 1): the Hermite track and its half-float unpacks
+KM_RECOMPILED(func_00156508_0x156508)
+KM_RECOMPILED(func_00156550_0x156550)
+KM_RECOMPILED(func_00158CD0_0x158cd0)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -352,7 +356,8 @@ namespace
                                    {0x45EF00u, 0x100u}, {0x3C1100u, 0x100u}, {0x586B00u, 0x100u},
                                    // rung 4: Adjust_theta_vec's table (0x3BF110)
                                    {0x3BF100u, 0x60u}, {0x41EA00u, 0x20u}, // + MtxInitRotVec's switch, capVu0Cos's table (0x3BF140)
-                                   {0x42C340u, 0x40u}, {0x41EE40u, 0x20u}}; // + capVu0Atan2's table, 0x15A190's next
+                                   {0x42C340u, 0x40u}, {0x41EE40u, 0x20u}, // + capVu0Atan2's table, 0x15A190's next
+                                   {0x41EDF0u, 0x40u}}; // M3: func_00156550's table
     constexpr uint32_t usedBytes()
     {
         uint32_t total = 0;
@@ -2006,6 +2011,56 @@ namespace
         for (uint32_t i = 0; i < 3u; ++i)
             setFloat(at + 4u * i, angle());
     }
+    // M3: real Hermite tracks (KM_TRACKS=<file>: u32 n, u32 the motion's frames, u32 bytes, the track; written from the
+    // game's em00.dat / pl00.dat in the sandbox, never committed); without it, made-up ones.
+    struct RealTrack
+    {
+        uint32_t n, frames;
+        std::vector<uint8_t> bytes;
+    };
+    const std::vector<RealTrack> &realTracks()
+    {
+        static const std::vector<RealTrack> tracks = [] {
+            std::vector<RealTrack> out;
+            const char *path = std::getenv("KM_TRACKS");
+            std::FILE *f = path ? std::fopen(path, "rb") : nullptr;
+            if (!f)
+                return out;
+            uint32_t head[3];
+            while (std::fread(head, 4, 3, f) == 3)
+            {
+                RealTrack t{head[0], head[1], std::vector<uint8_t>(head[2])};
+                if (std::fread(t.bytes.data(), 1, head[2], f) != head[2])
+                    break;
+                out.push_back(std::move(t));
+            }
+            std::fclose(f);
+            std::printf("KM_TRACKS: %zu real tracks\n", out.size());
+            return out;
+        }();
+        return tracks;
+    }
+    // func_00156550's table (the ELF's four quadwords), sometimes other words
+    void setHalfTable(bool wild)
+    {
+        static constexpr uint32_t kTable[4] = {0x1F800000u, 0x28000000u, 0x7FFFFFu, 0x80000000u};
+        for (uint32_t k = 0; k < 16u; ++k)
+            setU32(0x41EDF0u + 4u * k, (wild && g_rng() % 4u == 0u) ? static_cast<uint32_t>(g_rng()) : kTable[k / 4u]);
+    }
+    // A half float as the game's tracks hold them, sometimes any 16 bits, sometimes upper bits set (the natives take a0
+    // whole: lhu gives 16 bits, a test may give more)
+    uint32_t halfWord()
+    {
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 8u);
+        if (pick < 5)
+            return static_cast<uint32_t>(g_rng() % 0x10000u);
+        if (pick == 5)
+            return 0u;
+        if (pick == 6)
+            return 0x7E00u | static_cast<uint32_t>(g_rng() % 0x200u); // the top exponent
+        return static_cast<uint32_t>(g_rng());
+    }
+
     // func_001501D0's twist (partFlags 0x800; the join's and the passes' setups only, so the others keep their draws):
     // the axis at 0x3BD8B0 (the ELF's (0, 1, 0, 1); sometimes a unit 4-vector or wild words) and capVu0Cos's polynomial
     // at 0x3BF140 (the ELF's: the same words as ecossin's kSinPolynomial; sometimes other values).
@@ -2157,7 +2212,7 @@ namespace
             fn.address != 0x147B60u && fn.address != 0x147BF8u && fn.address != 0x147B18u && fn.address != 0x147A48u &&
             fn.address != 0x150138u && fn.address != 0x147568u && fn.address != 0x1501D0u && fn.address != 0x156D70u &&
             fn.address != 0x15A6A0u && fn.address != 0x15A190u && fn.address != 0x1478A8u && fn.address != 0x149EB8u &&
-            fn.address != 0x14A038u)
+            fn.address != 0x14A038u && fn.address != 0x156508u && fn.address != 0x156550u && fn.address != 0x158CD0u)
             return;
         R5900Context &ctx = call.ctx;
         // func_001501D0's twist (partFlags 0x800) in the join and both passes (rung 4, Nov 26): their own setups
@@ -2424,6 +2479,89 @@ namespace
                     setGpr(ctx, 4, 0x3BD800u | seg);
                 }
             }
+            return;
+        }
+        case 0x156508u: // func_00156508(a0 = a half float): f0
+            setGpr64(ctx, 4, (g_rng() % 4u == 0u) ? (static_cast<uint64_t>(g_rng()) << 32) | g_rng() : halfWord());
+            return;
+        case 0x156550u: // func_00156550(out, in): four half floats
+        {
+            setHalfTable(wild);
+            uint32_t in = base + 0x100u, out = base + 0x200u;
+            if (pick == 0)
+                out = in; // in place
+            else if (pick == 1)
+                out = in + 8u; // overlapping (sq writes out & ~0xF)
+            for (uint32_t k = 0; k < 4u; ++k)
+                setU32(in + 4u * k, halfWord());
+            setGpr(ctx, 4, (out + ((pick == 2) ? 4u : 0u)) | seg), setGpr(ctx, 5, (in + ((pick == 3) ? 12u : 0u)) | seg);
+            return;
+        }
+        case 0x158CD0u: // func_00158CD0(motion, record, f12 = t): f0
+        {
+            setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
+            setHalfTable(wild);
+            const std::vector<RealTrack> &real = realTracks();
+            // (an unaligned record or track would fault on the PS2: the recompiled run aborts on it, so none here)
+            uint32_t track = 0x80000u + 0x400u * static_cast<uint32_t>(g_rng() % 64u) + ((pick == 4) ? 2u : 0u);
+            const bool inFrame = pick == 6 && g_rng() % 2u; // the track in the frame (a short made-up one): declined
+            uint32_t n, frames;
+            if (inFrame)
+                track = sp - 0x80u;
+            if (!inFrame && !real.empty() && g_rng() % 4u)
+            {
+                const RealTrack &r = real[g_rng() % real.size()];
+                n = r.n, frames = r.frames;
+                std::memcpy(g_ramA + track, r.bytes.data(), r.bytes.size());
+                std::memcpy(g_ramB + track, r.bytes.data(), r.bytes.size());
+            }
+            else
+            {
+                n = (g_rng() % 8u == 0u) ? 0u : static_cast<uint32_t>(g_rng() % (inFrame ? 4u : 40u)) + 1u;
+                frames = 0;
+                for (uint32_t k = 0; k < 6u; ++k)
+                    setU16(track + 2u * k, static_cast<uint16_t>(halfWord()));
+                for (uint32_t k = 0; k < n; ++k)
+                {
+                    const uint32_t key = static_cast<uint32_t>(g_rng());
+                    // frames since the last key: mostly a few, some 0 (two keys on one frame)
+                    setU32(track + 0xCu + 4u * k, (key & ~0xFFu) | ((g_rng() % 6u == 0u) ? 0u : g_rng() % 12u));
+                    frames += g_ramA[track + 0xCu + 4u * k];
+                }
+            }
+            // t: a key's time (the equal path), between keys, x.5 (60 FPS), before / past the ends, specials
+            float t;
+            const uint32_t tp = static_cast<uint32_t>(g_rng() % 10u);
+            float keyTime = 0.0f;
+            const uint32_t stop = n ? static_cast<uint32_t>(g_rng() % n) : 0u;
+            for (uint32_t k = 0; k <= stop && k < n; ++k)
+                keyTime += static_cast<float>(g_ramA[track + 0xCu + 4u * k]);
+            if (tp < 3)
+                t = keyTime;
+            else if (tp < 6)
+                t = keyTime + static_cast<float>(g_rng() % 1000u) / 1000.0f * ((g_rng() % 2u) ? 1.0f : -1.0f);
+            else if (tp < 7)
+                t = keyTime + 0.5f;
+            else if (tp < 8)
+                t = static_cast<float>(frames) + static_cast<float>(g_rng() % 20u);
+            else if (tp < 9)
+                t = (g_rng() % 2u) ? -static_cast<float>(g_rng() % 10u) : 0.0f;
+            else
+            {
+                const uint32_t bits = gameFloat();
+                std::memcpy(&t, &bits, 4);
+            }
+            ctx.f[12] = t;
+            // the record: +2 n, +8 the track's offset from a0 (any motion base; the add wraps)
+            // (a record in the frame would be overwritten by the saved registers before its offset is read: the original
+            // would then follow garbage; a track in the frame only reads garbage values: declined)
+            const uint32_t record = base + ((pick == 5) ? 4u : 0u);
+            const uint32_t motion = static_cast<uint32_t>(g_rng() % 0x200000u);
+            setU32(record, static_cast<uint32_t>(g_rng()));
+            setU16(record + 2u, static_cast<uint16_t>(n));
+            setU32(record + 4u, static_cast<uint32_t>(g_rng()));
+            setU32(record + 8u, track - motion);
+            setGpr(ctx, 4, motion), setGpr(ctx, 5, record | seg);
             return;
         }
         case 0x149EB8u: // cModel_calcParts(model)
@@ -3412,6 +3550,59 @@ namespace
         }
         std::fclose(f);
         std::printf("wrote %d twist vectors to %s\n", written, twistPath.c_str());
+
+        // The track (<path>.track, M3): n, t, func_00156550's table, the track (up to 64 keys) -> the recompiled
+        // func_00158CD0's f0.
+        const std::string trackPath = std::string(path) + ".track";
+        f = std::fopen(trackPath.c_str(), "wb");
+        written = 0;
+        const std::vector<RealTrack> &real = realTracks();
+        for (int i = 0; i < count; ++i)
+        {
+            R5900Context ctx;
+            randomContext(ctx);
+            setHalfTable(false);
+            const uint32_t record = 0x20000u, track = 0x20100u;
+            uint8_t rec[4 + 4 + 64 + 0xC + 4 * 64 + 4] = {};
+            uint32_t n = 0;
+            if (!real.empty() && i % 4 != 3)
+            {
+                const RealTrack &r = real[g_rng() % real.size()];
+                if (r.n <= 64u)
+                {
+                    n = r.n;
+                    std::memcpy(g_ramA + track, r.bytes.data(), r.bytes.size());
+                }
+            }
+            else
+            {
+                n = static_cast<uint32_t>(g_rng() % 65u);
+                for (uint32_t k = 0; k < 6u; ++k)
+                    setU16(track + 2u * k, static_cast<uint16_t>(halfWord()));
+                for (uint32_t k = 0; k < n; ++k)
+                    setU32(track + 0xCu + 4u * k, (static_cast<uint32_t>(g_rng()) & ~0xFFu) | (g_rng() % 10u));
+            }
+            float keyTime = 0.0f;
+            const uint32_t stop = n ? static_cast<uint32_t>(g_rng() % n) : 0u;
+            for (uint32_t k = 0; k <= stop && k < n; ++k)
+                keyTime += static_cast<float>(g_ramA[track + 0xCu + 4u * k]);
+            const float t = (g_rng() % 3u == 0u) ? keyTime : keyTime + static_cast<float>(static_cast<int>(g_rng() % 2001u) - 1000) / 1000.0f;
+            setU16(record + 2u, static_cast<uint16_t>(n));
+            setU32(record + 8u, track);
+            setGpr(ctx, 29, 0xF0000u), setGpr(ctx, 31, 0x00123450u);
+            setGpr(ctx, 4, 0u), setGpr(ctx, 5, record);
+            ctx.f[12] = t;
+            ctx.pc = 0x158CD0u;
+            std::memcpy(rec, &n, 4), std::memcpy(rec + 4, &t, 4), std::memcpy(rec + 8, g_ramA + 0x41EDF0u, 64);
+            std::memcpy(rec + 72, g_ramA + track, 0xC + 4 * 64);
+            g_dueAt = 0;
+            func_00158CD0_0x158cd0(g_ramA, &ctx, g_rt);
+            std::memcpy(rec + 72 + 0xC + 4 * 64, &ctx.f[0], 4);
+            std::fwrite(rec, 1, sizeof(rec), f);
+            ++written;
+        }
+        std::fclose(f);
+        std::printf("wrote %d track vectors to %s\n", written, trackPath.c_str());
         resetRam();
     }
 }
@@ -3607,7 +3798,9 @@ int main(int argc, char **argv)
         {0x1501D0u, &func_001501D0_0x1501d0},    {0x156D70u, &func_00156D70_0x156d70},
         {0x15A6A0u, &func_0015A6A0_0x15a6a0},    {0x15A190u, &func_0015A190_0x15a190},
         {0x1478A8u, &MtxInitRotQuaternion_0x1478a8},
-        {0x149EB8u, &cModel_calcParts_0x149eb8}, {0x14A038u, &cModel_calcWorldParts_0x14a038}};
+        {0x149EB8u, &cModel_calcParts_0x149eb8}, {0x14A038u, &cModel_calcWorldParts_0x14a038},
+        {0x156508u, &func_00156508_0x156508},    {0x156550u, &func_00156550_0x156550},
+        {0x158CD0u, &func_00158CD0_0x158cd0}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
@@ -3747,7 +3940,7 @@ int main(int argc, char **argv)
                                 0x150DC8u, 0x150F68u, 0x151168u, 0x1503B8u, 0x2D8008u, 0x2D7E50u, 0x1F8DF8u,
                                 0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u, 0x14D0E8u, 0x153B00u, 0x14B810u,
                                 0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u, 0x147B18u, 0x147A48u,
-                                0x150138u, 0x1501D0u, 0x156D70u, 0x15A6A0u, 0x149EB8u, 0x14A038u})
+                                0x150138u, 0x1501D0u, 0x156D70u, 0x15A6A0u, 0x149EB8u, 0x14A038u, 0x158CD0u})
             if (fn.address == caller && !overridden(fn))
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;
