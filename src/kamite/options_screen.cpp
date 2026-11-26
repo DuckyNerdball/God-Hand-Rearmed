@@ -2005,7 +2005,9 @@ namespace kamite::options_screen
             case settings::Kind::Choice:
                 if (setting->gameSlider)
                     return r.choice <= 0;
-                return setting->choiceCount <= 3 && settings::choiceIndex(*setting, settings::value(g_ini, *setting)) == 0;
+                // A < value > list goes round (K, Nov 26: Control Style, Texture Filtering): Left never leaves it.
+                return !setting->gameList && setting->choiceCount <= 3 &&
+                       settings::choiceIndex(*setting, settings::value(g_ini, *setting)) == 0;
             case settings::Kind::Custom:
                 return false;
             }

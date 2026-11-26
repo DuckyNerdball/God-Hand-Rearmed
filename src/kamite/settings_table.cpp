@@ -579,6 +579,8 @@ namespace kamite::settings
         const Setting *parent = find(setting.parent);
         if (!parent)
             return true;
+        if (!parentAllows(ini, *parent))
+            return false; // a hidden row hides its own (K, Nov 26: Auto Brawl under a Switching that Classic hides)
         if (setting.parentValue)
             return same(value(ini, *parent), setting.parentValue);
         return on(ini, *parent);

@@ -5614,6 +5614,22 @@ namespace kamite::launcher
             const float th = textSize(state.bookFonts.heading, hs, state.bookTitle.c_str(), w).y;
             bookRule(b, dl, m.x, m.x + w, m.y + 6.0f * u + th + 6.0f * u, kBookInk, 1.8f * u, 3u);
             float size = 28.0f * u;
+            if (state.bookHelpRoom <= 0.0f)
+            {
+                // A setting's help: each of its own lines on one line (K, Nov 26: no wrapped help lines), the text
+                // down to 75% for the longest; past that it wraps.
+                float widest = 0.0f;
+                const std::string &help = state.bookHelp;
+                for (size_t start = 0; start <= help.size();)
+                {
+                    const size_t end = std::min(help.find('\n', start), help.size());
+                    const std::string line = help.substr(start, end - start);
+                    widest = std::max(widest, textSize(state.bookFonts.text, size, line.c_str()).x);
+                    start = end + 1;
+                }
+                if (widest > w && widest > 0.0f)
+                    size *= std::max(0.75f, w / widest * 0.995f);
+            }
             if (state.bookHelpRoom > 0.0f) // a long help (a mod's) shrinks to leave its page's stamps clear
             {
                 const float room = state.bookHelpRoom * u - (th + 50.0f * u), h = textSize(state.bookFonts.text, size, state.bookHelp.c_str(), w).y;
