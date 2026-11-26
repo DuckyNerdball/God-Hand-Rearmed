@@ -1805,11 +1805,12 @@ namespace kamite::native::motion
             registerFunction(fn);
         }
         // M5 batch 1 (Nov 26): matrix to Euler 0x147C88 (66 callers: IK and the moves) with its helpers inline, and the
-        // helpers as natives of their own; unchecked: replays shadow them.
-        addF("capVu0Atan2", kAtan2, &atan2Native<RealEnv>, &atan2Native<ShadowEnv>, false, NativeFunction::kReturnsF0);
-        addF("capVu0Acos", kAcos, &acosNative<RealEnv>, &acosNative<ShadowEnv>, false, NativeFunction::kReturnsF0);
-        addF("func_003A1B78", kAsinf, &asinfNative<RealEnv>, &asinfNative<ShadowEnv>, false, NativeFunction::kReturnsF0);
-        addF("MtxGetScaleVec", kScaleVec, &scaleVecNative<RealEnv>, &scaleVecNative<ShadowEnv>, false, 0u);
-        addF("func_00147C88", kMatToEuler, &matToEulerNative<RealEnv>, &matToEulerNative<ShadowEnv>, false, 0u);
+        // helpers as natives of their own; checked since K's 23:17 Build and Replay of 368d3b6 (atan2 11.63M, acos 3.96M,
+        // the asinf wrapper 1.12M, MtxGetScaleVec 1.20M, 0x147C88 1.12M calls compared, 0 mismatches; acos 2,890 declines).
+        addF("capVu0Atan2", kAtan2, &atan2Native<RealEnv>, &atan2Native<ShadowEnv>, true, NativeFunction::kReturnsF0);
+        addF("capVu0Acos", kAcos, &acosNative<RealEnv>, &acosNative<ShadowEnv>, true, NativeFunction::kReturnsF0);
+        addF("func_003A1B78", kAsinf, &asinfNative<RealEnv>, &asinfNative<ShadowEnv>, true, NativeFunction::kReturnsF0);
+        addF("MtxGetScaleVec", kScaleVec, &scaleVecNative<RealEnv>, &scaleVecNative<ShadowEnv>, true, 0u);
+        addF("func_00147C88", kMatToEuler, &matToEulerNative<RealEnv>, &matToEulerNative<ShadowEnv>, true, 0u);
     }
 }

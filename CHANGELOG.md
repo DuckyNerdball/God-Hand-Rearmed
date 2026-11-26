@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 26, 2026
 
+- Performance: turning bone matrices into angles (IK and many moves) runs as native code.
 - Performance: posing every bone from its animation each frame runs as native code.
 - Buck Breaker: the chest grab's posed bones play in full precision, as intended (they played at the animation's coarse steps).
 - Control styles renamed Classic Brawler / Modern Rambler (Strafing Tiger planned), moved to Controls with a Switching row.
