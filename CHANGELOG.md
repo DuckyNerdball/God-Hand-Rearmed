@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 26, 2026
 
+- Performance: decoding each animation's root motion runs as native code.
 - Performance: sampling the animation curves of every bone (their keyframes) runs as native code.
 - Pause menu: confirm / cancel hints, as on the Options screen.
 - EXIT in the pause menu and on the Options screen quits the game (confirm twice).

@@ -1238,7 +1238,9 @@ namespace kamite::native::motion
         addF("func_00156508", kHalf, &halfNative<RealEnv>, &halfNative<ShadowEnv>, true, NativeFunction::kReturnsF0);
         addF("func_00156550", kHalf4, &half4Native<RealEnv>, &half4Native<ShadowEnv>, true, 0u);
         addF("func_00158CD0", kTrack, &trackNative<RealEnv>, &trackNative<ShadowEnv>, true, NativeFunction::kReturnsF0);
-        // M3 (batch 2, Nov 26): the root channels' decode, shadowed (a walk reads one key at a time: up to kMaxSteps ranges).
+        // M3 (batch 2, Nov 26): the root channels' decode (a walk reads one key at a time: up to kMaxSteps ranges); checked
+        // since K's 16:08 Build and Replay of e0de538 (0x159AD0 17.93M, 0x159DA0 1.91M, readHeader 0.21M calls compared,
+        // 0 mismatches, 0 declines).
         auto addDecode = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
                             bool (*shadow)(ShadowEnv &, R5900Context *), bool checked, uint32_t returns) {
             NativeFunction fn{name, address, "motion", checked, real, shadow, nullptr};
@@ -1247,9 +1249,9 @@ namespace kamite::native::motion
             fn.maxRanges = 4096u + 16u;
             registerFunction(fn);
         };
-        addDecode("func_00159DA0", kDecodeKeys, &decodeKeysNative<RealEnv>, &decodeKeysNative<ShadowEnv>, false, 0u);
-        addDecode("RecDecode_readHeader", kReadHeader, &readHeaderNative<RealEnv>, &readHeaderNative<ShadowEnv>, false, 0u);
-        addDecode("func_00159AD0", kDecode, &decodeNative<RealEnv>, &decodeNative<ShadowEnv>, false,
+        addDecode("func_00159DA0", kDecodeKeys, &decodeKeysNative<RealEnv>, &decodeKeysNative<ShadowEnv>, true, 0u);
+        addDecode("RecDecode_readHeader", kReadHeader, &readHeaderNative<RealEnv>, &readHeaderNative<ShadowEnv>, true, 0u);
+        addDecode("func_00159AD0", kDecode, &decodeNative<RealEnv>, &decodeNative<ShadowEnv>, true,
                   NativeFunction::kReturnsF0);
     }
 }
