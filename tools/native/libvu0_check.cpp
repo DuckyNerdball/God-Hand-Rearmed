@@ -376,9 +376,39 @@ int main(int argc, char **argv)
         std::fclose(o);
     }
     bad += blendBad;
+
+    // The twist (<vectors>.twist: parent world, local, axis, angle, the cos table -> func_001501D0's world with partFlags
+    // 0x800 on its scaled path), motion_core.h's product + twist.
+    int twistCount = 0, twistBad = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".twist").c_str(), "rb"))
+    {
+        unsigned char rec[64 + 64 + 16 + 4 + 16 + 64];
+        while (std::fread(rec, 1, sizeof(rec), o) == sizeof(rec))
+        {
+            const motion::Mat4 pw{{load(rec), load(rec + 16), load(rec + 32), load(rec + 48)}};
+            const motion::Mat4 local{{load(rec + 64), load(rec + 80), load(rec + 96), load(rec + 112)}};
+            float axis[4], angle, c[4];
+            std::memcpy(axis, rec + 128, 16), std::memcpy(&angle, rec + 144, 4), std::memcpy(c, rec + 148, 16);
+            if (!motion::productInputs(pw, local))
+                continue;
+            motion::Mat4 w = motion::product(pw, local);
+            motion::Exact x;
+            int calls = 0;
+            if (!motion::twist(x, w, axis, angle, c, calls))
+                continue;
+            unsigned char got[64];
+            for (int k = 0; k < 4; ++k)
+                store(got + 16 * k, w.r[k]);
+            ++twistCount;
+            if (std::memcmp(got, rec + 164, 64) != 0 && ++twistBad <= 5)
+                std::printf("twist vector %d differs\n", twistCount);
+        }
+        std::fclose(o);
+    }
+    bad += twistBad;
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
-                "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ\n", path, count,
-                bad - rotBad - opsBad - b2Bad - motionBad - blendBad, rotCount, rotBad, opsCount, opsBad, b2Count, b2Bad, motionCount,
-                motionBad, blendCount, blendBad);
+                "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ; twist %d vectors, "
+                "%d differ\n", path, count, bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad, rotCount, rotBad,
+                opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad);
     return bad ? 1 : 0;
 }

@@ -182,6 +182,10 @@ namespace kamite::native
         // with and without some natives at full speed.
         const char *offValue = std::getenv("KAMITE_NATIVE_OFF");
         const std::string offList = offValue && *offValue ? lower(offValue) : "";
+        // A native may be registered twice at one address (rung 4, Nov 26: the twist variants after their checked
+        // selves): installed in registry order, a later one wraps what the slot holds (the live native, whose declines
+        // fall to the recompiled code). The harness keeps one slot per address: a second shadow there is left out.
+        std::vector<uint32_t> shadowedAddresses;
 #endif
         for (const NativeFunction &fn : registry())
         {
@@ -208,6 +212,12 @@ namespace kamite::native
             // Every native goes in the function's place behind its entry observers (K, Nov 21): observers keep running
             // first; `held` is what a declined call runs (the recompiled function, or a hook's replacement).
 #if !defined(KAMITE_RELEASE)
+            if (shadowed && std::find(shadowedAddresses.begin(), shadowedAddresses.end(), fn.address) != shadowedAddresses.end())
+            {
+                std::fprintf(stderr, "[native] %s 0x%08X: not shadowed (another native is shadow-checked there)\n", fn.name,
+                             fn.address);
+                continue;
+            }
             if (shadowed)
             {
                 if (!g_shadowing)
@@ -228,6 +238,7 @@ namespace kamite::native
                 if (!held)
                     continue;
                 shadow::add(fn, held);
+                shadowedAddresses.push_back(fn.address);
                 std::fprintf(stderr, "[native] %s 0x%08X: shadow-checked (%s)\n", fn.name, fn.address, how.c_str());
                 continue;
             }

@@ -347,11 +347,11 @@ namespace
                                    {0x5CAFF0u, 0x10u}, {0x747600u, 0x500u}, {0x755700u, 0x100u},
                                    {0x4F8000u, 0x18000u}, // batch 3: the frame allocator's areas around 0x506E10
                                    // step a: func_00154240's constants (D_003BD870..89F, D_004A6940) and the light set
-                                   {0x3BD800u, 0x100u}, {0x4A6900u, 0x100u}, {0x604700u, 0x80u}, {0x61A800u, 0x200u},
+                                   {0x3BD800u, 0x200u}, {0x4A6900u, 0x100u}, {0x604700u, 0x80u}, {0x61A800u, 0x200u},
                                    // the 0x14C7E8 batch: tanf's T table, the screen values D_003C1180 / 1190, D_00586B88
                                    {0x45EF00u, 0x100u}, {0x3C1100u, 0x100u}, {0x586B00u, 0x100u},
                                    // rung 4: Adjust_theta_vec's table (0x3BF110)
-                                   {0x3BF100u, 0x40u}, {0x41EA00u, 0x20u}, // + MtxInitRotVec's switch
+                                   {0x3BF100u, 0x60u}, {0x41EA00u, 0x20u}, // + MtxInitRotVec's switch, capVu0Cos's table (0x3BF140)
                                    {0x42C340u, 0x40u}, {0x41EE40u, 0x20u}}; // + capVu0Atan2's table, 0x15A190's next
     constexpr uint32_t usedBytes()
     {
@@ -2006,11 +2006,53 @@ namespace
         for (uint32_t i = 0; i < 3u; ++i)
             setFloat(at + 4u * i, angle());
     }
+    // func_001501D0's twist (partFlags 0x800; the *_twist natives only, so the other natives' setups keep their draws):
+    // the axis at 0x3BD8B0 (the ELF's (0, 1, 0, 1); sometimes a unit 4-vector or wild words) and capVu0Cos's polynomial
+    // at 0x3BF140 (the ELF's: the same words as ecossin's kSinPolynomial; sometimes other values).
+    void setTwistTables()
+    {
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 8u);
+        if (pick < 6)
+            for (uint32_t k = 0; k < 4u; ++k)
+                setU32(0x3BD8B0u + 4u * k, (k & 1u) ? 0x3F800000u : 0u);
+        else if (pick == 6)
+            setQuat(0x3BD8B0u);
+        else
+            floatsAt(0x3BD8B0u, 4, true);
+        if (g_rng() % 8u)
+            for (uint32_t k = 0; k < 4u; ++k)
+                setU32(0x3BF140u + 4u * k, kSinPolynomial[k]);
+        else
+            floatsAt(0x3BF140u, 4, false);
+    }
+    // A twist angle (part +0x150): 0 as the game mostly has it, -0, the game's other values (+-pi/6, -0.0683), angles up
+    // to +-3pi/2, sinf's edges (h = angle / 2 at pi/4, the near-pi/2 path, 3pi/4) and past them (declined), denormals,
+    // wild words.
+    void setTwistAngle(uint32_t at)
+    {
+        static constexpr uint32_t kEdges[] = {0x3FC90FD8u, 0x3FC90FD9u, 0x3FC90FDBu, 0x40490FD0u, 0x40490FDBu,
+                                              0x40490FDFu, 0x40490FE0u, 0x4096CBE3u, 0x4096CBE4u, 0x40C90FDBu};
+        const uint32_t sign = (g_rng() & 1u) << 31;
+        switch (g_rng() % 10u)
+        {
+        case 0:
+        case 1: setU32(at, 0u); break;
+        case 2: setU32(at, 0x80000000u); break;
+        case 3: setFloat(at, (g_rng() % 3u == 0u) ? -0.0683f : (sign ? -0.5235988f : 0.5235988f)); break;
+        case 4:
+        case 5: setFloat(at, (static_cast<float>(g_rng() % 2000001u) / 1000000.0f - 1.0f) * 4.712389f); break;
+        case 6: setU32(at, sign | kEdges[g_rng() % (sizeof(kEdges) / 4u)]); break;
+        case 7: setU32(at, sign | (static_cast<uint32_t>(g_rng()) & 0x7FFFFFu)); break;
+        case 8: setFloat(at, angle()); break;
+        default: setU32(at, gameFloat()); break;
+        }
+    }
     // M2: a cModel and its parts as the game lays them out (cModel.h): the model's pos pointer +0xF0 = &mtx[12]
     // (+0xB0), each part's anchor +0xD0 = &mtxLocal[12] (+0x30), parents the model or an earlier part (sometimes a
     // later one), parts +0x2C0 + 0x160 i after the model; flags, blend, rotOrder and partNum varied; now and then a
     // twist part (declined), a list shorter than partNum, a part in the frames or unaligned, NO_CALC with a set matrix.
-    void setupModel(uint32_t address, R5900Context &ctx, uint32_t sp, uint32_t pick, uint32_t seg, uint32_t base)
+    void setupModel(uint32_t address, R5900Context &ctx, uint32_t sp, uint32_t pick, uint32_t seg, uint32_t base,
+                    bool twistSetup)
     {
         setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
         setRotOrderTable();
@@ -2095,9 +2137,15 @@ namespace
             if (g_rng() % 4u == 0u)
                 flags |= 0x100000u;
             if (g_rng() % 24u == 0u)
-                flags |= 0x800u; // the twist: 0x1501D0 declines, so does the pass
+                flags |= 0x800u; // the twist: 0x1501D0 declines, so does the pass (the *_twist natives run it)
+            if (twistSetup && g_rng() % 3u == 0u)
+                flags |= 0x800u;
             setU32(part + 0x154u, flags);
+            if (twistSetup)
+                setTwistAngle(part + 0x150u);
         }
+        if (twistSetup)
+            setTwistTables();
         for (uint32_t a = 0; a < 0x200u; a += 4u)
             setU32(a, 0u);
         setGpr(ctx, 4, model | seg);
@@ -2112,6 +2160,7 @@ namespace
             fn.address != 0x14A038u)
             return;
         R5900Context &ctx = call.ctx;
+        const bool twistSetup = std::strstr(fn.name, "_twist") != nullptr; // the twist path's natives (rung 4, Nov 26)
         const uint32_t sp = 0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u);
         const uint32_t pick = static_cast<uint32_t>(g_rng() % 16u);
         if (g_rng() % 8u) // ecossin's own polynomial (else setupCall's ordinary values)
@@ -2359,11 +2408,26 @@ namespace
             setGpr(ctx, 4, part | seg);
             const uint32_t flags = (g_rng() % 2u) ? 0x40000u : static_cast<uint32_t>(g_rng() % 4u == 0u ? g_rng() : 0x40004u);
             setGpr64(ctx, 5, flags | (g_rng() & 0xFFFFFFFF00000000ull));
+            if (twistSetup)
+            {
+                // mostly a twist part (other flag bits random half the time), its angle, the tables; now and then the
+                // part moved onto the axis (0x3BD800: the world matrix the original writes covers 0x3BD8B0; declined)
+                if (g_rng() % 4u)
+                    setU32(part + 0x154u, 0x800u | ((g_rng() % 2u) ? static_cast<uint32_t>(g_rng()) : 0u));
+                setTwistAngle(part + 0x150u);
+                setTwistTables();
+                if (pick != 0 && g_rng() % 32u == 0u)
+                {
+                    std::memcpy(g_ramA + 0x3BD800u, g_ramA + part, 0x160u);
+                    std::memcpy(g_ramB + 0x3BD800u, g_ramA + part, 0x160u);
+                    setGpr(ctx, 4, 0x3BD800u | seg);
+                }
+            }
             return;
         }
         case 0x149EB8u: // cModel_calcParts(model)
         case 0x14A038u: // cModel_calcWorldParts(model): near models only
-            setupModel(fn.address, ctx, sp, pick, seg, base);
+            setupModel(fn.address, ctx, sp, pick, seg, base, twistSetup);
             return;
         case 0x147568u: // MtxInverse(out, in)
         {
@@ -2928,6 +2992,68 @@ namespace
         resetRam();
     }
 
+    // A replay's layering (native.cpp, rung 4 Nov 26): a native registered again at a checked native's address (the
+    // *_twist variants) is shadowed with the live checked native as the function it checks against, whose declines run
+    // the recompiled code. Here at a spare address: the shadowed call's outcome must be the recompiled alone's, and the
+    // harness must report no mismatch.
+    const NativeFunction *g_layerBase = nullptr;
+    Recompiled g_layerRecompiled = nullptr;
+    void layeredHeld(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
+    {
+        kamite::native::RealEnv env{rdram, rt};
+        if (!kamite::native::runNative(*g_layerBase, g_layerBase->runReal, env, ctx))
+            g_layerRecompiled(rdram, ctx, rt);
+    }
+    void checkLayered(const NativeFunction &variant, const NativeFunction &base, Recompiled recompiled, int calls,
+                      uint32_t address)
+    {
+        g_layerBase = &base;
+        g_layerRecompiled = recompiled;
+        NativeFunction slot = variant;
+        slot.address = address;
+        kamite::native::shadow::add(slot, &layeredHeld);
+        const kamite::native::shadow::Stats *stats = kamite::native::shadow::stats(address);
+        for (int i = 0; i < calls; ++i)
+        {
+            Call call;
+            setupCall(variant, call, (i % 4) == 3);
+            call.ctx.pc = address;
+            call.dueAt = 0; // the live native charges at its end: whole runs only (relaxed bar, as the replays compare)
+            const Outcome alone = runFrom(call, [&](R5900Context *ctx) { recompiled(g_ramA, ctx, g_rt); });
+            const Outcome shadowed = runFrom(call, [&](R5900Context *ctx) { kamite::native::shadow::entry(g_ramB, ctx, g_rt); });
+            if (!sameOutcomeFor(variant, call, alone, shadowed))
+            {
+                if (std::getenv("KM_DIFF"))
+                {
+                    std::printf("  charged %llu vs %llu\n", static_cast<unsigned long long>(alone.charged),
+                                static_cast<unsigned long long>(shadowed.charged));
+                    const auto *x = reinterpret_cast<const uint8_t *>(&alone.ctx), *y = reinterpret_cast<const uint8_t *>(&shadowed.ctx);
+                    for (size_t at = 0; at < sizeof(R5900Context); at += 4)
+                        if (std::memcmp(x + at, y + at, 4) != 0 && kamite::native::lastingContextByte(variant, at))
+                            std::printf("  ctx +0x%zX\n", at);
+                    int shown = 0;
+                    for (const Region &r : kRegions)
+                        for (uint32_t i = 0; i < r.size && shown < 8; i += 4)
+                            if (std::memcmp(g_ramA + r.begin + i, g_ramB + r.begin + i, 4) != 0 &&
+                                !kamite::native::deadStackByte(variant, call.ctx, r.begin + i))
+                                std::printf("  ram 0x%X\n", r.begin + i), ++shown;
+                }
+                fail("the layered shadow changed a call's outcome");
+            }
+            copyRam(g_ramB, g_ramA); // the live native leaves no frames: B's dead stack differs from A's after each call
+        }
+        std::printf("%-20s layered over %s %d: checked %llu, matched %llu, declined %llu, skipped %llu, interrupted %llu, "
+                    "mismatches %llu\n", variant.name, base.name, calls, static_cast<unsigned long long>(stats->checked),
+                    static_cast<unsigned long long>(stats->matched), static_cast<unsigned long long>(stats->declined),
+                    static_cast<unsigned long long>(stats->skipped), static_cast<unsigned long long>(stats->interrupted),
+                    static_cast<unsigned long long>(stats->mismatches));
+        if (stats->mismatches != 0)
+            fail("mismatches reported for a layered variant");
+        if (stats->checked == 0)
+            fail("no layered call compared");
+        resetRam();
+    }
+
     // ---- 5: test vectors for libvu0_check ----------------------------------------------------------------------------
     void writeVectors(const char *path, int count)
     {
@@ -3252,6 +3378,39 @@ namespace
         }
         std::fclose(f);
         std::printf("wrote %d blend vectors to %s\n", written, blendPath.c_str());
+
+        // The twist (<path>.twist): parent world, local, axis, angle, capVu0Cos's table -> the recompiled func_001501D0's
+        // world matrix (the scaled path with partFlags 0x800: MtxMultiply, then the twist).
+        const std::string twistPath = std::string(path) + ".twist";
+        f = std::fopen(twistPath.c_str(), "wb");
+        written = 0;
+        for (int i = 0; i < count; ++i)
+        {
+            R5900Context ctx;
+            randomContext(ctx);
+            const uint32_t part = 0x20000u, parent = 0x20200u;
+            Mat4f pw, local;
+            randomRigid(pw);
+            randomTrs(local);
+            setMat4f(parent + 0x80u, pw), setMat4f(part, local);
+            setU32(part + 0x148u, parent), setU32(part + 0x154u, 0x800u);
+            setTwistAngle(part + 0x150u);
+            setTwistTables();
+            setGpr(ctx, 29, 0xF0000u), setGpr(ctx, 31, 0x00123450u);
+            setGpr(ctx, 4, part), setGpr(ctx, 5, 0u);
+            ctx.pc = 0x1501D0u;
+            uint8_t record[64 + 64 + 16 + 4 + 16 + 64];
+            std::memcpy(record, g_ramA + parent + 0x80u, 64), std::memcpy(record + 64, g_ramA + part, 64);
+            std::memcpy(record + 128, g_ramA + 0x3BD8B0u, 16), std::memcpy(record + 144, g_ramA + part + 0x150u, 4);
+            std::memcpy(record + 148, g_ramA + 0x3BF140u, 16);
+            g_dueAt = 0;
+            func_001501D0_0x1501d0(g_ramA, &ctx, g_rt);
+            std::memcpy(record + 164, g_ramA + part + 0x80u, 64);
+            std::fwrite(record, 1, sizeof(record), f);
+            ++written;
+        }
+        std::fclose(f);
+        std::printf("wrote %d twist vectors to %s\n", written, twistPath.c_str());
         resetRam();
     }
 }
@@ -3532,19 +3691,48 @@ int main(int argc, char **argv)
         std::printf(g_failures ? "%d FAILURES\n" : "all passed\n", g_failures);
         return g_failures ? 1 : 0;
     }
-    for (const NativeFunction &fn : g_natives)
-        checkNative(fn, recompiledOf(fn), calls);
-
     std::filesystem::remove_all("/tmp/native_shadow_test");
     kamite::native::shadow::Settings settings;
     settings.output = &testOutput;
     settings.header = &testHeader;
     settings.cycles = &testCycles;
     kamite::native::shadow::begin(settings);
+    // One slot per address, as native.cpp keeps it: a native registered again at an address (the *_twist variants)
+    // takes its slot in these checks (in a replay the checked one is live and the variant is the shadowed one).
+    auto overridden = [&](const NativeFunction &fn) {
+        bool later = false, seen = false;
+        for (const NativeFunction &other : g_natives)
+        {
+            if (&other == &fn)
+                seen = true;
+            else if (seen && other.address == fn.address)
+                later = true;
+        }
+        return later;
+    };
+    auto layered = [&](int n, uint32_t spare) {
+        for (const NativeFunction &variant : g_natives)
+            for (const NativeFunction &base : g_natives)
+                if (&base != &variant && base.address == variant.address && overridden(base) && base.checked)
+                {
+                    checkLayered(variant, base, recompiledOf(variant), n, spare);
+                    spare += 0x10u;
+                }
+    };
+    if (std::getenv("KM_LAYERED")) // the replay's layering checks alone
+    {
+        layered(calls, 0x00931000u);
+        std::printf(g_failures ? "%d FAILURES\n" : "all passed\n", g_failures);
+        return g_failures ? 1 : 0;
+    }
     for (const NativeFunction &fn : g_natives)
-        kamite::native::shadow::add(fn, recompiledOf(fn));
+        checkNative(fn, recompiledOf(fn), calls);
     for (const NativeFunction &fn : g_natives)
-        checkInvisible(fn, recompiledOf(fn), calls);
+        if (!overridden(fn))
+            kamite::native::shadow::add(fn, recompiledOf(fn));
+    for (const NativeFunction &fn : g_natives)
+        if (!overridden(fn))
+            checkInvisible(fn, recompiledOf(fn), calls);
     // Nested: RotMatrix shadowed while the ecossin it calls is shadowed too (its own frame); every native that calls
     // another (CameraMatrix, NormalLightMatrix, the wrappers, the queue) with its callees shadowed too.
     g_nested = true;
@@ -3559,7 +3747,7 @@ int main(int argc, char **argv)
                                 0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u, 0x14D0E8u, 0x153B00u, 0x14B810u,
                                 0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u, 0x147B18u, 0x147A48u,
                                 0x150138u, 0x1501D0u, 0x156D70u, 0x15A6A0u, 0x149EB8u, 0x14A038u})
-            if (fn.address == caller)
+            if (fn.address == caller && !overridden(fn))
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;
 
@@ -3578,6 +3766,7 @@ int main(int argc, char **argv)
                     checkTwinShadow(twin, recompiledOf(fn), calls / 4, spare);
                     spare += 0x10u;
                 }
+        layered(calls / 2, spare); // the replay's layering: each variant shadowed over its live checked native
     }
     kamite::native::shadow::writeSummary();
     std::printf("summary: %s.native.txt (%ju bytes), records: %s.native.bin (%ju bytes)\n", g_output.c_str(),

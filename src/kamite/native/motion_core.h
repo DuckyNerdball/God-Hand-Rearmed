@@ -442,6 +442,42 @@ namespace kamite::native::motion
         return m;
     }
 
+    // ==== func_001501D0's twist path (partFlags +0x154 & 0x800; rung 4, Nov 26) ======================================
+    // ---- capVu0Cos 0x1F7FB8 (asm; f12 = x): u = pi/2 + x when x < 0 (c.lt.s; then a3 = 1), else pi/2 - x; on VU0 in the
+    // asm's order s = u + c3 u^3 + c2 u^5 + c1 u^7 + c0 u^9 (the table 0x3BF140 = c0..c3, lqc2); returns 0 + (0 + s)
+    // (vaddx.xy vf4, vf5 = 0, vf4x; vaddy.x vf4, vf5, vf4y). Its Q = sqrt(1 - s^2) and the a3 branch write vf4.x, which the
+    // last vaddy overwrites: dead (Q / vf7 / the VU flags are scratch to every caller). No calls, no loops.
+    inline float cosBody(Exact &x, float a, const float c[4])
+    {
+        const float zero = bitsFloat(0u), piOver2 = bitsFloat(0x3FC90FDBu);
+        const float u = fpuLess(a, zero) ? x.add(piOver2, a) : x.sub(piOver2, a);
+        float s = x.add(zero, u);     // vaddx.x vf4, vf0, vf6x
+        const float u2 = x.mul(u, u); // vmul.x vf6, vf6, vf6
+        float p[4];
+        for (int k = 0; k < 4; ++k)
+            p[k] = x.mul(x.mul(c[k], u), u2); // vmulw.xyzw vf8, vf5, vf6w; vmulx.xyzw vf8, vf8, vf6x
+        for (int k = 0; k < 3; ++k)
+            p[k] = x.mul(p[k], u2); // vmulx.xyz
+        s = x.add(s, p[3]);         // vaddw.x
+        for (int k = 0; k < 2; ++k)
+            p[k] = x.mul(p[k], u2); // vmulx.xy
+        s = x.add(s, p[2]);         // vaddz.x
+        p[0] = x.mul(p[0], u2);     // vmulx.x
+        s = x.add(s, p[1]);         // vaddy.x
+        s = x.add(s, p[0]);         // vaddx.x
+        return x.add(zero, x.add(zero, s));
+    }
+    // ---- Quaternion_SetRotationAxis 0x159FC8 (a0 = q, a1 = axis, f12 = angle; asm): h = angle 0.5 (mul.s), s = sinf(h),
+    // q.xyz = axis.xyz s (mul.s each, written as computed), q.w = capVu0Cos(h). sinfCalls: sinf's own callees (1-2).
+    inline void axisQuat(Exact &x, const float axis[3], float angle, const float c[4], int &sinfCalls, float q[4])
+    {
+        const float h = x.mul(angle, bitsFloat(0x3F000000u));
+        const float s = sinfBody(x, h, sinfCalls);
+        for (int k = 0; k < 3; ++k)
+            q[k] = x.mul(axis[k], s);
+        q[3] = cosBody(x, h, c);
+    }
+
     // ---- func_00156D70: blend(out, A, B, t) (asm): two TRS matrices interpolated --------------------------------------
     // T = A.t + (B.t - A.t) t (row 3, vsub / vmulx / vadd .xyz); s = sqrt.s(capVu0LengthSq(row k)) per row of A and B;
     // the rows over s (div.s 1 / s, sceVu0ScaleVectorXYZ) to quaternions (0x15A190), slerp by t, back to a matrix
@@ -502,5 +538,27 @@ namespace kamite::native::motion
         for (int k = 0; k < 4; ++k)
             out.r[k] = libvu0::mulRow(a.r[0], a.r[1], a.r[2], a.r[3], b.r[k]).r;
         return out;
+    }
+
+    // The twist on a part's world matrix w (after either join path): t = w's translation (0x147C60 -> func_00150710 into
+    // the frame), q about the axis by the angle, r = MtxInitRotQuaternion(q), w = MtxMultiply(out = w, A = r, B = w) (row k
+    // of B read before row k of out is written: out = B is safe), then w's xyz translation put back (0x147C40; the
+    // product's w lane stays). calls: every guest call (0x147C60 and its 0x150710, 0x159FC8, sinf and its 1-2, capVu0Cos,
+    // MtxInitRotQuaternion, 0x147C40) less MtxMultiply's (the caller charges it with its loops). false = decline.
+    inline bool twist(Exact &x, Mat4 &w, const float axis[3], float angle, const float c[4], int &calls)
+    {
+        float q[4];
+        int sinfCalls = 0;
+        axisQuat(x, axis, angle, c, sinfCalls, q);
+        if (!x.ok)
+            return false;
+        const Mat4 r = quat2mat(x, q);
+        if (!x.ok || !productInputs(r, w))
+            return false;
+        Mat4 out = product(r, w);
+        out.r[3] = blend<7>(out.r[3], w.r[3]);
+        w = out;
+        calls = 2 + 1 + 1 + sinfCalls + 1 + 1 + 1;
+        return true;
     }
 }

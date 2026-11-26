@@ -513,12 +513,38 @@ namespace kamite::native::motion
         // parent = *(part +0x148). a1 & 0x40004 != 0x40000: world = MtxMultiply(parent world, local +0x00). == 0x40000
         // (the parent's scale undone): rot = rot + rotAdd wrapped (Adjust_theta_vec), inv = (1 / parent scaleCalc +0x120..,
         // 1); scaleCalc +0x120 = parent's * scale +0x110 (+0x12C = 1); world = parent world x T(anchor *(part +0xD0)) x
-        // S(inv) x R(rot, order 0) x S(scaleCalc). Part +0x154 & 0x800 (a twist by +0x150 about the 0x3BD8B0 axis,
-        // func_00159FC8 / MtxInitRotQuaternion / func_00147C60 / 147C40): declined, the original runs. A 0xD0 frame, the
-        // deepest callee MtxMulRotVec's 0xD0 below it.
+        // S(inv) x R(rot, order 0) x S(scaleCalc). Then, when part +0x154 & 0x800 (read after both paths): the twist
+        // (motion_core twist(): about the axis at 0x3BD8B0 by part +0x150; the enemies' skeletons, parts 3, 4, 26, 29-36:
+        // rung4-motion-map.md "The twist"). kTwist = false declines a twist part (the checked native since 43a2de8); true
+        // runs it (shadowed as func_001501D0_twist until checked). A 0xD0 frame, the deepest callee MtxMulRotVec's 0xD0
+        // below it (the twist's deepest, 0x159FC8 0x40 -> sinf 0x20 -> rem_pio2f 0x50, fits in it).
         constexpr uint32_t kPartWorld = 0x1501D0u, kPartWorldFrames = 0xD0u + kMulRotFrames;
+        constexpr uint32_t kTwistAxis = 0x3BD8B0u, kCosTable = 0x3BF140u;
+        // The twist's inputs, read after the world matrix and scaleCalc are written (the tables clear of the part and the
+        // frames, which the original writes before it reads them), and the twist applied to world. calls: as twist().
         template <class Env>
-        bool partWorld(Env &env, R5900Context *ctx)
+        bool twistStep(Env &env, Mat4 &world, uint32_t part, uint32_t frame)
+        {
+            uint32_t axisAt, cosAt;
+            if (!plainRam(kTwistAxis, 16u, axisAt) || !plainRam(kCosTable, 16u, cosAt) ||
+                e::overlaps(axisAt, 16u, frame, kPartWorldFrames) || e::overlaps(axisAt, 16u, part, 0x160u) ||
+                e::overlaps(cosAt, 16u, frame, kPartWorldFrames) || e::overlaps(cosAt, 16u, part, 0x160u))
+                return false;
+            float axis[4], c[4], angle;
+            std::memcpy(axis, env.at(axisAt, 16u), 16);
+            std::memcpy(&angle, env.at(part + 0x150u, 4u), 4);
+            std::memcpy(c, env.at(cosAt, 16u), 16);
+            Exact x;
+            int calls = 0;
+            if (!twist(x, world, axis, angle, c, calls))
+                return false;
+            for (int k = 0; k < calls; ++k)
+                env.call();
+            chargeMultiply(env);
+            return true;
+        }
+        template <class Env, bool kTwist>
+        bool partWorldBody(Env &env, R5900Context *ctx)
         {
             if (!env.atEnd)
                 return false;
@@ -530,15 +556,18 @@ namespace kamite::native::motion
                 addiOverflows(a0 + 0x80u, 64u))
                 return false;
             const uint32_t parentAddress = e::read32(env, part + 0x148u);
+            const bool twisted = (e::read32(env, part + 0x154u) & 0x800u) != 0u;
             if ((parentAddress & 0xFu) != 0u || !plainRam(parentAddress, 0x130u, parent) ||
                 e::overlaps(parent, 0x130u, frame, kPartWorldFrames) || e::overlaps(parent, 0x130u, part, 0x160u) ||
-                (e::read32(env, part + 0x154u) & 0x800u) != 0u)
+                (twisted && !kTwist))
                 return false;
             const Mat4 parentWorld = readMat(env, parent + 0x80u);
             Mat4 world;
             if (!unscaled)
             {
                 if (!multiplyStep(world, parentWorld, readMat(env, part)))
+                    return false;
+                if (twisted && !twistStep(env, world, part, frame))
                     return false;
                 chargeMultiply(env);
                 writeMat(env, part + 0x80u, world);
@@ -561,6 +590,8 @@ namespace kamite::native::motion
                 !rotationStep(env, world, 0u, angles, frame, kPartWorldFrames, part, 0x160u) ||
                 !multiplyStep(world, world, scaling(floatBits(scaleCalc[0]), floatBits(scaleCalc[1]), floatBits(scaleCalc[2]))))
                 return false;
+            if (twisted && !twistStep(env, world, part, frame))
+                return false;
             env.call(); // jal Adjust_theta_vec
             chargeMulTransVec(env);
             chargeMulScaleVec(env);
@@ -572,6 +603,16 @@ namespace kamite::native::motion
             writeMat(env, part + 0x80u, world);
             returnFrom(ctx);
             return true;
+        }
+        template <class Env>
+        bool partWorld(Env &env, R5900Context *ctx)
+        {
+            return partWorldBody<Env, false>(env, ctx);
+        }
+        template <class Env>
+        bool partWorldTwist(Env &env, R5900Context *ctx)
+        {
+            return partWorldBody<Env, true>(env, ctx);
         }
 
         // ==== M1's blend batch: func_00156D70 fused (its helpers inline), and the quaternion helpers on their own =====
@@ -844,13 +885,13 @@ namespace kamite::native::motion
             j.call();
             return blendNative(j, &c);
         }
-        // the parent join: func_001501D0(part, objFlags as read now)
-        template <class Env>
+        // the parent join: func_001501D0(part, objFlags as read now); kTwist as partWorldBody's
+        template <bool kTwist, class Env>
         bool partJoin(JournalEnv<Env> &j, R5900Context &c, const ModelPass &p, uint32_t part)
         {
             innerArgs(c, p.callSp, part, e::read32(j, p.model + 0x250u), e::u32(&c, e::a2), e::u32(&c, e::a3));
             j.call();
-            return partWorld(j, &c);
+            return partWorldBody<JournalEnv<Env>, kTwist>(j, &c);
         }
         template <class Env>
         bool modelEntry(Env &env, R5900Context *ctx, uint32_t frame, uint32_t window, ModelPass &p, uint32_t &stackLow)
@@ -872,8 +913,9 @@ namespace kamite::native::motion
         constexpr uint32_t kCalcParts = 0x149EB8u, kCalcPartsFrame = 0x60u;
         constexpr uint32_t kCalcPartsWindow = kCalcPartsFrame + kBlendFrames; // the deepest callee: the blend (0x2C0)
         constexpr int kPartLimit = 255; // partNum is a byte
-        template <class Env>
-        bool calcPartsNative(Env &env, R5900Context *ctx)
+        // kTwist: a twist part runs its twist (cModel_calcParts_twist, shadowed until checked) or declines the pass.
+        template <class Env, bool kTwist>
+        bool calcPartsBody(Env &env, R5900Context *ctx)
         {
             ModelPass p;
             uint32_t stackLow;
@@ -909,7 +951,7 @@ namespace kamite::native::motion
                     (e::read32(j, at + 0x154u) & 0x100000u) == 0u && (e::read32(j, p.model + 0x250u) & 0x20u) == 0u &&
                     !partBlend(j, c, p, part))
                     return false;
-                if ((e::read32(j, at + 0x154u) & 0x10u) == 0u && !partJoin(j, c, p, part))
+                if ((e::read32(j, at + 0x154u) & 0x10u) == 0u && !partJoin<kTwist>(j, c, p, part))
                     return false;
                 const uint32_t n = *j.at(p.model + 0x2B4u, 1u);
                 ++i;
@@ -933,8 +975,8 @@ namespace kamite::native::motion
         // the blend; then the join. A 0xA0 frame.
         constexpr uint32_t kCalcWorldParts = 0x14A038u, kCalcWorldFrame = 0xA0u;
         constexpr uint32_t kCalcWorldWindow = kCalcWorldFrame + kBlendFrames;
-        template <class Env>
-        bool calcWorldPartsNative(Env &env, R5900Context *ctx)
+        template <class Env, bool kTwist>
+        bool calcWorldPartsBody(Env &env, R5900Context *ctx)
         {
             ModelPass p;
             uint32_t stackLow;
@@ -976,7 +1018,7 @@ namespace kamite::native::motion
                         if (!partBlend(j, c, p, part))
                             return false;
                     }
-                    if (!partJoin(j, c, p, part))
+                    if (!partJoin<kTwist>(j, c, p, part))
                         return false;
                 }
                 const uint32_t n = *j.at(p.model + 0x2B4u, 1u);
@@ -992,6 +1034,26 @@ namespace kamite::native::motion
             j.commit();
             returnFrom(ctx);
             return true;
+        }
+        template <class Env>
+        bool calcPartsNative(Env &env, R5900Context *ctx)
+        {
+            return calcPartsBody<Env, false>(env, ctx);
+        }
+        template <class Env>
+        bool calcPartsTwist(Env &env, R5900Context *ctx)
+        {
+            return calcPartsBody<Env, true>(env, ctx);
+        }
+        template <class Env>
+        bool calcWorldPartsNative(Env &env, R5900Context *ctx)
+        {
+            return calcWorldPartsBody<Env, false>(env, ctx);
+        }
+        template <class Env>
+        bool calcWorldPartsTwist(Env &env, R5900Context *ctx)
+        {
+            return calcWorldPartsBody<Env, true>(env, ctx);
         }
     }
 
@@ -1028,8 +1090,8 @@ namespace kamite::native::motion
         add("func_0015A190", kMatToQuat, &matToQuatNative<RealEnv>, &matToQuatNative<ShadowEnv>, true);
         add("MtxInitRotQuaternion", kQuatToMat, &quatToMatNative<RealEnv>, &quatToMatNative<ShadowEnv>, true);
         // M2 (batch 3): the per-model passes fused; checked since K's 23:57 Twice of 3581925 (calcParts 247.5k, calcWorldParts
-        // 56.6k calls compared, 0 mismatches; declined: one model a frame in each, a twist part). Their footprints (a model
-        // and all its parts) are recorded with Tag_set_scr's limits.
+        // 56.6k calls compared, 0 mismatches; declined: one model a frame in each, a twist part), live since 025d04b's
+        // builds. Their footprints (a model and all its parts) are recorded with Tag_set_scr's limits.
         auto addPass = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
                           bool (*shadow)(ShadowEnv &, R5900Context *), bool checked) {
             NativeFunction fn{name, address, "motion", checked, real, shadow, nullptr};
@@ -1042,5 +1104,13 @@ namespace kamite::native::motion
         addPass("cModel_calcParts", kCalcParts, &calcPartsNative<RealEnv>, &calcPartsNative<ShadowEnv>, true);
         addPass("cModel_calcWorldParts", kCalcWorldParts, &calcWorldPartsNative<RealEnv>, &calcWorldPartsNative<ShadowEnv>,
                 true);
+        // The twist path (Nov 26; rung4-motion-map.md "The twist"): the join and the two passes again, a twist part run
+        // instead of declined, registered after their checked selves at the same addresses: a dev replay shadows each
+        // against the live native (native.cpp), whose declined twist parts fall to the recompiled code. Unchecked; once
+        // checked, the three above take kTwist = true and these three go.
+        add("func_001501D0_twist", kPartWorld, &partWorldTwist<RealEnv>, &partWorldTwist<ShadowEnv>, false);
+        addPass("cModel_calcParts_twist", kCalcParts, &calcPartsTwist<RealEnv>, &calcPartsTwist<ShadowEnv>, false);
+        addPass("cModel_calcWorldParts_twist", kCalcWorldParts, &calcWorldPartsTwist<RealEnv>,
+                &calcWorldPartsTwist<ShadowEnv>, false);
     }
 }
