@@ -353,12 +353,13 @@ namespace kamite::modern
             if (keyDodge)
             {
                 // Shift + the move keys in the free camera: the game's dodge from Gene's facing (the left stick's keys
-                // went to the right stick); the camera keeps still. Strafing Tiger: the keys are the camera's
-                // directions, turned into his (K, Nov 26: dodges must follow the camera, not wherever he faces).
+                // went to the right stick); the camera keeps still. The keys are the camera's directions, turned
+                // into his (K, Nov 26: free-camera dodges follow the camera, not wherever he faces; Modern and
+                // Strafing Tiger alike).
                 g_stickX = 0.0f;
                 g_stickY = 0.0f;
                 g_moving = false;
-                if (strafing_tiger::enabled() && std::fmax(std::fabs(rx), std::fabs(ry)) > 0.2f)
+                if (std::fmax(std::fabs(rx), std::fabs(ry)) > 0.2f)
                 {
                     const float m = std::fmin(std::sqrt(rx * rx + ry * ry), 1.0f);
                     const float r = wrapAngle(g_cameraYaw.load(std::memory_order_relaxed) - std::atan2(rx, -ry) -

@@ -104,7 +104,7 @@ namespace kamite::keys_page
         }
         else if (mode == Mode::ResetArmed)
         {
-            v.notice = "Press \x01 again to reset the keyboard and mouse.";
+            v.notice = "Press \x01 again to reset the keyboard & mouse.";
             v.noticeIcons[0] = v.resetArt;
             v.confirmWord = kHintRebind;
             v.cancelWord = kHintBack;

@@ -466,7 +466,7 @@
     {
       "id": "CameraTilt",
       "label": "Camera Tilt",
-      "help": "At a wider field of view, the camera also rises and looks down at Gene by this much: more of the floor ahead, less sky.",
+      "help": "At a wider field of view, the camera also rises & looks down at Gene by this much: more of the floor ahead, less sky.",
       "group": "Camera",
       "choices": [
         {
@@ -527,7 +527,7 @@
     {
       "id": "SeeThrough",
       "label": "See Through",
-      "help": "Instead of removing walls, the camera sees through them around Gene and enemies.",
+      "help": "Instead of removing walls, the camera sees through them around Gene & enemies.",
       "group": "Camera",
       "choices": [
         {
@@ -909,7 +909,7 @@
     {
       "id": "ReplacementTextures",
       "label": "Replacement Textures",
-      "help": "Textures from your mods and texture packs. Press [T] in game to switch them on or off.",
+      "help": "Textures from your mods & texture packs. Press [T] in game to switch them on or off.",
       "group": "Textures",
       "choices": [
         {
@@ -984,7 +984,7 @@
     {
       "id": "AnisotropicFiltering",
       "label": "Anisotropic Filtering",
-      "help": "Keeps floors and walls sharp at a slant. Costs next to nothing. Max it out.",
+      "help": "Keeps floors & walls sharp at a slant. Costs next to nothing. Max it out.",
       "group": "Textures",
       "choices": [
         {
@@ -1116,7 +1116,7 @@
     {
       "id": "HudLayout",
       "label": "HUD Layout",
-      "help": "Where the health bar, radar, and the rest of the in-game HUD go on a wide screen. Wider than 16:9 keeps them at the edges of a 16:9 area.",
+      "help": "Where the health bar, radar & the rest of the in-game HUD go on a wide screen. Wider than 16:9 keeps them at the edges of a 16:9 area.",
       "group": "HUD",
       "choices": [
         {
@@ -1162,7 +1162,7 @@
     {
       "id": "SwayBar",
       "label": "Sway Bar",
-      "help": "Stun gauge for enemies and bosses. Fills up till they're stunned, then drains.",
+      "help": "Stun gauge for enemies & bosses. Fills up till they're stunned, then drains.",
       "group": "HUD",
       "choices": [
         {
@@ -1185,7 +1185,7 @@
     {
       "id": "MenuLayout",
       "label": "Menu Width",
-      "help": "Menus and screens (pause, options, roulette setup) are drawn for 4:3: shown 4:3 with side bars, or stretched to the screen.",
+      "help": "Menus & screens (pause, options, roulette setup) are drawn for 4:3: shown 4:3 with side bars, or stretched to the screen.",
       "group": "Menus & Prompts",
       "choices": [
         {
@@ -1249,7 +1249,7 @@
     {
       "id": "FpsCounter",
       "label": "FPS Counter",
-      "help": "Framerate and game speed statistics.",
+      "help": "Framerate & game speed statistics.",
       "group": "Overlays",
       "choices": [
         {
@@ -1477,7 +1477,7 @@
     {
       "id": "L3Dash",
       "label": "Click-Stick Dash",
-      "help": "Press and hold the stick to dash. Rebindable in Controls.",
+      "help": "Press & hold the stick to dash. Rebindable in Controls.",
       "group": "Move & Groove",
       "choices": [
         {
@@ -1546,7 +1546,7 @@
     {
       "id": "StyleSignal",
       "label": "Signal Style Switch",
-      "help": "Gene calls out each style as you switch to it, and his God Hand flashes.",
+      "help": "Gene calls out each style as you switch to it & his God Hand flashes.",
       "group": "Style Shuffle",
       "choices": [
         {
@@ -1618,7 +1618,7 @@
     {
       "id": "TensionPlacable",
       "label": "Tension is Placable",
-      "help": "After unleashing the God Hand, pull the trigger again to leash it early and keep your remaining Tension.",
+      "help": "After unleashing the God Hand, pull the trigger again to leash it early & keep your remaining Tension.",
       "group": "Fightin' Excitement",
       "choices": [
         {
@@ -1667,7 +1667,7 @@
     {
       "id": "LiftChairs",
       "label": "Wild Curry Funk",
-      "help": "Carry and throw more types of objects. Mostly chairs. If it's not obvious, this makes the game easier.",
+      "help": "Carry & throw more types of objects. Mostly chairs. If it's not obvious, this makes the game easier.",
       "group": "Fightin' Excitement",
       "choices": [
         {
@@ -1713,7 +1713,7 @@
     {
       "id": "RouletteTargetCycle",
       "label": "Target Select",
-      "help": "Switch Roulette targets with the right stick and the d-pad. HINT: You can also use the d-pad to cycle Roulette moves.",
+      "help": "Switch Roulette targets with the right stick & the d-pad. HINT: You can also use the d-pad to cycle Roulette moves.",
       "group": "Roulette Charrette",
       "choices": [
         {
@@ -1736,7 +1736,7 @@
     {
       "id": "RouletteInvert",
       "label": "Inverse Roulette",
-      "help": "Reverse the direction of the roulette, so up goes up and down goes down.",
+      "help": "Reverse the direction of the roulette, so up goes up & down goes down.",
       "group": "Roulette Charrette",
       "choices": [
         {
@@ -1782,7 +1782,7 @@
     {
       "id": "SkipIntro",
       "label": "Intro Skipper",
-      "help": "Start at the main menu: no Capcom and Clover logos and no \"Press Start\" screen.",
+      "help": "Start at the main menu: no Capcom & Clover logos & no \"Press Start\" screen.",
       "group": "Skip Poker",
       "choices": [
         {
@@ -1828,7 +1828,7 @@
     {
       "id": "NpcPoses",
       "label": "Better Shop & Casino Poses",
-      "help": "Give the shop and casino people better poses. Not sure what else you were expecting...",
+      "help": "Give the shop & casino people better poses. Not sure what else you were expecting...",
       "group": "Misqué & Risqué",
       "choices": [
         {
@@ -1935,7 +1935,7 @@
     {
       "id": "MusicVolume",
       "label": "Music",
-      "help": "Set stage, boss, menu, and minigame music volume.",
+      "help": "Set stage, boss, menu & minigame music volume.",
       "group": "Volume",
       "slider": {
         "key": "Sound/MusicVolume",
@@ -1967,7 +1967,7 @@
     {
       "id": "VoicesVolume",
       "label": "Voices",
-      "help": "Set the volume of ingame voice lines. Cutscene music and voices are one track.",
+      "help": "Set the volume of ingame voice lines. Cutscene music & voices are one track.",
       "group": "Volume",
       "slider": {
         "key": "Sound/VoicesVolume",

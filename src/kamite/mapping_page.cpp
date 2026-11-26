@@ -468,7 +468,7 @@ namespace kamite::mapping_page
         // bottom one).
         d.view.noticeIcons[0] = d.keep(icons + set.file[West] + ".png");
         d.view.noticeIcons[1] = d.keep(icons + set.file[options.menuStyle == 2 ? East : South] + ".png");
-        const std::string again = "Press \x01 again to confirm and reset.";
+        const std::string again = "Press \x01 again to confirm & reset.";
         if (state.readOnly)
             d.view.notice = d.keep(std::string(kReadOnlyNotice) + "\n" +
                                    (edit.armed == Armed::Reset ? again : std::string("Change it there or press \x01 to reset.")));

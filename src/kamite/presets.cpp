@@ -19,11 +19,11 @@ namespace kamite::presets
         {"REMASTERED", "Remastered", "Spitshine Edition",
          "Smooth Sexy Silky 60FPS, Fills your screen - edge to edge, Modern Controls, etc.", 17},
         {"REARMED", "Rearmed", "That's the Spice!",
-         "Adds: New Cam Angle, Roulette Refinements, Moveset Presets, Buck Breaker, Busta-Chan Jive, and "
+         "Adds: New Cam Angle, Roulette Refinements, Moveset Presets, Buck Breaker, Busta-Chan Jive & "
          "Misqu\xC3\xA9 & Risqu\xC3\xA9.",
          18},
         {"SLEAZY MODE", "Sleazy Mode", "...is Now Selectable! For the girl who just wants to have fun.",
-         "Adds: Cunt Punter, Tension - Off the Cuff, and Wild Curry Funk.", 15},
+         "Adds: Cunt Punter, Tension - Off the Cuff & Wild Curry Funk.", 15},
     };
     const Text kCustomText = {"CUSTOM", "Custom", "You know what you like.", "Resets with a preset.", 1};
 

@@ -209,7 +209,7 @@ namespace kamite::settings
                         "%"),
                  "CameraPreset", "custom")),
         live(sub(slider(choice(Tab::Controls, "Camera", "Camera Tilt",
-                               "At a wider field of view, the camera also rises and looks down at Gene by this much: more "
+                               "At a wider field of view, the camera also rises & looks down at Gene by this much: more "
                                "of the floor ahead, less sky.",
                                "Video", "CameraTilt", "0", kCameraTilts),
                         kDegrees),
@@ -219,7 +219,7 @@ namespace kamite::settings
                          "SteadyIdleCamera", false),
                   "F2 > Camera switches it while playing.")),
         live(note(toggle(Tab::Controls, "Camera", "See Through",
-                         "Instead of removing walls, the camera sees\nthrough them around Gene and enemies.",
+                         "Instead of removing walls, the camera sees\nthrough them around Gene & enemies.",
                          "Video", "SeeThrough", true),
                   "F2 > Camera sizes it while playing.")),
         // The free camera's up / down, stick and mouse alike (F2 > Controls' Invert up/down; brawl mode's dodges keep the
@@ -273,7 +273,7 @@ namespace kamite::settings
         // The mods' and texture packs' textures, switched live (K, Nov 22; the T hotkey: "[T]" shows its binding). The
         // launcher keeps it on its Mods tab, with the Texture Pack Folder.
         live(gameOnly(withId(toggle(Tab::Graphics, "Textures", "Replacement Textures",
-                                    "Textures from your mods and texture packs.\nPress [T] in game to switch them on or off.",
+                                    "Textures from your mods & texture packs.\nPress [T] in game to switch them on or off.",
                                     "Runtime", "PS2X_PCSX2_TEXTURES", true),
                              "ReplacementTextures"))),
         // Help texts: K's (Nov 17).
@@ -284,7 +284,7 @@ namespace kamite::settings
                     "PS2: the game's original texture smoothing.\nForced: textures blend smoothly into the distance.", "Video",
                     "TrilinearFiltering", "-1", kTrilinears)),
         live(choice(Tab::Graphics, "Textures", "Anisotropic Filtering",
-                    "Keeps floors and walls sharp at a slant.\nCosts next to nothing. Max it out.",
+                    "Keeps floors & walls sharp at a slant.\nCosts next to nothing. Max it out.",
                     "Video", "AnisotropicFiltering", "16", kAnisotropies)),
         live(choice(Tab::Graphics, "Effects", "Anti-Aliasing", "FXAA smooths jagged edges.\nMakes the picture a little softer. Like you.",
                     "Video", "AntiAliasing", "1", kAntiAliasings)),
@@ -302,24 +302,24 @@ namespace kamite::settings
         // ---- Interface ------------------------------------------------------------------------------------------
         // HUD Layout first, Enemy Life Gauge under it (K, Nov 14).
         live(wideOnly(note(choice(Tab::Interface, "HUD", "HUD Layout",
-                                  "Where the health bar, radar, and the rest of the in-game HUD go on a wide screen. Wider "
+                                  "Where the health bar, radar & the rest of the in-game HUD go on a wide screen. Wider "
                                   "than 16:9 keeps them at the edges of a 16:9 area.",
                                   "Video", "HudLayout", "16:9", kHudLayouts),
                            "F7 switches it while playing."))),
         live(toggle(Tab::Interface, "HUD", "Enemy Life Gauge", "Select whether to display\nan enemy's life gauge.", "Game",
                     "EnemyLifeGauge", true)), // the game's own help
         live(toggle(Tab::Interface, "HUD", "Sway Bar",
-                    "Stun gauge for enemies and bosses.\nFills up till they're stunned, then drains.",
+                    "Stun gauge for enemies & bosses.\nFills up till they're stunned, then drains.",
                     "Game", "SwayBar", false)),
         live(wideOnly(choice(Tab::Interface, "Menus & Prompts", "Menu Width",
-                             "Menus and screens (pause, options, roulette setup) are drawn for 4:3: shown 4:3 with side "
+                             "Menus & screens (pause, options, roulette setup) are drawn for 4:3: shown 4:3 with side "
                              "bars, or stretched to the screen.",
                              "Video", "MenuLayout", "4:3", kMenuLayouts))),
         live(choice(Tab::Interface, "Menus & Prompts", "Button Prompts",
                     "Controller button hint style.\nThis choice reflects your value as a person.",
                     "Game", "ButtonPrompts", "auto", kButtonPrompts)),
         // F3 switches it too (and saves it).
-        live(toggle(Tab::Interface, "Overlays", "FPS Counter", "Framerate and game speed statistics.", "Video",
+        live(toggle(Tab::Interface, "Overlays", "FPS Counter", "Framerate & game speed statistics.", "Video",
                     "FpsCounter", false)),
 
         // ---- Gameplay -------------------------------------------------------------------------------------------
@@ -370,7 +370,7 @@ namespace kamite::settings
                            "F2 > Controls sets the sensitivity."),
                       kKeyboard)),
         live(toggle(Tab::Gameplay, "Move & Groove", "Click-Stick Dash",
-                    "Press and hold the stick to dash.\nRebindable in Controls.", "Game", "L3Dash", false)),
+                    "Press & hold the stick to dash.\nRebindable in Controls.", "Game", "L3Dash", false)),
         live(note(toggle(Tab::Gameplay, "Move & Groove", "Busta-Chan Jive",
                          "Sprint attacks go through 99% of obstacles.\nSlide right through, swooce right over.",
                          "Game", "SprintTraversal", false),
@@ -379,7 +379,7 @@ namespace kamite::settings
                     "Configure up to 4 styles; switch with the d-pad.\nLetters around the radar show your sweet sexy styles.",
                     "Game", "StyleSwitching", false)),
         live(sub(toggle(Tab::Gameplay, "Style Shuffle", "Signal Style Switch",
-                        "Gene calls out each style as you switch to it, and his God Hand flashes.", "Game", "StyleSignal",
+                        "Gene calls out each style as you switch to it & his God Hand flashes.", "Game", "StyleSignal",
                         true),
                  "StyleSwitching")),
         live(toggle(Tab::Gameplay, "Style Shuffle", "Buck Breaker",
@@ -388,36 +388,36 @@ namespace kamite::settings
         live(toggle(Tab::Gameplay, "Fightin' Excitement", "Cunt Punter",
                     "Ball Buster works on women. Name changes on target.\nThis also works IRL, though your mileage may vary.", "Game", "BallBusterWomen", false)),
         live(toggle(Tab::Gameplay, "Fightin' Excitement", "Tension is Placable",
-                    "After unleashing the God Hand, pull the trigger again\nto leash it early and keep your remaining Tension.",
+                    "After unleashing the God Hand, pull the trigger again\nto leash it early & keep your remaining Tension.",
                     "Game", "TensionPlacable", false)),
         live(sub(toggle(Tab::Gameplay, "Fightin' Excitement", "Off the Cuff",
                         "Unleash the God Hand with any Tension, not just full.\nGene is invulnerable only when unleashing at full Tension.",
                         "Game", "OffTheCuff", false),
                  "TensionPlacable")),
         live(toggle(Tab::Gameplay, "Fightin' Excitement", "Wild Curry Funk",
-                    "Carry and throw more types of objects. Mostly chairs.\nIf it's not obvious, this makes the game "
+                    "Carry & throw more types of objects. Mostly chairs.\nIf it's not obvious, this makes the game "
                     "easier.",
                     "Game", "LiftChairs", false)),
         live(choice(Tab::Gameplay, "Roulette Charrette", "Roulette Timer",
                     "Time limit to select a move after opening the Roulette.\nTechniques fire off automatically at the end of the timer.",
                     "Game", "RouletteTimer", "normal", kRouletteTimers)),
         live(toggle(Tab::Gameplay, "Roulette Charrette", "Target Select",
-                    "Switch Roulette targets with the right stick and the d-pad.\nHINT: You can also use the d-pad to cycle Roulette moves.",
+                    "Switch Roulette targets with the right stick & the d-pad.\nHINT: You can also use the d-pad to cycle Roulette moves.",
                     "Game", "RouletteTargetCycle", false)),
         live(toggle(Tab::Gameplay, "Roulette Charrette", "Inverse Roulette",
-                    "Reverse the direction of the roulette,\nso up goes up and down goes down.",
+                    "Reverse the direction of the roulette,\nso up goes up & down goes down.",
                     "Game", "RouletteInvert", false)),
         live(toggle(Tab::Gameplay, "Roulette Charrette", "Dry Spinning",
                     "You can open the Roulette even when you don't have balls.\nHINT: You can use the Roulette camera for targeting.",
                     "Game", "RouletteNoOrbs", false)),
         toggle(Tab::Gameplay, "Skip Poker", "Intro Skipper",
-               "Start at the main menu: no Capcom and Clover logos and no \"Press Start\" screen.", "Game", "SkipIntro",
+               "Start at the main menu: no Capcom & Clover logos & no \"Press Start\" screen.", "Game", "SkipIntro",
                false),
         toggle(Tab::Gameplay, "Skip Poker", "Hard-On",
                "Hard can be picked from the start instead of after a clear. Your save is not changed.", "Game",
                "UnlockHard", false),
         live(note(toggle(Tab::Gameplay, kMisque, "Better Shop & Casino Poses",
-                         "Give the shop and casino people better poses.\nNot sure what else you were expecting...",
+                         "Give the shop & casino people better poses.\nNot sure what else you were expecting...",
                          "Game", "NpcPoses", false),
                   "F2 > NPCs sets the poses.")),
         // Money (K, Nov 14): out of F2 into Options, no help text; F2 > NPCs keeps its slider (any whole percent).
@@ -428,18 +428,18 @@ namespace kamite::settings
         live(choice(Tab::Sound, "Sound", "Mode", "Select between monaural,\nstereo, or surround sound.", "Sound", "Mode",
                     "stereo", kSoundModes)), // the game's own help (its SOUND row)
         live(toggle(Tab::Sound, "Sound", "Roulette Ratchet", "When you flick, it clicks.", "Sound", "RouletteRatchet", false)),
-        live(volume("Music", "Set stage, boss, menu, and minigame music volume.", "MusicVolume")),
+        live(volume("Music", "Set stage, boss, menu & minigame music volume.", "MusicVolume")),
         live(volume("Sound Effects", "Set the volume of ingame sound effects.", "EffectsVolume")),
         live(volume("Voices",
-                    "Set the volume of ingame voice lines.\nCutscene music and voices are one track.",
+                    "Set the volume of ingame voice lines.\nCutscene music & voices are one track.",
                     "VoicesVolume")),
 
         // ---- Mods (the launcher only) ---------------------------------------------------------------------------
         custom("Character", Tab::Mods, "Character", "Character",
-               "Who you play as. Currently, other characters use Gene's moves and his God Hand."),
+               "Who you play as. Currently, other characters use Gene's moves & his God Hand."),
         custom("Costume", Tab::Mods, "Character", "Costume", "What your character wears."),
         custom("Textures", Tab::Mods, "Texture Packs", "Replacement Textures",
-               "Textures from your mods and texture packs.\nPress [T] in game to switch them on or off."),
+               "Textures from your mods & texture packs.\nPress [T] in game to switch them on or off."),
     };
     const size_t kSettingCount = std::size(kSettings);
 

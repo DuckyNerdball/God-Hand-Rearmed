@@ -141,13 +141,13 @@ namespace kamite::options_screen
 
         // Help lines (K's, Nov 13; SOUND and the game's own rows: drafts / the game's wording).
         constexpr Text kPresetsText{"PRESETS", "Ready-made setups, from the PS2 original\nto everything Rearmed has."}; // DRAFT
-        constexpr Text kControlsText{"CONTROLS", "Camera and input settings."};
+        constexpr Text kControlsText{"CONTROLS", "Camera & input settings."};
         // DISPLAY's draft and GRAPHICS taking K's old DISPLAY line (Nov 15: the picture moved to GRAPHICS).
-        constexpr Text kDisplayText{"DISPLAY", "Window and screen settings."};
-        constexpr Text kGraphicsText{"GRAPHICS", "Rendering and graphics settings."};
-        constexpr Text kInterfaceText{"INTERFACE", "HUD options and button prompts."};
-        constexpr Text kGameplayText{"GAMEPLAY", "Framerate and optional gameplay enhancements."};
-        constexpr Text kSoundText{"SOUND", "Sound mode and volume levels."};
+        constexpr Text kDisplayText{"DISPLAY", "Window & screen settings."};
+        constexpr Text kGraphicsText{"GRAPHICS", "Rendering & graphics settings."};
+        constexpr Text kInterfaceText{"INTERFACE", "HUD options & button prompts."};
+        constexpr Text kGameplayText{"GAMEPLAY", "Framerate & optional gameplay enhancements."};
+        constexpr Text kSoundText{"SOUND", "Sound mode & volume levels."};
         constexpr Text kLoadText{"LOAD GAME", "Select a save file and\nrestart the game."};
         constexpr Text kResetText{"RESET GAME", "Return to title screen"};
         constexpr Text kRestoreText{"RESTORE DEFAULTS", "Set every option back to\nits default."};

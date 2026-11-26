@@ -4,6 +4,8 @@ Newest first, one line per change; the code comments say how.
 
 ## November 26, 2026
 
+- Modern, keyboard & mouse: Shift + move keys dodge in the camera's directions (was Gene's facing).
+- Help texts use "&" for "and" (the game's own lines keep theirs).
 - Keyboard: duck, back flip and both sidesteps can be bound to keys on the in-game BUTTON MAPPING page.
 - New help texts for BUTTON MAPPING and Swap Sticks.
 - F2 > Controls: Strafing Tiger prototype (off by default).
