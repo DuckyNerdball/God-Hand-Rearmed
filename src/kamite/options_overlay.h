@@ -186,6 +186,7 @@ namespace kamite::options_overlay
         int confirmRow = -1;         // a Yes / No beside this row (-1 = none)
         bool confirmYes = false;
         const char *question = "";   // the help box while asking
+        const char *helpOverride = nullptr; // the help box in place of the cursor row's help (EXIT asking to quit)
         // The category under the list's cursor: on 16:10 and wider it is shown beside the list, joined to it by a
         // bracket while open; narrower, an open page replaces the list.
         const Page *page = nullptr;
@@ -238,5 +239,8 @@ namespace kamite::options_overlay
     float helpTextWidth(const char *text, size_t length, float cap);
     // Black over the whole picture at this strength (0..1): the fade behind an OPTIONS change.
     void appendBlackout(float alpha, std::vector<Pcsx2GsScreenItem> &items);
+    // Only the confirm / cancel hints, where the OPTIONS screen has them (the pause menu's, K Nov 26).
+    void buildHints(float aspect, float fade, const Hint &confirm, const Hint &cancel, std::vector<Pcsx2GsScreenItem> &items,
+                    std::string &strings);
 #endif
 }

@@ -1659,8 +1659,21 @@ namespace kamite::options_overlay
         else if (open)
             b.help(view.pageCursor >= 0 && view.pageCursor < page->rowCount ? page->rows[view.pageCursor].help : "");
         else
-            b.help(view.rows[cursor].help);
+            b.help(view.helpOverride && *view.helpOverride ? view.helpOverride : view.rows[cursor].help);
         b.hints(view.confirmHint, view.cancelHint);
+    }
+
+    void buildHints(float aspect, float fade, const Hint &confirm, const Hint &cancel, std::vector<Pcsx2GsScreenItem> &items,
+                    std::string &strings)
+    {
+        items.clear();
+        strings.clear();
+        if (fade <= 0.0f)
+            return;
+        Builder b{items, strings, Space(std::clamp(aspect, 1.0f, 4.0f)), std::min(fade, 1.0f)};
+        b.labelFont = b.add(g_labelFont.data(), g_labelFont.size());
+        b.helpFont = b.add(g_helpFont.data(), g_helpFont.size());
+        b.hints(confirm, cancel);
     }
 #endif
 #if !defined(KAMITE_HAS_SCREEN_OVERLAY)

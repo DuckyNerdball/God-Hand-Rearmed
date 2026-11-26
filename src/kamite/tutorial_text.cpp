@@ -47,6 +47,8 @@ namespace kamite::tutorial_text
                                                     // titles (0x100 each, up to 0xFFA00), the dash (entry 4, up to
                                                     // 0xFFC00); buck_breaker's slot text at 0xFFC00
                                                     // (0x100), its BOOBPLEX prompt at 0xFFD00 (0x20);
+                                                    // options_screen's pause Quit texts at 0xFFD20
+                                                    // (0x20) and 0xFFD40 (0x80);
                                                     // debug_tools' landing scratch is at
                                                     // 0xFFF00, game_options' 0xFFFF0
         constexpr uint32_t kTitleText = 0x000FF800u, kTitleBytes = 0x100u;

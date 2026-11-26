@@ -4,6 +4,8 @@ Newest first, one line per change; the code comments say how.
 
 ## November 26, 2026
 
+- Pause menu: confirm / cancel hints, as on the Options screen.
+- EXIT in the pause menu and on the Options screen quits the game (confirm twice).
 - Modern, keyboard & mouse: Shift + move keys dodge in the camera's directions (was Gene's facing).
 - Help texts use "&" for "and" (the game's own lines keep theirs).
 - Keyboard: duck, back flip and both sidesteps can be bound to keys on the in-game BUTTON MAPPING page.

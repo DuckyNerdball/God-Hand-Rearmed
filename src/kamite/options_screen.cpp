@@ -51,6 +51,7 @@
 #include "kamite/modern_controls.h"
 #include "kamite/npc_poses.h"
 #include "kamite/options_overlay.h"
+#include "kamite/test_mode.h"
 #include "kamite/options_pages.h"
 #include "kamite/presets.h"
 #include "kamite/prompt_art.h"
@@ -151,7 +152,8 @@ namespace kamite::options_screen
         constexpr Text kLoadText{"LOAD GAME", "Select a save file and\nrestart the game."};
         constexpr Text kResetText{"RESET GAME", "Return to title screen"};
         constexpr Text kRestoreText{"RESTORE DEFAULTS", "Set every option back to\nits default."};
-        constexpr Text kExitText{"EXIT", ""};
+        constexpr Text kExitText{"EXIT", "Quit game"}; // EXIT quits the game (K, Nov 26), here and in the pause menu
+        constexpr const char *kQuitQuestion = "Really? Quit the game?\nWhat are you, chicken?"; // K's; a second confirm quits
         constexpr const char *kResetQuestion = "Would you really like to reset?"; // the game's own (message 0x2008)
         constexpr const char *kRestoreQuestion = "Set every option back to its default?";
 
@@ -247,6 +249,21 @@ namespace kamite::options_screen
         void sound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint16_t id)
         {
             callGuest(rdram, ctx, runtime, kSePlay, {kSeManager, 0u, id, 0xFFFFFFFFu, 0xFFFFFFFFu, 0u, 0u});
+        }
+
+        // A case being recorded or replayed: both EXITs as the game had them (back / close), so the cases recorded
+        // before Quit game replay as they were and new ones replay as recorded.
+        bool caseRun()
+        {
+            return test_mode::recording() || test_mode::replayFrame() != test_mode::kReplayIdle;
+        }
+
+        // EXIT's second confirm (K, Nov 26): the game ends as when its window is closed.
+        void quitGame(PS2Runtime *runtime)
+        {
+            KM_INFO(Game, "options screen: Quit game");
+            if (runtime)
+                runtime->requestStop();
         }
 
         // The volume sliders' previews (K, Nov 16): each step plays a sound of that kind at the new volume, cutting the
@@ -705,6 +722,7 @@ namespace kamite::options_screen
             uint32_t backdrop = 0; // its backdrop entry (left stretched over the picture)
             int confirmRow = -1;   // asking Yes / No for this row (-1 = not asking)
             bool confirmYes = false;
+            bool quitArmed = false; // EXIT confirmed once: the help asks, a second confirm quits, Cancel takes it back
             bool inPage = false;   // the cursor is in the category's page (A in, B out; beside the list Right / Left too)
             int pageCursor = 0;    // its row (headers skipped)
             int pageScroll = 0;    // the first row shown
@@ -1862,6 +1880,7 @@ namespace kamite::options_screen
             view.cursor = s.row;
             view.confirmRow = s.confirmRow;
             view.confirmYes = s.confirmYes;
+            view.helpOverride = s.quitArmed ? kQuitQuestion : nullptr;
             if (s.confirmRow >= 0)
                 view.question = k.actions[s.confirmRow] == Action::ResetGame ? kResetQuestion : kRestoreQuestion;
             // The category under the cursor: beside the list on 16:10 and wider (names only until it is opened), in its
@@ -2232,9 +2251,12 @@ namespace kamite::options_screen
                 s.confirmRow = s.row;
                 s.confirmYes = false;
                 break;
-            case Action::Exit:
+            case Action::Exit: // the first confirm asks (K, Nov 26); moveHook quits on the second
                 sound(rdram, ctx, runtime, kSeOk);
-                wr32(self + kResult, static_cast<uint32_t>(kResultBack));
+                if (caseRun())
+                    wr32(self + kResult, static_cast<uint32_t>(kResultBack));
+                else
+                    s.quitArmed = true;
                 break;
             default: // a category: its page
                 enterPage(kind, s, rdram, ctx, runtime);
@@ -2348,6 +2370,25 @@ namespace kamite::options_screen
                 g_voiceDueMs = 0;
                 previewSound(rdram, ctx, runtime, kSePickupLine); // the Voices slider settled
             }
+            if (s.quitArmed)
+            {
+                // EXIT asked: a second confirm quits, Cancel only takes the question back, any other press moves on.
+                if ((pressed & kOk) && !(pressed & kCancel) && k.actions[s.row] == Action::Exit)
+                {
+                    quitGame(runtime);
+                    ctx->pc = ra;
+                    return;
+                }
+                if (pressed & kCancel)
+                {
+                    sound(rdram, ctx, runtime, kSeBack);
+                    s.quitArmed = false;
+                    ctx->pc = ra;
+                    return;
+                }
+                if (pressed || (repeat & (kUp | kDown)))
+                    s.quitArmed = false;
+            }
             if ((pressed & (kOk | kStart)) == kStart)
             {
                 sound(rdram, ctx, runtime, kSeBack);
@@ -2435,6 +2476,183 @@ namespace kamite::options_screen
             return FunctionHooks::instance().replace(address, name, implementation, ReplacementStatus::Native, "the OPTIONS screen of God Hand: Rearmed");
         }
 
+        // ---- the pause menu (cSubScrMenu, vtable 0x41F6C8; claude/subscreen-vtables.md) -------------------------------
+        // K, Nov 26: its EXIT ("Return to game") quits the game after a second confirm, and it shows the OPTIONS
+        // screen's confirm / cancel hints. Its move (0x165EB8): cursor +0x5A (rows 0..4: techniques, roulette, map,
+        // options, EXIT), OK (pressed bit 28, only while +0x2A2 bit 0 is clear) sets +0x60 to 1..4 or -1 (EXIT: close),
+        // Cancel / Start (bits 29 / 21) -1. Its update (0x165638) gives the help line's two text entries (+0xC0 / +0xC4,
+        // message id at +0x90) message 0x2000 + the cursor, from the menu's own bank (bank 2, idsubscrmenu_us.idd:
+        // entry 4 "Return to game"). Ours: message 0x2004 pointed at "Quit game", and while asking, the entries given
+        // message 0x3043 (a free "<7d>" placeholder of bank 3; style_presets.cpp) pointed at the question. The texts
+        // sit in guest scratch below the ELF at 0xFFD20 / 0xFFD40 (tutorial_text.cpp keeps the map).
+        constexpr uint32_t kPauseOpen = 0x00164F30u, kPauseClose = 0x001655D8u, kPauseUpdate = 0x00165638u,
+                           kPauseMove = 0x00165EB8u, kPauseDraw = 0x00165E88u;
+        constexpr uint32_t kPauseCursor = 0x5Au, kPauseOkLock = 0x2A2u, kPauseHelpA = 0xC0u, kPauseHelpB = 0xC4u,
+                           kTextMessage = 0x90u;
+        constexpr int kPauseExitRow = 4;
+        constexpr uint16_t kQuitMessage = 0x2004u, kChickenMessage = 0x3043u;
+        constexpr uint32_t kQuitText = 0x000FFD20u, kChickenText = 0x000FFD40u; // 0x20 / 0x80 bytes
+        constexpr uint32_t kMessageManager = 0x003C23A4u; // cMessage: 16 bank pointers; id >> 12 picks the bank
+        GuestFunction g_pauseOriginal[5] = {};
+        bool g_pauseArmed = false;
+        bool g_pauseMoved = false; // its move ran since the last draw (it is the screen up)
+        bool g_pauseShown = false; // our hints are on the screen
+
+        // The menu font's codes (claude/tutorial-text.md; '?' 0x22 read from the game's own "...like to reset?").
+        uint16_t menuGlyph(char c)
+        {
+            if (c >= 'A' && c <= 'Z')
+                return static_cast<uint16_t>(0x40 + (c - 'A'));
+            if (c >= 'a' && c <= 'z')
+                return static_cast<uint16_t>(0x5A + (c - 'a'));
+            if (c >= '0' && c <= '9')
+                return static_cast<uint16_t>(0x36 + (c - '0'));
+            switch (c)
+            {
+            case '.': return 0x21u;
+            case '!': return 0x23u;
+            case '?': return 0x22u;
+            case ',': return 0x7Eu;
+            case '\'': return 0x27u;
+            case '\n': return 0xA001u;
+            default: return 0x35u;
+            }
+        }
+        void writeMenuText(uint32_t address, const char *text, uint32_t bytes)
+        {
+            uint32_t at_ = address;
+            for (const char *c = text; *c && at_ + 4u <= address + bytes; ++c, at_ += 2u)
+            {
+                const uint16_t g = menuGlyph(*c);
+                std::memcpy(at(at_), &g, 2);
+            }
+            const uint16_t end = 0x8001u;
+            std::memcpy(at(at_), &end, 2);
+        }
+        // A message's entry pointed at our text (an offset from its bank, wrapping below it).
+        bool pointMenuMessage(uint16_t id, uint32_t text)
+        {
+            const uint32_t mgr = rd32(kMessageManager) & PS2_RAM_MASK;
+            if (!valid(mgr, 64u))
+                return false;
+            const uint32_t bank = rd32(mgr + 4u * (id >> 12)) & PS2_RAM_MASK;
+            if (!valid(bank, 8u) || (id & 0xFFFu) >= rd32(bank) || !valid(bank + 8u * (id & 0xFFFu) + 8u))
+                return false;
+            const uint32_t word = bank + 8u * (id & 0xFFFu) + 4u;
+            if (rd32(word) != text - bank)
+                wr32(word, text - bank);
+            return true;
+        }
+
+        void pauseOpenHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            g_pauseArmed = false;
+            g_pauseOriginal[0](rdram, ctx, runtime);
+        }
+
+        void pauseCloseHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            g_pauseArmed = false;
+            g_pauseMoved = false;
+            if (g_pauseShown)
+            {
+                clearOverlay();
+                g_pauseShown = false;
+            }
+            g_pauseOriginal[1](rdram, ctx, runtime);
+        }
+
+        void pauseMoveHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t self = GPR_U32(ctx, 4) & PS2_RAM_MASK;
+            if (!valid(self, 0x2A4u))
+                return g_pauseOriginal[3](rdram, ctx, runtime);
+            g_pauseMoved = true;
+            const uint32_t ra = GPR_U32(ctx, 31);
+            const uint64_t pressed = rd64(kCommand);
+            const int8_t cursor = static_cast<int8_t>(*at(self + kPauseCursor));
+            if (cursor == kPauseExitRow && (*at(self + kPauseOkLock) & 1u) == 0u && !caseRun())
+            {
+                if ((pressed & kOk) && !(pressed & kCancel))
+                {
+                    if (g_pauseArmed)
+                        quitGame(runtime);
+                    else
+                    {
+                        sound(rdram, ctx, runtime, kSeOk);
+                        g_pauseArmed = true;
+                    }
+                    ctx->pc = ra;
+                    return;
+                }
+                if (g_pauseArmed && (pressed & kCancel))
+                {
+                    sound(rdram, ctx, runtime, kSeBack); // the question taken back; the menu stays
+                    g_pauseArmed = false;
+                    ctx->pc = ra;
+                    return;
+                }
+            }
+            const uint32_t result = rd32(self + kResult);
+            g_pauseOriginal[3](rdram, ctx, runtime);
+            if (static_cast<int8_t>(*at(self + kPauseCursor)) != kPauseExitRow || pressed)
+                g_pauseArmed = false;
+            if (rd32(self + kResult) != result && g_pauseShown)
+            {
+                clearOverlay(); // leaving for another screen (its own overlay, if any, follows) or closing
+                g_pauseShown = false;
+            }
+        }
+
+        void pauseUpdateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t self = GPR_U32(ctx, 4) & PS2_RAM_MASK;
+            g_pauseOriginal[2](rdram, ctx, runtime);
+            if (!valid(self, 0x2A4u) || static_cast<int8_t>(*at(self + kPauseCursor)) != kPauseExitRow || caseRun())
+                return;
+            writeMenuText(kQuitText, "Quit game", 0x20u);
+            pointMenuMessage(kQuitMessage, kQuitText);
+            if (!g_pauseArmed)
+                return;
+            writeMenuText(kChickenText, kQuitQuestion, 0x80u);
+            if (!pointMenuMessage(kChickenMessage, kChickenText))
+                return;
+            for (const uint32_t slot : {kPauseHelpA, kPauseHelpB})
+            {
+                const uint32_t entry = rd32(self + slot) & PS2_RAM_MASK;
+                if (valid(entry, kTextMessage + 2u))
+                    std::memcpy(at(entry + kTextMessage), &kChickenMessage, 2);
+            }
+        }
+
+        void pauseDrawHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            g_pauseOriginal[4](rdram, ctx, runtime);
+#if defined(KAMITE_HAS_SCREEN_OVERLAY)
+            if (!g_pauseMoved)
+            {
+                if (g_pauseShown)
+                {
+                    clearOverlay();
+                    g_pauseShown = false;
+                }
+                return;
+            }
+            g_pauseMoved = false;
+            const HintArt &hints = hintArt();
+            options_overlay::Hint confirm, cancel;
+            confirm.art[0] = hints.confirm[0].c_str();
+            confirm.art[1] = hints.confirm[1].c_str();
+            confirm.word = "Confirm";
+            cancel.art[0] = hints.cancel.c_str();
+            cancel.word = "Cancel";
+            options_overlay::buildHints(g_aspect, screenFade(), confirm, cancel, g_items, g_strings);
+            GSPcsx2Backend::SetScreen(g_items.data(), static_cast<uint32_t>(g_items.size()), g_strings.data(),
+                                      static_cast<uint32_t>(g_strings.size()));
+            g_pauseShown = true;
+#endif
+        }
+
         template <int N>
         bool hookKind(PS2Runtime &runtime)
         {
@@ -2469,6 +2687,13 @@ namespace kamite::options_screen
             KM_WARN(Game, "options screen: hooking failed; the Options screens may be the game's");
             return;
         }
+        // The pause menu: EXIT -> Quit game, the confirm / cancel hints (K, Nov 26).
+        if (!hook(runtime, kPauseOpen, "cSubScrMenu open (pause menu hints / Quit)", &pauseOpenHook, g_pauseOriginal[0]) ||
+            !hook(runtime, kPauseClose, "cSubScrMenu close (pause menu hints / Quit)", &pauseCloseHook, g_pauseOriginal[1]) ||
+            !hook(runtime, kPauseUpdate, "cSubScrMenu update (pause menu Quit text)", &pauseUpdateHook, g_pauseOriginal[2]) ||
+            !hook(runtime, kPauseMove, "cSubScrMenu move (pause menu Quit)", &pauseMoveHook, g_pauseOriginal[3]) ||
+            !hook(runtime, kPauseDraw, "cSubScrMenu draw (pause menu hints)", &pauseDrawHook, g_pauseOriginal[4]))
+            KM_WARN(Game, "options screen: the pause menu is not hookable; its EXIT returns to the game as before");
         const auto utf8 = [](const fs::path &path)
         {
             const std::u8string text = path.u8string();
