@@ -895,6 +895,37 @@ namespace kamite::native::motion
             return runDecoder(env, ctx, kDecodeKeysFrame, [&](auto &d) { d.keys(); });
         }
 
+        // ==== M4: the pose's kind-3 interpolator and the pose fused ======================================================
+        // ---- func_00158FC8 (a0 = the motion, a1 = its record, f12 = t; asm, a leaf: no frame, no calls): f0 ------------
+        // record: +2 the key count n (lhu), +8 the track's offset (lw); track = a0 + it (addu): six f32 then n 8-byte keys
+        // (motion_core kind3Sample). Reads only. The record and the track word-aligned (lw / lwc1), plain RAM.
+        constexpr uint32_t kKind3 = 0x158FC8u;
+        template <class Env>
+        bool kind3Native(Env &env, R5900Context *ctx)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t a1 = e::u32(ctx, e::a1);
+            uint32_t rec, track;
+            if ((a1 & 3u) != 0u || !plainRam(a1, 12u, rec))
+                return false;
+            const uint32_t n = u16At(env.at(rec + 2u, 2u));
+            const uint32_t trackAddress = e::u32(ctx, e::a0) + e::read32(env, rec + 8u);
+            const uint32_t span = 0x18u + 8u * n;
+            if ((trackAddress & 3u) != 0u || !plainRam(trackAddress, span, track))
+                return false;
+            Exact x;
+            int loops = 0;
+            const float v = kind3Sample(x, env.at(track, span), n, bitsFloat(e::fBits(ctx, 12)), loops);
+            if (!x.ok)
+                return false;
+            for (int k = 0; k < loops; ++k)
+                env.checkpoint(32u);
+            e::setFBits(ctx, 0, floatBits(v));
+            returnFrom(ctx);
+            return true;
+        }
+
         // ==== M2 (batch 3): cModel_calcParts and cModel_calcWorldParts fused ===========================================
         // The whole per-model pass as one native: the model's own matrix (MtxInitCoord) and its parts' (Adjust_theta_vec,
         // cParts_calcLocal, the blend 0x156D70, the parent join 0x1501D0), each callee run by its own native's body on a
@@ -955,6 +986,13 @@ namespace kamite::native::motion
             JournalEnv(const JournalEnv &) = delete;
             JournalEnv &operator=(const JournalEnv &) = delete;
             void commit() { kept = true; }
+            // A read that keeps nothing (M4's pose: its tracks are read in place, only writes need their old bytes).
+            const uint8_t *read(uint32_t offset, uint32_t bytes)
+            {
+                if (!store || e::overlaps(offset, bytes, low, size))
+                    ok = false;
+                return env.at(offset, bytes);
+            }
             uint8_t *at(uint32_t offset, uint32_t bytes)
             {
                 uint8_t *p = env.at(offset, bytes);
@@ -1174,6 +1212,353 @@ namespace kamite::native::motion
             returnFrom(ctx);
             return true;
         }
+
+        // ---- the pose func_00158328 (a0 = the object; asm 2464): its motion at +0x428 (an mtb3 block) at the clock -----
+        // +0x430 into the root outputs and every part. Records from block + 8, 12 bytes each, in order: word0's low byte the
+        // part (lb; 0xFF = the root), & 0xF00 the channel, (>> 12) & 0xF the kind (the table 0x3BD910: kind 0 GetField_2
+        // = the record's +8 as f32, 1 the Hermite 0x158CD0, 2 / 6 return 0, 3 0x158FC8; any other entry declines), each
+        // present record taken in turn. fp = (+0x434 >> 1) & 1 (a mirrored motion): the root's +0x310 / +0x344 / +0x348
+        // negated; per part s4 (fp, +0x14C set, not 0x800000: x on the partner +0x14C, negated) and s6 (fp, +0x14C set,
+        // none of 0x800000 / 0x2000000 / 0x1000000: rot y / z negated).
+        // Root: 0x0FF / 0x1FF / 0x2FF = the decode 0x159AD0 on the cursors +0x1B4 / +0x1D4 / +0x1F4 into +0x310..+0x318
+        // (default 0); 0x3FF..0x5FF the table into +0x340..+0x348 (default 0), Adjust_theta_vec(+0x340); 0x6FF..0x8FF into
+        // +0x370..+0x378 (default 1.0). Per part (count +0x2B4 read once for the loop, again for each lookup; parts +0x278):
+        // flags +0x154: 0x2000 sets 0x400000, 0x8000 sets 0x200000; 0x80 cleared; 0x1 skips the part's records; channels
+        // 0-2 (unless 0x200) the table into the anchor +0xD0's x / y / z (unkeyed with 0 < blend +0x27C and not 0x100000:
+        // the bind +0xE0..+0xE8); 3-5 (unless 0x100) the decode on the part's cursors +0x1B4.. into +0x100..+0x108
+        // (unkeyed with 0x8000: 0); 6-8 (unless 0x400) the table into +0x110..+0x118; a keyed channel sets 0x80. Skipped
+        // channels step over their records. Everything in the original's order on a JournalEnv (writes keep their bytes;
+        // tracks read in place); the callees run their checked natives' bodies (decode, Adjust_theta_vec) or cores (the
+        // Hermite, kind 3) inline, each jal / jalr charged, each taken back-edge a checkpoint. A 0xD0 frame; the deepest
+        // callee 0x159AD0 (0xB0).
+        constexpr uint32_t kPose = 0x158328u, kPoseFrame = 0xD0u, kPoseWindow = kPoseFrame + kDecodeFrame;
+        constexpr uint32_t kKindTable = 0x3BD910u, kGetField = 0x158CC8u, kZero2 = 0x158FB8u, kZero6 = 0x159490u;
+        constexpr uint32_t kSign = 0x80000000u;
+        template <class Env>
+        struct Pose
+        {
+            JournalEnv<Env> &j;
+            R5900Context &c;
+            uint32_t callSp = 0, block = 0, t = 0;
+            bool ok = true;
+            bool off(uint32_t address, uint32_t size, uint32_t &o)
+            {
+                if ((address & (size - 1u)) != 0u || !plainRam(address, size, o))
+                    ok = false;
+                return ok;
+            }
+            uint32_t lw(uint32_t address)
+            {
+                uint32_t o, v = 0u;
+                if (off(address, 4u, o))
+                    std::memcpy(&v, j.read(o, 4u), 4);
+                return v;
+            }
+            int32_t lb(uint32_t address)
+            {
+                uint32_t o;
+                return off(address, 1u, o) ? static_cast<int8_t>(*j.read(o, 1u)) : 0;
+            }
+            uint32_t lbu(uint32_t address)
+            {
+                uint32_t o;
+                return off(address, 1u, o) ? *j.read(o, 1u) : 0u;
+            }
+            uint32_t lhu(uint32_t address)
+            {
+                uint32_t o;
+                return off(address, 2u, o) ? u16At(j.read(o, 2u)) : 0u;
+            }
+            void sw(uint32_t address, uint32_t v)
+            {
+                uint32_t o;
+                if (off(address, 4u, o))
+                    e::write32(j, o, v);
+            }
+            bool fine() const { return ok && j.ok; }
+            // jal func_00159AD0(cursor, block, record, f12 = t): f0
+            uint32_t decode(uint32_t cursor, uint32_t record)
+            {
+                if (!fine())
+                    return 0u;
+                innerArgs(c, callSp, cursor, block, record, e::u32(&c, e::a3));
+                e::setFBits(&c, 12, t);
+                j.call();
+                if (!decodeNative(j, &c))
+                    ok = false;
+                return e::fBits(&c, 0);
+            }
+            // jalr the table's entry for the record's kind (a0 = block, a1 = record, f12 = t): f0
+            uint32_t interp(uint32_t record, uint32_t word)
+            {
+                const uint32_t fn = lw(kKindTable + ((word >> 10) & 0x3Cu));
+                if (!fine())
+                    return 0u;
+                j.call();
+                switch (fn)
+                {
+                case kGetField:
+                    return lw(record + 8u);
+                case kZero2:
+                case kZero6:
+                    return 0u;
+                case kTrack:
+                    return hermite(record);
+                case kKind3:
+                    return kind3(record);
+                default: // 4, 5 (not native yet), a zero or patched entry
+                    ok = false;
+                    return 0u;
+                }
+            }
+            // 0x158CD0's checks and core (trackNative) with the track read in place
+            uint32_t hermite(uint32_t record)
+            {
+                const uint32_t n = lhu(record + 2u), trackAddress = block + lw(record + 8u), span = 0xCu + 4u * n;
+                uint32_t track, table;
+                if (!fine() || (trackAddress & 1u) != 0u || !plainRam(trackAddress, span, track) ||
+                    !plainRam(kHalfTable, 64u, table))
+                {
+                    ok = false;
+                    return 0u;
+                }
+                uint32_t tb[16];
+                std::memcpy(tb, j.read(table, 64u), 64);
+                Exact x;
+                int calls = 0, loops = 0;
+                const float v = trackSample(x, j.read(track, span), n, bitsFloat(t), tb, calls, loops);
+                if (!x.ok)
+                    ok = false;
+                for (int k = 0; k < calls; ++k)
+                    j.call();
+                for (int k = 0; k < loops; ++k)
+                    j.checkpoint(32u);
+                return floatBits(v);
+            }
+            // 0x158FC8's checks and core (kind3Native) with the track read in place
+            uint32_t kind3(uint32_t record)
+            {
+                const uint32_t n = lhu(record + 2u), trackAddress = block + lw(record + 8u), span = 0x18u + 8u * n;
+                uint32_t track;
+                if (!fine() || (trackAddress & 3u) != 0u || !plainRam(trackAddress, span, track))
+                {
+                    ok = false;
+                    return 0u;
+                }
+                Exact x;
+                int loops = 0;
+                const float v = kind3Sample(x, j.read(track, span), n, bitsFloat(t), loops);
+                if (!x.ok)
+                    ok = false;
+                for (int k = 0; k < loops; ++k)
+                    j.checkpoint(32u);
+                return floatBits(v);
+            }
+        };
+        template <class Env>
+        bool poseNative(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp0 = e::u32(ctx, e::sp), obj = e::u32(ctx, e::a0);
+            uint32_t stackLow;
+            if (!env.atEnd || (sp0 & 0xFu) != 0u || (obj & 3u) != 0u || !plainRam(sp0 - kPoseWindow, kPoseWindow, stackLow))
+                return false;
+            JournalEnv<Env> j(env, stackLow, kPoseWindow);
+            if (!j.ok)
+                return false;
+            R5900Context c = *ctx;
+            Pose<Env> p{j, c};
+            p.callSp = sp0 - kPoseFrame;
+            p.block = p.lw(obj + 0x428u);
+            const uint32_t half = p.lhu(obj + 0x434u);
+            uint32_t word = p.lw(p.block + 8u);
+            uint32_t rec = p.block + 8u;
+            p.t = p.lw(obj + 0x430u);
+            const bool fp = ((half >> 1) & 1u) != 0u;
+            // the root's translation: the decode on the object's cursors, default 0
+            uint32_t f0 = 0u;
+            if ((word & 0xFFFu) == 0x0FFu)
+            {
+                f0 = p.decode(obj + 0x1B4u, rec);
+                rec = p.block + 0x14u;
+            }
+            p.sw(obj + 0x310u, f0);
+            if (fp)
+                p.sw(obj + 0x310u, f0 ^ kSign);
+            for (uint32_t ch = 1u; ch < 3u; ++ch)
+            {
+                word = p.lw(rec);
+                f0 = 0u;
+                if ((word & 0xFFFu) == (ch << 8 | 0xFFu))
+                {
+                    f0 = p.decode(obj + 0x1B4u + 0x20u * ch, rec);
+                    rec += 0xCu;
+                }
+                p.sw(obj + 0x310u + 4u * ch, f0);
+            }
+            // the root's rotation (the table, default 0), wrapped; the root's scale (default 1.0)
+            for (uint32_t ch = 3u; ch < 9u; ++ch)
+            {
+                word = p.lw(rec);
+                f0 = ch < 6u ? 0u : kOne;
+                if ((word & 0xFFFu) == (ch << 8 | 0xFFu))
+                {
+                    f0 = p.interp(rec, word);
+                    rec += 0xCu;
+                }
+                const uint32_t out = ch < 6u ? 0x340u + 4u * (ch - 3u) : 0x370u + 4u * (ch - 6u);
+                if (ch == 8u)
+                    break; // its store follows the count's read
+                p.sw(obj + out, f0);
+                if (ch == 5u && p.fine())
+                {
+                    innerArgs(c, p.callSp, obj + 0x340u, e::u32(&c, e::a1), e::u32(&c, e::a2), e::u32(&c, e::a3));
+                    j.call();
+                    if (!adjustThetaVec(j, &c))
+                        return false;
+                    if (fp)
+                    {
+                        const uint32_t y = p.lw(obj + 0x344u), z = p.lw(obj + 0x348u);
+                        p.sw(obj + 0x344u, y ^ kSign);
+                        p.sw(obj + 0x348u, z ^ kSign);
+                    }
+                }
+            }
+            const uint32_t count = p.lbu(obj + 0x2B4u);
+            p.sw(obj + 0x378u, f0);
+            const float zero = bitsFloat(0u);
+            auto keyed = [&](uint32_t channel, int32_t s2, uint32_t &w) {
+                if (p.lb(rec) != s2)
+                    return false;
+                w = p.lw(rec);
+                return (w & 0xF00u) == channel << 8;
+            };
+            // a skipped group: each of its three channels' records stepped over while they are the part's (movz)
+            auto skip = [&](uint32_t first, int32_t s2) {
+                for (uint32_t ch = first; ch < first + 3u; ++ch)
+                {
+                    if (p.lb(rec) != s2)
+                        return;
+                    if ((p.lw(rec) & 0xF00u) == ch << 8)
+                        rec += 0xCu;
+                }
+            };
+            for (int32_t s2 = 0; s2 < static_cast<int32_t>(count) && p.fine();)
+            {
+                const uint32_t now = p.lbu(obj + 0x2B4u);
+                const uint32_t part = s2 < static_cast<int32_t>(now) ? p.lw(p.lw(obj + 0x278u) + 4u * s2) : 0u;
+                uint32_t s1 = part;
+                uint32_t flags = p.lw(s1 + 0x154u);
+                if ((flags & 0x2000u) != 0u)
+                    p.sw(s1 + 0x154u, flags | 0x400000u);
+                flags = p.lw(s1 + 0x154u);
+                if ((flags & 0x8000u) != 0u)
+                    p.sw(s1 + 0x154u, flags | 0x200000u);
+                bool s4 = false, s6 = false;
+                if (fp && p.lw(s1 + 0x14Cu) != 0u)
+                    s4 = (p.lw(s1 + 0x154u) & 0x800000u) == 0u;
+                if (fp && p.lw(part + 0x14Cu) != 0u)
+                {
+                    const uint32_t v1 = p.lw(part + 0x154u);
+                    s6 = (v1 & 0x3800000u) == 0u;
+                }
+                if (s4)
+                    s1 = p.lw(part + 0x14Cu);
+                flags = p.lw(s1 + 0x154u);
+                p.sw(s1 + 0x154u, flags & ~0x80u);
+                auto set80 = [&] { p.sw(s1 + 0x154u, p.lw(s1 + 0x154u) | 0x80u); };
+                uint32_t w = 0u;
+                if ((flags & 1u) != 0u)
+                {
+                    // every motion channel off: step over the part's records (beql back: a checkpoint each)
+                    if (p.lb(rec) == s2)
+                    {
+                        rec += 0xCu;
+                        while (p.fine() && p.lb(rec) == s2)
+                        {
+                            rec += 0xCu;
+                            j.checkpoint(32u);
+                        }
+                    }
+                }
+                else
+                {
+                    // translation: the anchor's x / y / z (x negated with s4); unkeyed while blending: the bind position
+                    if ((flags & 0x200u) != 0u)
+                        skip(0u, s2);
+                    else
+                        for (uint32_t ch = 0u; ch < 3u; ++ch)
+                        {
+                            if (keyed(ch, s2, w))
+                            {
+                                f0 = p.interp(rec, w);
+                                rec += 0xCu;
+                                const uint32_t anchor = p.lw(s1 + 0xD0u);
+                                p.sw(anchor + 4u * ch, f0);
+                                if (ch == 0u && s4)
+                                    p.sw(anchor, f0 ^ kSign);
+                                set80();
+                            }
+                            else if (fpuLess(zero, bitsFloat(p.lw(obj + 0x27Cu))) &&
+                                     (p.lw(s1 + 0x154u) & 0x100000u) == 0u)
+                            {
+                                const uint32_t anchor = p.lw(s1 + 0xD0u);
+                                p.sw(anchor + 4u * ch, p.lw(s1 + 0xE0u + 4u * ch));
+                            }
+                        }
+                    // rotation: the decode on the part's cursors (y / z negated with s6); unkeyed with 0x8000: 0
+                    if ((p.lbu(s1 + 0x155u) & 1u) != 0u)
+                        skip(3u, s2);
+                    else
+                        for (uint32_t ch = 3u; ch < 6u; ++ch)
+                        {
+                            const uint32_t out = s1 + 0x100u + 4u * (ch - 3u);
+                            if (keyed(ch, s2, w))
+                            {
+                                f0 = p.decode(s1 + 0x1B4u + 0x20u * (ch - 3u), rec);
+                                rec += 0xCu;
+                                if (ch == 3u)
+                                {
+                                    const uint32_t fl = p.lw(s1 + 0x154u);
+                                    p.sw(out, f0);
+                                    p.sw(s1 + 0x154u, fl | 0x80u);
+                                    continue;
+                                }
+                                p.sw(out, f0);
+                                if (s6)
+                                    p.sw(out, f0 ^ kSign);
+                                set80();
+                            }
+                            else if ((p.lbu(s1 + 0x155u) >> 7) != 0u)
+                                p.sw(out, 0u);
+                        }
+                    // scale (unless 0x400): only keyed channels write
+                    if ((p.lw(s1 + 0x154u) & 0x400u) != 0u)
+                        skip(6u, s2);
+                    else
+                        for (uint32_t ch = 6u; ch < 9u; ++ch)
+                        {
+                            if (p.lb(rec) != s2)
+                                break; // the part's records end (bne to the loop's end)
+                            w = p.lw(rec);
+                            if ((w & 0xF00u) != ch << 8)
+                                continue; // another channel: the next test reads the same record
+                            f0 = p.interp(rec, w);
+                            rec += 0xCu;
+                            const uint32_t fl = p.lw(s1 + 0x154u);
+                            p.sw(s1 + 0x110u + 4u * (ch - 6u), f0);
+                            p.sw(s1 + 0x154u, fl | 0x80u);
+                        }
+                }
+                ++s2;
+                if (s2 < static_cast<int32_t>(count))
+                    j.checkpoint(32u); // bnel back to the loop's top
+            }
+            if (!p.fine())
+                return false;
+            j.commit();
+            returnFrom(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -1253,5 +1638,18 @@ namespace kamite::native::motion
         addDecode("RecDecode_readHeader", kReadHeader, &readHeaderNative<RealEnv>, &readHeaderNative<ShadowEnv>, true, 0u);
         addDecode("func_00159AD0", kDecode, &decodeNative<RealEnv>, &decodeNative<ShadowEnv>, true,
                   NativeFunction::kReturnsF0);
+        // M4 (Nov 26): the pose fused (the decode, the Hermite, kind 3, kinds 0 / 2 / 6 and Adjust_theta_vec inline) and
+        // kind 3 on its own; unchecked: replays shadow them. The pose sits under the features' three wrappers: its slot
+        // keeps FunctionHooks' trampoline from boot (native.cpp kUnderHooks), so they call it as their inner function,
+        // its observers first. Its footprint (a model, its parts, their tracks) is recorded with a larger limit.
+        addF("func_00158FC8", kKind3, &kind3Native<RealEnv>, &kind3Native<ShadowEnv>, false, NativeFunction::kReturnsF0);
+        {
+            NativeFunction fn{"func_00158328", kPose, "motion", false, &poseNative<RealEnv>, &poseNative<ShadowEnv>, nullptr};
+            fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
+            fn.returns = 0u;
+            fn.maxBytes = 1u << 22;
+            fn.maxRanges = 65536u;
+            registerFunction(fn);
+        }
     }
 }

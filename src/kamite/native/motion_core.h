@@ -648,6 +648,107 @@ namespace kamite::native::motion
         }
     }
 
+    // ---- func_00158FC8: a kind-3 track at time t (the pose's interpolator for kind 3; asm, a leaf) ----------------------
+    // track: six f32 (pos, dpos, tan0, dtan0, tan1, dtan1) then n 8-byte keys {u16 frame (absolute), value, in, out};
+    // key -1 = the header's last 8 bytes (+0x10). value(k) = cvt(key k's value) * dpos + pos (mul.s, add.s). Loop 1 walks
+    // the keys while frame < t (c.eq.s: that key's value; past the last: key n - 1's; n = 0: key -1's); at the first key
+    // past t (s), loop 2 starts again at s (equal: its value; past t: the Hermite between key s - 1 and it; run out: key
+    // s - 1's value). Hermite in the asm's order: u = (t - fA) / (fB - fA), A / B = the keys' values, A's tangent = out *
+    // dtan1 + tan1, B's = in * dtan0 + tan0. loops: every taken backward branch (the two loops' and the three b's back to
+    // the shared return).
+    inline float kind3Sample(Exact &x, const uint8_t *track, uint32_t n, float t, int &loops)
+    {
+        auto f32 = [&](uint32_t at) {
+            uint32_t v;
+            std::memcpy(&v, track + at, 4);
+            return bitsFloat(v);
+        };
+        const float pos = f32(0u), dpos = f32(4u);
+        const uint8_t *k = track + 0x18;
+        auto field = [&](int64_t key, uint32_t at) { return static_cast<float>(u16At(k + 8 * key + at)); };
+        auto value = [&](int64_t key) { return x.add(x.mul(field(key, 2u), dpos), pos); };
+        loops = 0;
+        if (n == 0u)
+            return value(-1); // 0x159030
+        uint32_t v1 = 0;
+        for (;;)
+        {
+            const float f = field(v1, 0u);
+            if (fpuEqual(f, t))
+            {
+                ++loops; // 0x1590C8, b back to the return
+                return value(v1);
+            }
+            if (!fpuLess(f, t))
+                break;
+            if (++v1 < n)
+            {
+                ++loops;
+                continue;
+            }
+            return value(static_cast<int64_t>(n) - 1); // 0x159030
+        }
+        const int64_t before = static_cast<int64_t>(v1) - 1; // t4
+        for (uint32_t j = v1;;)
+        {
+            const float f = field(j, 0u);
+            if (fpuEqual(f, t))
+            {
+                ++loops; // 0x1590E0, b back
+                return value(j);
+            }
+            v1 = j + 1u;
+            if (!fpuLess(f, t))
+            {
+                // 0x1590F8: the Hermite between key t4 and key j
+                const float fB = field(j, 0u), fA = field(before, 0u), vA = field(before, 2u), vB = field(j, 2u);
+                const float span = x.sub(fB, fA);
+                const float dtan0 = f32(0xCu);
+                const float d = x.sub(t, fA);
+                const float dtan1 = f32(0x14u);
+                float f8 = x.mul(vA, dpos);
+                float f7 = x.mul(vB, dpos);
+                const float tan1 = f32(0x10u);
+                const float u = x.div(d, span);
+                const float tan0 = f32(0x8u);
+                f8 = x.add(f8, pos);
+                f7 = x.add(f7, pos);
+                float f3 = field(j, 4u);
+                float f4 = field(before, 6u);
+                float f1 = x.mul(u, u);
+                f3 = x.mul(f3, dtan0);
+                f4 = x.mul(f4, dtan1);
+                float f5 = x.mul(f1, u);
+                const float f9 = x.mul(f1, bitsFloat(0x40400000u));
+                f4 = x.add(f4, tan1);
+                float f0 = x.add(f5, f5);
+                f5 = x.sub(f5, f1);
+                f3 = x.add(f3, tan0);
+                float f2 = negBits(f0);
+                f0 = x.sub(f0, f9);
+                f1 = x.sub(f5, f1);
+                f2 = x.add(f2, f9);
+                f0 = x.mul(f0, f8);
+                f1 = x.add(f1, u);
+                f7 = x.mul(f7, f2);
+                f0 = x.add(f0, f8);
+                f4 = x.mul(f4, f1);
+                f3 = x.mul(f3, f5);
+                f0 = x.add(f0, f7);
+                f0 = x.add(f0, f4);
+                return x.add(f0, f3);
+            }
+            ++j;
+            if (v1 < n)
+            {
+                ++loops;
+                continue;
+            }
+            ++loops; // 0x1590C0, b back
+            return value(before);
+        }
+    }
+
     // MtxMultiply(out, A, B) = sceVu0MulMatrix: out row k = A's rows weighted by B row k (mulRow). Both below 2^62.
     inline bool productInputs(const Mat4 &a, const Mat4 &b)
     {

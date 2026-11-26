@@ -479,10 +479,36 @@ int main(int argc, char **argv)
         std::fclose(o);
     }
     bad += decodeBad;
+
+    // Kind 3 (<vectors>.kind3, M4: n, t, the track -> func_00158FC8's f0), motion_core's kind3Sample.
+    int kind3Count = 0, kind3Bad = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".kind3").c_str(), "rb"))
+    {
+        unsigned char rec[4 + 4 + 0x18 + 8 * 33 + 4];
+        while (std::fread(rec, 1, sizeof(rec), o) == sizeof(rec))
+        {
+            uint32_t n, want;
+            float t;
+            std::memcpy(&n, rec, 4), std::memcpy(&t, rec + 4, 4), std::memcpy(&want, rec + 8 + 0x18 + 8 * 33, 4);
+            motion::Exact x;
+            int loops = 0;
+            const float v = motion::kind3Sample(x, rec + 8, n, t, loops);
+            if (!x.ok)
+                continue;
+            ++kind3Count;
+            uint32_t got;
+            std::memcpy(&got, &v, 4);
+            if (got != want && ++kind3Bad <= 5)
+                std::printf("kind-3 vector %d differs: %08X want %08X\n", kind3Count, got, want);
+        }
+        std::fclose(o);
+    }
+    bad += kind3Bad;
+    std::printf("kind 3: %d vectors, %d differ\n", kind3Count, kind3Bad);
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
                 "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ; twist %d vectors, "
                 "%d differ; track %d vectors, %d differ; decode %d vectors (%d declined), %d differ\n", path, count,
-                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad, rotCount, rotBad,
+                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad, rotCount, rotBad,
                 opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad,
                 trackCount, trackBad, decodeCount, decodeDeclined, decodeBad);
     return bad ? 1 : 0;

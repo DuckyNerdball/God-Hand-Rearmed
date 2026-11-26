@@ -47,6 +47,13 @@ namespace kamite
         // address has no function.
         GuestFunction replaceBehindObservers(uint32_t address, std::string name, GuestFunction implementation,
                                              ReplacementStatus status, std::string reason);
+        // Keeps `address`'s entry observers and what runs behind them (natives) under every hook added later: `entry` (a
+        // function that calls runUnder(address, ...)) goes in the slot now, so a later replace() wraps it (its inner
+        // function), a later observeEntry joins the observers and a later replaceBehindObservers sets what runs behind
+        // them, neither touching the slot. Call before anything else hooks the address (rung 4 M4: the pose under its
+        // three wrappers, K's round 1).
+        bool keepUnderHooks(uint32_t address, std::string name, GuestFunction entry);
+        static void runUnder(uint32_t address, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
         // Runs the entry observers of `address`, if any (a native that runs an observed function inline calls this
         // where the guest call would have entered it). Cheap when the address has none.
         static void runEntryObservers(uint32_t address, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);

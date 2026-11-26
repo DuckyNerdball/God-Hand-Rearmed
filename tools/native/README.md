@@ -41,7 +41,8 @@ with kamite/git_commit.h):
        func_0015A6A0_0x15a6a0 func_0015A190_0x15a190 capVu0LengthSq_0x1f7e28 sceVu0ScaleVectorXYZ_0x30aba0
        capVu0Atan2_0x1f8180 cModel_calcParts_0x149eb8 cModel_calcWorldParts_0x14a038
        func_00156508_0x156508 func_00156550_0x156550 func_00158CD0_0x158cd0 func_00159AD0_0x159ad0
-       RecDecode_readHeader_0x1599b0 func_00159DA0_0x159da0"
+       RecDecode_readHeader_0x1599b0 func_00159DA0_0x159da0 func_00158328_0x158328 func_00158FC8_0x158fc8
+       GetField_2_158CC8_0x158cc8 func_00158FB8_0x158fb8 func_00159300_0x159300 func_00159490_0x159490"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -222,3 +223,18 @@ specials (any float only when the cursor can't walk). Declines set up: readHeade
 the cursor, the keys in the window (0x159DA0 would read its own saves), 0x159DA0's src in its frame. Not set up: t past
 0xFF00 frames (the only place a kind-1 walk's 16-bit sum wraps). `<vectors>.decode` (whole calls of func_00159AD0
 against the recompiled one: f0 and the cursor after) runs in libvu0_check.
+
+## M4: the pose fused (rung 4, Nov 26)
+
+func_00158328 (an object's motion at +0x428 at the clock +0x430 into its root outputs and every part) runs its whole
+subtree inline: the decode (func_00159AD0's native body), the table 0x3BD910's interpolators by the entry the record's
+kind reaches (GetField_2 a load, 0x158CD0's and 0x158FC8's cores with the track read in place, 0x158FB8 / 0x159490 a 0,
+anything else a decline) and Adjust_theta_vec, on a JournalEnv (writes keep their old bytes; `read()` keeps none). It is
+installed under the features' three wrappers (frame_patches, game_options, style_pose): native.cpp's kUnderHooks puts
+FunctionHooks' trampoline in its slot at boot (keepUnderHooks), so the wrappers wrap the trampoline and the native sits
+behind its observers. func_00158FC8 (kind 3) is a native of its own too. shadow_test's setupPose builds an object, 16
+parts (flags, partners +0x14C, anchors +0xD0, cursors) and a block: a real mtb3 block when `KM_BLOCKS=<file>` names a
+pool (`make_tracks.py --blocks <out> <em00.dat> <pl00.dat>`, sandbox only), else made-up records and tracks (kinds 0 / 1
+/ 3, rarely 2 / 5 / 6; the table's entries swapped now and then). Every cursor a record reaches starts from the
+recompiled RecDecode_readHeader, and half the time a recompiled pose at another t walks them first. `<vectors>.kind3`
+(kind3Sample against the recompiled func_00158FC8) runs in libvu0_check.

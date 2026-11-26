@@ -143,6 +143,25 @@ namespace kamite::native
 #endif
     }
 
+    namespace
+    {
+        // Natives that run under the features' hooks at their address (rung 4 M4, K's round 1: the pose under
+        // frame_patches', game_options' and style_pose's wrappers): the slot keeps FunctionHooks' trampoline from boot.
+        constexpr uint32_t kUnderHooks[] = {0x158328u};
+        template <size_t I>
+        void underHooksEntry(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            FunctionHooks::runUnder(kUnderHooks[I], rdram, ctx, runtime);
+        }
+    }
+
+    void reserveUnderHooks(PS2Runtime &runtime)
+    {
+        (void)runtime;
+        if (!FunctionHooks::instance().keepUnderHooks(kUnderHooks[0], "func_00158328 (motion pose)", &underHooksEntry<0>))
+            std::fprintf(stderr, "[native] func_00158328: its natives can't go under its hooks\n");
+    }
+
     void registerFunction(const NativeFunction &function)
     {
         registry().push_back(function);

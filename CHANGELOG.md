@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 26, 2026
 
+- Buck Breaker: the chest grab's posed bones play in full precision, as intended (they played at the animation's coarse steps).
 - Control styles renamed Classic Brawler / Modern Rambler (Strafing Tiger planned), moved to Controls with a Switching row.
 - Mouse Look option removed: the mouse always turns Modern Rambler's freecam.
 - Modern, controller: Trackpad Tango option: the trackpad or mouse turns the freecam, the right stick dodges.

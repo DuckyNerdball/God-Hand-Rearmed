@@ -17,6 +17,11 @@ namespace kamite::native
     //   - else recompiled (untouched).
     void installFromEnvironment(PS2Runtime &runtime);
 
+    // Right after FunctionHooks::attach, before any feature hook: the addresses whose natives (and entry observers) run
+    // under the hooks added later (the pose 0x158328: its three wrappers call the trampoline as their inner function).
+    // In every build, native or not: the observers there run as they would at an unhooked address.
+    void reserveUnderHooks(PS2Runtime &runtime);
+
     // At exit: writes the shadow harness's summary (nothing to do without it).
     void flush();
 

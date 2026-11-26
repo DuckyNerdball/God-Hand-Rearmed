@@ -1232,6 +1232,7 @@ int main(int argc, char *argv[])
             applyEeFloatingPointMode(); // on the game thread
             KM_INFO(Ee, "EE FPU host mode: round toward zero, denormals flushed");
         });
+        kamite::native::reserveUnderHooks(runtime); // the pose's natives and observers under its wrappers (before any hook)
         kamite::installHleBindings(runtime); // port_prep/hle-bindings owns the game's table
         kamite::file_layer::install(runtime); // replaced game files (characters::install's) served at the read
 #if KAMITE_HAS_VU1_PROGRAMS
