@@ -749,6 +749,190 @@ namespace kamite::native::motion
         }
     }
 
+    // ==== M5 batch 1: matrix to Euler (0x147C88) and its helpers ======================================================
+    // c.le.s: the runtime's compare key
+    inline bool fpuLessEqual(float a, float b) { return fpuKey(floatBits(a)) <= fpuKey(floatBits(b)); }
+    // __ieee754_sqrtf 0x3A3B48 (decomp C, newlib e_sqrtf: bit by bit) for a normal positive x (else false: never reached
+    // from asinf); loops: the bit loop's taken back-edge (24).
+    inline bool sqrtfBits(uint32_t bits, uint32_t &out, int &loops)
+    {
+        int32_t ix = static_cast<int32_t>(bits);
+        if ((ix & 0x7f800000) == 0x7f800000 || ix <= 0 || (ix >> 23) == 0)
+            return false;
+        int32_t m = (ix >> 23) - 127;
+        ix = (ix & 0x007fffff) | 0x00800000;
+        if (m & 1)
+            ix += ix;
+        m >>= 1;
+        ix += ix;
+        int32_t q = 0, s = 0;
+        for (uint32_t r = 0x01000000u; r != 0u;)
+        {
+            const int32_t t = s + static_cast<int32_t>(r);
+            if (t <= ix)
+            {
+                s = t + static_cast<int32_t>(r);
+                ix -= t;
+                q += static_cast<int32_t>(r);
+            }
+            ix += ix;
+            r >>= 1;
+            if (r != 0u)
+                ++loops;
+        }
+        if (ix != 0)
+            q += (q & 1);
+        out = static_cast<uint32_t>((q >> 1) + 0x3f000000 + static_cast<int32_t>(static_cast<uint32_t>(m) << 23));
+        return true;
+    }
+    // __ieee754_asinf 0x3A2558 (decomp C, newlib ef_asin.c; no fused ops in its asm) on Exact; |x| > 1 (the 0 / 0 NaN)
+    // false. calls: fabsf and __ieee754_sqrtf on |x| >= 0.5; loops: sqrtf's.
+    inline bool ieeeAsinf(Exact &x, float xf, float &out, int &calls, int &loops)
+    {
+        const uint32_t hx = floatBits(xf), ix = hx & 0x7fffffffu;
+        const float one = bitsFloat(0x3F800000u), huge = bitsFloat(0x7149F2CAu), two = bitsFloat(0x40000000u),
+                    half = bitsFloat(0x3F000000u), pio2_hi = bitsFloat(0x3FC90FDAu), pio2_lo = bitsFloat(0x33A22168u),
+                    pio4_hi = bitsFloat(0x3F490FDBu), pS0 = bitsFloat(0x3E2AAAABu), pS1 = bitsFloat(0xBEA6B090u),
+                    pS2 = bitsFloat(0x3E4E0AA8u), pS3 = bitsFloat(0xBD241146u), pS4 = bitsFloat(0x3A4F7F04u),
+                    pS5 = bitsFloat(0x3811EF08u), qS1 = bitsFloat(0xC019D139u), qS2 = bitsFloat(0x4001572Du),
+                    qS3 = bitsFloat(0xBF303361u), qS4 = bitsFloat(0x3D9DC62Eu);
+        auto pq = [&](float t, float &p, float &q) {
+            p = x.mul(t, x.add(pS0, x.mul(t, x.add(pS1, x.mul(t, x.add(pS2, x.mul(t, x.add(pS3, x.mul(t, x.add(pS4, x.mul(t, pS5)))))))))));
+            q = x.add(one, x.mul(t, x.add(qS1, x.mul(t, x.add(qS2, x.mul(t, x.add(qS3, x.mul(t, qS4))))))));
+        };
+        if (ix == 0x3f800000u)
+        {
+            out = x.add(x.mul(xf, pio2_hi), x.mul(xf, pio2_lo));
+            return true;
+        }
+        if (ix > 0x3f800000u)
+            return false;
+        float p, q;
+        if (ix < 0x3f000000u)
+        {
+            if (ix < 0x32000000u)
+            {
+                if (fpuLess(one, x.add(huge, xf)))
+                {
+                    out = xf;
+                    return true;
+                }
+                return false; // (t unset in the C: never, huge + x > 1)
+            }
+            const float t = x.mul(xf, xf);
+            pq(t, p, q);
+            out = x.add(xf, x.mul(xf, x.div(p, q)));
+            return true;
+        }
+        calls += 1; // fabsf
+        const float t = x.mul(x.sub(one, absBits(xf)), half);
+        pq(t, p, q);
+        calls += 1; // __ieee754_sqrtf
+        uint32_t sb;
+        if (!sqrtfBits(floatBits(t), sb, loops))
+            return false;
+        const float s = bitsFloat(sb);
+        float r;
+        if (ix >= 0x3F79999Au)
+            r = x.sub(pio2_hi, x.sub(x.mul(two, x.add(s, x.mul(s, x.div(p, q)))), pio2_lo));
+        else
+        {
+            const float w = bitsFloat(sb & 0xfffff000u);
+            const float c = x.div(x.sub(t, x.mul(w, w)), x.add(s, w));
+            const float rr = x.div(p, q);
+            const float pp = x.sub(x.mul(x.mul(two, s), rr), x.sub(pio2_lo, x.mul(two, c)));
+            const float qq = x.sub(pio4_hi, x.mul(two, w));
+            r = x.sub(pio4_hi, x.sub(pp, qq));
+        }
+        out = static_cast<int32_t>(hx) > 0 ? r : negBits(r);
+        return true;
+    }
+    // func_003A1B78 (asinf, decomp C): __ieee754_asinf, then unless _LIB_VERSION (0x45F024) is _IEEE_ (-1): isnanf (a
+    // NaN: done), fabsf, and |x| > 1 the DOMAIN path (matherr, errno: false). calls: every jal it makes.
+    inline bool asinfWrapper(Exact &x, float xf, int32_t libVersion, float &out, int &calls, int &loops)
+    {
+        calls += 1; // __ieee754_asinf
+        if (!ieeeAsinf(x, xf, out, calls, loops))
+            return false;
+        if (libVersion == -1)
+            return true;
+        calls += 1; // isnanf
+        if ((floatBits(xf) & 0x7fffffffu) > 0x7f800000u)
+            return true;
+        calls += 1; // fabsf
+        return !fpuLess(bitsFloat(0x3F800000u), absBits(xf));
+    }
+    // MtxGetScaleVec 0x148160's lengths: each row's (x x + y y) + z z, sqrt.s
+    inline void rowLengths(Exact &x, const float m[12], float s[3])
+    {
+        for (int r = 0; r < 3; ++r)
+            s[r] = x.sqrt(x.add(x.add(x.mul(m[4 * r], m[4 * r]), x.mul(m[4 * r + 1], m[4 * r + 1])), x.mul(m[4 * r + 2], m[4 * r + 2])));
+    }
+    // func_00147C88's six rotation orders (its jump table 0x41EA20; 6 and up: order 0's code). m = the matrix's first 12
+    // words, s = rowLengths; atan2(y, x) = capVu0Atan2 (vf0 constant), asin(v) = -pi/2 when v <= -1, pi/2 when 1 <= v
+    // (c.le.s), else the asinf wrapper. calls: the atan2s and the asinf wrapper's; loops: order 3's taken bc1t back to
+    // the shared pi/2 tail, asinf's. false = decline (a domain error, Exact's limits).
+    inline bool matToEuler(Exact &x, const float m[12], const float s[3], uint32_t order, const float c[9], int32_t libVersion,
+                           float out[3], int &calls, int &loops)
+    {
+        const float sx = s[0], sy = s[1], sz = s[2];
+        bool ok = true;
+        auto atan2 = [&](float y, float xv) {
+            calls += 1;
+            return atan2Body(x, y, xv, c);
+        };
+        auto asinClamp = [&](float v, bool backEdge) {
+            if (fpuLessEqual(v, bitsFloat(0xBF800000u)))
+                return bitsFloat(0xBFC90FDBu);
+            if (fpuLessEqual(bitsFloat(0x3F800000u), v))
+            {
+                if (backEdge)
+                    ++loops; // order 3: bc1t back to 0x147E38
+                return bitsFloat(0x3FC90FDBu);
+            }
+            float r = 0.0f;
+            calls += 1;
+            if (!asinfWrapper(x, v, libVersion, r, calls, loops))
+                ok = false;
+            return r;
+        };
+        auto d = [&](float a, float b) { return x.div(a, b); };
+        switch (order < 6u ? order : 0u)
+        {
+        case 0:
+            out[0] = atan2(d(m[6], sy), d(m[10], sz));
+            out[1] = asinClamp(d(negBits(m[2]), sx), false);
+            out[2] = atan2(d(m[1], sx), d(m[0], sx));
+            break;
+        case 1:
+            out[0] = atan2(d(negBits(m[9]), sz), d(m[5], sy));
+            out[1] = atan2(d(negBits(m[2]), sx), d(m[0], sx));
+            out[2] = asinClamp(d(m[1], sx), false);
+            break;
+        case 2:
+            out[0] = asinClamp(d(m[6], sy), false);
+            out[1] = atan2(d(negBits(m[2]), sx), d(m[10], sz));
+            out[2] = atan2(d(negBits(m[4]), sy), d(m[5], sy));
+            break;
+        case 3:
+            out[0] = atan2(d(m[6], sy), d(m[5], sy));
+            out[1] = atan2(d(m[8], sz), d(m[0], sx));
+            out[2] = asinClamp(d(negBits(m[4]), sy), true);
+            break;
+        case 4:
+            out[0] = asinClamp(d(negBits(m[9]), sz), false);
+            out[1] = atan2(d(m[8], sz), d(m[10], sz));
+            out[2] = atan2(d(m[1], sx), d(m[5], sy));
+            break;
+        default:
+            out[0] = atan2(d(negBits(m[9]), sz), d(m[10], sz));
+            out[1] = asinClamp(d(m[8], sz), false);
+            out[2] = atan2(d(negBits(m[4]), sy), d(m[0], sx));
+            break;
+        }
+        return ok;
+    }
+
     // MtxMultiply(out, A, B) = sceVu0MulMatrix: out row k = A's rows weighted by B row k (mulRow). Both below 2^62.
     inline bool productInputs(const Mat4 &a, const Mat4 &b)
     {

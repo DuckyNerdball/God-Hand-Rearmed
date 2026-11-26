@@ -167,6 +167,26 @@ KM_RECOMPILED(GetField_2_158CC8_0x158cc8)
 KM_RECOMPILED(func_00158FB8_0x158fb8)
 KM_RECOMPILED(func_00159300_0x159300)
 KM_RECOMPILED(func_00159490_0x159490)
+// M5 batch 1: matrix to Euler and its helpers (+ the asinf wrapper's libm / soft-double callees)
+KM_RECOMPILED(capVu0Acos_0x1f8140)
+KM_RECOMPILED(func_003A1B78_0x3a1b78)
+KM_RECOMPILED(ps2___ieee754_asinf_0x3a2558)
+KM_RECOMPILED(ps2___ieee754_sqrtf_0x3a3b48)
+KM_RECOMPILED(isnanf_0x3a4e00)
+KM_RECOMPILED(MtxGetScaleVec_0x148160)
+KM_RECOMPILED(func_00147C88_0x147c88)
+KM_RECOMPILED(fptodp_0x31edd0)
+KM_RECOMPILED(dptofp_0x31eae0)
+KM_RECOMPILED(matherr_0x3a4ac8)
+KM_RECOMPILED(Obj0000_Get_D_003FA62C_3A4FB8_0x3a4fb8)
+KM_RECOMPILED(ps2___unpack_f_0x31ec48)
+KM_RECOMPILED(ps2___make_dp_0x31eab0)
+KM_RECOMPILED(ps2___pack_d_0x31de78)
+KM_RECOMPILED(ps2___unpack_d_0x31dfa8)
+KM_RECOMPILED(ps2___make_fp_0x31eda0)
+KM_RECOMPILED(ps2___pack_f_0x31eb38)
+KM_RECOMPILED(dpcmp_0x31e870)
+KM_RECOMPILED(ps2___fpcmp_parts_d_0x31e758)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -372,9 +392,10 @@ namespace
                                    // the 0x14C7E8 batch: tanf's T table, the screen values D_003C1180 / 1190, D_00586B88
                                    {0x45EF00u, 0x100u}, {0x3C1100u, 0x100u}, {0x586B00u, 0x100u},
                                    // rung 4: Adjust_theta_vec's table (0x3BF110)
-                                   {0x3BF100u, 0x60u}, {0x41EA00u, 0x20u}, // + MtxInitRotVec's switch, capVu0Cos's table (0x3BF140)
+                                   {0x3BF100u, 0x60u}, {0x41EA00u, 0x40u}, // + MtxInitRotVec's / 0x147C88's switches, capVu0Cos's table (0x3BF140)
                                    {0x42C340u, 0x40u}, {0x41EE40u, 0x20u}, // + capVu0Atan2's table, 0x15A190's next
-                                   {0x41EDF0u, 0x40u}}; // M3: func_00156550's table
+                                   {0x41EDF0u, 0x40u}, // M3: func_00156550's table
+                                   {0x45F000u, 0x40u}}; // M5: _LIB_VERSION (0x45F024)
     constexpr uint32_t usedBytes()
     {
         uint32_t total = 0;
@@ -2667,6 +2688,96 @@ namespace
         setGpr(ctx, 4, obj | seg);
     }
 
+
+    // ---- M5 batch 1: matrix to Euler (func_00147C88) and its helpers ---------------------------------------------------
+    // The ELF's tables: capVu0Atan2's (setBlendTables), 0x147C88's jump table 0x41EA20 (now and then an entry patched:
+    // declined), _LIB_VERSION 0x45F024 (1 = _XOPEN_; sometimes -1 / 0 / 2). A matrix: a TRS (random rotation, each row
+    // scaled), or a signed axis permutation scaled (the asin clamps at +-1, atan2's 1e-5 paths), now and then a zero row
+    // (sqrt.s of 0: declined) or wild words; out on the matrix sometimes (every read comes first).
+    float edgeValue() // a value for the scalar helpers: their branch edges and specials
+    {
+        static constexpr uint32_t kEdges[] = {0x00000000u, 0x80000000u, 0x3F800000u, 0xBF800000u, 0x3F000000u, 0xBF000000u,
+                                              0x3F79999Au, 0x3F799999u, 0x32000000u, 0x31FFFFFFu, 0x3727C5ACu, 0x3727C5ABu,
+                                              0x3F800001u, 0x00400000u, 0x7F7FFFFFu, 0x7F800000u, 0x7FC00000u, 0xB727C5ACu};
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 8u);
+        uint32_t bits;
+        if (pick < 4u)
+        {
+            const float f = static_cast<float>(static_cast<int>(g_rng() % 2000001u) - 1000000) / 1000000.0f;
+            std::memcpy(&bits, &f, 4);
+        }
+        else if (pick < 6u)
+            bits = kEdges[g_rng() % (sizeof(kEdges) / 4u)] + ((g_rng() % 4u == 0u) ? static_cast<uint32_t>(g_rng() % 3u) : 0u);
+        else if (pick < 7u)
+            bits = gameFloat();
+        else
+            bits = static_cast<uint32_t>(g_rng());
+        float f;
+        std::memcpy(&f, &bits, 4);
+        return f;
+    }
+    void eulerMatrix(uint32_t at, bool wild)
+    {
+        Mat4f m;
+        randomTrs(m);
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 8u);
+        if (pick < 2u) // a signed axis permutation, each row scaled
+        {
+            static constexpr int kPerm[6][3] = {{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
+            const int *pp = kPerm[g_rng() % 6u];
+            for (int r = 0; r < 3; ++r)
+            {
+                const float sc = (g_rng() % 2u) ? 1.0f : 0.5f + static_cast<float>(g_rng() % 1000u) / 500.0f;
+                for (int k = 0; k < 3; ++k)
+                    m.v[4 * r + k] = (k == pp[r]) ? ((g_rng() % 2u) ? sc : -sc) : 0.0f;
+            }
+        }
+        setMat4f(at, m);
+        if (pick == 2u)
+            for (uint32_t k = 0; k < 3u; ++k)
+                setU32(at + 16u * static_cast<uint32_t>(g_rng() % 3u) + 4u * k, 0u); // a zero row
+        if (wild && pick == 3u)
+            for (uint32_t k = 0; k < 12u; ++k)
+                if (g_rng() % 4u == 0u)
+                    setU32(at + 4u * k, gameFloat());
+    }
+    void setupEuler(uint32_t address, R5900Context &ctx, uint32_t sp, uint32_t pick, uint32_t seg, uint32_t base, bool wild)
+    {
+        setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
+        setBlendTables(false);
+        static constexpr uint32_t kCases[6] = {0x147CF8u, 0x147DA0u, 0x147E5Cu, 0x147F14u, 0x147FB4u, 0x148070u};
+        for (uint32_t k = 0; k < 6u; ++k)
+            setU32(0x41EA20u + 4u * k, (wild && g_rng() % 32u == 0u) ? kCases[(k + 1u) % 6u] : kCases[k]);
+        const uint32_t lib = static_cast<uint32_t>(g_rng() % 8u);
+        setU32(0x45F024u, lib < 5u ? 1u : lib == 5u ? 0xFFFFFFFFu : lib == 6u ? 0u : 2u);
+        switch (address)
+        {
+        case 0x1F8180u: // atan2(y, x)
+        {
+            float y = edgeValue(), xv = edgeValue();
+            if (pick < 8u) // a direction scaled, as the game asks
+            {
+                const float a = angle(), r = std::ldexp(0.5f + static_cast<float>(g_rng() % 1000u) / 1000.0f, static_cast<int>(g_rng() % 30u) - 20);
+                y = std::sin(a) * r, xv = std::cos(a) * r;
+            }
+            ctx.f[12] = y, ctx.f[13] = xv;
+            return;
+        }
+        case 0x1F8140u: // acos(x)
+        case 0x3A1B78u: // asinf(x)
+            ctx.f[12] = (pick < 6u) ? std::cos(angle()) : edgeValue();
+            return;
+        default: // MtxGetScaleVec(out, m), func_00147C88(out, m, order)
+        {
+            const uint32_t m = base + 0x100u, out = pick == 0u ? m : pick == 1u ? m + 0x10u : base + 0x40u;
+            eulerMatrix(m, wild);
+            setGpr(ctx, 4, out | seg), setGpr(ctx, 5, m | seg);
+            setGpr(ctx, 6, (static_cast<uint32_t>(g_rng()) & ~0xFFu) | ((g_rng() % 8u) ? g_rng() % 6u : 6u + g_rng() % 250u));
+            return;
+        }
+        }
+    }
+
     void setupMotion(const NativeFunction &fn, Call &call, bool wild, uint32_t base, uint32_t seg)
     {
         // Other natives: untouched, and no draws from g_rng (their setups stay the sequence they were proven on).
@@ -2676,7 +2787,8 @@ namespace
             fn.address != 0x15A6A0u && fn.address != 0x15A190u && fn.address != 0x1478A8u && fn.address != 0x149EB8u &&
             fn.address != 0x14A038u && fn.address != 0x156508u && fn.address != 0x156550u && fn.address != 0x158CD0u &&
             fn.address != 0x159AD0u && fn.address != 0x1599B0u && fn.address != 0x159DA0u && fn.address != 0x158FC8u &&
-            fn.address != 0x158328u)
+            fn.address != 0x158328u && fn.address != 0x1F8180u && fn.address != 0x1F8140u && fn.address != 0x3A1B78u &&
+            fn.address != 0x148160u && fn.address != 0x147C88u)
             return;
         R5900Context &ctx = call.ctx;
         // func_001501D0's twist (partFlags 0x800) in the join and both passes (rung 4, Nov 26): their own setups
@@ -3080,6 +3192,15 @@ namespace
             setGpr(ctx, 4, motion), setGpr(ctx, 5, record | seg);
             return;
         }
+        case 0x1F8180u: // capVu0Atan2(f12 = y, f13 = x): f0
+        case 0x1F8140u: // capVu0Acos(f12): f0
+        case 0x3A1B78u: // asinf(f12): f0
+        case 0x148160u: // MtxGetScaleVec(out, matrix)
+        case 0x147C88u: // func_00147C88(out, matrix, order): Euler angles
+            setupEuler(fn.address, ctx, sp, pick, seg, base, wild);
+            if ((fn.address == 0x147C88u || fn.address == 0x3A1B78u) && g_rng() % 4u) // (each call a checkpoint, as the pose's)
+                call.dueAt = 0;
+            return;
         case 0x158328u: // the pose func_00158328(object)
             setupPose(ctx, sp, seg, base, wild);
             if (g_rng() % 4u) // every guest call is a checkpoint: most runs to the end, or few would be compared
@@ -4199,6 +4320,49 @@ namespace
         }
         std::fclose(f);
         std::printf("wrote %d kind-3 vectors to %s\n", written, kind3Path.c_str());
+
+        // Euler (<path>.euler, M5): the matrix's 12 words, the order, _LIB_VERSION, capVu0Atan2's table -> the recompiled
+        // func_00147C88's x, y, z; asinf (<path>.asinf): x, _LIB_VERSION -> the recompiled func_003A1B78's f0
+        const std::string eulerPath = std::string(path) + ".euler", asinPath = std::string(path) + ".asinf";
+        std::FILE *fe = std::fopen(eulerPath.c_str(), "wb"), *fa = std::fopen(asinPath.c_str(), "wb");
+        int eulers = 0, asins = 0;
+        for (int i = 0; i < count / 2; ++i)
+        {
+            R5900Context ctx;
+            randomContext(ctx);
+            const uint32_t base = 0x10000u + 0x400u * static_cast<uint32_t>(g_rng() % 64u);
+            const bool euler = i % 2 == 0;
+            setupEuler(euler ? 0x147C88u : 0x3A1B78u, ctx, 0xF0000u, 2u + static_cast<uint32_t>(g_rng() % 14u), 0u, base, false);
+            setGpr(ctx, 31, 0x00123450u);
+            uint32_t lib, out = 0, m = 0, order = 0;
+            std::memcpy(&lib, g_ramA + 0x45F024u, 4);
+            g_dueAt = 0;
+            if (euler)
+            {
+                std::memcpy(&out, &ctx.r[4], 4), std::memcpy(&m, &ctx.r[5], 4), std::memcpy(&order, &ctx.r[6], 4);
+                uint8_t rec[48 + 4 + 4 + 36 + 12];
+                std::memcpy(rec, g_ramA + m, 48), std::memcpy(rec + 48, &order, 4), std::memcpy(rec + 52, &lib, 4);
+                std::memcpy(rec + 56, g_ramA + 0x42C350u, 36);
+                ctx.pc = 0x147C88u;
+                func_00147C88_0x147c88(g_ramA, &ctx, g_rt);
+                std::memcpy(rec + 92, g_ramA + out, 12);
+                std::fwrite(rec, 1, sizeof(rec), fe);
+                ++eulers;
+            }
+            else
+            {
+                uint8_t rec[4 + 4 + 4];
+                std::memcpy(rec, &ctx.f[12], 4), std::memcpy(rec + 4, &lib, 4);
+                ctx.pc = 0x3A1B78u;
+                func_003A1B78_0x3a1b78(g_ramA, &ctx, g_rt);
+                std::memcpy(rec + 8, &ctx.f[0], 4);
+                std::fwrite(rec, 1, sizeof(rec), fa);
+                ++asins;
+            }
+            resetRam();
+        }
+        std::fclose(fe), std::fclose(fa);
+        std::printf("wrote %d euler / %d asinf vectors to %s / .asinf\n", eulers, asins, eulerPath.c_str());
     }
 }
 
@@ -4397,7 +4561,10 @@ int main(int argc, char **argv)
         {0x156508u, &func_00156508_0x156508},    {0x156550u, &func_00156550_0x156550},
         {0x158CD0u, &func_00158CD0_0x158cd0},    {0x159AD0u, &func_00159AD0_0x159ad0},
         {0x1599B0u, &RecDecode_readHeader_0x1599b0}, {0x159DA0u, &func_00159DA0_0x159da0},
-        {0x158FC8u, &func_00158FC8_0x158fc8},    {0x158328u, &func_00158328_0x158328}};
+        {0x158FC8u, &func_00158FC8_0x158fc8},    {0x158328u, &func_00158328_0x158328},
+        {0x1F8180u, &capVu0Atan2_0x1f8180},      {0x1F8140u, &capVu0Acos_0x1f8140},
+        {0x3A1B78u, &func_003A1B78_0x3a1b78},    {0x148160u, &MtxGetScaleVec_0x148160},
+        {0x147C88u, &func_00147C88_0x147c88}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
@@ -4408,6 +4575,23 @@ int main(int argc, char **argv)
              {0x158CC8u, &GetField_2_158CC8_0x158cc8}, {0x158FB8u, &func_00158FB8_0x158fb8},
              {0x159300u, &func_00159300_0x159300}, {0x159490u, &func_00159490_0x159490}})
         g_callees.push_back({address, f}); // the pose's other interpolators (inline in it, no natives of their own)
+    for (const auto &[address, f] : std::initializer_list<std::pair<uint32_t, void (*)(uint8_t *, R5900Context *, PS2Runtime *)>>{
+             {0x3A2558u, &ps2___ieee754_asinf_0x3a2558},
+             {0x3A3B48u, &ps2___ieee754_sqrtf_0x3a3b48},
+             {0x3A4E00u, &isnanf_0x3a4e00},
+             {0x31EDD0u, &fptodp_0x31edd0},
+             {0x31EAE0u, &dptofp_0x31eae0},
+             {0x3A4AC8u, &matherr_0x3a4ac8},
+             {0x3A4FB8u, &Obj0000_Get_D_003FA62C_3A4FB8_0x3a4fb8},
+             {0x31EC48u, &ps2___unpack_f_0x31ec48},
+             {0x31EAB0u, &ps2___make_dp_0x31eab0},
+             {0x31DE78u, &ps2___pack_d_0x31de78},
+             {0x31DFA8u, &ps2___unpack_d_0x31dfa8},
+             {0x31EDA0u, &ps2___make_fp_0x31eda0},
+             {0x31EB38u, &ps2___pack_f_0x31eb38},
+             {0x31E870u, &dpcmp_0x31e870},
+             {0x31E758u, &ps2___fpcmp_parts_d_0x31e758}})
+        g_callees.push_back({address, f}); // asinf's libm (and its DOMAIN path's soft-double) callees (no natives)
     for (const auto &[address, f] : std::initializer_list<std::pair<uint32_t, void (*)(uint8_t *, R5900Context *, PS2Runtime *)>>{
              {0x1478A8u, &MtxInitRotQuaternion_0x1478a8}, {0x147C40u, &CopyVec3ToField30_147C40_0x147c40},
              {0x147C60u, &ForwardVec3At30_147C60_0x147c60}, {0x150710u, &func_00150710_0x150710},
@@ -4542,7 +4726,7 @@ int main(int argc, char **argv)
                                 0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u, 0x14D0E8u, 0x153B00u, 0x14B810u,
                                 0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u, 0x147B18u, 0x147A48u,
                                 0x150138u, 0x1501D0u, 0x156D70u, 0x15A6A0u, 0x149EB8u, 0x14A038u, 0x158CD0u,
-                                0x159AD0u, 0x1599B0u, 0x159DA0u, 0x158328u})
+                                0x159AD0u, 0x1599B0u, 0x159DA0u, 0x158328u, 0x1F8140u, 0x147C88u, 0x148160u})
             if (fn.address == caller && !overridden(fn))
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;

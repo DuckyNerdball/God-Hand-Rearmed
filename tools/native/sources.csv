@@ -93,3 +93,8 @@ RecDecode_readHeader,0x001599B0,decomp,RecDecode_readHeader,src/cod/001599b0.c,e
 func_00159AD0,0x00159AD0,asm,,,,,rung 4 M3 batch 2: the root channels' value at t: reset / key walk / Hermite in the asm's order; readHeader / 0x159DA0 inline; returns f0; kRenderPath|kChargeAtEnd
 func_00158FC8,0x00158FC8,asm,,,,,rung 4 M4: the pose's kind-3 track (u16 keys, two key loops, the Hermite in the asm's order); a leaf; returns f0; kRenderPath|kChargeAtEnd
 func_00158328,0x00158328,asm,,,,,rung 4 M4: the pose fused: root and part channels in the asm's order on a JournalEnv; the decode / Hermite / kind 3 / kinds 0 2 6 / Adjust_theta_vec inline; under its three wrappers (native.cpp kUnderHooks); kRenderPath|kChargeAtEnd
+capVu0Atan2,0x001F8180,asm,,,,,rung 4 M5 batch 1: motion_core atan2Body (the slerp's) as a native of its own; returns f0; kRenderPath|kChargeAtEnd
+capVu0Acos,0x001F8140,decomp,capVu0Acos,src/cod/001f8140.c,eed8dc0,db4d1d2aae47,rung 4 M5 batch 1: atan2(sqrt.s(1 - x x), x); returns f0; kRenderPath|kChargeAtEnd
+func_003A1B78,0x003A1B78,decomp,func_003A1B78,src/cod/003a1b78.c,eed8dc0,b8652d143ef2,rung 4 M5 batch 1: the asinf wrapper with __ieee754_asinf (src/cod/003a2558.c) and __ieee754_sqrtf (src/cod/003a3b48.c) inline; the DOMAIN path declines; returns f0; kRenderPath|kChargeAtEnd
+MtxGetScaleVec,0x00148160,asm,,,,,rung 4 M5 batch 1: the rows' lengths, 0x150710 inline; kRenderPath|kChargeAtEnd
+func_00147C88,0x00147C88,asm,,,,,rung 4 M5 batch 1: a matrix to Euler angles by rotation order (six cases) with MtxGetScaleVec / capVu0Atan2 / the asinf wrapper inline; kRenderPath|kChargeAtEnd

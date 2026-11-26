@@ -152,7 +152,7 @@ def load_sources():
 def registered_natives():
     """The recompiled names registered by src/kamite/native/*.cpp (registerFunction / the add lambdas)."""
     names = set()
-    rx = re.compile(r'(?:NativeFunction\{|\badd\w*\()\s*"([^"]+)"')
+    rx = re.compile(r'(?:NativeFunction(?:\s+\w+)?\s*\{|\badd\w*\()\s*"([^"]+)"')
     for name in sorted(os.listdir(NATIVE_DIR)):
         if name.endswith(".cpp"):
             with open(os.path.join(NATIVE_DIR, name), encoding="utf-8") as f:

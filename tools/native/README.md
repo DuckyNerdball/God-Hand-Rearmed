@@ -42,7 +42,11 @@ with kamite/git_commit.h):
        capVu0Atan2_0x1f8180 cModel_calcParts_0x149eb8 cModel_calcWorldParts_0x14a038
        func_00156508_0x156508 func_00156550_0x156550 func_00158CD0_0x158cd0 func_00159AD0_0x159ad0
        RecDecode_readHeader_0x1599b0 func_00159DA0_0x159da0 func_00158328_0x158328 func_00158FC8_0x158fc8
-       GetField_2_158CC8_0x158cc8 func_00158FB8_0x158fb8 func_00159300_0x159300 func_00159490_0x159490"
+       GetField_2_158CC8_0x158cc8 func_00158FB8_0x158fb8 func_00159300_0x159300 func_00159490_0x159490
+       capVu0Acos_0x1f8140 func_003A1B78_0x3a1b78 ps2___ieee754_asinf_0x3a2558 ps2___ieee754_sqrtf_0x3a3b48
+       isnanf_0x3a4e00 MtxGetScaleVec_0x148160 func_00147C88_0x147c88 fptodp_0x31edd0 dptofp_0x31eae0 matherr_0x3a4ac8
+       Obj0000_Get_D_003FA62C_3A4FB8_0x3a4fb8 ps2___unpack_f_0x31ec48 ps2___make_dp_0x31eab0 ps2___pack_d_0x31de78
+       ps2___unpack_d_0x31dfa8 ps2___make_fp_0x31eda0 ps2___pack_f_0x31eb38 dpcmp_0x31e870 ps2___fpcmp_parts_d_0x31e758"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -238,3 +242,14 @@ pool (`make_tracks.py --blocks <out> <em00.dat> <pl00.dat>`, sandbox only), else
 / 3, rarely 2 / 5 / 6; the table's entries swapped now and then). Every cursor a record reaches starts from the
 recompiled RecDecode_readHeader, and half the time a recompiled pose at another t walks them first. `<vectors>.kind3`
 (kind3Sample against the recompiled func_00158FC8) runs in libvu0_check.
+
+## M5 batch 1: matrix to Euler (rung 4, Nov 26)
+
+func_00147C88 (66 callers: IK and the moves) turns a matrix into Euler angles by its rotation order: MtxGetScaleVec's row
+lengths, then per order (its jump table 0x41EA20: a patched entry declines) two capVu0Atan2 and one asin clamped at +-1
+(c.le.s) through the libm wrapper func_003A1B78, whose __ieee754_asinf and bit-by-bit __ieee754_sqrtf run as the decomp's
+C on Exact (the DOMAIN path, |x| > 1, declines; _LIB_VERSION 0x45F024 read in place). capVu0Atan2, capVu0Acos, the
+wrapper and MtxGetScaleVec are natives of their own too. shadow_test's setupEuler: TRS matrices, signed axis permutations
+(the clamps at exactly +-1, atan2's 1e-5 paths), zero rows, wild words; orders 0-5 and past them; out on the matrix;
+_LIB_VERSION 1 / -1 / 0 / 2; the scalar helpers' branch edges (edgeValue). The wrapper's DOMAIN path calls the soft-double
+helpers (fptodp, dptofp, matherr, ...): in the build lines as callees. `<vectors>.euler` / `.asinf` run in libvu0_check.

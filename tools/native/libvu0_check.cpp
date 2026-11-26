@@ -505,10 +505,56 @@ int main(int argc, char **argv)
     }
     bad += kind3Bad;
     std::printf("kind 3: %d vectors, %d differ\n", kind3Count, kind3Bad);
+
+    // Euler / asinf (<vectors>.euler / .asinf, M5: func_00147C88's x, y, z, func_003A1B78's f0), motion_core's
+    // rowLengths + matToEuler and asinfWrapper (a decline: not compared).
+    int eulerCount = 0, eulerBad = 0, asinCount = 0, asinBad = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".euler").c_str(), "rb"))
+    {
+        unsigned char rec[48 + 4 + 4 + 36 + 12];
+        while (std::fread(rec, 1, sizeof(rec), o) == sizeof(rec))
+        {
+            float m[12], c[9], sc[3], got[3];
+            uint32_t order, want[3];
+            int32_t lib;
+            std::memcpy(m, rec, 48), std::memcpy(&order, rec + 48, 4), std::memcpy(&lib, rec + 52, 4);
+            std::memcpy(c, rec + 56, 36), std::memcpy(want, rec + 92, 12);
+            motion::Exact x;
+            int calls = 0, loops = 0;
+            motion::rowLengths(x, m, sc);
+            if (!motion::matToEuler(x, m, sc, order & 0xFFu, c, lib, got, calls, loops) || !x.ok)
+                continue;
+            ++eulerCount;
+            if (std::memcmp(got, want, 12) != 0 && ++eulerBad <= 5)
+                std::printf("euler vector %d (order %u) differs\n", eulerCount, order & 0xFFu);
+        }
+        std::fclose(o);
+    }
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".asinf").c_str(), "rb"))
+    {
+        unsigned char rec[12];
+        while (std::fread(rec, 1, sizeof(rec), o) == sizeof(rec))
+        {
+            float v, got;
+            int32_t lib;
+            uint32_t want;
+            std::memcpy(&v, rec, 4), std::memcpy(&lib, rec + 4, 4), std::memcpy(&want, rec + 8, 4);
+            motion::Exact x;
+            int calls = 0, loops = 0;
+            if (!motion::asinfWrapper(x, v, lib, got, calls, loops) || !x.ok)
+                continue;
+            ++asinCount;
+            if (std::memcmp(&got, &want, 4) != 0 && ++asinBad <= 5)
+                std::printf("asinf vector %d differs\n", asinCount);
+        }
+        std::fclose(o);
+    }
+    bad += eulerBad + asinBad;
+    std::printf("euler: %d vectors, %d differ; asinf: %d vectors, %d differ\n", eulerCount, eulerBad, asinCount, asinBad);
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
                 "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ; twist %d vectors, "
                 "%d differ; track %d vectors, %d differ; decode %d vectors (%d declined), %d differ\n", path, count,
-                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad, rotCount, rotBad,
+                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad - eulerBad - asinBad, rotCount, rotBad,
                 opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad,
                 trackCount, trackBad, decodeCount, decodeDeclined, decodeBad);
     return bad ? 1 : 0;

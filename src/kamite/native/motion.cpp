@@ -926,6 +926,157 @@ namespace kamite::native::motion
             return true;
         }
 
+        // ==== M5 (batch 1): matrix to Euler func_00147C88 and its helpers =============================================
+        // caller_scan (ELF + 81 DLLs): capVu0Atan2 132 + 2, capVu0Acos 12, MtxGetScaleVec 3, asinf's wrapper 8, 0x147C88 66
+        // sites; none reads a scratch register after the call, no j, no code pointer.
+        constexpr uint32_t kMatToEuler = 0x147C88u, kScaleVec = 0x148160u, kAtan2 = 0x1F8180u, kAcos = 0x1F8140u,
+                           kAsinf = 0x3A1B78u, kLibVersion = 0x45F024u, kEulerCases = 0x41EA20u;
+        template <class Env>
+        bool atanCoefficients(Env &env, float c[9])
+        {
+            uint32_t at;
+            if (!plainRam(kAtanTable, 36u, at))
+                return false;
+            std::memcpy(c, env.at(at, 36u), 36);
+            return true;
+        }
+        // ---- capVu0Atan2 0x1F8180 (y = f12, x = f13; asm, a leaf; jr ra + nop: the generated code clears in_delay_slot): f0
+        template <class Env>
+        bool atan2Native(Env &env, R5900Context *ctx)
+        {
+            float c[9];
+            if (!env.atEnd || !e::vf0Constant(ctx) || !atanCoefficients(env, c))
+                return false;
+            Exact x;
+            const float v = atan2Body(x, bitsFloat(e::fBits(ctx, 12)), bitsFloat(e::fBits(ctx, 13)), c);
+            if (!x.ok)
+                return false;
+            e::setFBits(ctx, 0, floatBits(v));
+            returnFrom(ctx);
+            return true;
+        }
+        // ---- capVu0Acos 0x1F8140 (f12; src/cod/001f8140.c): atan2(sqrt.s(1 - x x), x); a 0x10 frame ----------------------
+        constexpr uint32_t kAcosFrame = 0x10u;
+        template <class Env>
+        bool acosNative(Env &env, R5900Context *ctx)
+        {
+            float c[9];
+            uint32_t frame;
+            const uint32_t sp0 = e::u32(ctx, e::sp);
+            if (!env.atEnd || !e::vf0Constant(ctx) || !plainRam(sp0 - kAcosFrame, kAcosFrame, frame) ||
+                !atanCoefficients(env, c))
+                return false;
+            Exact x;
+            const float v = bitsFloat(e::fBits(ctx, 12));
+            const float s = x.sqrt(x.sub(one(), x.mul(v, v)));
+            const float r = atan2Body(x, s, v, c);
+            if (!x.ok)
+                return false;
+            env.call();
+            e::setFBits(ctx, 0, floatBits(r));
+            returnFrom(ctx);
+            return true;
+        }
+        // ---- func_003A1B78 (asinf: the libm wrapper; src/cod/003a1b78.c) with __ieee754_asinf / sqrtf inline: f0 ---------
+        // frames: 0x60, asinf's 0x50 (sqrtf, isnanf, fabsf: leaves). _LIB_VERSION read in place.
+        constexpr uint32_t kAsinfWindow = 0x60u + 0x50u;
+        template <class Env>
+        bool asinfNative(Env &env, R5900Context *ctx)
+        {
+            uint32_t frame, lib;
+            const uint32_t sp0 = e::u32(ctx, e::sp);
+            if (!env.atEnd || !plainRam(sp0 - kAsinfWindow, kAsinfWindow, frame) || !plainRam(kLibVersion, 4u, lib) ||
+                e::overlaps(lib, 4u, frame, kAsinfWindow))
+                return false;
+            Exact x;
+            float r;
+            int calls = 0, loops = 0;
+            if (!asinfWrapper(x, bitsFloat(e::fBits(ctx, 12)), static_cast<int32_t>(e::read32(env, lib)), r, calls, loops) ||
+                !x.ok)
+                return false;
+            for (int k = 0; k < calls; ++k)
+                env.call();
+            for (int k = 0; k < loops; ++k)
+                env.checkpoint(32u);
+            e::setFBits(ctx, 0, floatBits(r));
+            returnFrom(ctx);
+            return true;
+        }
+        // The 12 words a matrix's rows 0-2 give (lwc1: word-aligned), clear of the stack window
+        template <class Env>
+        bool readRows(Env &env, uint32_t address, uint32_t frame, uint32_t frameSize, float m[12])
+        {
+            uint32_t at;
+            if ((address & 3u) != 0u || !plainRam(address, 48u, at) || e::overlaps(at, 48u, frame, frameSize))
+                return false;
+            std::memcpy(m, env.at(at, 48u), 48);
+            return true;
+        }
+        // 0x150710's stores (x, w = 1.0, y, z in that order) into a word-aligned vector clear of the window
+        template <class Env>
+        bool storeVec(Env &env, uint32_t address, uint32_t frame, uint32_t frameSize, const float v[3])
+        {
+            uint32_t at;
+            if ((address & 3u) != 0u || !plainRam(address, 16u, at) || e::overlaps(at, 16u, frame, frameSize))
+                return false;
+            uint8_t *p = env.at(at, 16u);
+            const uint32_t w[4] = {floatBits(v[0]), floatBits(v[1]), floatBits(v[2]), kOne};
+            std::memcpy(p, w, 16);
+            return true;
+        }
+        // ---- MtxGetScaleVec 0x148160 (a0 = out, a1 = a matrix; asm): out = the rows' lengths, 1.0; a 0x10 frame -------------
+        constexpr uint32_t kScaleVecFrame = 0x10u;
+        template <class Env>
+        bool scaleVecNative(Env &env, R5900Context *ctx)
+        {
+            uint32_t frame;
+            const uint32_t sp0 = e::u32(ctx, e::sp);
+            float m[12], s[3];
+            if (!env.atEnd || !plainRam(sp0 - kScaleVecFrame, kScaleVecFrame, frame) ||
+                !readRows(env, e::u32(ctx, e::a1), frame, kScaleVecFrame, m))
+                return false;
+            Exact x;
+            rowLengths(x, m, s);
+            if (!x.ok || !storeVec(env, e::u32(ctx, e::a0), frame, kScaleVecFrame, s))
+                return false;
+            env.call(); // jal 0x150710
+            returnFrom(ctx);
+            return true;
+        }
+        // ---- func_00147C88 (a0 = out, a1 = a matrix, a2 = its rotation order (byte); asm): out = its Euler angles, 1.0 ------
+        // MtxGetScaleVec into the frame (sqc2 vf0 there first: dead), the order's case (the jump table's entry must be the
+        // ELF's: a patched one declines), out through 0x150710 at the end (every read before it). A 0x70 frame; the deepest
+        // callee the asinf wrapper (0x60 + 0x50).
+        constexpr uint32_t kMatToEulerFrame = 0x70u, kMatToEulerWindow = kMatToEulerFrame + kAsinfWindow;
+        template <class Env>
+        bool matToEulerNative(Env &env, R5900Context *ctx)
+        {
+            static constexpr uint32_t kCases[6] = {0x147CF8u, 0x147DA0u, 0x147E5Cu, 0x147F14u, 0x147FB4u, 0x148070u};
+            uint32_t frame, lib, cases;
+            const uint32_t sp0 = e::u32(ctx, e::sp), order = e::u32(ctx, e::a2) & 0xFFu;
+            float m[12], s[3], c[9], out[3];
+            if (!env.atEnd || (sp0 & 0xFu) != 0u || !e::vf0Constant(ctx) ||
+                !plainRam(sp0 - kMatToEulerWindow, kMatToEulerWindow, frame) || !plainRam(kLibVersion, 4u, lib) ||
+                !plainRam(kEulerCases, 24u, cases) || !atanCoefficients(env, c) ||
+                !readRows(env, e::u32(ctx, e::a1), frame, kMatToEulerWindow, m))
+                return false;
+            if (order < 6u && e::read32(env, cases + 4u * order) != kCases[order])
+                return false;
+            Exact x;
+            int calls = 2, loops = 0; // MtxGetScaleVec and its 0x150710
+            rowLengths(x, m, s);
+            if (!matToEuler(x, m, s, order, c, static_cast<int32_t>(e::read32(env, lib)), out, calls, loops) || !x.ok ||
+                !storeVec(env, e::u32(ctx, e::a0), frame, kMatToEulerWindow, out))
+                return false;
+            calls += 1; // the last 0x150710
+            for (int k = 0; k < calls; ++k)
+                env.call();
+            for (int k = 0; k < loops; ++k)
+                env.checkpoint(32u);
+            returnFrom(ctx);
+            return true;
+        }
+
         // ==== M2 (batch 3): cModel_calcParts and cModel_calcWorldParts fused ===========================================
         // The whole per-model pass as one native: the model's own matrix (MtxInitCoord) and its parts' (Adjust_theta_vec,
         // cParts_calcLocal, the blend 0x156D70, the parent join 0x1501D0), each callee run by its own native's body on a
@@ -1653,5 +1804,12 @@ namespace kamite::native::motion
             fn.maxRanges = 65536u;
             registerFunction(fn);
         }
+        // M5 batch 1 (Nov 26): matrix to Euler 0x147C88 (66 callers: IK and the moves) with its helpers inline, and the
+        // helpers as natives of their own; unchecked: replays shadow them.
+        addF("capVu0Atan2", kAtan2, &atan2Native<RealEnv>, &atan2Native<ShadowEnv>, false, NativeFunction::kReturnsF0);
+        addF("capVu0Acos", kAcos, &acosNative<RealEnv>, &acosNative<ShadowEnv>, false, NativeFunction::kReturnsF0);
+        addF("func_003A1B78", kAsinf, &asinfNative<RealEnv>, &asinfNative<ShadowEnv>, false, NativeFunction::kReturnsF0);
+        addF("MtxGetScaleVec", kScaleVec, &scaleVecNative<RealEnv>, &scaleVecNative<ShadowEnv>, false, 0u);
+        addF("func_00147C88", kMatToEuler, &matToEulerNative<RealEnv>, &matToEulerNative<ShadowEnv>, false, 0u);
     }
 }
