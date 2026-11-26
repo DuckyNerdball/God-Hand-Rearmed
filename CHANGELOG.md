@@ -4,6 +4,8 @@ Newest first, one line per change; the code comments say how.
 
 ## November 26, 2026
 
+- Control styles renamed Classic Brawler / Modern Rambler (Strafing Tiger planned), moved to Controls with a Switching row.
+- Mouse Look option removed: the mouse always turns Modern Rambler's freecam.
 - Modern, controller: Trackpad Tango option: the trackpad or mouse turns the freecam, the right stick dodges.
 - Performance: decoding each animation's root motion runs as native code.
 - Performance: sampling the animation curves of every bone (their keyframes) runs as native code.

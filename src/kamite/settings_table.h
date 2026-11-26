@@ -43,6 +43,7 @@ namespace kamite::settings
         const char *value; // in GHR.ini
         const char *label; // the launcher's
         const char *game;  // the in-game screen's (caps, short); a number for a slider-like choice
+        bool planned = false; // listed as coming (the launcher's "(planned)"), never picked: left out in game
     };
 
     struct Setting
@@ -80,6 +81,9 @@ namespace kamite::settings
         bool freeCamera = false;
         // In game only: the launcher draws it elsewhere (Replacement Textures: the Mods tab's Texture Packs row).
         bool gameOnly = false;
+        // Drawn nowhere: a GHR.ini key that other rows read and write ([Game] ControlStyle / HoldMode, under Control
+        // Style and Switching; K, Nov 26). Still restored, applied and counted by the presets by its id.
+        bool hidden = false;
     };
     inline constexpr int8_t kPad = 0, kKeyboard = 1;
 
@@ -101,4 +105,7 @@ namespace kamite::settings
     void writeCameraPreset(IniFile &ini, const std::string &id);
     // Display Mode ([Video] StartFullscreen / StartMaximized): "fullscreen", "maximized" or "window", and a pick written.
     void writeDisplayMode(IniFile &ini, const std::string &mode);
+    // A pick written as the launcher and the game write it: Camera & FOV and Display Mode their several keys, the
+    // controller's Control Style and Switching [Game] ControlStyle / HoldMode, a planned choice nothing; else its key.
+    void write(IniFile &ini, const Setting &setting, const std::string &value);
 }

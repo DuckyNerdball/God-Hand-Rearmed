@@ -82,6 +82,13 @@ def when_of(setting, by_id):
         return None
     if parent["id"] == "DisplayMode":  # two keys: a window only
         return {"Video/StartFullscreen": "0", "Video/StartMaximized": "0"}
+    # The controller's Control Style / Switching read [Game] ControlStyle / HoldMode (settings::value): Rambler is
+    # ControlStyle modern or hold, which one "when" can't say: the rows under it are always listed here.
+    if parent["id"] == "PadStyle":
+        return None
+    if parent["id"] == "Switching":
+        return {"toggle": {"Game/ControlStyle": "modern"}, "brawl": {"Game/ControlStyle": "hold", "Game/HoldMode": "brawl"},
+                "cam": {"Game/ControlStyle": "hold", "Game/HoldMode": "cam"}}.get(setting["parentValue"])
     if setting["parentValue"]:
         return {key_name(parent["section"], parent["key"]): setting["parentValue"]}
     return {key_name(parent["section"], parent["key"]): "1"}
@@ -99,7 +106,7 @@ def setting_row(s, by_id):
         row["slider"] = {"key": key_name(s["section"], s["key"]), "min": min(values), "max": max(values),
                          "step": 5 if 5 in steps else min(steps), "format": "%d"}
     else:  # a choice (Display Mode and Camera & FOV write more than one key)
-        row["choices"] = [{"label": c["label"], "set": keys_dict(c["keys"])} for c in s["choices"]]
+        row["choices"] = [{"label": c["label"], "set": keys_dict(c["keys"])} for c in s["choices"] if not c["planned"]]
     row["defaults"] = keys_dict(s["fallbackKeys"])
     when = when_of(s, by_id)
     if when:
@@ -132,7 +139,8 @@ def manifest(data):
             {"label": "God Hand: Rearmed's launcher", "args": []},
         ],
     }
-    rows = [start_row, preset_row] + [setting_row(s, by_id) for s in data["settings"] if s["id"] not in SKIPPED]
+    rows = [start_row, preset_row] + [setting_row(s, by_id) for s in data["settings"]
+                                      if s["id"] not in SKIPPED and not s["hidden"]]
     return {
         "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
         "format": 1,
@@ -184,6 +192,8 @@ def check_defaults(doc):
     problems = []
     for row in doc["settings"]:
         if "choices" not in row or row.get("in") == "args" or row["id"] == "Preset":
+            continue
+        if row["id"] == "Switching":  # Modern Rambler's only: the shipped Classic Brawler has none
             continue
 
         def current(k):

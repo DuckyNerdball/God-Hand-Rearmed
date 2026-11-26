@@ -59,6 +59,17 @@ namespace
             return {{"Video", "StartFullscreen", ini.get("Video", "StartFullscreen")},
                     {"Video", "StartMaximized", ini.get("Video", "StartMaximized")}};
         }
+        if (std::strcmp(s.id, "PadStyle") == 0 || std::strcmp(s.id, "Switching") == 0)
+        {
+            // [Game] ControlStyle / HoldMode, as settings::write sets them from nothing (Rambler from Classic: Hold to Brawl).
+            IniFile ini;
+            settings::write(ini, s, value);
+            std::vector<Key> keys;
+            for (const char *key : {"ControlStyle", "HoldMode"})
+                if (!ini.get("Game", key).empty())
+                    keys.push_back({"Game", key, ini.get("Game", key)});
+            return keys;
+        }
         if (std::strcmp(s.id, "CameraPreset") == 0 && !same(value, "custom"))
         {
             IniFile ini;
@@ -141,12 +152,14 @@ int main()
         std::printf(",\"fallbackKeys\":"), keys(keysOf(s, s.fallback));
         std::printf(",\"parent\":"), str(s.parent ? s.parent : "");
         std::printf(",\"parentValue\":"), str(s.parentValue ? s.parentValue : "");
+        std::printf(",\"hidden\":%s", s.hidden ? "true" : "false");
         std::printf(",\"choices\":[");
         for (int c = 0; c < s.choiceCount; ++c)
         {
             std::printf(c ? ",{" : "{");
             std::printf("\"value\":"), str(s.choices[c].value);
             std::printf(",\"label\":"), str(s.choices[c].label);
+            std::printf(",\"planned\":%s", s.choices[c].planned ? "true" : "false");
             std::printf(",\"keys\":"), keys(keysOf(s, s.choices[c].value)), std::putchar('}');
         }
         std::printf("],\"values\":[");

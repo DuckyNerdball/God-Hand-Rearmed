@@ -75,10 +75,22 @@ namespace kamite::settings
                                          115, 120, 125, 130, 135, 140, 145, 150};
         // The controller's: Modern is Toggle (R3) or Hold (L1; K, Nov 19: the alpha's Hold to Brawl back); the keyboard &
         // mouse's Modern is Toggle only (its Dodge Modifier is its hold).
+        // [Game] ControlStyle's values (the hidden data row; the rows shown are Control Style + Switching below).
         constexpr Choice kControlStyles[] = {{"classic", "Classic", "CLASSIC"},
                                              {"modern", "Modern: Toggle", "MODERN: TOGGLE"},
                                              {"hold", "Modern: Hold", "MODERN: HOLD"}};
-        constexpr Choice kKbmControlStyles[] = {{"classic", "Classic", "CLASSIC"}, {"modern", "Modern: Toggle", "MODERN: TOGGLE"}};
+        // The control styles (K, Nov 25-26; later.md "Control styles redesign"): per device Classic Brawler / Modern
+        // Rambler / Strafing Tiger (planned). The controller's Rambler = ControlStyle modern or hold (Switching).
+        constexpr Choice kPadStyles[] = {{"classic", "Classic Brawler", "CLASSIC BRAWLER"},
+                                         {"modern", "Modern Rambler", "MODERN RAMBLER"},
+                                         {"tiger", "Strafing Tiger (planned)", "STRAFING TIGER", true}};
+        constexpr Choice kKbmControlStyles[] = {{"classic", "Classic Brawler", "CLASSIC BRAWLER"},
+                                                {"modern", "Modern Rambler", "MODERN RAMBLER"},
+                                                {"tiger", "Strafing Tiger (planned)", "STRAFING TIGER", true}};
+        // Modern Rambler's switching (the controller): ControlStyle modern = Toggle, hold + HoldMode brawl / cam.
+        constexpr Choice kSwitching[] = {{"toggle", "Toggle (R3)", "TOGGLE (R3)"},
+                                         {"brawl", "Hold to Brawl (L1)", "HOLD TO BRAWL (L1)"},
+                                         {"cam", "Hold to Cam (L1)", "HOLD TO CAM (L1)"}};
         // Modern: Hold's two ways round (K, Nov 20): L1 held brawls (the alpha's), or L1 held is the free camera.
         constexpr Choice kHoldModes[] = {{"brawl", "Hold to Brawl", "HOLD TO BRAWL"}, {"cam", "Hold to Cam", "HOLD TO CAM"}};
         constexpr Choice kRouletteTimers[] = {{"normal", "Normal", "NORMAL"}, {"double", "Double time", "DOUBLE"}};
@@ -157,6 +169,7 @@ namespace kamite::settings
         constexpr Setting gameOnly(Setting s) { return s.gameOnly = true, s; }
         // A second row for one key (its own id), e.g. a sub-option whose text differs by its parent's value.
         constexpr Setting withId(Setting s, const char *id) { return s.id = id, s; }
+        constexpr Setting hidden(Setting s) { return s.hidden = true, s; }
         constexpr Setting note(Setting s, const char *text) { return s.note = text, s; }
         constexpr Setting gameNote(Setting s, const char *text) { return s.gameNote = text, s; }
         constexpr Setting sub(Setting s, const char *parent, const char *value = nullptr)
@@ -187,6 +200,57 @@ namespace kamite::settings
     // The order is the launcher's and the game's.
     const Setting kSettings[] = {
         // ---- Controls -------------------------------------------------------------------------------------------
+        // ---- Control Style (K, Nov 26: its own category, first in Controls; later.md "Control styles redesign") -------
+        // In game the device in use's rows (K, Nov 16); the launcher lists both. Rows a choice makes irrelevant are
+        // hidden (K, Nov 26). The controller's Control Style and Switching read and write [Game] ControlStyle /
+        // HoldMode (the hidden data rows after them; settings::value / write).
+        live(onDevice(withId(gameList(choice(Tab::Controls, "Control Style", "Control Style: Pad",
+                                             "Classic Brawler: PS2's OG fixed facing brawling.\n"
+                                             "Modern Rambler: freecam, brawl mode on a button.",
+                                             "", "", "classic", kPadStyles)),
+                             "PadStyle"),
+                      kPad, "Control Style")),
+        live(onDevice(sub(withId(gameList(choice(Tab::Controls, "Control Style", "Switching",
+                                                 "Toggle: R3 flips freecam & brawl mode.\n"
+                                                 "Hold to Brawl / Hold to Cam: hold L1 for that one.",
+                                                 "", "", "toggle", kSwitching)),
+                                 "Switching"),
+                          "PadStyle", "modern"),
+                      kPad)),
+        live(onDevice(sub(toggle(Tab::Controls, "Control Style", "Auto Brawl",
+                                 "Brawling starts when dealing or taking damage.\nPress the stick (rebindable) to go back to freecam.",
+                                 "Game", "ModernAuto", true),
+                          "Switching", "toggle"),
+                      kPad)),
+        // The same [Game] ModernAuto under Hold to Brawl, where Auto also ends brawl mode (K, Nov 19); none under
+        // Hold to Cam (brawl mode is its rest state; K, Nov 20).
+        live(onDevice(sub(withId(toggle(Tab::Controls, "Control Style", "Auto Brawl",
+                                        "Brawling starts when dealing or taking damage.\nIt stops once no enemy is near.",
+                                        "Game", "ModernAuto", true),
+                                 "ModernAutoHold"),
+                          "Switching", "brawl"),
+                      kPad)),
+        // Trackpad Tango (K, Nov 25-26); the touchpad's speed is F2's / GHR.ini's.
+        live(onDevice(note(sub(toggle(Tab::Controls, "Control Style", "Trackpad Tango",
+                                      "Trackpad or mouse turns the freecam & RS dodges.\n"
+                                      "For Steam pads, Steam Deck & PlayStation touchpads.",
+                                      "Game", "TrackpadTango", false),
+                               "PadStyle", "modern"),
+                           "F2 > Controls sets the touchpad speed."),
+                      kPad)),
+        live(onDevice(gameList(choice(Tab::Controls, "Control Style", "Control Style: KBM",
+                                      "Keyboard & mouse.\nClassic Brawler: PS2's OG brawling. Modern Rambler: mouse freecam.",
+                                      "Game", "KbmControlStyle", "modern", kKbmControlStyles)),
+                      kKeyboard, "Control Style")),
+        live(onDevice(sub(toggle(Tab::Controls, "Control Style", "Auto Brawl",
+                                 "Brawling starts when dealing or taking damage.\nMiddle-click (rebindable) to go back to freecam.",
+                                 "Game", "KbmModernAuto", false),
+                          "KbmControlStyle", "modern"),
+                      kKeyboard)),
+        // The data rows (drawn nowhere): applied, restored and counted by the presets by these ids.
+        live(hidden(choice(Tab::Controls, "Control Style", "Control Style (data)", "", "Game", "ControlStyle", "classic",
+                           kControlStyles))),
+        live(hidden(choice(Tab::Controls, "Control Style", "Hold Mode (data)", "", "Game", "HoldMode", "brawl", kHoldModes))),
         // Camera first (K, Nov 13: the camera's behaviour sits with the controls).
         live(note(choice(Tab::Controls, "Camera", "Camera & FOV",
                          "How far you see to the side.\nWorks with Aspect Ratio; enemies adapt.",
@@ -327,56 +391,6 @@ namespace kamite::settings
                     "Play at a smooth sexy silky 60FPS.\nLeave OFF if you want the OG experience.", "Game",
                     "Fps60", false)),
         // One Control Style per device (K, Nov 16): the one in effect is the device used last.
-        // In game one Control Style: the device in use's (K, Nov 16); the launcher lists both.
-        live(onDevice(note(gameList(choice(Tab::Gameplay, "Move & Groove", "Control Style: Pad",
-                                           "Classic: PS2's OG fixed facing brawling.\n"
-                                           "Modern (rebindable): Toggle Brawl (R3) | Hold to Brawl (L1).",
-                                           "Game", "ControlStyle", "classic", kControlStyles)),
-                           "F2 > Controls changes it while playing."),
-                      kPad, "Control Style")),
-        live(onDevice(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Auto",
-                                 "Brawling starts when dealing or taking damage.\nPress the stick (rebindable) to go back to freecam.",
-                                 "Game", "ModernAuto", true),
-                          "ControlStyle", "modern"),
-                      kPad)),
-        // Hold to Brawl / Hold to Cam (K, Nov 20); Hold to Cam rests in brawl mode, so its Auto row is hidden
-        // (parentAllows).
-        live(onDevice(sub(gameList(choice(Tab::Gameplay, "Move & Groove", "Modern: Hold Mode",
-                                          "Hold to Brawl: hold L1 to brawl, double-tap it to turn.\n"
-                                          "Hold to Cam: hold L1 for freecam, tap it to turn.",
-                                          "Game", "HoldMode", "brawl", kHoldModes)),
-                          "ControlStyle", "hold"),
-                      kPad)),
-        // The same [Game] ModernAuto under Hold, where Auto also ends brawl mode (no switch to leave it; K, Nov 19).
-        live(onDevice(sub(withId(toggle(Tab::Gameplay, "Move & Groove", "Modern: Auto",
-                                        "Brawling starts when dealing or taking damage.\nIt stops once no enemy is near.",
-                                        "Game", "ModernAuto", true),
-                                 "ModernAutoHold"),
-                          "ControlStyle", "hold"),
-                      kPad)),
-        // Trackpad Tango (K, Nov 25-26): under either Modern (parentAllows); the touchpad's speed is F2's / GHR.ini's.
-        live(onDevice(note(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Trackpad Tango",
-                                      "Trackpad or mouse turns the freecam & RS dodges.\n"
-                                      "For Steam pads, Steam Deck & PlayStation touchpads.",
-                                      "Game", "TrackpadTango", false),
-                               "ControlStyle"),
-                           "F2 > Controls sets the touchpad speed."),
-                      kPad)),
-        live(onDevice(gameList(choice(Tab::Gameplay, "Move & Groove", "Control Style: KBM",
-                                      "Keyboard & mouse.\nClassic: PS2's OG brawling. Modern: mouse freecam.",
-                                      "Game", "KbmControlStyle", "modern", kKbmControlStyles)),
-                      kKeyboard, "Control Style")),
-        live(onDevice(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Auto",
-                                 "Brawling starts when dealing or taking damage.\nMiddle-click (rebindable) to go back to freecam.",
-                                 "Game", "KbmModernAuto", false),
-                          "KbmControlStyle", "modern"),
-                      kKeyboard)),
-        live(onDevice(note(sub(toggle(Tab::Gameplay, "Move & Groove", "Modern: Mouse Look",
-                                      "Freak...",
-                                      "Game", "MouseCamera", true),
-                               "KbmControlStyle", "modern"),
-                           "F2 > Controls sets the sensitivity."),
-                      kKeyboard)),
         live(toggle(Tab::Gameplay, "Move & Groove", "Click-Stick Dash",
                     "Press & hold the stick to dash.\nRebindable in Controls.", "Game", "L3Dash", false)),
         live(note(toggle(Tab::Gameplay, "Move & Groove", "Busta-Chan Jive",
@@ -496,6 +510,17 @@ namespace kamite::settings
 
     std::string value(const IniFile &ini, const Setting &setting)
     {
+        // The controller's Control Style and Switching: what [Game] ControlStyle / HoldMode say (K, Nov 26).
+        if (std::strcmp(setting.id, "PadStyle") == 0 || std::strcmp(setting.id, "Switching") == 0)
+        {
+            const Setting *style = find("ControlStyle"), *mode = find("HoldMode");
+            const std::string s = style ? value(ini, *style) : std::string("classic");
+            if (std::strcmp(setting.id, "PadStyle") == 0)
+                return same(s, "modern") || same(s, "hold") ? "modern" : "classic";
+            if (!same(s, "hold"))
+                return "toggle";
+            return mode && same(value(ini, *mode), "cam") ? "cam" : "brawl";
+        }
         if (std::strcmp(setting.id, "DisplayMode") == 0) // two keys
             return ini.getBool("Video", "StartFullscreen", true)    ? "fullscreen"
                    : ini.getBool("Video", "StartMaximized", false) ? "maximized"
@@ -549,20 +574,53 @@ namespace kamite::settings
             return false;
         if (!setting.parent)
             return true;
-        if (std::strcmp(setting.id, "TrackpadTango") == 0) // both Modern styles (Toggle, Hold), not Classic
-            return modernStyle(ini, kPad);
         if (std::strcmp(setting.parent, "DisplayMode") == 0) // two keys in GHR.ini (StartFullscreen, StartMaximized)
             return !ini.getBool("Video", "StartFullscreen", true) && !ini.getBool("Video", "StartMaximized", false);
-        // Hold's Auto: not under Hold to Cam (brawl mode is its rest state; K, Nov 20).
-        if (std::strcmp(setting.id, "ModernAutoHold") == 0)
-            if (const Setting *mode = find("HoldMode"); mode && same(value(ini, *mode), "cam"))
-                return false;
         const Setting *parent = find(setting.parent);
         if (!parent)
             return true;
         if (setting.parentValue)
             return same(value(ini, *parent), setting.parentValue);
         return on(ini, *parent);
+    }
+
+    void write(IniFile &ini, const Setting &setting, const std::string &value)
+    {
+        for (int i = 0; i < setting.choiceCount; ++i)
+            if (setting.choices[i].planned && same(value, setting.choices[i].value))
+                return; // coming later: not a pick yet
+        if (std::strcmp(setting.key, "CameraPreset") == 0)
+            return writeCameraPreset(ini, value); // its four values (Custom: from Action's)
+        if (std::strcmp(setting.id, "DisplayMode") == 0)
+            return writeDisplayMode(ini, value);
+        if (std::strcmp(setting.id, "PadStyle") == 0)
+        {
+            // Modern Rambler keeps the switching it had; from Classic it starts on Hold to Brawl (the controller's
+            // default Modern; K, Nov 19).
+            const Setting *style = find("ControlStyle");
+            const std::string now = style ? settings::value(ini, *style) : std::string("classic");
+            if (same(value, "classic"))
+                ini.set("Game", "ControlStyle", "classic");
+            else if (!same(now, "modern") && !same(now, "hold"))
+            {
+                ini.set("Game", "ControlStyle", "hold");
+                ini.set("Game", "HoldMode", "brawl");
+            }
+            return;
+        }
+        if (std::strcmp(setting.id, "Switching") == 0)
+        {
+            if (same(value, "toggle"))
+                ini.set("Game", "ControlStyle", "modern");
+            else
+            {
+                ini.set("Game", "ControlStyle", "hold");
+                ini.set("Game", "HoldMode", same(value, "cam") ? "cam" : "brawl");
+            }
+            return;
+        }
+        if (*setting.key)
+            ini.set(setting.section, setting.key, value);
     }
 
     const char *cameraPresetId(float fov, float fight, float zoomOut, float tilt)

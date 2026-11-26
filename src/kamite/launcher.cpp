@@ -3466,12 +3466,7 @@ namespace kamite::launcher
             {
                 std::string value = settings::value(state.ini, setting);
                 if (tableCombo(id.c_str(), setting, value))
-                {
-                    if (std::strcmp(setting.key, "CameraPreset") == 0)
-                        settings::writeCameraPreset(state.ini, value); // its four values (Custom: from Action's)
-                    else
-                        state.ini.set(setting.section, setting.key, value);
-                }
+                    settings::write(state.ini, setting, value); // several keys for some rows; nothing for a planned one
                 break;
             }
             case settings::Kind::Slider:
@@ -3513,7 +3508,7 @@ namespace kamite::launcher
             for (size_t i = 0; i < settings::kSettingCount; ++i)
             {
                 const settings::Setting &s = settings::kSettings[i];
-                if (s.tab != tab || s.gameOnly)
+                if (s.tab != tab || s.gameOnly || s.hidden)
                     continue;
                 const bool allowed = settings::parentAllows(state.ini, s);
                 if (!allowed && !s.greyed)
@@ -4320,12 +4315,7 @@ namespace kamite::launcher
                 bookValue(state, b, r, current >= 0 ? s.choices[current].label : ("Custom: " + value).c_str(), faded);
                 const int picked = listOf(labels, current, r);
                 if (picked >= 0 && picked != current)
-                {
-                    if (std::strcmp(s.key, "CameraPreset") == 0)
-                        settings::writeCameraPreset(state.ini, s.choices[picked].value);
-                    else
-                        state.ini.set(s.section, s.key, s.choices[picked].value);
-                }
+                    settings::write(state.ini, s, s.choices[picked].value); // several keys for some rows; nothing for a planned one
             }
             else if (std::strcmp(s.id, "DisplayMode") == 0)
             {
@@ -4425,7 +4415,7 @@ namespace kamite::launcher
             for (size_t i = 0; i < settings::kSettingCount; ++i)
             {
                 const settings::Setting &s = settings::kSettings[i];
-                if (s.tab != tab || s.gameOnly)
+                if (s.tab != tab || s.gameOnly || s.hidden)
                     continue;
                 if (!settings::parentAllows(state.ini, s) && !s.greyed)
                     continue;

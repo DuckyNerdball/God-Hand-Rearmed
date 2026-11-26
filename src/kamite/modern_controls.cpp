@@ -570,7 +570,6 @@ namespace kamite::modern
             ini.set("Game", "CameraPitchSpeed", number(g_pitchSpeed.load()));
             ini.setBool("Game", "CameraInvertX", g_invertX.load());
             ini.setBool("Game", "CameraInvertY", g_invertY.load());
-            ini.setBool("Game", "MouseCamera", g_mouseCamera.load());
             ini.set("Game", "MouseSensitivity", number2(g_mouseSensitivity.load()));
             ini.setBool("Game", "TrackpadTango", g_tango.load());
             ini.set("Game", "TouchpadSensitivity", number(g_touchSensitivity.load()));
@@ -602,44 +601,60 @@ namespace kamite::modern
                 ui->text_wrapped("This pcsx2gs.dll is older than the game: build again to get these controls.");
                 return;
             }
+            // The launcher's / Options' layout (K, Nov 26: Classic Brawler / Modern Rambler + Switching, Auto Brawl,
+            // Trackpad Tango; the mouse always turns Rambler's free camera).
             ui->separator_text("Control style");
-            static const char *const kStyles[] = {"Classic: as on the PS2", "Modern: Toggle (the right stick press switches)",
-                                                  "Modern: Hold (brawl mode while L1 is held)"};
-            int style = !g_modern.load() ? 0 : g_hold.load() ? 2 : 1;
+            static const char *const kStyles[] = {"Classic Brawler: as on the PS2", "Modern Rambler: free camera"};
+            static const char *const kSwitchings[] = {"Toggle (R3): the right stick press switches",
+                                                      "Hold to Brawl (L1): brawl mode while L1 is held",
+                                                      "Hold to Cam (L1): the free camera while L1 is held"};
+            int style = g_modern.load() ? 1 : 0;
             ui->text("Controller");
             ui->set_next_width(340.0f);
-            if (ui->combo("##style", &style, kStyles, 3))
+            if (ui->combo("##style", &style, kStyles, 2))
             {
-                g_modern = style >= 1;
-                g_hold = style == 2;
+                if (style == 1 && !g_modern.load())
+                {
+                    g_hold = true; // Rambler starts on Hold to Brawl, the controller's default Modern (K, Nov 19)
+                    g_holdCam = false;
+                }
+                g_modern = style == 1;
             }
             if (style == 1)
-                checkbox(ui, "Auto: fighting starts brawl mode (the right stick press switches back)##auto", g_auto);
-            else if (style == 2)
             {
-                checkbox(ui, "Hold to Cam: brawl mode unless L1 is held (L1 held: free camera; a tap turns)##holdcam", g_holdCam);
-                if (!g_holdCam.load())
-                    checkbox(ui, "Auto: fighting starts brawl mode, the fight's end ends it##autohold", g_auto);
+                int switching = !g_hold.load() ? 0 : g_holdCam.load() ? 2 : 1;
+                ui->set_next_width(340.0f);
+                if (ui->combo("##switching", &switching, kSwitchings, 3))
+                {
+                    g_hold = switching >= 1;
+                    g_holdCam = switching == 2;
+                }
+                if (switching == 0)
+                    checkbox(ui, "Auto Brawl: fighting starts brawl mode (the right stick press switches back)##auto", g_auto);
+                else if (switching == 1)
+                    checkbox(ui, "Auto Brawl: fighting starts brawl mode, the fight's end ends it##autohold", g_auto);
+                checkbox(ui, "Trackpad Tango: the trackpad / mouse turns the free camera, the right stick dodges##tango", g_tango);
+                if (g_tango.load())
+                    slider(ui, "Touchpad speed##touchsens", g_touchSensitivity, 30.0f, 720.0f, "%.0f deg per width");
             }
-            static const char *const kKbmStyles[] = {"Classic: as on the PS2", "Modern: Toggle (free camera on the mouse)"};
             int kbmStyle = g_kbmModern.load() ? 1 : 0;
             ui->text("Keyboard & mouse");
             ui->set_next_width(340.0f);
-            if (ui->combo("##kbmstyle", &kbmStyle, kKbmStyles, 2))
+            if (ui->combo("##kbmstyle", &kbmStyle, kStyles, 2))
                 g_kbmModern = kbmStyle == 1;
             if (kbmStyle == 1)
-                checkbox(ui, "Auto: fighting starts brawl mode (the middle click switches back)##kbmauto", g_kbmAuto);
-            ui->text_disabled("The style in effect is the device used last.");
+                checkbox(ui, "Auto Brawl: fighting starts brawl mode (the middle click switches back)##kbmauto", g_kbmAuto);
+            ui->text_disabled("The style in effect is the device used last. Strafing Tiger: planned (the prototype below).");
             checkbox(ui, "Strafing Tiger (prototype): in Modern's free camera Gene faces the camera and the left stick "
                          "strafes (his walk slides for now)##tiger", strafing_tiger::setting());
             // The Modern settings show only with Modern selected (K, Oct 27).
             if (style >= 1 || kbmStyle == 1)
             {
-                ui->text_wrapped(style == 2 && g_holdCam.load()
+                ui->text_wrapped(style == 1 && g_hold.load() && g_holdCam.load()
                                      ? "Hold to Cam: brawl mode (classic controls) unless L1 is held; holding L1 is the free "
                                        "camera, a tap of L1 the quick turn. R3 turns too if the Button Mapping page gave it the turn."
-                                 : style == 2 ? "Hold: brawl mode (classic controls) while L1 is held; double-tap L1 for the "
-                                              "quick turn. R3 turns too if the Button Mapping page gave it the turn."
+                                 : style == 1 && g_hold.load() ? "Hold to Brawl: brawl mode (classic controls) while L1 is held; double-tap L1 for the "
+                                                                 "quick turn. R3 turns too if the Button Mapping page gave it the turn."
                                             : "Toggle: the stick press (middle click) switches between the free camera and "
                                               "brawl mode (classic controls); each device keeps its choice across rooms. L1 "
                                               "is the game's quick turn.");
@@ -649,19 +664,11 @@ namespace kamite::modern
                 checkbox(ui, "Invert left/right##invx", g_invertX);
                 checkbox(ui, "Invert up/down##invy", g_invertY);
             }
-            if (kbmStyle == 1)
+            if (kbmStyle == 1 || (style == 1 && g_tango.load()))
             {
                 ui->separator_text("Mouse");
-                checkbox(ui, "The mouse turns the free camera##mouse", g_mouseCamera);
-                ui->begin_disabled(!g_mouseCamera.load());
                 slider(ui, "Sensitivity##mousesens", g_mouseSensitivity, 0.02f, 0.5f, "%.3f deg/pixel");
-                ui->end_disabled();
                 ui->text_disabled("Click in the game to capture the mouse; Esc frees it (so does this menu).");
-                ui->separator_text("Trackpad Tango (controller, Modern)");
-                checkbox(ui, "The trackpad / mouse turns the free camera, the right stick dodges##tango", g_tango);
-                ui->begin_disabled(!g_tango.load());
-                slider(ui, "Touchpad speed##touchsens", g_touchSensitivity, 30.0f, 720.0f, "%.0f deg per width");
-                ui->end_disabled();
             }
 
             ui->separator_text("Now");
@@ -971,7 +978,7 @@ namespace kamite::modern
         g_pitchSpeed = envFloat("KAMITE_CAMERA_PITCH_SPEED", 80.0f, 20.0f, 250.0f);
         g_invertX = envBool("KAMITE_CAMERA_INVERT_X", false);
         g_invertY = envBool("KAMITE_CAMERA_INVERT_Y", false);
-        g_mouseCamera = envBool("KAMITE_MOUSE_CAMERA", true);
+        g_mouseCamera = true; // Mouse Look retired (K, Nov 25): the mouse always turns Modern Rambler's free camera
         g_mouseSensitivity = envFloat("KAMITE_MOUSE_SENSITIVITY", 0.1f, 0.01f, 1.0f);
         g_tango = envBool("KAMITE_TRACKPAD_TANGO", false);
         g_touchSensitivity = envFloat("KAMITE_TOUCHPAD_SENSITIVITY", 180.0f, 30.0f, 720.0f);

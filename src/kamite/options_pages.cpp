@@ -92,7 +92,7 @@ namespace kamite::options_pages
         for (size_t i = 0; i < settings::kSettingCount; ++i)
         {
             const settings::Setting &s = settings::kSettings[i];
-            if (s.tab != tab || !s.live || (s.wideOnly && aspect < 1.34f) || !settings::parentAllows(ini, s))
+            if (s.tab != tab || !s.live || s.hidden || (s.wideOnly && aspect < 1.34f) || !settings::parentAllows(ini, s))
                 continue;
             if (s.device >= 0 && s.device != (keyboard ? settings::kKeyboard : settings::kPad))
                 continue; // the other device's (K, Nov 16)

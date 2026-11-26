@@ -128,6 +128,10 @@
         {
           "label": "Classic",
           "set": {
+            "Game/ModernAuto": "1",
+            "Game/KbmControlStyle": "classic",
+            "Game/ControlStyle": "classic",
+            "Game/HoldMode": "brawl",
             "Video/CameraPreset": "ps2",
             "Video/FieldOfView": "100",
             "Video/FightFieldOfView": "100",
@@ -137,8 +141,6 @@
             "Video/AspectRatio": "4:3",
             "Game/SwayBar": "0",
             "Game/Fps60": "0",
-            "Game/ControlStyle": "classic",
-            "Game/KbmControlStyle": "classic",
             "Game/L3Dash": "0",
             "Game/SprintTraversal": "0",
             "Game/StyleSwitching": "0",
@@ -159,6 +161,11 @@
         {
           "label": "Remastered",
           "set": {
+            "Game/ModernAuto": "1",
+            "Game/KbmControlStyle": "modern",
+            "Game/KbmModernAuto": "0",
+            "Game/ControlStyle": "hold",
+            "Game/HoldMode": "brawl",
             "Video/CameraPreset": "wider",
             "Video/FieldOfView": "125",
             "Video/FightFieldOfView": "100",
@@ -169,11 +176,6 @@
             "Video/HudLayout": "16:9",
             "Game/SwayBar": "0",
             "Game/Fps60": "1",
-            "Game/ControlStyle": "hold",
-            "Game/HoldMode": "brawl",
-            "Game/ModernAuto": "1",
-            "Game/KbmControlStyle": "modern",
-            "Game/KbmModernAuto": "0",
             "Game/L3Dash": "1",
             "Game/SprintTraversal": "0",
             "Game/StyleSwitching": "0",
@@ -194,6 +196,11 @@
         {
           "label": "Rearmed",
           "set": {
+            "Game/ModernAuto": "1",
+            "Game/KbmControlStyle": "modern",
+            "Game/KbmModernAuto": "0",
+            "Game/ControlStyle": "hold",
+            "Game/HoldMode": "brawl",
             "Video/CameraPreset": "action",
             "Video/FieldOfView": "153",
             "Video/FightFieldOfView": "117",
@@ -204,11 +211,6 @@
             "Video/HudLayout": "16:9",
             "Game/SwayBar": "1",
             "Game/Fps60": "1",
-            "Game/ControlStyle": "hold",
-            "Game/HoldMode": "brawl",
-            "Game/ModernAuto": "1",
-            "Game/KbmControlStyle": "modern",
-            "Game/KbmModernAuto": "0",
             "Game/L3Dash": "1",
             "Game/SprintTraversal": "1",
             "Game/StyleSwitching": "1",
@@ -230,6 +232,11 @@
         {
           "label": "Sleazy Mode",
           "set": {
+            "Game/ModernAuto": "1",
+            "Game/KbmControlStyle": "modern",
+            "Game/KbmModernAuto": "0",
+            "Game/ControlStyle": "hold",
+            "Game/HoldMode": "brawl",
             "Video/CameraPreset": "action",
             "Video/FieldOfView": "153",
             "Video/FightFieldOfView": "117",
@@ -240,11 +247,6 @@
             "Video/HudLayout": "16:9",
             "Game/SwayBar": "1",
             "Game/Fps60": "1",
-            "Game/ControlStyle": "hold",
-            "Game/HoldMode": "brawl",
-            "Game/ModernAuto": "1",
-            "Game/KbmControlStyle": "modern",
-            "Game/KbmModernAuto": "0",
             "Game/L3Dash": "1",
             "Game/SprintTraversal": "1",
             "Game/StyleSwitching": "1",
@@ -269,6 +271,186 @@
           "set": {}
         }
       ]
+    },
+    {
+      "id": "PadStyle",
+      "label": "Control Style: Pad",
+      "help": "Classic Brawler: PS2's OG fixed facing brawling. Modern Rambler: freecam, brawl mode on a button.",
+      "group": "Control Style",
+      "choices": [
+        {
+          "label": "Classic Brawler",
+          "set": {
+            "Game/ControlStyle": "classic"
+          }
+        },
+        {
+          "label": "Modern Rambler",
+          "set": {
+            "Game/ControlStyle": "hold",
+            "Game/HoldMode": "brawl"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/ControlStyle": "classic"
+      }
+    },
+    {
+      "id": "Switching",
+      "label": "Switching",
+      "help": "Toggle: R3 flips freecam & brawl mode. Hold to Brawl / Hold to Cam: hold L1 for that one.",
+      "group": "Control Style",
+      "choices": [
+        {
+          "label": "Toggle (R3)",
+          "set": {
+            "Game/ControlStyle": "modern"
+          }
+        },
+        {
+          "label": "Hold to Brawl (L1)",
+          "set": {
+            "Game/ControlStyle": "hold",
+            "Game/HoldMode": "brawl"
+          }
+        },
+        {
+          "label": "Hold to Cam (L1)",
+          "set": {
+            "Game/ControlStyle": "hold",
+            "Game/HoldMode": "cam"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/ControlStyle": "modern"
+      }
+    },
+    {
+      "id": "ModernAuto",
+      "label": "Auto Brawl",
+      "help": "Brawling starts when dealing or taking damage. Press the stick (rebindable) to go back to freecam.",
+      "group": "Control Style",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "Game/ModernAuto": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "Game/ModernAuto": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/ModernAuto": "1"
+      },
+      "when": {
+        "Game/ControlStyle": "modern"
+      }
+    },
+    {
+      "id": "ModernAutoHold",
+      "label": "Auto Brawl",
+      "help": "Brawling starts when dealing or taking damage. It stops once no enemy is near.",
+      "group": "Control Style",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "Game/ModernAuto": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "Game/ModernAuto": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/ModernAuto": "1"
+      },
+      "when": {
+        "Game/ControlStyle": "hold",
+        "Game/HoldMode": "brawl"
+      }
+    },
+    {
+      "id": "TrackpadTango",
+      "label": "Trackpad Tango",
+      "help": "Trackpad or mouse turns the freecam & RS dodges. For Steam pads, Steam Deck & PlayStation touchpads.",
+      "group": "Control Style",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "Game/TrackpadTango": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "Game/TrackpadTango": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/TrackpadTango": "0"
+      }
+    },
+    {
+      "id": "KbmControlStyle",
+      "label": "Control Style: KBM",
+      "help": "Keyboard & mouse. Classic Brawler: PS2's OG brawling. Modern Rambler: mouse freecam.",
+      "group": "Control Style",
+      "choices": [
+        {
+          "label": "Classic Brawler",
+          "set": {
+            "Game/KbmControlStyle": "classic"
+          }
+        },
+        {
+          "label": "Modern Rambler",
+          "set": {
+            "Game/KbmControlStyle": "modern"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/KbmControlStyle": "modern"
+      }
+    },
+    {
+      "id": "KbmModernAuto",
+      "label": "Auto Brawl",
+      "help": "Brawling starts when dealing or taking damage. Middle-click (rebindable) to go back to freecam.",
+      "group": "Control Style",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "Game/KbmModernAuto": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "Game/KbmModernAuto": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "Game/KbmModernAuto": "0"
+      },
+      "when": {
+        "Game/KbmControlStyle": "modern"
+      }
     },
     {
       "id": "CameraPreset",
@@ -1290,214 +1472,6 @@
       ],
       "defaults": {
         "Game/Fps60": "0"
-      }
-    },
-    {
-      "id": "ControlStyle",
-      "label": "Control Style: Pad",
-      "help": "Classic: PS2's OG fixed facing brawling. Modern (rebindable): Toggle Brawl (R3) | Hold to Brawl (L1).",
-      "group": "Move & Groove",
-      "choices": [
-        {
-          "label": "Classic",
-          "set": {
-            "Game/ControlStyle": "classic"
-          }
-        },
-        {
-          "label": "Modern: Toggle",
-          "set": {
-            "Game/ControlStyle": "modern"
-          }
-        },
-        {
-          "label": "Modern: Hold",
-          "set": {
-            "Game/ControlStyle": "hold"
-          }
-        }
-      ],
-      "defaults": {
-        "Game/ControlStyle": "classic"
-      }
-    },
-    {
-      "id": "ModernAuto",
-      "label": "Modern: Auto",
-      "help": "Brawling starts when dealing or taking damage. Press the stick (rebindable) to go back to freecam.",
-      "group": "Move & Groove",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "Game/ModernAuto": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "Game/ModernAuto": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "Game/ModernAuto": "1"
-      },
-      "when": {
-        "Game/ControlStyle": "modern"
-      }
-    },
-    {
-      "id": "HoldMode",
-      "label": "Modern: Hold Mode",
-      "help": "Hold to Brawl: hold L1 to brawl, double-tap it to turn. Hold to Cam: hold L1 for freecam, tap it to turn.",
-      "group": "Move & Groove",
-      "choices": [
-        {
-          "label": "Hold to Brawl",
-          "set": {
-            "Game/HoldMode": "brawl"
-          }
-        },
-        {
-          "label": "Hold to Cam",
-          "set": {
-            "Game/HoldMode": "cam"
-          }
-        }
-      ],
-      "defaults": {
-        "Game/HoldMode": "brawl"
-      },
-      "when": {
-        "Game/ControlStyle": "hold"
-      }
-    },
-    {
-      "id": "ModernAutoHold",
-      "label": "Modern: Auto",
-      "help": "Brawling starts when dealing or taking damage. It stops once no enemy is near.",
-      "group": "Move & Groove",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "Game/ModernAuto": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "Game/ModernAuto": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "Game/ModernAuto": "1"
-      },
-      "when": {
-        "Game/ControlStyle": "hold"
-      }
-    },
-    {
-      "id": "TrackpadTango",
-      "label": "Modern: Trackpad Tango",
-      "help": "Trackpad or mouse turns the freecam & RS dodges. For Steam pads, Steam Deck & PlayStation touchpads.",
-      "group": "Move & Groove",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "Game/TrackpadTango": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "Game/TrackpadTango": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "Game/TrackpadTango": "0"
-      },
-      "when": {
-        "Game/ControlStyle": "1"
-      }
-    },
-    {
-      "id": "KbmControlStyle",
-      "label": "Control Style: KBM",
-      "help": "Keyboard & mouse. Classic: PS2's OG brawling. Modern: mouse freecam.",
-      "group": "Move & Groove",
-      "choices": [
-        {
-          "label": "Classic",
-          "set": {
-            "Game/KbmControlStyle": "classic"
-          }
-        },
-        {
-          "label": "Modern: Toggle",
-          "set": {
-            "Game/KbmControlStyle": "modern"
-          }
-        }
-      ],
-      "defaults": {
-        "Game/KbmControlStyle": "modern"
-      }
-    },
-    {
-      "id": "KbmModernAuto",
-      "label": "Modern: Auto",
-      "help": "Brawling starts when dealing or taking damage. Middle-click (rebindable) to go back to freecam.",
-      "group": "Move & Groove",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "Game/KbmModernAuto": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "Game/KbmModernAuto": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "Game/KbmModernAuto": "0"
-      },
-      "when": {
-        "Game/KbmControlStyle": "modern"
-      }
-    },
-    {
-      "id": "MouseCamera",
-      "label": "Modern: Mouse Look",
-      "help": "Freak...",
-      "group": "Move & Groove",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "Game/MouseCamera": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "Game/MouseCamera": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "Game/MouseCamera": "1"
-      },
-      "when": {
-        "Game/KbmControlStyle": "modern"
       }
     },
     {

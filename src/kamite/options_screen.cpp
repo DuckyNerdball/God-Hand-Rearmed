@@ -925,6 +925,14 @@ namespace kamite::options_screen
 
         void apply(const settings::Setting &s)
         {
+            // The controller's Control Style / Switching: their data rows ([Game] ControlStyle / HoldMode) applied.
+            if (std::strcmp(s.id, "PadStyle") == 0 || std::strcmp(s.id, "Switching") == 0)
+            {
+                for (const char *data : {"ControlStyle", "HoldMode"})
+                    if (const settings::Setting *d = settings::find(data))
+                        apply(*d);
+                return;
+            }
             syncEnv(s);
             const std::string id = s.id, value = settings::value(g_ini, s);
             const bool on = s.kind == settings::Kind::Toggle && settings::on(g_ini, s);
@@ -1111,19 +1119,16 @@ namespace kamite::options_screen
                 const int n = s.choiceCount, now = settings::choiceIndex(s, settings::value(g_ini, s));
                 if (n <= 0)
                     return false;
-                const int next = ((now < 0 ? 0 : now + (ok ? 1 : dir)) % n + n) % n; // a < value > list: goes round
-                if (next == now)
+                int next = ((now < 0 ? 0 : now + (ok ? 1 : dir)) % n + n) % n; // a < value > list: goes round
+                for (int skip = 0; skip < n && s.choices[next].planned; ++skip) // "(planned)": the launcher's only
+                    next = ((next + (ok ? 1 : dir)) % n + n) % n;
+                if (next == now || s.choices[next].planned)
                     return false;
                 value = s.choices[next].value;
                 break;
             }
             }
-            if (std::strcmp(s.key, "CameraPreset") == 0)
-                settings::writeCameraPreset(g_ini, value); // its four values (Custom: from Action's)
-            else if (std::strcmp(s.id, "DisplayMode") == 0)
-                settings::writeDisplayMode(g_ini, value);
-            else
-                g_ini.set(s.section, s.key, value);
+            settings::write(g_ini, s, value); // Camera & FOV, Display Mode, Control Style / Switching: several keys
             if (!g_ini.save())
                 KM_WARN(Game, "options screen: could not write GHR.ini");
             if (s.applyOnLeave)
