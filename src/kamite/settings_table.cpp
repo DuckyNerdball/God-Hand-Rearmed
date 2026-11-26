@@ -240,7 +240,7 @@ namespace kamite::settings
                       "RightStickDeadzone")),
         // Left-handed play (K, Nov 21; help text a placeholder for K): the controller's sticks trade jobs.
         live(toggle(Tab::Controls, "Controller", "Swap Sticks",
-                    "For lefties: the right stick moves Gene, the left one dodges and aims.\nStick presses: swap them in Button Mapping.",
+                    "For leftists: RS moves Gene, LS dodges & freecams.\nStick presses: swap them in Button Mapping yourself.",
                     "Game", "SwapSticks", false)),
         live(toggle(Tab::Controls, "Controller", "Mash Assistic", "Are ya winning, dad?\nEasy stick waggles & hold to auto-mash.",
                     "Game", "MashAssist", false)),

@@ -657,7 +657,7 @@
     {
       "id": "SwapSticks",
       "label": "Swap Sticks",
-      "help": "For lefties: the right stick moves Gene, the left one dodges and aims. Stick presses: swap them in Button Mapping.",
+      "help": "For leftists: RS moves Gene, LS dodges & freecams. Stick presses: swap them in Button Mapping yourself.",
       "group": "Controller",
       "choices": [
         {
@@ -680,7 +680,7 @@
     {
       "id": "MashAssist",
       "label": "Mash Assistic",
-      "help": "Are ya winning, dad? Waggle and mash events are easier.",
+      "help": "Are ya winning, dad? Easy stick waggles & hold to auto-mash.",
       "group": "Controller",
       "choices": [
         {
@@ -833,19 +833,13 @@
     {
       "id": "GraphicsAPI",
       "label": "Graphics API",
-      "help": "Default: Vulkan | Fallback: DX11",
+      "help": "Vulkan: the renderer on Linux",
       "group": "Renderer",
       "choices": [
         {
           "label": "Vulkan",
           "set": {
             "Video/GraphicsAPI": "vulkan"
-          }
-        },
-        {
-          "label": "Direct3D 11",
-          "set": {
-            "Video/GraphicsAPI": "dx11"
           }
         }
       ],

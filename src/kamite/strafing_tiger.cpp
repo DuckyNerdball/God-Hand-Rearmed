@@ -49,9 +49,9 @@ namespace kamite::strafing_tiger
             if (!g_setting.load(std::memory_order_relaxed) || !g_slide.load(std::memory_order_relaxed) || !inRam(obj) ||
                 obj != rd32(rdram, kPlayerPointer))
                 return g_inner(rdram, ctx, runtime);
-            // Walking only (major step 0, sub-step 1 walk / 2 run: modern_controls' geneMoves without the standing ones).
+            // Moving only: mode 0, phase 1 walk / 2 run / 3 back-pedal (style_pose's isFree phases without standing).
             const uint8_t major = rdram[(obj + 0x2F4u) & PS2_RAM_MASK], sub = rdram[(obj + 0x2F5u) & PS2_RAM_MASK];
-            if (major != 0u || (sub != 1u && sub != 2u))
+            if (major != 0u || sub < 1u || sub > 3u)
                 return g_inner(rdram, ctx, runtime);
             // The yaw turns the model's +z (his facing) to (sin yaw, cos yaw) (Ry, frame_patches' eulerMatrix), so
             // turning the delta by Ry(angle) first sends him toward his yaw + angle.

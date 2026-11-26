@@ -30,6 +30,11 @@ namespace kamite::keys_page
             {"LLeft", "MOVE LEFT"},
             {"LRight", "MOVE RIGHT"},
             {"DodgeModifier", "DODGE (HOLD + MOVE)"},
+            // The dodges on keys of their own (the launcher's right-stick rows; K, Nov 26).
+            {"RUp", "DUCK"},
+            {"RDown", "BACK FLIP"},
+            {"RLeft", "SIDESTEP LEFT"},
+            {"RRight", "SIDESTEP RIGHT"},
         };
         if (options.clickStickDash)
             out.push_back({"L3", "DASH"});

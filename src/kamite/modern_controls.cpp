@@ -353,10 +353,19 @@ namespace kamite::modern
             if (keyDodge)
             {
                 // Shift + the move keys in the free camera: the game's dodge from Gene's facing (the left stick's keys
-                // went to the right stick); the camera keeps still.
+                // went to the right stick); the camera keeps still. Strafing Tiger: the keys are the camera's
+                // directions, turned into his (K, Nov 26: dodges must follow the camera, not wherever he faces).
                 g_stickX = 0.0f;
                 g_stickY = 0.0f;
                 g_moving = false;
+                if (strafing_tiger::enabled() && std::fmax(std::fabs(rx), std::fabs(ry)) > 0.2f)
+                {
+                    const float m = std::fmin(std::sqrt(rx * rx + ry * ry), 1.0f);
+                    const float r = wrapAngle(g_cameraYaw.load(std::memory_order_relaxed) - std::atan2(rx, -ry) -
+                                              g_geneYaw.load(std::memory_order_relaxed));
+                    state.rightX = static_cast<uint8_t>(std::lround(std::fmin(std::fmax(128.0f - std::sin(r) * m * 127.0f, 0.0f), 255.0f)));
+                    state.rightY = static_cast<uint8_t>(std::lround(std::fmin(std::fmax(128.0f - std::cos(r) * m * 127.0f, 0.0f), 255.0f)));
+                }
                 return;
             }
             // The free camera has the right stick; the game sees it centred (no dodges).
@@ -384,13 +393,15 @@ namespace kamite::modern
             if (strafing_tiger::enabled())
             {
                 // Strafing Tiger (prototype): he keeps facing the camera (the camera side turns him); the game gets
-                // his walk / run forward, or the back-pedal for a stick pointing more than about 90 degrees behind
-                // him (+-10 degrees of stickiness), at the stick's magnitude (walk or run as before), and the root
-                // delta is turned the rest of the way to where the stick points (strafing_tiger.cpp).
+                // his walk / run forward, or the back-pedal for the stick's back three eighths (past 112.5 degrees
+                // from the camera's forward, +-10 of stickiness: straight sideways stays a walk, K Nov 26), at the
+                // stick's magnitude (walk or run as before), and the root delta is turned the rest of the way to
+                // where the stick points (strafing_tiger.cpp). Forward / back is judged on the stick against the
+                // camera, never against his yaw, which lags a turning camera.
                 static bool s_back = false;
                 const float relative = wrapAngle(desired - g_geneYaw.load(std::memory_order_relaxed));
-                const float edge = (s_back ? 80.0f : 100.0f) * (3.14159265f / 180.0f);
-                s_back = std::fabs(relative) > edge;
+                const float edge = (s_back ? 102.5f : 122.5f) * (3.14159265f / 180.0f);
+                s_back = std::fabs(std::atan2(lx, -ly)) > edge;
                 g_moveYaw = g_cameraYaw.load(std::memory_order_relaxed);
                 g_moving = true;
                 strafing_tiger::setSlide(s_back ? wrapAngle(relative - 3.14159265f) : relative);
@@ -449,6 +460,12 @@ namespace kamite::modern
         bool validPointer(uint32_t pointer) { return pointer >= 0x100000u && pointer < PS2_RDRAM_SIZE; }
 
         // Gene stands or walks: major step 0, sub-step 0 / 10 (standing) or 1 / 2 (walking).
+        // Phase 3 (0x10C930) = the back-pedal: Modern never gets there (it turns him to the stick); Strafing Tiger does.
+        bool backPedals(const uint8_t *rdram, uint32_t player)
+        {
+            return rdram[(player + 0x2F4u) & PS2_RAM_MASK] == 0u && rdram[(player + 0x2F5u) & PS2_RAM_MASK] == 3u;
+        }
+
         bool geneMoves(const uint8_t *rdram, uint32_t player)
         {
             const uint8_t major = rdram[(player + 0x2F4u) & PS2_RAM_MASK], sub = rdram[(player + 0x2F5u) & PS2_RAM_MASK];
@@ -832,7 +849,8 @@ namespace kamite::modern
             // Strafing Tiger: he faces the camera, standing too (the game turns him on the spot).
             const uint32_t player = ram32(rdram, kPlayerPointer);
             const bool tiger = strafing_tiger::enabled();
-            if ((tiger || g_moving.load(std::memory_order_relaxed)) && validPointer(player) && geneMoves(rdram, player))
+            if ((tiger || g_moving.load(std::memory_order_relaxed)) && validPointer(player) &&
+                (geneMoves(rdram, player) || (tiger && backPedals(rdram, player))))
             {
                 const float target = tiger ? g_yaw : g_moveYaw.load(std::memory_order_relaxed);
                 const float step = std::fmin(std::fmax(wrapAngle(target - geneYaw), -kTurnRate * dt), kTurnRate * dt);
