@@ -202,7 +202,7 @@ its half-float unpacks func_00156508 / 00156550 inline and as natives of their o
 through its table at 0x3BD910 (jalr): `caller_scan.py ... --table 3BD910:f <addr>[:returns]...` walks every jalr of the
 functions that load the table (the pose, setMotionInfo, MotionGetParam, func_00139180). setupMotion gives the track real
 Hermite tracks when `KM_TRACKS=<file>` names a pool (u32 n, u32 the motion's frames, u32 bytes, the track; written in the
-sandbox from the game's em00.dat / pl00.dat, never committed), else made-up ones; t at a key's time (the equal path),
+sandbox by `make_tracks.py <out> <em00.dat> <pl00.dat>` from the game's files, never committed), else made-up ones; t at a key's time (the equal path),
 between keys, x.5, before / past the ends, specials. An unaligned record or track, or a record in the frame (the saved
 registers overwrite it before its offset is read), would make the original follow garbage: not set up. `<vectors>.track`
 (trackSample against the recompiled function) runs in libvu0_check.
