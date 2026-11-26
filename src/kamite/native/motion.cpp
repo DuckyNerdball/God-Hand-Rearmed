@@ -1639,12 +1639,14 @@ namespace kamite::native::motion
         addDecode("func_00159AD0", kDecode, &decodeNative<RealEnv>, &decodeNative<ShadowEnv>, true,
                   NativeFunction::kReturnsF0);
         // M4 (Nov 26): the pose fused (the decode, the Hermite, kind 3, kinds 0 / 2 / 6 and Adjust_theta_vec inline) and
-        // kind 3 on its own; unchecked: replays shadow them. The pose sits under the features' three wrappers: its slot
+        // kind 3 on its own. The pose checked since K's 19:28 Build and Replay of 7e82f46 (283.6k calls, 283.1k compared,
+        // 0 mismatches, 429 declines; its kind-3 path proven in the sandbox only, as M3's decode kinds 3 / 5). Kind 3 alone
+        // was never called there (no replay reaches a kind-3 record): it stays shadowed. The pose sits under the features' three wrappers: its slot
         // keeps FunctionHooks' trampoline from boot (native.cpp kUnderHooks), so they call it as their inner function,
         // its observers first. Its footprint (a model, its parts, their tracks) is recorded with a larger limit.
         addF("func_00158FC8", kKind3, &kind3Native<RealEnv>, &kind3Native<ShadowEnv>, false, NativeFunction::kReturnsF0);
         {
-            NativeFunction fn{"func_00158328", kPose, "motion", false, &poseNative<RealEnv>, &poseNative<ShadowEnv>, nullptr};
+            NativeFunction fn{"func_00158328", kPose, "motion", true, &poseNative<RealEnv>, &poseNative<ShadowEnv>, nullptr};
             fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
             fn.returns = 0u;
             fn.maxBytes = 1u << 22;
