@@ -54,6 +54,7 @@ set(KAMITE_HOST_SOURCES
     kamite/style_presets.cpp
     kamite/style_sfx.cpp
     kamite/style_pose.cpp
+    kamite/strafing_tiger.cpp
     kamite/buck_breaker.cpp
     kamite/mash_assist.cpp
     kamite/punish_fit.cpp

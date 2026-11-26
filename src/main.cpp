@@ -24,6 +24,7 @@
 #include "kamite/tutorial_text.h"
 #include "kamite/options_screen.h"
 #include "kamite/style_presets.h"
+#include "kamite/strafing_tiger.h"
 #include "kamite/buck_breaker.h"
 #include "kamite/mash_assist.h"
 #include "kamite/punish_fit.h"
@@ -1245,6 +1246,7 @@ int main(int argc, char *argv[])
         kamite::hotkeys::install(exeDir / "GHR.ini"); // [Hotkeys]: the port's shortcut keys
         kamite::dev_menu::install(exeDir / "GHR.ini"); // F2: the dev menu's tab order, Display and Gameplay
         kamite::style_presets::install(runtime); // style presets: d-pad swaps in play, the Techniques screen's style row and L2 / R2
+        kamite::strafing_tiger::install(runtime); // Strafing Tiger (prototype, F2 > Controls): hooks addNullSpeed
         kamite::mash_assist::install(runtime);   // [Game] MashAssist: held input mashes in struggles and mash moves
         kamite::buck_breaker::install(runtime);  // [Game] BuckBreaker: the stun punish per style (the Techniques screen's punish slot)
         kamite::punish_fit::install(runtime, exeDir); // with it: the punishes fitted to every body (resources/punish_fit.txt)

@@ -59,6 +59,7 @@
 #include "kamite/log.h"
 #include "kamite/menu_buttons.h"
 #include "kamite/style_presets.h"
+#include "kamite/strafing_tiger.h"
 #include "kamite/test_mode.h"
 #include "kamite/game_layout.h"
 #include "ps2_host_input.h"
@@ -285,6 +286,7 @@ namespace kamite::modern
             style_presets::padFilter(player, state); // the d-pad style swaps (ps2_host_input has one filter)
             if (player != 0u)
                 return;
+            strafing_tiger::clearSlide(); // set again below only while Strafing Tiger moves him in the free camera
             menu_buttons::noteRightStick(state.connected ? state.rightX : 0x80u); // the Techniques screen's Gene turn
             noteDevice();
             if (!modernNow())
@@ -379,6 +381,24 @@ namespace kamite::modern
                 return;
             }
             const float desired = wrapAngle(g_cameraYaw.load(std::memory_order_relaxed) - std::atan2(lx, -ly));
+            if (strafing_tiger::enabled())
+            {
+                // Strafing Tiger (prototype): he keeps facing the camera (the camera side turns him); the game gets
+                // his walk / run forward, or the back-pedal for a stick pointing more than about 90 degrees behind
+                // him (+-10 degrees of stickiness), at the stick's magnitude (walk or run as before), and the root
+                // delta is turned the rest of the way to where the stick points (strafing_tiger.cpp).
+                static bool s_back = false;
+                const float relative = wrapAngle(desired - g_geneYaw.load(std::memory_order_relaxed));
+                const float edge = (s_back ? 80.0f : 100.0f) * (3.14159265f / 180.0f);
+                s_back = std::fabs(relative) > edge;
+                g_moveYaw = g_cameraYaw.load(std::memory_order_relaxed);
+                g_moving = true;
+                strafing_tiger::setSlide(s_back ? wrapAngle(relative - 3.14159265f) : relative);
+                const float up = s_back ? -magnitude : magnitude;
+                state.leftX = 0x80u;
+                state.leftY = static_cast<uint8_t>(std::lround(std::fmin(std::fmax(128.0f - up * 127.0f, 0.0f), 255.0f)));
+                return;
+            }
             g_moveYaw = desired;
             g_moving = true;
             const float relative = wrapAngle(desired - g_geneYaw.load(std::memory_order_relaxed));
@@ -568,6 +588,8 @@ namespace kamite::modern
             if (kbmStyle == 1)
                 checkbox(ui, "Auto: fighting starts brawl mode (the middle click switches back)##kbmauto", g_kbmAuto);
             ui->text_disabled("The style in effect is the device used last.");
+            checkbox(ui, "Strafing Tiger (prototype): in Modern's free camera Gene faces the camera and the left stick "
+                         "strafes (his walk slides for now)##tiger", strafing_tiger::setting());
             // The Modern settings show only with Modern selected (K, Oct 27).
             if (style >= 1 || kbmStyle == 1)
             {
@@ -807,10 +829,12 @@ namespace kamite::modern
 
             // Gene faces where the left stick points while he stands or walks (elsewhere the stick the filter made
             // steers him the original way).
+            // Strafing Tiger: he faces the camera, standing too (the game turns him on the spot).
             const uint32_t player = ram32(rdram, kPlayerPointer);
-            if (g_moving.load(std::memory_order_relaxed) && validPointer(player) && geneMoves(rdram, player))
+            const bool tiger = strafing_tiger::enabled();
+            if ((tiger || g_moving.load(std::memory_order_relaxed)) && validPointer(player) && geneMoves(rdram, player))
             {
-                const float target = g_moveYaw.load(std::memory_order_relaxed);
+                const float target = tiger ? g_yaw : g_moveYaw.load(std::memory_order_relaxed);
                 const float step = std::fmin(std::fmax(wrapAngle(target - geneYaw), -kTurnRate * dt), kTurnRate * dt);
                 const float turned = wrapAngle(geneYaw + step);
                 std::memcpy(rdram + ((player + 0x104u) & PS2_RAM_MASK), &turned, sizeof(turned));
