@@ -1027,8 +1027,9 @@ namespace kamite::native::motion
         add("func_0015A6A0", kSlerp, &slerpNative<RealEnv>, &slerpNative<ShadowEnv>, true);
         add("func_0015A190", kMatToQuat, &matToQuatNative<RealEnv>, &matToQuatNative<ShadowEnv>, true);
         add("MtxInitRotQuaternion", kQuatToMat, &quatToMatNative<RealEnv>, &quatToMatNative<ShadowEnv>, true);
-        // M2 (batch 3, Nov 25): the per-model passes fused; shadowed (unchecked) until a K build shows 0 mismatches. Their
-        // footprints (a model and all its parts) are recorded with Tag_set_scr's limits.
+        // M2 (batch 3): the per-model passes fused; checked since K's 23:57 Twice of 3581925 (calcParts 247.5k, calcWorldParts
+        // 56.6k calls compared, 0 mismatches; declined: one model a frame in each, a twist part). Their footprints (a model
+        // and all its parts) are recorded with Tag_set_scr's limits.
         auto addPass = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
                           bool (*shadow)(ShadowEnv &, R5900Context *), bool checked) {
             NativeFunction fn{name, address, "motion", checked, real, shadow, nullptr};
@@ -1038,8 +1039,8 @@ namespace kamite::native::motion
             fn.maxRanges = 16384u;
             registerFunction(fn);
         };
-        addPass("cModel_calcParts", kCalcParts, &calcPartsNative<RealEnv>, &calcPartsNative<ShadowEnv>, false);
+        addPass("cModel_calcParts", kCalcParts, &calcPartsNative<RealEnv>, &calcPartsNative<ShadowEnv>, true);
         addPass("cModel_calcWorldParts", kCalcWorldParts, &calcWorldPartsNative<RealEnv>, &calcWorldPartsNative<ShadowEnv>,
-                false);
+                true);
     }
 }
