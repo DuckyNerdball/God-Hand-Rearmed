@@ -2006,7 +2006,7 @@ namespace
         for (uint32_t i = 0; i < 3u; ++i)
             setFloat(at + 4u * i, angle());
     }
-    // func_001501D0's twist (partFlags 0x800; the *_twist natives only, so the other natives' setups keep their draws):
+    // func_001501D0's twist (partFlags 0x800; the join's and the passes' setups only, so the others keep their draws):
     // the axis at 0x3BD8B0 (the ELF's (0, 1, 0, 1); sometimes a unit 4-vector or wild words) and capVu0Cos's polynomial
     // at 0x3BF140 (the ELF's: the same words as ecossin's kSinPolynomial; sometimes other values).
     void setTwistTables()
@@ -2137,7 +2137,7 @@ namespace
             if (g_rng() % 4u == 0u)
                 flags |= 0x100000u;
             if (g_rng() % 24u == 0u)
-                flags |= 0x800u; // the twist: 0x1501D0 declines, so does the pass (the *_twist natives run it)
+                flags |= 0x800u; // the twist
             if (twistSetup && g_rng() % 3u == 0u)
                 flags |= 0x800u;
             setU32(part + 0x154u, flags);
@@ -2160,7 +2160,8 @@ namespace
             fn.address != 0x14A038u)
             return;
         R5900Context &ctx = call.ctx;
-        const bool twistSetup = std::strstr(fn.name, "_twist") != nullptr; // the twist path's natives (rung 4, Nov 26)
+        // func_001501D0's twist (partFlags 0x800) in the join and both passes (rung 4, Nov 26): their own setups
+        const bool twistSetup = fn.address == 0x1501D0u || fn.address == 0x149EB8u || fn.address == 0x14A038u;
         const uint32_t sp = 0xF0000u + 0x100u * static_cast<uint32_t>(g_rng() % 16u);
         const uint32_t pick = static_cast<uint32_t>(g_rng() % 16u);
         if (g_rng() % 8u) // ecossin's own polynomial (else setupCall's ordinary values)
@@ -2408,7 +2409,7 @@ namespace
             setGpr(ctx, 4, part | seg);
             const uint32_t flags = (g_rng() % 2u) ? 0x40000u : static_cast<uint32_t>(g_rng() % 4u == 0u ? g_rng() : 0x40004u);
             setGpr64(ctx, 5, flags | (g_rng() & 0xFFFFFFFF00000000ull));
-            if (twistSetup)
+            if (twistSetup) // always here (the join)
             {
                 // mostly a twist part (other flag bits random half the time), its angle, the tables; now and then the
                 // part moved onto the axis (0x3BD800: the world matrix the original writes covers 0x3BD8B0; declined)
@@ -2993,7 +2994,7 @@ namespace
     }
 
     // A replay's layering (native.cpp, rung 4 Nov 26): a native registered again at a checked native's address (the
-    // *_twist variants) is shadowed with the live checked native as the function it checks against, whose declines run
+    // rung 4's *_twist variants, 98add9b) is shadowed with the live checked native as the function it checks against, whose declines run
     // the recompiled code. Here at a spare address: the shadowed call's outcome must be the recompiled alone's, and the
     // harness must report no mismatch.
     const NativeFunction *g_layerBase = nullptr;
@@ -3697,7 +3698,7 @@ int main(int argc, char **argv)
     settings.header = &testHeader;
     settings.cycles = &testCycles;
     kamite::native::shadow::begin(settings);
-    // One slot per address, as native.cpp keeps it: a native registered again at an address (the *_twist variants)
+    // One slot per address, as native.cpp keeps it: a native registered again at an address (as the *_twist variants were)
     // takes its slot in these checks (in a replay the checked one is live and the variant is the shadowed one).
     auto overridden = [&](const NativeFunction &fn) {
         bool later = false, seen = false;

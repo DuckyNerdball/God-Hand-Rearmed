@@ -168,7 +168,7 @@ setupMotion gives them angles / orders / aliasing / frames; MtxInitRotVec's jump
 table (0x3BF110) are test regions. `<vectors>.motion` (Adjust_theta_vec, MtxInitRotVec, MtxMulRotVec, MtxMulScaleVec,
 MtxInverse from the recompiled functions) runs in libvu0_check on SSE / plain C++ / NEON. Batch 2's composites chain
 batch 1's bodies in registers (motion.cpp multiplyStep / rotationStep, each step checked as its own native checks it);
-func_001501D0's twist path (+0x154 & 0x800) is declined there (the *_twist natives below run it). checkNative counts a call as interrupted
+func_001501D0's twist path (+0x154 & 0x800): "The twist path" below. checkNative counts a call as interrupted
 only when the original's own checkpoint came due (its dueAt-th call), not on any differing pc: a native whose original
 restores a frame it overwrote (another ra) is compared and fails (planted: MtxMulScaleVec's out in its frame).
 New setups draw from g_rng only for their own functions: a draw for every native shifts all later inputs, and on a
@@ -182,14 +182,14 @@ to plain RAM in the test (a random one aborts the recompiled run), so a short li
 ## The twist path (rung 4, Nov 26)
 
 func_001501D0's partFlags 0x800 (the enemies' skeletons; `twist_survey.py` finds the models in a replay's snapshots)
-runs in `func_001501D0_twist`, `cModel_calcParts_twist` and `cModel_calcWorldParts_twist`: the same bodies with
-kTwist = true, registered after their checked selves at the same addresses. native.cpp installs in registry order, so in
-a replay the checked native is live and the variant is shadowed over it (its declines run the recompiled code); one
-shadow slot per address (a second is left out). shadow_test keeps one slot per address too (the later registration),
-and `checkLayered` runs each variant shadowed over its live checked native at a spare address (whole runs, the relaxed
-bar; `KM_LAYERED=1 shadow_test <n>` runs those alone). The live native writes no frames, so B is copied from A after each
-layered call: a later call with a lower sp would compare the stale dead stack as live RAM. The variants' setups (setupMotion's twistSetup, by the name) add twist parts, angles (setTwistAngle: 0, -0, the
+runs in func_001501D0 and both passes. It was proven by shadowing `*_twist` variants (the same bodies) registered after
+their checked selves at the same addresses (98add9b): the way to shadow a new path of a live native. native.cpp installs
+in registry order, so in a replay the checked native is live and the variant is shadowed over it (its declines run the
+recompiled code); one shadow slot per address (a second is left out). shadow_test keeps one slot per address too (the
+later registration), and `checkLayered` runs each variant shadowed over its live checked native at a spare address
+(whole runs, the relaxed bar; `KM_LAYERED=1 shadow_test <n>` runs those alone). The live native writes no frames, so B
+is copied from A after each layered call: a later call with a lower sp would compare the stale dead stack as live RAM.
+The twist setups (setupMotion's twistSetup: the join and both passes) add twist parts, angles (setTwistAngle: 0, -0, the
 game's values, sinf's edges and past them) and the tables (setTwistTables: the axis 0x3BD8B0, capVu0Cos's 0x3BF140,
-both test regions), and now and then the part moved onto the axis (0x3BD800: declined); the checked natives' draws are
-unchanged. `<vectors>.twist` (the scaled path's product + the twist, from the recompiled func_001501D0) runs in
-libvu0_check.
+both test regions), and now and then the part moved onto the axis (0x3BD800: declined). `<vectors>.twist` (the scaled
+path's product + the twist, from the recompiled func_001501D0) runs in libvu0_check.

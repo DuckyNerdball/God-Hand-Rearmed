@@ -2,6 +2,10 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 26, 2026
+
+- Performance: enemies whose upper body twists (most of them) keep their bones' passes in native code (they fell back to the recompiled code every frame).
+
 ## November 25, 2026
 
 - Mash Assistic: holding the stick counts as a waggle every frame (was every fourth); new help text.
