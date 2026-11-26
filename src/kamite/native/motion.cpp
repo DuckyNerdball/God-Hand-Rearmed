@@ -815,6 +815,86 @@ namespace kamite::native::motion
             return true;
         }
 
+        // ==== M3 (batch 2): the root channels' decode (motion_core RecDecoder) ============================================
+        // func_00159AD0 (setMotionInfo x3, the pose x6: the cursors at the motion's +0x1B4 / +0x1D4 / +0x1F4),
+        // RecDecode_readHeader (also func_001595F8 x6) and func_00159DA0 (from the two). caller_scan (ELF + 81 DLLs): 9 / 7
+        // / 2 sites, no DLL site, no j, no code pointer; none reads a scratch register after the call. Each runs its
+        // callees inline (0x156508 / 0x156550's bodies: checked natives) on a copy of the cursor; the rest read in place.
+        // A decline (anything read outside plain RAM, on the cursor or in the stack window the original's frames cover,
+        // an unaligned access, a divide by a 0 span, a value past FLT_MAX - 1 ulp, a walk that never ends) changes nothing;
+        // else the cursor's 0x20 bytes are written once at the end (the original writes only them).
+        constexpr uint32_t kReadHeader = 0x1599B0u, kDecode = 0x159AD0u, kDecodeKeys = 0x159DA0u;
+        // stack windows: 0x159DA0 0x50; readHeader 0x10 + 0x50; 0x159AD0 0x50 + readHeader's
+        constexpr uint32_t kDecodeKeysFrame = 0x50u, kReadHeaderFrame = 0x60u, kDecodeFrame = 0xB0u;
+        template <class Env>
+        struct DecodeMem
+        {
+            Env &env;
+            uint32_t cursor, frame, frameSize;
+            const uint8_t *read(uint32_t address, uint32_t size)
+            {
+                uint32_t at;
+                if (!plainRam(address, size, at) || e::overlaps(at, size, cursor, 0x20u) ||
+                    e::overlaps(at, size, frame, frameSize))
+                    return nullptr;
+                return env.at(at, size);
+            }
+        };
+        // The entry checks: sp aligned (0x156550 reads its quadword at sp & ~0xF), the cursor word-aligned, plain, clear
+        // of the window. Runs `body` on a RecDecoder over a copy of the cursor; true = it ran (the cursor written back).
+        template <class Env, class Body>
+        bool runDecoder(Env &env, R5900Context *ctx, uint32_t frameSize, Body body)
+        {
+            if (!env.atEnd)
+                return false;
+            const uint32_t sp0 = e::u32(ctx, e::sp), a0 = e::u32(ctx, e::a0);
+            uint32_t frame, cursor;
+            if ((sp0 & 0xFu) != 0u || (a0 & 3u) != 0u || !plainRam(sp0 - frameSize, frameSize, frame) ||
+                !plainRam(a0, 0x20u, cursor) || e::overlaps(cursor, 0x20u, frame, frameSize))
+                return false;
+            DecodeMem<Env> mem{env, cursor, frame, frameSize};
+            Exact x;
+            RecDecoder<DecodeMem<Env>> d{mem, x};
+            uint8_t *c = env.at(cursor, 0x20u);
+            std::memcpy(d.o, c, 0x20);
+            body(d);
+            if (!d.ok || !x.ok)
+                return false;
+            if (std::memcmp(c, d.o, 0x20) != 0)
+                std::memcpy(c, d.o, 0x20);
+            for (int k = 0; k < d.calls; ++k)
+                env.call();
+            for (int k = 0; k < d.loops; ++k)
+                env.checkpoint(32u);
+            returnFrom(ctx);
+            return true;
+        }
+        // ---- func_00159AD0 (a0 = the cursor, a1 = the block, a2 = the record, f12 = t; asm): f0 -----------------------
+        template <class Env>
+        bool decodeNative(Env &env, R5900Context *ctx)
+        {
+            uint32_t v = 0u;
+            const uint32_t block = e::u32(ctx, e::a1), record = e::u32(ctx, e::a2);
+            const float t = bitsFloat(e::fBits(ctx, 12));
+            if (!runDecoder(env, ctx, kDecodeFrame, [&](auto &d) { v = d.decode(block, record, t); }))
+                return false;
+            e::setFBits(ctx, 0, v);
+            return true;
+        }
+        // ---- RecDecode_readHeader 0x1599B0 (a0 = the cursor, a1 = the block, a2 = the record; src/cod/001599b0.c) ------
+        template <class Env>
+        bool readHeaderNative(Env &env, R5900Context *ctx)
+        {
+            const uint32_t block = e::u32(ctx, e::a1), record = e::u32(ctx, e::a2);
+            return runDecoder(env, ctx, kReadHeaderFrame, [&](auto &d) { d.header(block, record); });
+        }
+        // ---- func_00159DA0 (a0 = the cursor; asm) ---------------------------------------------------------------------
+        template <class Env>
+        bool decodeKeysNative(Env &env, R5900Context *ctx)
+        {
+            return runDecoder(env, ctx, kDecodeKeysFrame, [&](auto &d) { d.keys(); });
+        }
+
         // ==== M2 (batch 3): cModel_calcParts and cModel_calcWorldParts fused ===========================================
         // The whole per-model pass as one native: the model's own matrix (MtxInitCoord) and its parts' (Adjust_theta_vec,
         // cParts_calcLocal, the blend 0x156D70, the parent join 0x1501D0), each callee run by its own native's body on a
@@ -1158,5 +1238,18 @@ namespace kamite::native::motion
         addF("func_00156508", kHalf, &halfNative<RealEnv>, &halfNative<ShadowEnv>, true, NativeFunction::kReturnsF0);
         addF("func_00156550", kHalf4, &half4Native<RealEnv>, &half4Native<ShadowEnv>, true, 0u);
         addF("func_00158CD0", kTrack, &trackNative<RealEnv>, &trackNative<ShadowEnv>, true, NativeFunction::kReturnsF0);
+        // M3 (batch 2, Nov 26): the root channels' decode, shadowed (a walk reads one key at a time: up to kMaxSteps ranges).
+        auto addDecode = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
+                            bool (*shadow)(ShadowEnv &, R5900Context *), bool checked, uint32_t returns) {
+            NativeFunction fn{name, address, "motion", checked, real, shadow, nullptr};
+            fn.flags = NativeFunction::kRenderPath | NativeFunction::kChargeAtEnd;
+            fn.returns = returns;
+            fn.maxRanges = 4096u + 16u;
+            registerFunction(fn);
+        };
+        addDecode("func_00159DA0", kDecodeKeys, &decodeKeysNative<RealEnv>, &decodeKeysNative<ShadowEnv>, false, 0u);
+        addDecode("RecDecode_readHeader", kReadHeader, &readHeaderNative<RealEnv>, &readHeaderNative<ShadowEnv>, false, 0u);
+        addDecode("func_00159AD0", kDecode, &decodeNative<RealEnv>, &decodeNative<ShadowEnv>, false,
+                  NativeFunction::kReturnsF0);
     }
 }

@@ -433,10 +433,57 @@ int main(int argc, char **argv)
         std::fclose(o);
     }
     bad += trackBad;
+
+    // The decode (<vectors>.decode, M3 batch 2: the block, the cursor, t, the 0x156550 table -> func_00159AD0's f0 and
+    // the cursor after), motion_core's RecDecoder over the block and the table alone (a read elsewhere declines).
+    int decodeCount = 0, decodeBad = 0, decodeDeclined = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".decode").c_str(), "rb"))
+    {
+        static unsigned char rec[16 + 64 + 0x20 + 0x800 + 4 + 0x20];
+        struct Mem
+        {
+            uint32_t block, cursor;
+            const unsigned char *bytes, *table;
+            const uint8_t *read(uint32_t address, uint32_t size)
+            {
+                if (address < cursor + 0x20u && cursor < address + size)
+                    return nullptr;
+                if (address >= block && address + size <= block + 0x800u && address + size > address)
+                    return bytes + (address - block);
+                if (address >= 0x41EDF0u && address + size <= 0x41EE30u)
+                    return table + (address - 0x41EDF0u);
+                return nullptr;
+            }
+        };
+        while (std::fread(rec, 1, sizeof(rec), o) == sizeof(rec))
+        {
+            uint32_t head[4], want;
+            std::memcpy(head, rec, 16);
+            std::memcpy(&want, rec + 112 + 0x800, 4);
+            float t;
+            std::memcpy(&t, &head[3], 4);
+            Mem mem{head[0], head[1], rec + 112, rec + 16};
+            motion::Exact x;
+            motion::RecDecoder<Mem> d{mem, x};
+            std::memcpy(d.o, rec + 80, 0x20);
+            const uint32_t got = d.decode(head[0], head[2], t);
+            if (!d.ok || !x.ok)
+            {
+                ++decodeDeclined;
+                continue;
+            }
+            ++decodeCount;
+            if ((got != want || std::memcmp(d.o, rec + 116 + 0x800, 0x20) != 0) && ++decodeBad <= 5)
+                std::printf("decode vector %d differs: f0 %08X want %08X\n", decodeCount, got, want);
+        }
+        std::fclose(o);
+    }
+    bad += decodeBad;
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
                 "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ; twist %d vectors, "
-                "%d differ; track %d vectors, %d differ\n", path, count,
-                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad, rotCount, rotBad, opsCount, opsBad,
-                b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad, trackCount, trackBad);
+                "%d differ; track %d vectors, %d differ; decode %d vectors (%d declined), %d differ\n", path, count,
+                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad, rotCount, rotBad,
+                opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad,
+                trackCount, trackBad, decodeCount, decodeDeclined, decodeBad);
     return bad ? 1 : 0;
 }

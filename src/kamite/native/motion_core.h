@@ -685,4 +685,243 @@ namespace kamite::native::motion
         calls = 2 + 1 + 1 + sinfCalls + 1 + 1 + 1;
         return true;
     }
+
+    // ==== M3 batch 2: the root channels' decode (func_00159AD0, RecDecode_readHeader 0x1599B0, func_00159DA0) =========
+    // A cursor (0x20 bytes: the motion's +0x1B4 / +0x1D4 / +0x1F4; decomp RecTrack.h) walks one record's keys forward:
+    // +0 kind, +4 src (the record's block), +8 cur (the key at or after t), +0xC t0 / +0xE t1 (the bracketing keys'
+    // frames), +0x10 / +0x14 their values, +0x18 / +0x1C the tangents. Kinds: 1 = the Hermite track's bytes (src: halves
+    // pos, dpos, tan0, dtan0, tan1, dtan1; 4-byte keys from src + 0xC: frames since the last, value, out, in), 3 = shorts
+    // (src: six floats; 8-byte keys from src + 0x18: frame, value, out, in), 5 = floats (16-byte keys from the record's
+    // data: frame, value, out, in); else the record's +8 word is the value. The cursor is worked on in o (the bytes the
+    // original leaves); everything else is read through mem.read(address, size), nullptr = decline (not plain RAM,
+    // overlapping the cursor or the call's stack window). Each access is checked for its width's alignment (the PS2
+    // faults on an unaligned one: declined). calls / loops: the guest calls and taken back-edges the original charges.
+    template <class Mem>
+    struct RecDecoder
+    {
+        static constexpr uint32_t kHalfTable = 0x41EDF0u; // func_00156550's four quadwords
+        static constexpr uint32_t kMaxSteps = 4096u;      // a longer walk (garbage past a track) declines
+        Mem &mem;
+        Exact &x;
+        uint8_t o[0x20] = {};
+        int calls = 0, loops = 0;
+        bool ok = true;
+
+        uint32_t word(uint32_t at) const
+        {
+            uint32_t v;
+            std::memcpy(&v, o + at, 4);
+            return v;
+        }
+        void setWord(uint32_t at, uint32_t v) { std::memcpy(o + at, &v, 4); }
+        uint32_t half(uint32_t at) const { return u16At(o + at); }
+        void setHalf(uint32_t at, uint32_t v)
+        {
+            o[at] = static_cast<uint8_t>(v);
+            o[at + 1u] = static_cast<uint8_t>(v >> 8);
+        }
+        void setFloat(uint32_t at, float f) { setWord(at, floatBits(f)); }
+        const uint8_t *read(uint32_t address, uint32_t size, uint32_t align)
+        {
+            static const uint8_t zeros[64] = {}; // a declined read's stand-in (never used: callers stop on !ok)
+            const uint8_t *p = ok && (address & (align - 1u)) == 0u ? mem.read(address, size) : nullptr;
+            if (!p)
+                ok = false;
+            return p ? p : zeros;
+        }
+        static uint32_t at32(const uint8_t *p)
+        {
+            uint32_t v;
+            std::memcpy(&v, p, 4);
+            return v;
+        }
+        // cvt.s.w of a byte / halfword, mul.s, add.s
+        float value(uint32_t q, float scale, float base) { return x.add(x.mul(static_cast<float>(q), scale), base); }
+
+        // ---- func_00159DA0 (a0 = the cursor; asm): the bracketing keys' values and tangents ----------------------------
+        // kind 1: pos / dpos by 0x156508 (twice), the tangents' four by 0x156550 (on the stack, the table at 0x41EDF0);
+        // +0x14 = cur's value, +0x1C = cur's out tangent, +0x10 = the key before's value, +0x18 its in tangent. 3: the
+        // same from src's floats and the keys' shorts. 5: the keys' floats copied. Else nothing.
+        void keys()
+        {
+            const uint32_t kind = o[0];
+            if (kind == 1u)
+            {
+                calls += 3;
+                const uint8_t *s = read(word(4), 12u, 2u);
+                const uint8_t *table = read(kHalfTable, 64u, 16u);
+                const uint8_t *c = read(word(8) - 4u, 8u, 1u);
+                if (!ok)
+                    return;
+                const float pos = bitsFloat(halfBits(u16At(s))), dpos = bitsFloat(halfBits(u16At(s + 2)));
+                uint32_t t[16];
+                std::memcpy(t, table, 64);
+                float lane[4];
+                for (uint32_t q = 0; q < 4u; ++q)
+                    lane[q] = bitsFloat(halfLane(u16At(s + 4u + 2u * q), t, q));
+                setFloat(0x14u, value(c[5], dpos, pos));
+                setFloat(0x1Cu, value(c[6], lane[1], lane[0]));
+                setFloat(0x10u, value(c[1], dpos, pos));
+                setFloat(0x18u, value(c[3], lane[3], lane[2]));
+            }
+            else if (kind == 3u)
+            {
+                const uint8_t *s = read(word(4), 0x18u, 4u);
+                const uint8_t *c = read(word(8) - 8u, 0x10u, 2u);
+                if (!ok)
+                    return;
+                float f[6];
+                std::memcpy(f, s, sizeof(f));
+                setFloat(0x14u, value(u16At(c + 0xA), f[1], f[0]));
+                setFloat(0x1Cu, value(u16At(c + 0xC), f[3], f[2]));
+                setFloat(0x10u, value(u16At(c + 2), f[1], f[0]));
+                setFloat(0x18u, value(u16At(c + 6), f[5], f[4]));
+            }
+            else if (kind == 5u)
+            {
+                const uint8_t *c = read(word(8) - 0x10u, 0x1Cu, 4u);
+                if (!ok)
+                    return;
+                setWord(0x10u, at32(c + 4));
+                setWord(0x14u, at32(c + 0x14));
+                setWord(0x18u, at32(c + 0xC));
+                setWord(0x1Cu, at32(c + 0x18));
+            }
+        }
+
+        // ---- RecDecode_readHeader 0x1599B0 (a0 = the cursor, a1 = the block, a2 = the record; src/cod/001599b0.c) -----
+        // kind = (record word >> 12) & 0xF; kinds 1 / 3 / 5 point the cursor at the keys (block + the record's +8), reset
+        // it when the record (+2) has fewer than 2 keys (kind 0, +0x10 = 0), else t0 = 0, t1 = the first key's frame and
+        // func_00159DA0; any other kind keeps the record's +8 word as the value.
+        void header(uint32_t block, uint32_t record)
+        {
+            const uint8_t *r = read(record, 12u, 4u);
+            if (!ok)
+                return;
+            const uint32_t kind = (at32(r) >> 12) & 0xFu, count = u16At(r + 2), off = at32(r + 8);
+            o[0] = static_cast<uint8_t>(kind);
+            if (kind != 1u && kind != 3u && kind != 5u)
+            {
+                setWord(0x10u, off);
+                return;
+            }
+            const uint32_t p = block + off;
+            const uint32_t head = kind == 1u ? 0xCu : kind == 3u ? 0x18u : 0u;
+            if (kind != 5u)
+                setWord(4u, p);
+            setWord(8u, p + head);
+            if (count < 2u)
+            {
+                o[0] = 0u;
+                setWord(0x10u, 0u);
+                return;
+            }
+            setHalf(0xCu, 0u);
+            setWord(8u, p + head + (kind == 1u ? 4u : kind == 3u ? 8u : 0x10u));
+            const uint8_t *first = read(word(8), kind == 1u ? 1u : 2u, kind == 1u ? 1u : 2u);
+            if (!ok)
+                return;
+            setHalf(0xEu, kind == 1u ? first[0] : u16At(first));
+            calls += 1;
+            keys();
+        }
+
+        // ---- func_00159AD0 (a0 = the cursor, a1 = the block, a2 = the record, f12 = t; asm): the value at t in f0 (bits)
+        // kind 0: +0x10. s1 = t's frame rounded up (0 below 0: cvt.w.s, cvt.s.w, c.eq). t before t0: RecDecode_readHeader
+        // (start over). kinds 1 / 3 / 5 while t1 < s1 (sltu): step a key (t0 = t1, cur += 4 / 8 / 16, t1 = t0 + the key's
+        // byte (16 bits) or the key's frame), then func_00159DA0. t on t0: +0x10; on t1: +0x14; kinds 1 / 3 / 5 the Hermite
+        // between them; else +0x10. s1 past 0xFFFF on a walk never ends (t1 is 16 bits): declined.
+        uint32_t decode(uint32_t block, uint32_t record, float t)
+        {
+            if (o[0] == 0u)
+                return word(0x10u);
+            uint32_t s1 = 0u;
+            if (!fpuLess(t, bitsFloat(0u)))
+            {
+                const int32_t i = fpuToWord(t);
+                s1 = static_cast<uint32_t>(i);
+                if (i >= 0 && i <= 0xFFFF && !fpuEqual(static_cast<float>(i), t))
+                    ++s1;
+                else if (i < 0 || i > 0xFFFF)
+                    s1 = 0x10000u; // past 0xFFFF (cvt.s.w's chop not needed: a walk declines, else s1 isn't read)
+            }
+            if (fpuLess(t, static_cast<float>(half(0xCu))))
+            {
+                calls += 1;
+                header(block, record);
+                if (!ok)
+                    return 0u;
+            }
+            uint32_t kind = o[0];
+            if ((kind == 1u || kind == 3u || kind == 5u) && half(0xEu) < s1)
+            {
+                if (s1 > 0xFFFFu)
+                {
+                    ok = false;
+                    return 0u;
+                }
+                const uint32_t stride = kind == 1u ? 4u : kind == 3u ? 8u : 0x10u;
+                uint32_t cur = word(8u), t0 = 0u, t1 = half(0xEu);
+                for (uint32_t step = 0;; ++step)
+                {
+                    if (step == kMaxSteps)
+                    {
+                        ok = false;
+                        return 0u;
+                    }
+                    t0 = t1;
+                    cur += stride;
+                    const uint8_t *k = read(cur, kind == 1u ? 1u : 2u, kind == 1u ? 1u : 2u);
+                    if (!ok)
+                        return 0u;
+                    t1 = kind == 1u ? (t0 + k[0]) & 0xFFFFu : u16At(k);
+                    if (t1 >= s1)
+                        break;
+                    ++loops;
+                }
+                setHalf(0xCu, t0);
+                setWord(8u, cur);
+                setHalf(0xEu, t1);
+                calls += 1;
+                keys();
+                if (!ok)
+                    return 0u;
+            }
+            const uint32_t t0 = half(0xCu), t1 = half(0xEu);
+            if (fpuEqual(static_cast<float>(t0), t))
+                return word(0x10u);
+            if (fpuEqual(static_cast<float>(t1), t))
+                return word(0x14u);
+            kind = o[0];
+            if (kind != 1u && kind != 3u && kind != 5u)
+                return word(0x10u);
+            return floatBits(hermite(t, t0, t1));
+        }
+        // 0x159CE4: s = (t - t0) / (t1 - t0) (subu, cvt.s.w); h00 = 2s^3 - 3s^2 + 1, h01 = -2s^3 + 3s^2, h10 = s^3 - 2s^2
+        // + s, h11 = s^3 - s^2 on +0x10 / +0x14 / +0x18 / +0x1C, in the asm's order.
+        float hermite(float t, uint32_t t0, uint32_t t1)
+        {
+            const float a = static_cast<float>(t0);
+            const float span = static_cast<float>(static_cast<int32_t>(t1 - t0));
+            const float s = x.div(x.sub(t, a), span);
+            float f1 = x.mul(s, s);
+            float f5 = x.mul(f1, s);
+            const float f6 = x.mul(f1, bitsFloat(0x40400000u));
+            float f2 = x.add(f5, f5);
+            f5 = x.sub(f5, f1);
+            float f3 = negBits(f2);
+            f2 = x.sub(f2, f6);
+            f1 = x.sub(f5, f1);
+            f3 = x.add(f3, f6);
+            f2 = x.add(f2, one());
+            f1 = x.add(f1, s);
+            const float f8 = x.mul(bitsFloat(word(0x14u)), f3);
+            float f0 = x.mul(bitsFloat(word(0x10u)), f2);
+            const float f9 = x.mul(bitsFloat(word(0x18u)), f1);
+            const float f7 = x.mul(bitsFloat(word(0x1Cu)), f5);
+            f0 = x.add(f0, f8);
+            f0 = x.add(f0, f9);
+            return x.add(f0, f7);
+        }
+    };
 }

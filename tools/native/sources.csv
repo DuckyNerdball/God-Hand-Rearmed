@@ -88,3 +88,6 @@ cModel_calcWorldParts,0x0014A038,decomp,cModel_calcWorldParts,src/cod/0014a038.c
 func_00156508,0x00156508,asm,,,,,rung 4 M3 batch 1: a 16-bit PlatinumGames float to f32 bits (integer ops); returns f0; kRenderPath|kChargeAtEnd
 func_00156550,0x00156550,asm,,,,,rung 4 M3 batch 1: four of them by the 0x41EDF0 table's lanes (MMI); kRenderPath|kChargeAtEnd
 func_00158CD0,0x00158CD0,asm,,,,,rung 4 M3 batch 1: the pose's kind-1 (Hermite) track: both key loops and the Hermite in the asm's order; 0x156508 / 0x156550 inline; returns f0; kRenderPath|kChargeAtEnd
+func_00159DA0,0x00159DA0,asm,,,,,rung 4 M3 batch 2: a cursor's bracketing keys' values / tangents (kinds 1 / 3 / 5); 0x156508 / 0x156550 inline; motion_core RecDecoder::keys; kRenderPath|kChargeAtEnd
+RecDecode_readHeader,0x001599B0,decomp,RecDecode_readHeader,src/cod/001599b0.c,eed8dc0,5a3b7199e429,rung 4 M3 batch 2: a cursor from a record; 0x159DA0 inline; motion_core RecDecoder::header; kRenderPath|kChargeAtEnd
+func_00159AD0,0x00159AD0,asm,,,,,rung 4 M3 batch 2: the root channels' value at t: reset / key walk / Hermite in the asm's order; readHeader / 0x159DA0 inline; returns f0; kRenderPath|kChargeAtEnd

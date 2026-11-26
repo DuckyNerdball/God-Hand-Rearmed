@@ -40,7 +40,8 @@ with kamite/git_commit.h):
        sinf_0x3a19f8 ps2___kernel_cosf_0x3a3c80 ps2___kernel_sinf_0x3a4728 func_00156D70_0x156d70
        func_0015A6A0_0x15a6a0 func_0015A190_0x15a190 capVu0LengthSq_0x1f7e28 sceVu0ScaleVectorXYZ_0x30aba0
        capVu0Atan2_0x1f8180 cModel_calcParts_0x149eb8 cModel_calcWorldParts_0x14a038
-       func_00156508_0x156508 func_00156550_0x156550 func_00158CD0_0x158cd0"
+       func_00156508_0x156508 func_00156550_0x156550 func_00158CD0_0x158cd0 func_00159AD0_0x159ad0
+       RecDecode_readHeader_0x1599b0 func_00159DA0_0x159da0"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -206,3 +207,18 @@ sandbox by `make_tracks.py <out> <em00.dat> <pl00.dat>` from the game's files, n
 between keys, x.5, before / past the ends, specials. An unaligned record or track, or a record in the frame (the saved
 registers overwrite it before its offset is read), would make the original follow garbage: not set up. `<vectors>.track`
 (trackSample against the recompiled function) runs in libvu0_check.
+
+## M3 batch 2: the root channels' decode (rung 4, Nov 26)
+
+func_00159AD0 (a cursor's value at t: setMotionInfo and the pose, for the motion's root channels at +0x1B4 / +0x1D4 /
++0x1F4), RecDecode_readHeader (start a cursor from a record) and func_00159DA0 (the bracketing keys' values and
+tangents), each running the others and 0x156508 / 0x156550's bodies inline: motion_core.h's RecDecoder over a copy of
+the cursor (its 0x20 bytes written once at the end), everything else read in place through a Mem that declines a read
+outside plain RAM, on the cursor or in the stack window. In the game's em00 / pl00 the root records are kinds 0 and 1
+only; 3 and 5 are set up made-up. setupDecode builds a block (a record at +8, its keys at the offset, after the last
+key 0xFF bytes to the block's end, so any walk stops: a walk that never ends would hang the recompiled original) and a
+cursor fresh, at a key, kind 0 or garbage; t at a key's time, between keys, x.5, before t0 (the reset), past the end,
+specials (any float only when the cursor can't walk). Declines set up: readHeader's record in the stack window or over
+the cursor, the keys in the window (0x159DA0 would read its own saves), 0x159DA0's src in its frame. Not set up: t past
+0xFF00 frames (the only place a kind-1 walk's 16-bit sum wraps). `<vectors>.decode` (whole calls of func_00159AD0
+against the recompiled one: f0 and the cursor after) runs in libvu0_check.
