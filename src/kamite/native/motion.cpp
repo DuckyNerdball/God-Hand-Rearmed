@@ -1146,7 +1146,8 @@ namespace kamite::native::motion
         addPass("cModel_calcParts", kCalcParts, &calcPartsNative<RealEnv>, &calcPartsNative<ShadowEnv>, true);
         addPass("cModel_calcWorldParts", kCalcWorldParts, &calcWorldPartsNative<RealEnv>, &calcWorldPartsNative<ShadowEnv>,
                 true);
-        // M3 (batch 1, Nov 26): the Hermite track and its half-float unpacks; f0 is the result of two of them.
+        // M3 (batch 1, Nov 26): the Hermite track and its half-float unpacks (f0 is the result of two of them); checked since
+        // K's 12:51 Build and Replay of dc69900 (7.87M / 3.52M / 2.03M calls compared, 0 mismatches, 0 declines).
         auto addF = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
                        bool (*shadow)(ShadowEnv &, R5900Context *), bool checked, uint32_t returns) {
             NativeFunction fn{name, address, "motion", checked, real, shadow, nullptr};
@@ -1154,8 +1155,8 @@ namespace kamite::native::motion
             fn.returns = returns;
             registerFunction(fn);
         };
-        addF("func_00156508", kHalf, &halfNative<RealEnv>, &halfNative<ShadowEnv>, false, NativeFunction::kReturnsF0);
-        addF("func_00156550", kHalf4, &half4Native<RealEnv>, &half4Native<ShadowEnv>, false, 0u);
-        addF("func_00158CD0", kTrack, &trackNative<RealEnv>, &trackNative<ShadowEnv>, false, NativeFunction::kReturnsF0);
+        addF("func_00156508", kHalf, &halfNative<RealEnv>, &halfNative<ShadowEnv>, true, NativeFunction::kReturnsF0);
+        addF("func_00156550", kHalf4, &half4Native<RealEnv>, &half4Native<ShadowEnv>, true, 0u);
+        addF("func_00158CD0", kTrack, &trackNative<RealEnv>, &trackNative<ShadowEnv>, true, NativeFunction::kReturnsF0);
     }
 }
