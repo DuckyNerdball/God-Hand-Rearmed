@@ -37,4 +37,8 @@ namespace kamite::native
     {
         void registerFunctions();
     }
+    namespace collision
+    {
+        void registerFunctions();
+    }
 }

@@ -665,6 +665,27 @@ namespace kamite::native::libvu0
             return true;
         }
 
+        // ---- sceVu0InnerProduct 0x30A348 (a0, a1; src/cod/0030a348.c): f0 = a.b (vmul.xyz, vaddy.x, vaddz.x) --------
+        // vf4 = a, vf5 = the sum (w = b's), v0 = vf5 whole (qmfc2.ni), f0 = v0's low word; jr ra + nop. Rung 4 collision
+        // (claude/rung4-collision-map.md C1): one of its 57 + 2 sites reads f6 after it, so the whole context.
+        constexpr uint32_t kInnerProduct = 0x30A348u;
+        template <class Env>
+        bool innerProductNative(Env &env, R5900Context *ctx)
+        {
+            uint32_t va, vb;
+            if (!plain16(e::u32(ctx, e::a0), va) || !plain16(e::u32(ctx, e::a1), vb))
+                return false;
+            const Vec4 a = e::read128(env, va), b = e::read128(env, vb);
+            if (!innerInputs(a, b))
+                return false;
+            e::setVf(ctx, 4, a);
+            e::setVf(ctx, 5, innerSummed(a, b));
+            std::memcpy(&ctx->r[e::v0], &ctx->vu0_vf[5], 16); // qmfc2.ni v0, vf5
+            std::memcpy(&ctx->f[0], &ctx->r[e::v0], 4);       // mtc1 v0, f0
+            ctx->pc = e::u32(ctx, e::ra);                     // a nop delay slot: in_delay_slot as it was
+            return true;
+        }
+
         // ---- the one-call wrappers: addiu sp, -16; sd ra; jal <leaf> (nop); ld ra; jr ra (addiu sp, 16) -----------
         // MtxCopy 0x147528 -> CopyMatrix, MtxMultiply 0x147548 -> MulMatrix (with its checkpoints), the game's thunk
         // 0x101E28 -> capVu0Length. The leaf runs inline after the guest call's 8 cycles.
@@ -1558,5 +1579,9 @@ namespace kamite::native::libvu0
         };
         addReadable("func_001503B8", kModelMatrix, false, &modelMatrixReadable<RealEnv>, &modelMatrixReadable<ShadowEnv>);
         addReadable("func_002D8008", kLightColour, true, &lightColourReadable<RealEnv>, &lightColourReadable<ShadowEnv>);
+        // Rung 4 collision C1 (Nov 27): sceVu0InnerProduct, the whole context; registered unchecked (shadowed in K's next
+        // plain Build and Replay).
+        registerFunction(NativeFunction{"sceVu0InnerProduct", kInnerProduct, "libvu0", false, &innerProductNative<RealEnv>,
+                                        &innerProductNative<ShadowEnv>, nullptr});
     }
 }

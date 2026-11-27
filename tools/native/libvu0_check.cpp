@@ -4,6 +4,7 @@
 // SSE, plain C++ (-DKAMITE_VU_SCALAR) and AArch64 NEON under qemu.
 #include "kamite/native/libvu0_core.h"
 #include "kamite/native/motion_core.h"
+#include "kamite/native/collision_core.h"
 
 #include <cstdio>
 #include <cstring>
@@ -675,10 +676,96 @@ int main(int argc, char **argv)
     }
     bad += ikBad;
     std::printf("two-bone IK: %d vectors (%d declined), %d differ\n", ikCount, ikDeclined, ikBad);
+
+    // Collision C1 (<vectors>.coll, rung 4 collision: 64 words, w[0] the kind, w[1] the native's own decision on the same
+    // inputs, which this check must match; inputs from w[4], the recompiled results from w[40]; collision_core.h).
+    int collCount[6] = {}, collBad = 0, collDeclined = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".coll").c_str(), "rb"))
+    {
+        uint32_t w[64];
+        const Vec4 vf0 = bitsOf(0u, 0u, 0u, 0x3F800000u);
+        while (std::fread(w, 4, 64, o) == 64)
+        {
+            const uint32_t kind = w[0];
+            bool ok = true;
+            uint32_t got[8] = {}, n = 0;
+            if (kind == 0)
+            {
+                const Vec4 a = load(w + 4), b = load(w + 8);
+                ok = libvu0::innerInputs(a, b);
+                if (ok)
+                {
+                    const Vec4 r = libvu0::innerSummed(a, b);
+                    got[0] = laneBits<0>(r), store(got + 1, r), n = 5;
+                }
+            }
+            else if (kind == 1)
+            {
+                const Vec4 a = load(w + 4), b = load(w + 8);
+                store(got, vuMin(a, b)), store(got + 4, vuMax(a, b)), n = 8;
+            }
+            else if (kind == 2)
+            {
+                float v[4][3];
+                for (int k = 0; k < 4; ++k)
+                    std::memcpy(v[k], w + 4 + 4 * k, 12);
+                int loops = 0;
+                got[0] = collision::boxesOverlap(v[0], v[1], v[2], v[3], loops) ? 1u : 0u;
+                got[1] = 32u * static_cast<uint32_t>(loops), n = 2;
+            }
+            else if (kind == 3 || kind == 5)
+            {
+                Vec4 q[4];
+                for (int k = 0; k < 4; ++k)
+                    q[k] = load(w + 16 + 4 * k);
+                const collision::PlaneHit h = collision::planeHit(vf0, load(w + 4), load(w + 8), load(w + 12),
+                                                                  kind == 3 ? load(w + 16) : q[0], 0u);
+                ok = h.ok;
+                int hit = h.hit;
+                uint32_t calls = kind == 3 ? 4u : 5u, loops = 0;
+                if (ok && kind == 5 && h.hit)
+                {
+                    const collision::QuadInside qi = collision::quadInside(vf0, q, blend<7>(vf0, h.point), h.status);
+                    ok = qi.ok, hit = qi.inside, calls += 1u + static_cast<uint32_t>(qi.calls), loops = 1;
+                }
+                if (ok)
+                {
+                    std::memcpy(got, w + 36, 12);
+                    if (hit)
+                        got[0] = laneBits<0>(h.point), got[1] = laneBits<1>(h.point), got[2] = laneBits<2>(h.point);
+                    got[3] = static_cast<uint32_t>(hit), got[4] = 8u * calls + 32u * loops, n = 5;
+                }
+            }
+            else
+            {
+                Vec4 q[4];
+                for (int k = 0; k < 4; ++k)
+                    q[k] = load(w + 4 + 4 * k);
+                const collision::QuadInside qi = collision::quadInside(vf0, q, load(w + 20), 0u);
+                ok = qi.ok;
+                got[0] = static_cast<uint32_t>(qi.inside), got[1] = 32u + 8u * static_cast<uint32_t>(qi.calls), n = 2;
+            }
+            if (ok != (w[1] == 1u) && ++collBad <= 5)
+                std::printf("collision vector (kind %u): the check %s, the native %s\n", kind, ok ? "ran" : "declined",
+                            w[1] ? "ran" : "declined");
+            if (!ok)
+            {
+                ++collDeclined;
+                continue;
+            }
+            ++collCount[kind < 6 ? kind : 0];
+            if (std::memcmp(got, w + 40, 4u * n) != 0 && ++collBad <= 5)
+                std::printf("collision vector (kind %u) differs\n", kind);
+        }
+        std::fclose(o);
+    }
+    bad += collBad;
+    std::printf("collision C1: inner %d, sort %d, overlap %d, plane %d, quad %d, probe %d vectors (%d declined), %d differ\n",
+                collCount[0], collCount[1], collCount[2], collCount[3], collCount[4], collCount[5], collDeclined, collBad);
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
                 "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ; twist %d vectors, "
                 "%d differ; track %d vectors, %d differ; decode %d vectors (%d declined), %d differ\n", path, count,
-                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad - eulerBad - asinBad - aimBad - ikBad, rotCount, rotBad,
+                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad - eulerBad - asinBad - aimBad - ikBad - collBad, rotCount, rotBad,
                 opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad,
                 trackCount, trackBad, decodeCount, decodeDeclined, decodeBad);
     return bad ? 1 : 0;

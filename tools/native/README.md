@@ -48,11 +48,14 @@ with kamite/git_commit.h):
        Obj0000_Get_D_003FA62C_3A4FB8_0x3a4fb8 ps2___unpack_f_0x31ec48 ps2___make_dp_0x31eab0 ps2___pack_d_0x31de78
        ps2___unpack_d_0x31dfa8 ps2___make_fp_0x31eda0 ps2___pack_f_0x31eb38 dpcmp_0x31e870 ps2___fpcmp_parts_d_0x31e758
        capVu0ApplyMatrixXYZ_0x1f8350 Quat_rotatePoint_0x15ada0 func_0015ABA0_0x15aba0 cModel_aimIkPart_0x153808
-       func_00153158_0x153158 Circle_line2_0x15f2a8 drawArrow_0x15fb98"
+       func_00153158_0x153158 Circle_line2_0x15f2a8 drawArrow_0x15fb98 sceVu0InnerProduct_0x30a348
+       func_00133948_0x133948 func_00133408_0x133408 func_00135EC8_0x135ec8 func_001361A0_0x1361a0
+       HitProbe_probeHitPoint_0x1365b8"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
-        src/kamite/native/libvu0.cpp src/kamite/native/packet.cpp src/kamite/native/motion.cpp src/kamite/native/recording.cpp \
+        src/kamite/native/libvu0.cpp src/kamite/native/packet.cpp src/kamite/native/motion.cpp src/kamite/native/collision.cpp \
+        src/kamite/native/recording.cpp \
         src/kamite/texture_slots.cpp src/kamite/model_detail.cpp runtime/ps2xRuntime/src/lib/ps2_ee_float.cpp \
         /tmp/nt/*.o -o /tmp/nt/shadow_test
     /tmp/nt/shadow_test 20000 /tmp/nt/vectors.bin    # natives, footprints, invisibility, detection; writes vectors
@@ -283,3 +286,16 @@ reach whose root comes back exact), past it, mostly in between; A's rows zero; A
 pointers a word off, in the window or the frame copy (declined); B's anchor / out on A's rows, B = A, C = B; unaligned
 parts. `<vectors>.ik` (whole calls in the standard layout, with the native's own decision in w[50]) runs in
 libvu0_check.
+
+## Rung 4: collision C1, the probes' leaves (Nov 27)
+
+src/kamite/native/collision.cpp + collision_core.h (claude/rung4-collision-map.md), switch KAMITE_NATIVE_COLLISION; every
+collision native kRenderPath | kChargeAtEnd as motion's, allowed by caller_scan.py (ELF + the 81 DLLs). C1: func_00133948
+(vmini / vmax in place), func_00133408 (box overlap), func_00135EC8 (a segment against a plane), func_001361A0 (a point in
+a quad), HitProbe_probeHitPoint (the two inline); sceVu0InnerProduct is libvu0.cpp's (the whole context: a caller reads
+f6 after it). shadow_test's setupCollision: quads on axis-aligned and sloped planes (either winding, skewed, bent, a zero
+edge), points inside / outside / on an edge / on a vertex / just outside (the 1e-6 tolerance), segments crossing,
+stopping short, starting or ending on the plane (t = 0 / 1), parallel, reversed, zero-length; touching boxes, -0 / +0 and
+denormals for the compares; pointers unaligned (lqc2 masks them), in the frames' window, out 0 / over an input / unaligned.
+Its `g_collPlants` notes what each setup planted for a decline probe (a /tmp copy whose declines record their line).
+`<vectors>.coll` (whole calls in the standard layout with the native's own decision in w[1]) runs in libvu0_check.

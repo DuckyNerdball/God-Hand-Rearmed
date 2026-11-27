@@ -163,6 +163,16 @@ namespace kamite::native::libvu0
         s = blend<1>(s, add(s, splat<2>(s)));
         return s;
     }
+    // sceVu0InnerProduct 0x30A348 (rung 4 collision): vf5.xyz = a * b (w = b's), vf5.x += vf5.y, vf5.x += vf5.z. Only xyz
+    // reach lane x (the other lanes are computed and blended away): a / b xyz below 2^62 keep it the host's.
+    inline Vec4 innerSummed(Vec4 a, Vec4 b)
+    {
+        Vec4 s = blend<7>(b, mul(a, b));
+        s = blend<1>(s, add(s, splat<1>(s)));
+        s = blend<1>(s, add(s, splat<2>(s)));
+        return s;
+    }
+    inline bool innerInputs(Vec4 a, Vec4 b) { return finiteXyz(a) && finiteXyz(b); }
     // A sum of squares the divide unit takes on the host path (exponent 1-254).
     inline bool ordinaryLength(Vec4 summed) { return ((laneBits<0>(summed) >> 23) & 0xFFu) - 1u < 254u; }
 

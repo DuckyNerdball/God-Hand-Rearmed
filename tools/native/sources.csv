@@ -103,3 +103,9 @@ Quat_rotatePoint,0x0015ADA0,decomp,Quat_rotatePoint,src/cod/0015ada0.c,a6c87fd,c
 func_0015ABA0,0x0015ABA0,asm,,,,,rung 4 M5 batch 2: the basis with z row b and x / y from b x a (two capVu0Length normalizes) into 0x15A190's quaternion; kRenderPath|kChargeAtEnd
 cModel_aimIkPart,0x00153808,decomp,cModel_aimIkPart,src/cod/00153808.c,a6c87fd,e71bb9a1a395,rung 4 M5 batch 2: MulMatrix x2 / InversMatrix / ApplyMatrixXYZ / func_001501D0 inline on a JournalEnv; kRenderPath|kChargeAtEnd
 func_00153158,0x00153158,asm,,,,,rung 4 M5 batch 3: IK's two-bone solve fused (law of cosines + capVu0Acos x2; the axis by Quat_rotatePoint / ApplyMatrixXYZ / capVu0Length; 0x15ABA0; two quaternion products + SetRotationAxis; MtxInitRotQuaternion x2; sceVu0ApplyMatrix); kRenderPath|kChargeAtEnd
+sceVu0InnerProduct,0x0030A348,decomp,sceVu0InnerProduct,src/cod/0030a348.c,9979f74,f98988c91958,rung 4 collision C1: vmul.xyz / vaddy.x / vaddz.x into f0 and v0; libvu0's whole-context bar (a caller reads f6 after it)
+func_00133948,0x00133948,decomp,func_00133948,src/cod/00133948.c,9979f74,a658c306c285,rung 4 collision C1: vmini / vmax xyzw of two quadwords in place; kRenderPath|kChargeAtEnd
+func_00133408,0x00133408,decomp,func_00133408,src/cod/00133408.c,9979f74,61aeb069a835,rung 4 collision C1: box overlap x / z / y (c.lt.s; the z / y exits a backward branch); kRenderPath|kChargeAtEnd
+func_00135EC8,0x00135EC8,decomp,func_00135EC8,src/cod/00135ec8.c,9979f74,06a2633d15bd,rung 4 collision C1: the segment against a plane (Normalize + InnerProduct x3 inline); kRenderPath|kChargeAtEnd
+func_001361A0,0x001361A0,asm,,,,,rung 4 collision C1: a point inside a quad (Normalize x6 / OuterProduct x5 / InnerProduct x4 inline; the 1e-6 tolerance); kRenderPath|kChargeAtEnd
+HitProbe_probeHitPoint,0x001365B8,decomp,HitProbe_probeHitPoint,src/cod/001365b8.c,9979f74,d19a0760038c,rung 4 collision C1: 0x135EC8 then 0x1361A0 inline; kRenderPath|kChargeAtEnd

@@ -42,7 +42,7 @@ namespace kamite::native
         }
 
         // The installed natives: one trampoline per slot (a template instance per index), no lookup on the call.
-        constexpr size_t kMaxNatives = 128;
+        constexpr size_t kMaxNatives = 256; // 128 until rung 4's collision (100 natives then)
         struct Installed
         {
             NativeFunction fn;
@@ -177,6 +177,7 @@ namespace kamite::native
         libvu0::registerFunctions();
         packet::registerFunctions();
         motion::registerFunctions();
+        collision::registerFunctions();
         // Rung 3 step b's draw list (draw_list.h): live in every build unless KAMITE_NATIVE_DRAWLIST=0.
         draw_list::begin(runtime.memory().getRDRAM());
 

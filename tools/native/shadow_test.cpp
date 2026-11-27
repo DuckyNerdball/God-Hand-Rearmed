@@ -196,6 +196,13 @@ KM_RECOMPILED(cModel_aimIkPart_0x153808)
 KM_RECOMPILED(func_00153158_0x153158)
 KM_RECOMPILED(Circle_line2_0x15f2a8)
 KM_RECOMPILED(drawArrow_0x15fb98)
+// rung 4 collision, C1
+KM_RECOMPILED(sceVu0InnerProduct_0x30a348)
+KM_RECOMPILED(func_00133948_0x133948)
+KM_RECOMPILED(func_00133408_0x133408)
+KM_RECOMPILED(func_00135EC8_0x135ec8)
+KM_RECOMPILED(func_001361A0_0x1361a0)
+KM_RECOMPILED(HitProbe_probeHitPoint_0x1365b8)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -3643,6 +3650,348 @@ namespace
         }
     }
 
+    // ---- rung 4 collision, C1: the probes' leaves (claude/rung4-collision-map.md) ------------------------------------
+    // g_collPlants: what a setup planted that a native may decline on (the decline probe's ledger, Nov 27).
+    enum CollPlant : uint32_t
+    {
+        kPlantWild = 1u,          // wild words (huge / special values) in an input
+        kPlantFrame = 2u,         // an input or the output in the frames' window
+        kPlantOutUnaligned = 4u,  // out not word-aligned
+        kPlantZeroNormal = 8u,    // the normal of 0x135EC8 zero (its normalize divides by 0)
+        kPlantDegenerate = 16u,   // a quad edge of length 0 (0x1361A0's normalize of v1 - v0 / v3 - v0)
+        kPlantAtVertex = 32u,     // the point on a quad vertex (0x1361A0's normalize of v_k - p)
+        kPlantVf0 = 64u,          // vf0 not (0, 0, 0, 1) (setupBatch1's pick 2)
+        kPlantWordUnaligned = 128u, // 0x133408's pointers not word-aligned
+        kPlantFar = 256u,         // coordinates far enough apart that a difference passes 2^62 (normalizeInput)
+    };
+    uint32_t g_collPlants = 0;
+    bool isCollisionC1(uint32_t a)
+    {
+        return a == 0x30A348u || a == 0x133948u || a == 0x133408u || a == 0x135EC8u || a == 0x1361A0u || a == 0x1365B8u;
+    }
+    // A world coordinate as the rooms have them (metres, a few hundred at most), sometimes round, 0 or -0
+    float collCoord()
+    {
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 20u);
+        if (pick == 0)
+            return 0.0f;
+        if (pick == 1)
+            return -0.0f;
+        if (pick < 5)
+            return static_cast<float>(static_cast<int>(g_rng() % 801u) - 400) / 4.0f;
+        return (static_cast<float>(g_rng() % 2000001u) / 1000000.0f - 1.0f) * static_cast<float>(1u << (g_rng() % 9u));
+    }
+    void setVec(uint32_t at, const float v[3], uint32_t w)
+    {
+        for (uint32_t i = 0; i < 3u; ++i)
+            setFloat(at + 4u * i, v[i]);
+        setU32(at + 12u, w);
+    }
+    uint32_t collW() { return (g_rng() % 2u) ? 0x3F800000u : (g_rng() % 2u) ? 0u : gameFloat(); } // a w lane: carried
+    void unitVec(float n[3])
+    {
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 8u);
+        if (pick < 3) // axis-aligned, as most walls / floors
+        {
+            n[0] = n[1] = n[2] = 0.0f;
+            n[pick] = (g_rng() % 2u) ? 1.0f : -1.0f;
+            return;
+        }
+        double v[3], l = 0.0;
+        do
+        {
+            l = 0.0;
+            for (int i = 0; i < 3; ++i)
+                v[i] = static_cast<double>(g_rng() % 2001u) / 1000.0 - 1.0, l += v[i] * v[i];
+        } while (l < 1e-4);
+        l = std::sqrt(l);
+        for (int i = 0; i < 3; ++i)
+            n[i] = static_cast<float>(v[i] / l);
+        if (pick == 3) // a sloped one with a zero lane
+            n[g_rng() % 3u] = 0.0f;
+    }
+    // A quad v0..v3 (four quadwords at q) on a plane: centre, two edges; mostly a parallelogram, sometimes skewed or bent,
+    // either winding; the normal (v1 - v0) x (v3 - v0) normalized into nOut (the game's polygon normals point that way).
+    void collQuad(uint32_t q, float nOut[3], float v[4][3], bool wild)
+    {
+        float c[3], u[3], w2[3];
+        for (int i = 0; i < 3; ++i)
+            c[i] = collCoord();
+        const uint32_t shape = static_cast<uint32_t>(g_rng() % 6u);
+        float n[3];
+        unitVec(n);
+        // two edge directions in the plane of n
+        float a[3] = {n[1] - n[2], n[2] - n[0], n[0] - n[1]};
+        if (std::fabs(a[0]) + std::fabs(a[1]) + std::fabs(a[2]) < 1e-3f)
+            a[0] = n[1], a[1] = -n[0], a[2] = 0.0f;
+        if (std::fabs(a[0]) + std::fabs(a[1]) + std::fabs(a[2]) < 1e-3f)
+            a[0] = 0.0f, a[1] = n[2], a[2] = -n[1];
+        float b[3] = {n[1] * a[2] - n[2] * a[1], n[2] * a[0] - n[0] * a[2], n[0] * a[1] - n[1] * a[0]};
+        const float su = static_cast<float>(1u + g_rng() % 400u) / 40.0f, sv = static_cast<float>(1u + g_rng() % 400u) / 40.0f;
+        for (int i = 0; i < 3; ++i)
+            u[i] = a[i] * su, w2[i] = b[i] * sv;
+        if (g_rng() % 2u)
+            for (int i = 0; i < 3; ++i)
+                std::swap(u[i], w2[i]); // the other winding
+        for (int i = 0; i < 3; ++i)
+        {
+            v[0][i] = c[i] - u[i] - w2[i];
+            v[1][i] = c[i] + u[i] - w2[i];
+            v[2][i] = c[i] + u[i] + w2[i];
+            v[3][i] = c[i] - u[i] + w2[i];
+        }
+        if (shape == 0) // skewed: v2 moved along the plane
+            for (int i = 0; i < 3; ++i)
+                v[2][i] += u[i] * 0.5f;
+        else if (shape == 1) // bent: v2 off the plane
+            for (int i = 0; i < 3; ++i)
+                v[2][i] += n[i] * 0.25f;
+        else if (shape == 2) // a triangle-ish quad: v3 = v0 + tiny
+            for (int i = 0; i < 3; ++i)
+                v[3][i] = v[0][i] + w2[i] * 0.001f;
+        if (wild && g_rng() % 4u == 0u)
+        {
+            uint32_t bits = gameFloat();
+            std::memcpy(&v[g_rng() % 4u][g_rng() % 3u], &bits, 4);
+            g_collPlants |= kPlantWild;
+        }
+        if (g_rng() % 40u == 0u) // a zero edge
+        {
+            const uint32_t k = (g_rng() % 2u) ? 1u : 3u;
+            for (int i = 0; i < 3; ++i)
+                v[k][i] = v[0][i];
+            g_collPlants |= kPlantDegenerate;
+        }
+        for (uint32_t k = 0; k < 4u; ++k)
+            setVec(q + 16u * k, v[k], collW());
+        // the normal as (v1 - v0) x (v3 - v0), normalized in double (the game's are close to that)
+        double e1[3], e3[3];
+        for (int i = 0; i < 3; ++i)
+            e1[i] = static_cast<double>(v[1][i]) - v[0][i], e3[i] = static_cast<double>(v[3][i]) - v[0][i];
+        double m[3] = {e1[1] * e3[2] - e1[2] * e3[1], e1[2] * e3[0] - e1[0] * e3[2], e1[0] * e3[1] - e1[1] * e3[0]};
+        const double l = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+        for (int i = 0; i < 3; ++i)
+            nOut[i] = l > 0.0 ? static_cast<float>(m[i] / l) : n[i];
+    }
+    // A point for the quad test: inside, outside, on an edge, on a vertex (declined), just outside an edge (the 1e-6
+    // tolerance), the centre.
+    void collPoint(const float v[4][3], float p[3])
+    {
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 12u);
+        const float s = static_cast<float>(g_rng() % 1001u) / 1000.0f, t = static_cast<float>(g_rng() % 1001u) / 1000.0f;
+        const uint32_t e = static_cast<uint32_t>(g_rng() % 4u);
+        for (int i = 0; i < 3; ++i)
+        {
+            const float a = v[e][i], b = v[(e + 1) & 3][i];
+            if (pick < 5) // inside the parallelogram v0 + s (v1 - v0) + t (v3 - v0)
+                p[i] = v[0][i] + s * (v[1][i] - v[0][i]) + t * (v[3][i] - v[0][i]);
+            else if (pick < 7) // outside: past an edge
+                p[i] = v[0][i] + (1.0f + s) * (v[1][i] - v[0][i]) + t * (v[3][i] - v[0][i]);
+            else if (pick < 9) // on an edge
+                p[i] = a + s * (b - a);
+            else if (pick == 9) // a vertex
+                p[i] = a;
+            else if (pick == 10) // just outside an edge
+                p[i] = a + s * (b - a) + (v[(e + 2) & 3][i] - a) * -1.0e-7f;
+            else
+                p[i] = 0.25f * (v[0][i] + v[1][i] + v[2][i] + v[3][i]);
+        }
+        // on a vertex (the pick, or an edge / inside point at s or t 0 / 1): 0x1361A0's normalize of v_k - p divides by 0
+        for (uint32_t k = 0; k < 4u; ++k)
+        {
+            double d2 = 0.0;
+            for (int i = 0; i < 3; ++i)
+            {
+                const float d = v[k][i] - p[i];
+                d2 += static_cast<double>(d) * d;
+            }
+            if (d2 < 1.0e-30)
+                g_collPlants |= kPlantAtVertex;
+        }
+    }
+    void setupCollision(const NativeFunction &fn, Call &call, bool wild, uint32_t base, uint32_t seg, bool standard = false)
+    {
+        if (!isCollisionC1(fn.address))
+            return;
+        R5900Context &ctx = call.ctx;
+        g_collPlants = 0;
+        if ((fn.address == 0x133408u || fn.address == 0x135EC8u || fn.address == 0x1361A0u || fn.address == 0x1365B8u) &&
+            g_rng() % 4u) // guest calls / a loop are checkpoints: most runs to the end, or few would be compared
+            call.dueAt = 0;
+        uint32_t sp;
+        std::memcpy(&sp, &ctx.r[29], 4);
+        sp &= 0x1FFFFFFu;
+        {
+            uint32_t w3;
+            std::memcpy(&w3, reinterpret_cast<const uint8_t *>(&ctx.vu0_vf[0]) + 12, 4);
+            if (w3 != 0x3F800000u)
+                g_collPlants |= kPlantVf0;
+        }
+        const uint32_t pick = standard ? 15u : static_cast<uint32_t>(g_rng() % 16u);
+        const uint32_t window = fn.address == 0x135EC8u ? 0xB0u : fn.address == 0x1361A0u ? 0x150u : 0x190u;
+        // an argument (by register) moved into the frames' window: declined (only the functions with frames)
+        auto inFrame = [&](int reg) {
+            setGpr(ctx, reg, (sp - 0x10u - 0x10u * static_cast<uint32_t>(g_rng() % (window / 0x10u))) | seg);
+            g_collPlants |= kPlantFrame;
+        };
+        switch (fn.address)
+        {
+        case 0x30A348u: // sceVu0InnerProduct(a, b): f0
+        case 0x133948u: // func_00133948(_, a, b): a = min, b = max
+        {
+            const uint32_t a = base + 0x10u * static_cast<uint32_t>(g_rng() % 8u), b = base + 0x100u + 0x10u * static_cast<uint32_t>(g_rng() % 8u);
+            for (uint32_t at : {a, b})
+                for (uint32_t i = 0; i < 4u; ++i)
+                    if (wild && g_rng() % 3u == 0u)
+                        setU32(at + 4u * i, gameFloat()), g_collPlants |= kPlantWild;
+                    else
+                        setFloat(at + 4u * i, (g_rng() % 3u) ? collCoord() : static_cast<float>(g_rng() % 2001u) / 1000.0f - 1.0f);
+            if (g_rng() % 8u == 0u) // equal lanes, +0 / -0 ties, a denormal against 0
+            {
+                std::memcpy(g_ramA + b, g_ramA + a, 8), std::memcpy(g_ramB + b, g_ramA + a, 8);
+                setU32(b + 8u, 0x80000000u), setU32(a + 8u, 0u), setU32(a + 12u, 0x00000123u), setU32(b + 12u, 0u);
+            }
+            const uint32_t ra = (pick == 0 ? b : a) + (pick == 1 ? 4u + 4u * static_cast<uint32_t>(g_rng() % 3u) : 0u);
+            setGpr(ctx, fn.address == 0x30A348u ? 4 : 5, ra | seg); // aliasing (pick 0), unaligned (pick 1): masked
+            setGpr(ctx, fn.address == 0x30A348u ? 5 : 6, b | seg);
+            return;
+        }
+        case 0x133408u: // func_00133408(_, amin, amax, bmin, bmax): v0 = overlap
+        {
+            float amin[3], amax[3], bmin[3], bmax[3];
+            for (int i = 0; i < 3; ++i)
+            {
+                const float c = collCoord(), h = static_cast<float>(g_rng() % 400u) / 16.0f;
+                amin[i] = c - h, amax[i] = c + h;
+                const uint32_t rel = static_cast<uint32_t>(g_rng() % 8u);
+                const float h2 = static_cast<float>(g_rng() % 400u) / 16.0f;
+                if (rel == 0) // touching: b starts where a ends (c.lt.s is strict)
+                    bmin[i] = amax[i], bmax[i] = amax[i] + h2;
+                else if (rel == 1)
+                    bmax[i] = amin[i], bmin[i] = amin[i] - h2;
+                else if (rel == 2) // apart
+                    bmin[i] = amax[i] + 0.5f + h2, bmax[i] = bmin[i] + h2;
+                else if (rel == 3)
+                    bmax[i] = amin[i] - 0.5f - h2, bmin[i] = bmax[i] - h2;
+                else if (rel == 4) // -0 against +0, a denormal against 0
+                    amin[i] = amax[i] = 0.0f, bmin[i] = -0.0f, bmax[i] = (g_rng() % 2u) ? 1.0e-40f : -1.0e-40f;
+                else // overlapping
+                    bmin[i] = c - h2, bmax[i] = c + h2 * 0.5f;
+            }
+            const uint32_t at[4] = {base, base + 0x20u, base + 0x40u, base + 0x60u};
+            const float *src[4] = {amin, amax, bmin, bmax};
+            for (int k = 0; k < 4; ++k)
+                for (uint32_t i = 0; i < 3u; ++i)
+                    if (wild && g_rng() % 6u == 0u)
+                        setU32(at[k] + 4u * i, gameFloat()), g_collPlants |= kPlantWild;
+                    else
+                        setFloat(at[k] + 4u * i, src[k][i]);
+            uint32_t reg[4] = {at[0], at[1], at[2], at[3]};
+            if (pick == 0)
+                reg[3] = reg[1]; // bmax = amax (aliasing)
+            else if (pick == 1)
+                reg[g_rng() % 4u] += 2u, g_collPlants |= kPlantWordUnaligned;
+            for (int k = 0; k < 4; ++k)
+                setGpr(ctx, 5 + k, reg[k] | seg);
+            return;
+        }
+        case 0x135EC8u: // func_00135EC8(start, end, normal, point, out): v0
+        case 0x1365B8u: // HitProbe_probeHitPoint(start, end, quad, normal, out): v0
+        {
+            const bool probe = fn.address == 0x1365B8u;
+            const uint32_t qa = base + 0x40u, so = base + 0x100u, eo = base + 0x110u, no = base + 0x120u, po = base + 0x130u,
+                           oo = base + 0x180u;
+            float n[3], v[4][3], p[3];
+            collQuad(qa, n, v, wild);
+            collPoint(v, p); // where the segment crosses the plane (if it does)
+            const uint32_t npick = static_cast<uint32_t>(g_rng() % 16u);
+            if (npick == 0) // an unnormalized normal
+                for (int i = 0; i < 3; ++i)
+                    n[i] *= 3.5f;
+            else if (npick == 1 && !standard)
+                n[0] = n[1] = n[2] = 0.0f, g_collPlants |= kPlantZeroNormal;
+            else if (npick == 2) // a normal unrelated to the quad
+                unitVec(n);
+            setVec(no, n, collW());
+            setVec(po, v[0], collW()); // 0x135EC8's plane point: the quad's v0 (as HitProbe passes it)
+            // the segment: through p (crossing), stopping short, starting on the plane (t = 0), ending on it (t = 1),
+            // parallel to it (n.d == 0 for axis-aligned normals), reversed, zero length
+            float s[3], e[3], d[3];
+            unitVec(d);
+            const uint32_t seg2 = static_cast<uint32_t>(g_rng() % 10u);
+            const float a = static_cast<float>(1u + g_rng() % 400u) / 40.0f, b = static_cast<float>(1u + g_rng() % 400u) / 40.0f;
+            for (int i = 0; i < 3; ++i)
+            {
+                const float along = (seg2 == 6) ? (d[i] - n[i] * (d[0] * n[0] + d[1] * n[1] + d[2] * n[2])) : n[i] + d[i] * 0.3f;
+                s[i] = p[i] + along * a;
+                e[i] = p[i] - along * b;
+                if (seg2 == 2) // stopping short
+                    e[i] = p[i] + along * (a * 0.1f);
+                else if (seg2 == 3) // starting on the plane point
+                    s[i] = p[i];
+                else if (seg2 == 4)
+                    e[i] = p[i];
+                else if (seg2 == 5)
+                    std::swap(s[i], e[i]);
+                else if (seg2 == 7)
+                    e[i] = s[i];
+            }
+            if (seg2 == 8 && n[1] != 0.0f && n[0] == 0.0f && n[2] == 0.0f) // exactly on a floor's height, both ends
+                s[1] = e[1] = v[0][1];
+            if (wild && g_rng() % 4u == 0u)
+            {
+                uint32_t bits = gameFloat();
+                std::memcpy(&s[g_rng() % 3u], &bits, 4);
+                g_collPlants |= kPlantWild;
+            }
+            if (!standard && g_rng() % 50u == 0u) // far apart: a difference past 2^62
+            {
+                s[0] = 5.0e18f, e[0] = -5.0e18f; // past 2^62 (4.6e18): finiteXyz
+                g_collPlants |= kPlantFar;
+            }
+            setVec(so, s, collW());
+            setVec(eo, e, collW());
+            for (uint32_t i = 0; i < 4u; ++i)
+                setU32(oo + 4u * i, static_cast<uint32_t>(g_rng()));
+            uint32_t out = oo;
+            const uint32_t op = standard ? 9u : static_cast<uint32_t>(g_rng() % 10u);
+            if (op == 0)
+                out = 0u; // no output
+            else if (op == 1)
+                out = so; // over start (written last)
+            else if (op == 2)
+                out = oo + 2u, g_collPlants |= kPlantOutUnaligned;
+            setGpr(ctx, 4, (so + (pick == 2 ? 8u : 0u)) | seg); // unaligned: lqc2 takes it masked
+            setGpr(ctx, 5, eo | seg);
+            setGpr(ctx, probe ? 7 : 6, no | seg);
+            setGpr(ctx, probe ? 6 : 7, (probe ? qa : po) | seg);
+            setGpr(ctx, 8, out ? (out | seg) : 0u);
+            if (pick == 3)
+                inFrame(4 + static_cast<int>(g_rng() % 4u));
+            else if (pick == 4 && out)
+                inFrame(8);
+            return;
+        }
+        case 0x1361A0u: // func_001361A0(quad, point): v0
+        {
+            const uint32_t qa = base + 0x40u, po = base + 0x100u;
+            float n[3], v[4][3], p[3];
+            collQuad(qa, n, v, wild);
+            collPoint(v, p);
+            if (!standard && g_rng() % 60u == 0u)
+                p[0] = 5.0e18f, g_collPlants |= kPlantFar; // v - p past 2^62: the normalize's check
+            setVec(po, p, collW());
+            setGpr(ctx, 4, (qa + (pick == 2 ? 4u : 0u)) | seg);
+            setGpr(ctx, 5, po | seg);
+            if (pick == 3)
+                inFrame(4 + static_cast<int>(g_rng() % 2u));
+            return;
+        }
+        default:
+            return;
+        }
+    }
+
     void setupCall(const NativeFunction &fn, Call &call, bool wild)
     {
         randomContext(call.ctx);
@@ -3678,6 +4027,7 @@ namespace
         setupBatch1(fn, call, wild, base, seg);
         setupBatch2(fn, call, wild, base, seg);
         setupMotion(fn, call, wild, base, seg);
+        setupCollision(fn, call, wild, base, seg);
     }
 
     // Runs `run` from the call's state on `ram`; returns the context after, the cycles and checkpoint calls.
@@ -4872,6 +5222,99 @@ namespace
         }
         std::fclose(fk);
         std::printf("wrote %d two-bone IK vectors to %s\n", iks, ikPath.c_str());
+
+        // Collision C1 (<path>.coll, rung 4 collision): 64 words a record from setupCollision's standard layout (aligned,
+        // out of the frames, an output): w[0] the kind (0 InnerProduct, 1 0x133948, 2 0x133408, 3 0x135EC8, 4 0x1361A0,
+        // 5 HitProbe), w[1] 1 when the native took the call (the check must decline exactly those it declined), inputs
+        // from w[4] (16 bytes each: a / b, or amin amax bmin bmax, or start end normal point, or the quad + the point,
+        // or start end normal + the quad), the recompiled function's results from w[40] (f0 + vf5; a, b; v0 + cycles;
+        // out + v0 + cycles).
+        const std::string collPath = std::string(path) + ".coll";
+        std::FILE *fc = std::fopen(collPath.c_str(), "wb");
+        int colls = 0;
+        const uint32_t kKinds[6] = {0x30A348u, 0x133948u, 0x133408u, 0x135EC8u, 0x1361A0u, 0x1365B8u};
+        for (int i = 0; i < count; ++i)
+        {
+            const uint32_t kind = static_cast<uint32_t>(i % 6);
+            const kamite::native::NativeFunction *fn = nullptr;
+            for (const kamite::native::NativeFunction &f : g_natives)
+                if (f.address == kKinds[kind])
+                    fn = &f;
+            Call call;
+            R5900Context &ctx = call.ctx;
+            randomContext(ctx);
+            const uint32_t base = 0x10000u + 0x400u * static_cast<uint32_t>(g_rng() % 64u);
+            setGpr(ctx, 29, 0xF0000u);
+            setupCollision(*fn, call, false, base, 0u, true);
+            setGpr(ctx, 31, 0x00123450u);
+            ctx.pc = kKinds[kind];
+            uint32_t w[64] = {};
+            w[0] = kind;
+            auto in = [&](int at, int reg) {
+                uint32_t a;
+                std::memcpy(&a, &ctx.r[reg], 4);
+                std::memcpy(w + at, g_ramA + ((a & ~0xFu) & 0x1FFFFFFu), 16);
+            };
+            auto in64 = [&](int at, int reg) {
+                uint32_t a;
+                std::memcpy(&a, &ctx.r[reg], 4);
+                std::memcpy(w + at, g_ramA + ((a & ~0xFu) & 0x1FFFFFFu), 64);
+            };
+            auto words = [&](int at, int reg) {
+                uint32_t a;
+                std::memcpy(&a, &ctx.r[reg], 4);
+                std::memcpy(w + at, g_ramA + (a & 0x1FFFFFFu), 12);
+            };
+            uint32_t outAt = 0;
+            std::memcpy(&outAt, &ctx.r[8], 4);
+            outAt &= 0x1FFFFFFu;
+            switch (kind)
+            {
+            case 0: in(4, 4), in(8, 5); break;
+            case 1: in(4, 5), in(8, 6); break;
+            case 2: words(4, 5), words(8, 6), words(12, 7), words(16, 8); break;
+            case 3: in(4, 4), in(8, 5), in(12, 6), in(16, 7); std::memcpy(w + 36, g_ramA + outAt, 12); break;
+            case 4: in64(4, 4), in(20, 5); break;
+            default: in(4, 4), in(8, 5), in(12, 7), in64(16, 6); std::memcpy(w + 36, g_ramA + outAt, 12); break;
+            }
+            {
+                R5900Context nctx = ctx;
+                kamite::native::RealEnv env{g_ramB, g_rt};
+                w[1] = kamite::native::runNative(*fn, fn->runReal, env, &nctx) ? 1u : 0u;
+            }
+            g_dueAt = 0;
+            g_charged = 0;
+            Recompiled rec = nullptr;
+            for (const auto &[address, f] : g_callees)
+                if (address == kKinds[kind])
+                    rec = f;
+            rec(g_ramA, &ctx, g_rt);
+            uint32_t a5, a6;
+            std::memcpy(&a5, &ctx.r[5], 4), std::memcpy(&a6, &ctx.r[6], 4);
+            switch (kind)
+            {
+            case 0: std::memcpy(w + 40, &ctx.f[0], 4), std::memcpy(w + 41, &ctx.vu0_vf[5], 16); break;
+            case 1: // the original's a1 / a2 as set up
+            {
+                uint32_t r5, r6;
+                std::memcpy(&r5, &call.ctx.r[5], 4), std::memcpy(&r6, &call.ctx.r[6], 4);
+                std::memcpy(w + 40, g_ramA + ((r5 & ~0xFu) & 0x1FFFFFFu), 16);
+                std::memcpy(w + 44, g_ramA + ((r6 & ~0xFu) & 0x1FFFFFFu), 16);
+                break;
+            }
+            case 2:
+            case 4: std::memcpy(w + 40, &ctx.r[2], 4), w[41] = static_cast<uint32_t>(g_charged); break;
+            default:
+                std::memcpy(w + 40, g_ramA + outAt, 12), std::memcpy(w + 43, &ctx.r[2], 4);
+                w[44] = static_cast<uint32_t>(g_charged);
+                break;
+            }
+            std::fwrite(w, 4, 64, fc);
+            ++colls;
+            resetRam();
+        }
+        std::fclose(fc);
+        std::printf("wrote %d collision C1 vectors to %s\n", colls, collPath.c_str());
     }
 }
 
@@ -5022,6 +5465,7 @@ int main(int argc, char **argv)
     kamite::native::libvu0::registerFunctions();
     kamite::native::packet::registerFunctions();
     kamite::native::motion::registerFunctions();
+    kamite::native::collision::registerFunctions();
     const NativeFunction &apply = g_natives[1];
     // Every native with its recompiled function.
     const std::vector<std::pair<uint32_t, Recompiled>> recompiled = {
@@ -5076,7 +5520,10 @@ int main(int argc, char **argv)
         {0x147C88u, &func_00147C88_0x147c88},
         {0x1F8350u, &capVu0ApplyMatrixXYZ_0x1f8350}, {0x15ADA0u, &Quat_rotatePoint_0x15ada0},
         {0x15ABA0u, &func_0015ABA0_0x15aba0},    {0x153808u, &cModel_aimIkPart_0x153808},
-        {0x153158u, &func_00153158_0x153158}};
+        {0x153158u, &func_00153158_0x153158},
+        {0x30A348u, &sceVu0InnerProduct_0x30a348}, {0x133948u, &func_00133948_0x133948},
+        {0x133408u, &func_00133408_0x133408},    {0x135EC8u, &func_00135EC8_0x135ec8},
+        {0x1361A0u, &func_001361A0_0x1361a0},    {0x1365B8u, &HitProbe_probeHitPoint_0x1365b8}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
@@ -5241,7 +5688,7 @@ int main(int argc, char **argv)
                                 0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u, 0x147B18u, 0x147A48u,
                                 0x150138u, 0x1501D0u, 0x156D70u, 0x15A6A0u, 0x149EB8u, 0x14A038u, 0x158CD0u,
                                 0x159AD0u, 0x1599B0u, 0x159DA0u, 0x158328u, 0x1F8140u, 0x147C88u, 0x148160u,
-                                0x15ABA0u, 0x153808u, 0x153158u})
+                                0x15ABA0u, 0x153808u, 0x153158u, 0x135EC8u, 0x1361A0u, 0x1365B8u})
             if (fn.address == caller && !overridden(fn))
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;
