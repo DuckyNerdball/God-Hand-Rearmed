@@ -119,19 +119,35 @@ namespace ps2_host_gamepads
                 std::cerr << "[input] could not open controller " << id << ": " << SDL_GetError() << std::endl;
                 return;
             }
+            // Controllers number as if no unmapped joystick were there (#44's follow-up: a joystick plugged in or found
+            // first doesn't renumber the controller players already bound as SDL-0): one in the way moves up.
             int slot = SDL_GetGamepadPlayerIndex(gamepad);
-            if (slot < 0 || slot >= kMaxDevices || g_devices[static_cast<size_t>(slot)].gamepad ||
-                g_devices[static_cast<size_t>(slot)].joystick)
+            if (slot < 0 || slot >= kMaxDevices || g_devices[static_cast<size_t>(slot)].gamepad)
             {
                 slot = -1;
                 for (int i = 0; i < kMaxDevices && slot < 0; ++i)
-                    if (!g_devices[static_cast<size_t>(i)].gamepad && !g_devices[static_cast<size_t>(i)].joystick)
+                    if (!g_devices[static_cast<size_t>(i)].gamepad)
                         slot = i;
             }
             if (slot < 0)
             {
                 SDL_CloseGamepad(gamepad);
                 return;
+            }
+            if (Device &raw = g_devices[static_cast<size_t>(slot)]; raw.joystick)
+            {
+                int free = -1;
+                for (int i = 0; i < kMaxDevices && free < 0; ++i)
+                    if (i != slot && !g_devices[static_cast<size_t>(i)].gamepad && !g_devices[static_cast<size_t>(i)].joystick)
+                        free = i;
+                if (free >= 0)
+                {
+                    std::cerr << "[input] SDL-" << slot << " (" << raw.name << ", raw joystick) is now SDL-" << free << std::endl;
+                    g_devices[static_cast<size_t>(free)] = raw;
+                }
+                else
+                    SDL_CloseJoystick(raw.joystick);
+                raw = Device{};
             }
             Device &device = g_devices[static_cast<size_t>(slot)];
             device = Device{};

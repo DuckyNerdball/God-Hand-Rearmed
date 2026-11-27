@@ -2871,6 +2871,18 @@ namespace kamite::launcher
             g_controlsStatus = rowName(row) + ": " + pc::displayName(removed) + " removed";
         }
 
+        // Unmapped joysticks' axes where they were when the capture opened (#44's follow-up: a trigger or throttle
+        // resting at one end reads -1 / +1 when untouched; judged against its rest it neither holds the capture
+        // open nor binds itself).
+        std::array<std::array<float, gp::kRawHatBase - gp::kRawAxisBase>, gp::kMaxDevices> g_rawRest{};
+        void noteRawRest()
+        {
+            for (int device = 0; device < gp::kMaxDevices; ++device)
+                for (int a = 0; a < gp::kRawHatBase - gp::kRawAxisBase; ++a)
+                    g_rawRest[static_cast<size_t>(device)][static_cast<size_t>(a)] = a < gp::rawAxisCount(device) ? gp::rawAxis(device, a) : 0.0f;
+        }
+        float rawMoved(int device, int a) { return gp::rawAxis(device, a) - g_rawRest[static_cast<size_t>(device)][static_cast<size_t>(a)]; }
+
         bool anyPadInput()
         {
             for (int device = 0; device < gp::kMaxDevices; ++device)
@@ -2891,7 +2903,7 @@ namespace kamite::launcher
                         if (gp::rawHat(device, h, direction))
                             return true;
                 for (int a = 0; a < gp::rawAxisCount(device); ++a)
-                    if (std::fabs(gp::rawAxis(device, a)) > 0.3f)
+                    if (std::fabs(rawMoved(device, a)) > 0.3f)
                         return true;
             }
             return false;
@@ -2998,9 +3010,11 @@ namespace kamite::launcher
                         bindCell(g_capture.row, true, 0, pc::padButtonBinding(device, gp::kRawButtonBase + b));
                         return true;
                     }
+                // the diagonals first: held, their two cardinals read held too (direction = the code's 0..7)
                 constexpr unsigned char kHatMasks[] = {1u, 3u, 2u, 6u, 4u, 12u, 8u, 9u};
+                constexpr int kHatOrder[] = {1, 3, 5, 7, 0, 2, 4, 6};
                 for (int h = 0; h < gp::rawHatCount(device); ++h)
-                    for (int direction = 0; direction < static_cast<int>(std::size(kHatMasks)); ++direction)
+                    for (const int direction : kHatOrder)
                         if (gp::rawHat(device, h, kHatMasks[direction]))
                         {
                             bindCell(g_capture.row, true, 0,
@@ -3018,7 +3032,7 @@ namespace kamite::launcher
                 }
                 for (int a = 0; a < gp::rawAxisCount(device); ++a)
                 {
-                    const float v = gp::rawAxis(device, a);
+                    const float v = rawMoved(device, a);
                     if (std::fabs(v) > 0.6f)
                     {
                         bindCell(g_capture.row, true, 0, pc::padAxisBinding(device, gp::kRawAxisBase + a, v < 0.0f));
@@ -3032,6 +3046,8 @@ namespace kamite::launcher
         void startCapture(int row, bool controller, int column)
         {
             g_capture = Capture{true, controller, row, column, true, GetTime()};
+            if (controller)
+                noteRawRest();
             g_openCapture = true;
         }
 
