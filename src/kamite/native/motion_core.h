@@ -1351,4 +1351,119 @@ namespace kamite::native::motion
         mat2quat(x, m, next, q);
         return true;
     }
+
+    // ==== M5 batch 3: func_00153158, IK's two-bone solve (claude/rung4-motion-map.md "M5 batch 3") ===================
+    // The quaternion product both of its products use: o = a * b, each lane in the asm's order.
+    inline void ikQuatMul(Exact &x, const float a[4], const float b[4], float o[4])
+    {
+        const float ax = a[0], ay = a[1], az = a[2], aw = a[3], bx = b[0], by = b[1], bz = b[2], bw = b[3];
+        o[0] = x.add(x.add(x.sub(x.mul(ay, bz), x.mul(az, by)), x.mul(ax, bw)), x.mul(aw, bx));
+        o[1] = x.add(x.add(x.sub(x.mul(az, bx), x.mul(ax, bz)), x.mul(ay, bw)), x.mul(aw, by));
+        o[2] = x.add(x.add(x.sub(x.mul(ax, by), x.mul(ay, bx)), x.mul(az, bw)), x.mul(aw, bz));
+        o[3] = x.sub(x.sub(x.sub(x.mul(aw, bw), x.mul(ax, bx)), x.mul(ay, by)), x.mul(az, bz));
+    }
+    // capVu0Acos's body (its native's: sqrt.s(1 - x x), then atan2): its own declines (sqrt.s of 0 at +-1) via x.
+    inline float ikAcos(Exact &x, float v, const float atan[9])
+    {
+        return atan2Body(x, x.sqrt(x.sub(one(), x.mul(v, v))), v, atan);
+    }
+    // The clamp before each capVu0Acos: c.lt.s c, -1.0 -> -1.0; then c.lt.s c, 1.0 ? c : 1.0.
+    inline float ikClamp(float c)
+    {
+        const float minusOne = bitsFloat(0xBF800000u);
+        if (fpuLess(c, minusOne))
+            c = minusOne;
+        return fpuLess(c, one()) ? c : one();
+    }
+    // The normalize after each capVu0Length in 0x153158: v as lqc2 has it (any w); 0 < length (c.lt.s): xyz * (1 /
+    // length) (div.s, mul.s), w = v's; else vf0 (0, 0, 0, 1). false = capVu0Length's check (xyz past 2^62).
+    inline bool ikNormalize(Exact &x, Vec4 v, Vec4 &n)
+    {
+        if (!libvu0::finiteXyz(v))
+            return false;
+        const float len = lane<0>(libvu0::length(vf0Constant(), v, 0).vf4);
+        if (!fpuLess(bitsFloat(0u), len))
+        {
+            n = vf0Constant();
+            return true;
+        }
+        const float r = x.div(one(), len);
+        uint32_t w[4];
+        store(w, v);
+        n = bitsOf(floatBits(x.mul(lane<0>(v), r)), floatBits(x.mul(lane<1>(v), r)), floatBits(x.mul(lane<2>(v), r)), w[3]);
+        return true;
+    }
+    // Everything 0x153158 computes before its first guest write (steps 1-7 of the map): the inputs as the original reads
+    // them (posA / posC by lqc2, la / lb at +0x158, qA at A +0x160, 0x3BD8A0's xyz, A's world rows 0-2, capVu0Atan2's
+    // table, 0x15A190's next table, capVu0Cos's table at the first SetRotationAxis). Out: P = q0 * qA, the local axis,
+    // ang2, qa = P * r1 (A's new rotation). calls: the guest calls so far (LengthSq, the two capVu0Acos and their atan2,
+    // Quat_rotatePoint, ApplyMatrixXYZ, the thunks and capVu0Length, 0x15ABA0 and its six, SetRotationAxis with sinf's and
+    // capVu0Cos). false or x.ok = false: decline.
+    struct IkSolveIn
+    {
+        Vec4 posA, posC, wA[3];
+        float la, lb, qA[4], xAxis[3], atan[9], cos[4];
+        uint32_t next[3];
+    };
+    struct IkSolveHalf
+    {
+        float P[4], axis[3], ang2, qa[4];
+        bool bent;
+    };
+    inline bool ikSolveFirst(Exact &x, const IkSolveIn &in, IkSolveHalf &h, int &calls)
+    {
+        if (!libvu0::finiteXyz(in.posA) || !libvu0::finiteXyz(in.posC))
+            return false;
+        // 1: dist = sqrt.s(capVu0LengthSq((A - C).xyz)) (sqrtf never: the runtime's c.eq.s of a value with itself)
+        const float dist = x.sqrt(lengthSq(x, x.xyz(sub(in.posA, in.posC))));
+        calls = 1;
+        // 3: the bend angles (law of cosines, the asm's order), else both +0
+        float ang1 = bitsFloat(0u), ang2 = bitsFloat(0u);
+        const float la = in.la, lb = in.lb;
+        h.bent = fpuLess(dist, x.add(la, lb));
+        if (h.bent)
+        {
+            const float f5 = x.mul(la, la), f2 = x.mul(dist, dist), f4 = x.mul(lb, lb);
+            const float c1 = x.div(x.sub(x.add(f5, f2), f4), x.mul(x.add(la, la), dist));
+            const float c2 = x.div(x.sub(x.add(f2, f4), f5), x.mul(x.add(dist, dist), lb));
+            ang1 = ikAcos(x, ikClamp(c1), in.atan);
+            ang2 = ikAcos(x, ikClamp(c2), in.atan);
+            calls += 4;
+        }
+        // 4: the local axis (Quat_rotatePoint of (1, 0, 0) by qA), its world direction by A's rows 0-2, normalized
+        quatRotatePoint(x, in.qA, in.xAxis, h.axis);
+        const Vec4 axis4 = bitsOf(floatBits(h.axis[0]), floatBits(h.axis[1]), floatBits(h.axis[2]), 0x3F800000u);
+        if (!applyXyzInputs(in.wA[0], in.wA[1], in.wA[2], axis4))
+            return false;
+        Vec4 n, u;
+        if (!ikNormalize(x, applyXyz(in.wA[0], in.wA[1], in.wA[2], axis4).r, n))
+            return false;
+        // 5: the reach direction (C - A).xyz, w = C's, normalized
+        if (!ikNormalize(x, blend<7>(in.posC, x.xyz(sub(in.posC, in.posA))), u))
+            return false;
+        calls += 1 + 1 + 2 + 2;
+        // 6: q0 = func_0015ABA0(n, u)
+        float a[3] = {lane<0>(n), lane<1>(n), lane<2>(n)}, b[3] = {lane<0>(u), lane<1>(u), lane<2>(u)}, q0[4];
+        if (!lookQuat(x, a, b, in.next, q0))
+            return false;
+        calls += 7;
+        // 7: P = q0 * qA, r1 about the axis by -ang1, qa = P * r1
+        ikQuatMul(x, q0, in.qA, h.P);
+        float r1[4];
+        int sinfCalls = 0;
+        axisQuat(x, h.axis, negBits(ang1), in.cos, sinfCalls, r1);
+        ikQuatMul(x, h.P, r1, h.qa);
+        calls += 3 + sinfCalls;
+        h.ang2 = ang2;
+        return x.ok;
+    }
+    // Step 9's rotation: qb = P * (the axis by ang2), with capVu0Cos's table as read then. calls: SetRotationAxis's.
+    inline void ikSolveSecond(Exact &x, const IkSolveHalf &h, const float cos[4], float qb[4], int &calls)
+    {
+        float r2[4];
+        int sinfCalls = 0;
+        axisQuat(x, h.axis, h.ang2, cos, sinfCalls, r2);
+        ikQuatMul(x, h.P, r2, qb);
+        calls = 3 + sinfCalls;
+    }
 }

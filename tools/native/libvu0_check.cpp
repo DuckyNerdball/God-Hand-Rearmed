@@ -619,10 +619,66 @@ int main(int argc, char **argv)
     bad += aimBad;
     std::printf("IK leaves: apply %d, rotate %d, look %d, invers %d vectors (%d declined), %d differ\n", aimCount[0],
                 aimCount[1], aimCount[2], aimCount[3], aimDeclined, aimBad);
+
+    // IK's two-bone solve (<vectors>.ik, M5 batch 3: 96 words, inputs from w[0], the recompiled A / B matrices from w[60]
+    // / w[76], w[50] the native's own decision on the same inputs, which this check must match): the native's maths and
+    // its declines in its order (the debug bit, the next table, ikSolveFirst, quat2mat, ikSolveSecond, the final apply's
+    // inputs); A's row 3 xyz = posA's (the restore), B's row 3 = the apply.
+    int ikCount = 0, ikBad = 0, ikDeclined = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".ik").c_str(), "rb"))
+    {
+        uint32_t w[96];
+        while (std::fread(w, 4, 96, o) == 96)
+        {
+            motion::IkSolveIn in;
+            in.posA = load(w + 1), in.posC = load(w + 5);
+            std::memcpy(&in.la, w + 9, 4), std::memcpy(&in.lb, w + 10, 4), std::memcpy(in.qA, w + 11, 16);
+            std::memcpy(in.xAxis, w + 15, 12);
+            for (int k = 0; k < 3; ++k)
+                in.wA[k] = load(w + 18 + 4 * k);
+            std::memcpy(in.atan, w + 34, 36), std::memcpy(in.next, w + 43, 12), std::memcpy(in.cos, w + 46, 16);
+            motion::Exact x;
+            motion::IkSolveHalf h;
+            int calls = 0, calls2 = 0;
+            bool ok = w[0] == 0u && in.next[0] == 1u && in.next[1] == 2u && in.next[2] == 0u &&
+                      motion::ikSolveFirst(x, in, h, calls);
+            motion::Mat4 a, b;
+            if (ok)
+            {
+                a = motion::quat2mat(x, h.qa);
+                a.r[3] = blend<7>(a.r[3], in.posA);
+                float qb[4];
+                motion::ikSolveSecond(x, h, in.cos, qb, calls2);
+                b = motion::quat2mat(x, qb);
+                const Vec4 v = load(w + 30);
+                ok = x.ok && libvu0::finiteInputs(a.r[0]) && libvu0::finiteInputs(a.r[1]) &&
+                     libvu0::finiteInputs(a.r[2]) && libvu0::finiteInputs(a.r[3]) && libvu0::finiteInputs(v);
+                if (ok)
+                    b.r[3] = libvu0::mulRow(a.r[0], a.r[1], a.r[2], a.r[3], v).r;
+            }
+            if (ok != (w[50] == 1u) && ++ikBad <= 5) // the native's own decision on the same inputs
+                std::printf("two-bone IK vector %d: the check %s, the native %s\n", ikCount + ikDeclined, ok ? "ran" : "declined",
+                            w[50] ? "ran" : "declined");
+            if (!ok)
+            {
+                ++ikDeclined;
+                continue;
+            }
+            uint32_t got[32];
+            for (int k = 0; k < 4; ++k)
+                store(got + 4 * k, a.r[k]), store(got + 16 + 4 * k, b.r[k]);
+            ++ikCount;
+            if (std::memcmp(got, w + 60, 128) != 0 && ++ikBad <= 5)
+                std::printf("two-bone IK vector %d differs\n", ikCount);
+        }
+        std::fclose(o);
+    }
+    bad += ikBad;
+    std::printf("two-bone IK: %d vectors (%d declined), %d differ\n", ikCount, ikDeclined, ikBad);
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
                 "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ; twist %d vectors, "
                 "%d differ; track %d vectors, %d differ; decode %d vectors (%d declined), %d differ\n", path, count,
-                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad - eulerBad - asinBad - aimBad, rotCount, rotBad,
+                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad - eulerBad - asinBad - aimBad - ikBad, rotCount, rotBad,
                 opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad,
                 trackCount, trackBad, decodeCount, decodeDeclined, decodeBad);
     return bad ? 1 : 0;

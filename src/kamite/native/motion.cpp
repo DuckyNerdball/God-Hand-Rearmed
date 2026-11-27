@@ -1884,6 +1884,102 @@ namespace kamite::native::motion
             returnFrom(ctx);
             return true;
         }
+
+        // ==== M5 batch 3: func_00153158 fused (claude/rung4-motion-map.md "M5 batch 3") =================================
+        // caller_scan (ELF + 81 DLLs): 1 site (IK_InverseKinematics 0x152F24), none reads a scratch register after it, no j,
+        // no code pointer.
+        // ---- func_00153158 (a0 = A, a1 = B, a2 = C: cParts; asm): IK's two-bone solve -----------------------------------
+        // A 0x130 frame; the deepest callee chain 0x15ABA0 0xD0 -> 0x15A190 0x80 below it. Steps 1-7 (ikSolveFirst) read
+        // only what no guest write has touched yet; then MtxInitRotQuaternion(A +0x80, qa), *(A +0xF0)'s xyz put back from
+        // its copy, the second rotation (capVu0Cos's table read again), MtxInitRotQuaternion(B +0x80, qb) and
+        // sceVu0ApplyMatrix(*(B +0xF0), A +0x80, *(B +0xD0)), each reading what the earlier ones wrote (a JournalEnv). The
+        // debug bit (0x747A2C & 1: a debug byte scales the reach, the draws are stubs) declines.
+        constexpr uint32_t kIkSolve = 0x153158u, kIkSolveFrame = 0x130u, kIkSolveWindow = kIkSolveFrame + kLookQuatWindow;
+        constexpr uint32_t kIkDebugWord = 0x747A2Cu, kIkXAxis = 0x3BD8A0u;
+        template <class Env>
+        bool ikSolveNative(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp0 = e::u32(ctx, e::sp), aAt = e::u32(ctx, e::a0), bAt = e::u32(ctx, e::a1),
+                           cAt = e::u32(ctx, e::a2);
+            uint32_t stackLow, pa, pb, pc, dbg, xAxisAt, cosAt;
+            if (!env.atEnd || (sp0 & 0xFu) != 0u || ((aAt | bAt) & 0xFu) != 0u || (cAt & 3u) != 0u ||
+                !e::vf0Constant(ctx) || !plainRam(sp0 - kIkSolveWindow, kIkSolveWindow, stackLow) ||
+                !plainRam(aAt, 0x170u, pa) || !plainRam(bAt, 0x15Cu, pb) || !plainRam(cAt + 0xF0u, 4u, pc) ||
+                !plainRam(kIkDebugWord, 4u, dbg) || !plainRam(kIkXAxis, 16u, xAxisAt) || !plainRam(kCosTable, 16u, cosAt))
+                return false;
+            JournalEnv<Env> j(env, stackLow, kIkSolveWindow);
+            if (!j.ok || (e::read32(j, dbg) & 1u) != 0u)
+                return false;
+            // steps 1-7: every input as the original reads it (the window's own bytes decline: the original's frames)
+            IkSolveIn in;
+            uint32_t vA, vC;
+            const uint32_t posAAt = e::read32(j, pa + 0xF0u), posCAt = e::read32(j, pc);
+            if (!plainRam(posAAt & ~0xFu, 16u, vA) || !plainRam(posCAt & ~0xFu, 16u, vC))
+                return false;
+            in.posA = e::read128(j, vA);
+            in.posC = e::read128(j, vC);
+            std::memcpy(&in.la, j.at(pa + 0x158u, 4u), 4);
+            std::memcpy(&in.lb, j.at(pb + 0x158u, 4u), 4);
+            std::memcpy(in.qA, j.at(pa + 0x160u, 16u), 16);
+            std::memcpy(in.xAxis, j.at(xAxisAt, 12u), 12);
+            const Mat4 wA = readMat(j, pa + 0x80u);
+            for (int k = 0; k < 3; ++k)
+                in.wA[k] = wA.r[k];
+            BlendTables tb;
+            if (!blendTables(j, tb))
+                return false;
+            std::memcpy(in.atan, tb.atan, 36);
+            std::memcpy(in.next, tb.next, 12);
+            std::memcpy(in.cos, j.at(cosAt, 16u), 16);
+            Exact x;
+            IkSolveHalf h;
+            int calls = 0;
+            if (!ikSolveFirst(x, in, h, calls) || !j.ok)
+                return false;
+            const Mat4 mA = quat2mat(x, h.qa);
+            // posA's copy (lqc2 of *(A +0xF0) & ~0xF): the last read before the first write
+            const uint32_t copyAt = e::read32(j, pa + 0xF0u);
+            uint32_t vCopy;
+            if (!x.ok || !plainRam(copyAt & ~0xFu, 16u, vCopy))
+                return false;
+            uint32_t copy[4];
+            std::memcpy(copy, j.at(vCopy, 16u), 16);
+            // step 8: A's matrix, then its position's xyz put back (swc1: word-aligned; the frame copy itself, which
+            // the original skips, is in the window: declined above)
+            writeMat(j, pa + 0x80u, mA);
+            const uint32_t restoreAt = e::read32(j, pa + 0xF0u);
+            uint32_t vr;
+            if ((restoreAt & 3u) != 0u || !plainRam(restoreAt, 12u, vr))
+                return false;
+            for (uint32_t k = 0; k < 3u; ++k)
+                e::write32(j, vr + 4u * k, copy[k]);
+            // step 9: B's rotation (capVu0Cos's table as it is now), its matrix, then its position by A's matrix
+            float cos2[4], qb[4];
+            std::memcpy(cos2, j.at(cosAt, 16u), 16);
+            int calls2 = 0;
+            ikSolveSecond(x, h, cos2, qb, calls2);
+            const Mat4 mB = quat2mat(x, qb);
+            if (!x.ok)
+                return false;
+            writeMat(j, pb + 0x80u, mB);
+            const uint32_t outAt = e::read32(j, pb + 0xF0u), vAt = e::read32(j, pb + 0xD0u);
+            uint32_t vo, vm, vv;
+            if (!plainRam(outAt & ~0xFu, 16u, vo) || !plainRam(aAt + 0x80u, 64u, vm) || !plainRam(vAt & ~0xFu, 16u, vv))
+                return false;
+            const Mat4 m = readMat(j, vm);
+            const Vec4 v = e::read128(j, vv);
+            if (!libvu0::finiteInputs(m.r[0]) || !libvu0::finiteInputs(m.r[1]) || !libvu0::finiteInputs(m.r[2]) ||
+                !libvu0::finiteInputs(m.r[3]) || !libvu0::finiteInputs(v))
+                return false;
+            e::write128(j, vo, libvu0::mulRow(m.r[0], m.r[1], m.r[2], m.r[3], v).r);
+            if (!j.ok)
+                return false;
+            for (int k = 0; k < calls + calls2 + 3; ++k) // + MtxInitRotQuaternion x2, sceVu0ApplyMatrix
+                j.call();
+            j.commit();
+            returnFrom(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -1995,5 +2091,9 @@ namespace kamite::native::motion
              NativeFunction::kReturnsV0);
         addF("func_0015ABA0", kLookQuat, &lookQuatNative<RealEnv>, &lookQuatNative<ShadowEnv>, true, 0u);
         addF("cModel_aimIkPart", kAimIkPart, &aimIkPartNative<RealEnv>, &aimIkPartNative<ShadowEnv>, true, 0u);
+        // M5 batch 3 (Nov 27): func_00153158 fused (IK's two-bone solve: capVu0LengthSq, capVu0Acos x2, Quat_rotatePoint,
+        // capVu0ApplyMatrixXYZ, the thunk + capVu0Length x2, func_0015ABA0, SetRotationAxis x2, MtxInitRotQuaternion x2,
+        // sceVu0ApplyMatrix inline). Unchecked: shadowed in dev replays.
+        addF("func_00153158", kIkSolve, &ikSolveNative<RealEnv>, &ikSolveNative<ShadowEnv>, false, 0u);
     }
 }

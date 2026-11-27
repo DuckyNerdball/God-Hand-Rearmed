@@ -102,3 +102,4 @@ capVu0ApplyMatrixXYZ,0x001F8350,decomp,capVu0ApplyMatrixXYZ,src/cod/001f8350.c,a
 Quat_rotatePoint,0x0015ADA0,decomp,Quat_rotatePoint,src/cod/0015ada0.c,a6c87fd,c22fb6604c99,rung 4 M5 batch 2: q (p 0) conj(q) in the asm's FPU order; returns v0 = out; kRenderPath|kChargeAtEnd
 func_0015ABA0,0x0015ABA0,asm,,,,,rung 4 M5 batch 2: the basis with z row b and x / y from b x a (two capVu0Length normalizes) into 0x15A190's quaternion; kRenderPath|kChargeAtEnd
 cModel_aimIkPart,0x00153808,decomp,cModel_aimIkPart,src/cod/00153808.c,a6c87fd,e71bb9a1a395,rung 4 M5 batch 2: MulMatrix x2 / InversMatrix / ApplyMatrixXYZ / func_001501D0 inline on a JournalEnv; kRenderPath|kChargeAtEnd
+func_00153158,0x00153158,asm,,,,,rung 4 M5 batch 3: IK's two-bone solve fused (law of cosines + capVu0Acos x2; the axis by Quat_rotatePoint / ApplyMatrixXYZ / capVu0Length; 0x15ABA0; two quaternion products + SetRotationAxis; MtxInitRotQuaternion x2; sceVu0ApplyMatrix); kRenderPath|kChargeAtEnd

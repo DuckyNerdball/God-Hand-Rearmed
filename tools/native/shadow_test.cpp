@@ -192,6 +192,10 @@ KM_RECOMPILED(capVu0ApplyMatrixXYZ_0x1f8350)
 KM_RECOMPILED(Quat_rotatePoint_0x15ada0)
 KM_RECOMPILED(func_0015ABA0_0x15aba0)
 KM_RECOMPILED(cModel_aimIkPart_0x153808)
+// M5 batch 3: func_00153158 (IK's two-bone solve) and its debug draws (empty stubs: callees only)
+KM_RECOMPILED(func_00153158_0x153158)
+KM_RECOMPILED(Circle_line2_0x15f2a8)
+KM_RECOMPILED(drawArrow_0x15fb98)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -649,6 +653,16 @@ namespace
         return n;
     }
 
+    // The end of a texture cache table: every slot from `from` down to the kind's boundary cleared to -1, as the game
+    // keeps them (func_00151398's insert writes the new entry over the -1 and none below it: a table with one -1 sent a
+    // later lookup in the same call scanning into the RAM below, down past 0; found by the rung-4 batch-3 chat, Nov 27).
+    void textureTableEnd(uint32_t w, uint64_t type, uint32_t from)
+    {
+        const uint32_t boundary = w + (type == 2u ? 0x3C9A0u : type == 1u ? 0x3D300u : 0x3C040u);
+        for (uint32_t at = from; at >= boundary; at -= 0x10u)
+            setU32(at, 0xFFFFFFFFu);
+    }
+
     // A texture manager's cache table at w (func_00151398's layout): entries {name, b, c, v} from the kind's start
     // down; a hit (v < maxBlock) or, 1 in 6, a full table with no hit (the original returns 0 then; a miss in a table
     // that isn't full makes it insert and call the upload builders, which the test doesn't have).
@@ -670,7 +684,7 @@ namespace
             setU32(at + 8u, static_cast<uint32_t>(g_rng()));
             setU32(at + 12u, static_cast<uint32_t>(g_rng() % maxBlock));
         }
-        setU32(start - 0x10u * n, 0xFFFFFFFFu); // the end (at the boundary when full)
+        textureTableEnd(w, type, start - 0x10u * n); // the end (at the boundary when full)
         name = names[g_rng() % n];
         if (full)
             name = 0xFFFFFFF0u; // in no entry (the random names stay below 0x7FFFFF or carry bit 31 with others)
@@ -1219,7 +1233,7 @@ namespace
                 else if (!misses)
                     cache(pack);
             }
-            setU32(start - 0x10u * entries, 0xFFFFFFFFu);
+            textureTableEnd(w, kind, start - 0x10u * entries);
             setU32(0x747A9Cu, g_rng() % 16u == 0u ? 0u : pack); // D_00747A9C
             setU32(base + 0x380u, (static_cast<uint32_t>(g_rng()) & ~0x02000000u) | (named ? 0x02000000u : 0u));
             const uint32_t data = 0x70000u + 0x100u * static_cast<uint32_t>(g_rng() % 32u);
@@ -1286,7 +1300,7 @@ namespace
                 else if (!misses)
                     cache(named);
             }
-            setU32(start - 0x10u * entries, 0xFFFFFFFFu);
+            textureTableEnd(w, kind, start - 0x10u * entries);
             const uint32_t variant = how == 0u ? 0x04000000u : how == 1u ? 0x08000000u : how == 2u ? 0x02000000u : 0u;
             setU32(base + 0x380u, (static_cast<uint32_t>(g_rng()) & ~0x0E000004u) | variant | (g_rng() % 8u == 0u ? 4u : 0u));
             setU32(base + 0x400u, named);
@@ -2947,6 +2961,211 @@ namespace
         }
     }
 
+    // ---- M5 batch 3: func_00153158(A, B, C), IK's two-bone solve -----------------------------------------------------
+    // Three parts (A the upper bone, B the lower, C the end; cParts +0xF0 a position pointer, +0x158 the bone length, A
+    // +0x160 a unit quaternion, A / B +0x80 world matrices, B +0xD0 its anchor), as the game lays them out (pos =
+    // &mtx[12], anchor = &mtxLocal[12]). C's reach from A: 0 (A on C: sqrt.s of 0, declined), exactly la + lb or just
+    // under (the clamps at 1.0: capVu0Acos's own decline), |la - lb| (folded), past la + lb (straight: no bend), mostly in
+    // between (bent). The tables (capVu0Atan2's, 0x15A190's next, capVu0Cos's, 0x3BD8A0) mostly the ELF's; the debug bit
+    // sometimes set (declined). Not standard (the vectors take standard: none of these): pos a word off (lqc2 masks it,
+    // swc1 puts it back at the word), another vector, in the frame window or the frame copy's own address (declined),
+    // two bytes off (declined); B's anchor or out on A's rows (step 9 reads what step 8 wrote), out on C's position or a
+    // word off, B's own row 3, the anchor in the window (declined); B = A, C = B; unaligned parts (declined); wild words.
+    void setupIkSolve(Call &call, uint32_t sp, uint32_t seg, uint32_t base, bool wild, bool standard)
+    {
+        R5900Context &ctx = call.ctx;
+        setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
+        auto unit01 = [] { return static_cast<float>(g_rng() % 100001u) / 100000.0f; };
+        auto getFloat = [](uint32_t at) {
+            float f;
+            std::memcpy(&f, g_ramA + at, 4);
+            return f;
+        };
+        setBlendTables(!standard);
+        if (standard || g_rng() % 8u)
+            for (uint32_t k = 0; k < 4u; ++k)
+                setU32(0x3BF140u + 4u * k, kSinPolynomial[k]);
+        else
+            floatsAt(0x3BF140u, 4, false);
+        const uint32_t xp = standard ? 0u : static_cast<uint32_t>(g_rng() % 16u);
+        if (xp < 13u)
+            for (uint32_t k = 0; k < 4u; ++k)
+                setU32(0x3BD8A0u + 4u * k, (k == 0u || k == 3u) ? 0x3F800000u : 0u);
+        else if (xp == 13u)
+            setQuat(0x3BD8A0u);
+        else
+            floatsAt(0x3BD8A0u, 4, wild);
+        setU32(0x747A2Cu, (static_cast<uint32_t>(g_rng()) & ~1u) | ((!standard && g_rng() % 16u == 0u) ? 1u : 0u));
+        const uint32_t ap = standard ? 31u : static_cast<uint32_t>(g_rng() % 32u);
+        uint32_t A = ap == 5u ? 0x3BF0C0u : base + 0x400u, B = base + 0x600u, C = base + 0x800u;
+        const float S = (g_rng() % 2u) ? 1.0f : 60.0f;
+        // A's world: a rotation (mostly unit rows; sometimes uniformly scaled or a TRS), its translation posA
+        Mat4f wa;
+        const uint32_t mp = static_cast<uint32_t>(g_rng() % 8u);
+        if (mp < 2u)
+            randomRigid(wa);
+        else if (mp < 3u)
+            randomTrs(wa);
+        else
+        {
+            setQuat(A + 0x80u); // a unit quaternion's rotation, in double
+            double q[4];
+            for (uint32_t k = 0; k < 4u; ++k)
+                q[k] = getFloat(A + 0x80u + 4u * k);
+            const double x = q[0], y = q[1], z = q[2], w = q[3];
+            const double r[9] = {1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w),
+                                 2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w),
+                                 2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)};
+            for (int i = 0; i < 3; ++i)
+            {
+                for (int j = 0; j < 3; ++j)
+                    wa.v[4 * i + j] = static_cast<float>(r[3 * i + j]);
+                wa.v[4 * i + 3] = 0.0f;
+            }
+        }
+        if (!standard && mp == 7u && g_rng() % 2u) // rows 0-2 zero: the world axis's 0 length (vf0)
+            for (int k = 0; k < 12; ++k)
+                wa.v[k] = 0.0f;
+        for (int k = 0; k < 3; ++k)
+            wa.v[12 + k] = (unit01() * 2.0f - 1.0f) * S;
+        wa.v[15] = 1.0f;
+        setMat4f(A + 0x80u, wa);
+        const uint32_t reachCase = static_cast<uint32_t>(g_rng() % 16u);
+        float la = S * (0.1f + unit01()), lb = S * (0.1f + unit01());
+        if (reachCase == 7u) // la + lb a few-bit d (d d exact, so sqrt.s gives d back), la many-bit, lb = d - la
+        {
+            const float dd = S * static_cast<float>(4u + g_rng() % 12u) * 0.125f;
+            la = dd * (0.25f + 0.5f * unit01());
+            lb = dd - la;
+        }
+        setFloat(A + 0x158u, la);
+        setQuat(A + 0x160u);
+        const uint32_t qp = standard ? 0u : static_cast<uint32_t>(g_rng() % 16u);
+        if (qp == 1u)
+            for (uint32_t k = 0; k < 4u; ++k)
+                setFloat(A + 0x160u + 4u * k, edgeValue());
+        else if (qp == 2u && wild)
+            floatsAt(A + 0x160u, 4, true);
+        // C: posC = posA + dir * reach
+        double d[3], n = 0.0;
+        for (double &c : d)
+            c = static_cast<double>(static_cast<int>(g_rng() % 2001u) - 1000) / 1000.0, n += c * c;
+        n = n > 0.0 ? std::sqrt(n) : 1.0;
+        const float lo = std::fabs(la - lb), hi = la + lb;
+        float reach;
+        bool axisReach = false;
+        switch (reachCase)
+        {
+        case 0: reach = standard ? hi * 0.5f : 0.0f; break; // A on C (declined)
+        case 1: reach = hi; break;
+        case 2: reach = std::nextafter(hi, 0.0f); break;
+        case 3: reach = lo; break;
+        case 7: reach = hi, axisReach = true; break; // along x from the origin: dist == la + lb (c.lt.s: straight)
+        case 6: reach = standard ? lo + 0.5f * (hi - lo) : lo * unit01(); break; // inside the fold: a cos past +-1
+        case 4:
+        case 5: reach = hi * (1.0f + unit01() * 0.3f); break; // straight
+        default: reach = lo + unit01() * (hi - lo); break;     // bent
+        }
+        if (axisReach)
+        {
+            d[0] = n = 1.0, d[1] = d[2] = 0.0;
+            for (uint32_t k = 0; k < 3u; ++k)
+                wa.v[12 + k] = 0.0f, setFloat(A + 0xB0u + 4u * k, 0.0f);
+        }
+        for (uint32_t k = 0; k < 3u; ++k)
+            setFloat(C + 0xB0u + 4u * k, wa.v[12 + k] + static_cast<float>(d[k] / n) * reach);
+        setFloat(C + 0xBCu, 1.0f);
+        if (wild && g_rng() % 4u == 0u)
+            floatsAt(C + 0xB0u, 3, true);
+        setU32(C + 0xF0u, (C + 0xB0u) | seg);
+        // A's position pointer
+        uint32_t posA = A + 0xB0u;
+        const uint32_t pp = standard ? 15u : static_cast<uint32_t>(g_rng() % 16u);
+        if (pp == 0u)
+            posA = A + 0xB4u; // a word off: lqc2 reads the row, swc1 puts its first three words back at +4
+        else if (pp == 1u)
+        {
+            posA = base + 0xA00u; // another vector (the matrix's translation then stays (0, 0, 0))
+            for (uint32_t k = 0; k < 4u; ++k)
+                setU32(posA + 4u * k, *reinterpret_cast<const uint32_t *>(g_ramA + A + 0xB0u + 4u * k));
+        }
+        else if (pp == 2u)
+            posA = sp - 0x130u + 0x30u; // the frame copy itself (the original skips the restore): declined
+        else if (pp == 3u)
+            posA = sp - 0x200u; // in the window: declined
+        else if (pp == 4u)
+            posA = A + 0xB2u; // two bytes off (swc1 would fault): declined
+        setU32(A + 0xF0u, posA | seg);
+        // B: its world (overwritten), its local matrix's translation as the anchor (the knee: (la, 0, 0) mostly)
+        Mat4f wb;
+        randomTrs(wb);
+        setMat4f(B + 0x80u, wb);
+        randomTrs(wb);
+        setMat4f(B, wb);
+        if (g_rng() % 4u)
+        {
+            setFloat(B + 0x30u, la), setFloat(B + 0x34u, 0.0f), setFloat(B + 0x38u, 0.0f), setFloat(B + 0x3Cu, 1.0f);
+        }
+        setFloat(B + 0x158u, lb);
+        uint32_t anchor = B + 0x30u, out = B + 0xB0u;
+        const uint32_t bp = standard ? 15u : static_cast<uint32_t>(g_rng() % 16u);
+        if (bp == 0u)
+            anchor = A + 0xB0u; // A's row 3: step 8's restore wrote it
+        else if (bp == 1u)
+            anchor = A + 0x84u; // A's row 0, a word off (lqc2 masks it): step 8 wrote it
+        else if (bp == 2u)
+            out = A + 0x90u; // A's row 1 (the last write)
+        else if (bp == 3u)
+            out = B + 0x34u; // a word off: sqc2 masks it
+        else if (bp == 4u)
+            anchor = sp - 0x40u; // in the window: declined
+        else if (bp == 5u)
+            out = C + 0xB0u; // C's position (read before any write)
+        else if (bp == 6u)
+            anchor = B + 0xB0u; // B's own row 3, just written (0, 0, 0, 1)
+        setU32(B + 0xD0u, anchor | seg);
+        setU32(B + 0xF0u, out | seg);
+        // aliasing and alignment (ap 5: A at 0x3BF0C0, its matrix over capVu0Cos's table: step 9 reads what step 8 wrote)
+        if (ap == 0u)
+            B = A; // one part as both bones (its length lb, its anchor and out A's)
+        else if (ap == 1u)
+            C = B; // C's position is B's (read before any write)
+        else if (ap == 2u)
+        {
+            setU32(A + 0xF4u, posA | seg), setU32(A + 0xF8u, posA | seg);
+            A += 4u; // declined (its pointers sane for the original)
+        }
+        else if (ap == 3u)
+        {
+            setU32(B + 0xF8u, out | seg), setU32(B + 0xD8u, anchor | seg);
+            B += 8u; // declined
+        }
+        else if (ap == 4u)
+        {
+            setU32(C + 0xF4u, 0u);
+            C += 2u; // declined (lw at C +0xF2 reads a small address)
+        }
+        if (ap == 0u)
+        {
+            randomTrs(wb); // A's local matrix: the anchor's row
+            setMat4f(A, wb);
+            setU32(A + 0xD0u, (A + 0x30u) | seg);
+            setFloat(A + 0x158u, lb);
+        }
+        if (ap == 1u)
+        {
+            for (uint32_t k = 0; k < 4u; ++k)
+                setU32(B + 0xB0u + 4u * k, *reinterpret_cast<const uint32_t *>(g_ramA + base + 0x800u + 0xB0u + 4u * k));
+        }
+        if (wild && g_rng() % 4u == 0u)
+            setU32(A + 0x80u + 4u * static_cast<uint32_t>(g_rng() % 16u), gameFloat());
+        if (wild && g_rng() % 4u == 0u)
+            setU32((g_rng() % 2u ? A : B) + 0x158u, gameFloat());
+        setGpr(ctx, 4, A | seg), setGpr(ctx, 5, B | seg), setGpr(ctx, 6, C | seg);
+        if (g_rng() % 4u) // ~25 guest calls, each a checkpoint: most runs to the end
+            call.dueAt = 0;
+    }
+
     void setupMotion(const NativeFunction &fn, Call &call, bool wild, uint32_t base, uint32_t seg)
     {
         // Other natives: untouched, and no draws from g_rng (their setups stay the sequence they were proven on).
@@ -2958,7 +3177,7 @@ namespace
             fn.address != 0x159AD0u && fn.address != 0x1599B0u && fn.address != 0x159DA0u && fn.address != 0x158FC8u &&
             fn.address != 0x158328u && fn.address != 0x1F8180u && fn.address != 0x1F8140u && fn.address != 0x3A1B78u &&
             fn.address != 0x148160u && fn.address != 0x147C88u && fn.address != 0x1F8350u && fn.address != 0x15ADA0u &&
-            fn.address != 0x15ABA0u && fn.address != 0x153808u)
+            fn.address != 0x15ABA0u && fn.address != 0x153808u && fn.address != 0x153158u)
             return;
         R5900Context &ctx = call.ctx;
         // func_001501D0's twist (partFlags 0x800) in the join and both passes (rung 4, Nov 26): their own setups
@@ -3367,6 +3586,9 @@ namespace
         case 0x15ABA0u: // func_0015ABA0(q, a, b)
         case 0x153808u: // cModel_aimIkPart(model, part, target)
             setupIk(fn.address, call, sp, pick, seg, base, wild);
+            return;
+        case 0x153158u: // func_00153158(A, B, C)
+            setupIkSolve(call, sp, seg, base, wild, false);
             return;
         case 0x1F8180u: // capVu0Atan2(f12 = y, f13 = x): f0
         case 0x1F8140u: // capVu0Acos(f12): f0
@@ -4604,6 +4826,52 @@ namespace
         }
         std::fclose(fi);
         std::printf("wrote %d IK-leaf vectors to %s\n", aims, aimPath.c_str());
+
+        // IK's two-bone solve (<path>.ik, M5 batch 3): 96 words a record from setupIkSolve's standard layout (pos =
+        // &mtx[12], anchor = &mtxLocal[12], no aliasing): w[0] the debug bit (0 in the standard layout); posA
+        // w[1..4], posC w[5..8], la w[9], lb w[10], qA w[11..14], 0x3BD8A0's xyz w[15..17], A's rows 0-2 w[18..29], the
+        // anchor w[30..33], capVu0Atan2's table w[34..42], 0x15A190's next w[43..45], capVu0Cos's w[46..49], w[50] 1 when the
+        // native took the call (the check must decline exactly those it declined); the
+        // recompiled function's A +0x80..+0xBF from w[60], B's from w[76].
+        const std::string ikPath = std::string(path) + ".ik";
+        std::FILE *fk = std::fopen(ikPath.c_str(), "wb");
+        int iks = 0;
+        for (int i = 0; i < count; ++i)
+        {
+            Call call;
+            R5900Context &ctx = call.ctx;
+            randomContext(ctx);
+            const uint32_t base = 0x10000u + 0x400u * static_cast<uint32_t>(g_rng() % 64u);
+            setupIkSolve(call, 0xF0000u, 0u, base, false, true);
+            setGpr(ctx, 31, 0x00123450u);
+            const uint32_t A = base + 0x400u, B = base + 0x600u, C = base + 0x800u;
+            uint32_t w[96] = {};
+            uint32_t dbg;
+            std::memcpy(&dbg, g_ramA + 0x747A2Cu, 4);
+            w[0] = dbg & 1u; // (randomContext keeps vf0 (0, 0, 0, 1))
+            std::memcpy(w + 1, g_ramA + A + 0xB0u, 16), std::memcpy(w + 5, g_ramA + C + 0xB0u, 16);
+            std::memcpy(w + 9, g_ramA + A + 0x158u, 4), std::memcpy(w + 10, g_ramA + B + 0x158u, 4);
+            std::memcpy(w + 11, g_ramA + A + 0x160u, 16), std::memcpy(w + 15, g_ramA + 0x3BD8A0u, 12);
+            std::memcpy(w + 18, g_ramA + A + 0x80u, 48), std::memcpy(w + 30, g_ramA + B + 0x30u, 16);
+            std::memcpy(w + 34, g_ramA + 0x42C350u, 36), std::memcpy(w + 43, g_ramA + 0x41EE48u, 12);
+            std::memcpy(w + 46, g_ramA + 0x3BF140u, 16);
+            g_dueAt = 0;
+            ctx.pc = 0x153158u;
+            for (const kamite::native::NativeFunction &fn : g_natives) // w[50]: the native took it (on B)
+                if (fn.address == 0x153158u)
+                {
+                    R5900Context nctx = ctx;
+                    kamite::native::RealEnv env{g_ramB, g_rt};
+                    w[50] = kamite::native::runNative(fn, fn.runReal, env, &nctx) ? 1u : 0u;
+                }
+            func_00153158_0x153158(g_ramA, &ctx, g_rt);
+            std::memcpy(w + 60, g_ramA + A + 0x80u, 64), std::memcpy(w + 76, g_ramA + B + 0x80u, 64);
+            std::fwrite(w, 4, 96, fk);
+            ++iks;
+            resetRam();
+        }
+        std::fclose(fk);
+        std::printf("wrote %d two-bone IK vectors to %s\n", iks, ikPath.c_str());
     }
 }
 
@@ -4807,13 +5075,16 @@ int main(int argc, char **argv)
         {0x3A1B78u, &func_003A1B78_0x3a1b78},    {0x148160u, &MtxGetScaleVec_0x148160},
         {0x147C88u, &func_00147C88_0x147c88},
         {0x1F8350u, &capVu0ApplyMatrixXYZ_0x1f8350}, {0x15ADA0u, &Quat_rotatePoint_0x15ada0},
-        {0x15ABA0u, &func_0015ABA0_0x15aba0},    {0x153808u, &cModel_aimIkPart_0x153808}};
+        {0x15ABA0u, &func_0015ABA0_0x15aba0},    {0x153808u, &cModel_aimIkPart_0x153808},
+        {0x153158u, &func_00153158_0x153158}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
     g_callees.push_back({0x31CDC0u, &SearchDataByTwoNames_0x31cdc0});
     g_callees.push_back({0x1522C0u, &cIDBase_getSlotPtr_0x1522c0});
     g_callees.push_back({0x30A870u, &sceVu0RotMatrix_0x30a870}); // MtxInitRotVec's order 5
+    g_callees.push_back({0x15F2A8u, &Circle_line2_0x15f2a8}); // func_00153158's debug draws (empty stubs)
+    g_callees.push_back({0x15FB98u, &drawArrow_0x15fb98});
     for (const auto &[address, f] : std::initializer_list<std::pair<uint32_t, void (*)(uint8_t *, R5900Context *, PS2Runtime *)>>{
              {0x158CC8u, &GetField_2_158CC8_0x158cc8}, {0x158FB8u, &func_00158FB8_0x158fb8},
              {0x159300u, &func_00159300_0x159300}, {0x159490u, &func_00159490_0x159490}})
@@ -4970,7 +5241,7 @@ int main(int argc, char **argv)
                                 0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u, 0x147B18u, 0x147A48u,
                                 0x150138u, 0x1501D0u, 0x156D70u, 0x15A6A0u, 0x149EB8u, 0x14A038u, 0x158CD0u,
                                 0x159AD0u, 0x1599B0u, 0x159DA0u, 0x158328u, 0x1F8140u, 0x147C88u, 0x148160u,
-                                0x15ABA0u, 0x153808u})
+                                0x15ABA0u, 0x153808u, 0x153158u})
             if (fn.address == caller && !overridden(fn))
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;

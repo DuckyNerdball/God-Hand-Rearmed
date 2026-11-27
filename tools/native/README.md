@@ -47,7 +47,8 @@ with kamite/git_commit.h):
        isnanf_0x3a4e00 MtxGetScaleVec_0x148160 func_00147C88_0x147c88 fptodp_0x31edd0 dptofp_0x31eae0 matherr_0x3a4ac8
        Obj0000_Get_D_003FA62C_3A4FB8_0x3a4fb8 ps2___unpack_f_0x31ec48 ps2___make_dp_0x31eab0 ps2___pack_d_0x31de78
        ps2___unpack_d_0x31dfa8 ps2___make_fp_0x31eda0 ps2___pack_f_0x31eb38 dpcmp_0x31e870 ps2___fpcmp_parts_d_0x31e758
-       capVu0ApplyMatrixXYZ_0x1f8350 Quat_rotatePoint_0x15ada0 func_0015ABA0_0x15aba0 cModel_aimIkPart_0x153808"
+       capVu0ApplyMatrixXYZ_0x1f8350 Quat_rotatePoint_0x15ada0 func_0015ABA0_0x15aba0 cModel_aimIkPart_0x153808
+       func_00153158_0x153158 Circle_line2_0x15f2a8 drawArrow_0x15fb98"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -116,7 +117,9 @@ place), so those natives run on a `Txn` (packet.cpp): reads see the writes made 
 `commit()`, a decline midway changes nothing. shadow_test builds real TIM2 / TIM3 / TM / pack files and texture managers
 for them (textureFile, textureManager), switches texture_slots per call (its hook is registered through stubs of the
 runtime's patch flags), and fills Tim2CalcBufWidth's (0x309C30) jump table and the format tables from the ELF's values. A recorded
-footprint past 256 ranges (a TM file of 256 pictures) is skipped, not compared.
+footprint past 256 ranges (a TM file of 256 pictures) is skipped, not compared. The cache tables end cleared to -1 down
+to their boundary (textureTableEnd), as the game keeps them: the insert writes no new -1, so with a single -1 a second
+lookup in one call (func_00148D30's meshes) scanned on into the RAM below and, now and then, past 0 (Nov 27).
 
 ## Txn compositions (rung 3 step a, Nov 22)
 
@@ -266,3 +269,17 @@ parallel and zero directions (the lengths' 0 path), out on an input, inputs in t
 aimIkPart on setupModel's model and parts (a part and its child, the position pointer sometimes the child's anchor or the
 part's local translation, the target on the part's own words). `<vectors>.aim` (applyXyz, quatRotatePoint, lookQuat and
 sceVu0InversMatrix's inversRigid against the recompiled functions) runs in libvu0_check.
+
+## M5 batch 3: IK's two-bone solve (rung 4, Nov 27)
+
+func_00153158 (IK_InverseKinematics' one site) fused: the reach |A - C| (capVu0LengthSq, sqrt.s), the law of cosines
+against the bone lengths (A / B +0x158) and two capVu0Acos when bent, the bend axis (Quat_rotatePoint of (1, 0, 0) by A
++0x160, ApplyMatrixXYZ by A's rows, capVu0Length's normalize), the reach direction, func_0015ABA0's basis, two
+quaternion products with SetRotationAxis, MtxInitRotQuaternion into A's and B's world matrices (A's position put back
+between them) and sceVu0ApplyMatrix for B's position, on a JournalEnv. The debug bit 0x747A2C & 1 declines (the debug
+draws Circle_line2 / drawArrow are empty stubs: callees in the build lines). shadow_test's setupIkSolve: three parts as
+the game lays them out; C's reach 0 (declined), inside the fold, at |la - lb|, just under / exactly la + lb (an axis
+reach whose root comes back exact), past it, mostly in between; A's rows zero; A's matrix over capVu0Cos's table;
+pointers a word off, in the window or the frame copy (declined); B's anchor / out on A's rows, B = A, C = B; unaligned
+parts. `<vectors>.ik` (whole calls in the standard layout, with the native's own decision in w[50]) runs in
+libvu0_check.
