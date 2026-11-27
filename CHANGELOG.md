@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 27, 2026
 
+- Controllers SDL doesn't recognise as gamepads (generic USB pads) can be bound in Controls: their buttons, axes and hats (#44, by Alirezatz).
 - Performance: bending a limb's two bones to reach its IK target runs as native code.
 - Performance: aiming a limb at its target in IK, and its rotation helpers, run as native code.
 
