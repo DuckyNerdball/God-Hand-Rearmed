@@ -61,6 +61,7 @@ namespace kamite::native::collision
     {
         int hit = 0;
         bool ok = true;
+        int why = 0; // a decline's reason: 1 start / end / the point past 2^62, 2 the normal's normalize, 3 the quotient
         Vec4 point;
         uint16_t status;
     };
@@ -73,6 +74,7 @@ namespace kamite::native::collision
             !normalizeStep(vf0, normal, r.status, n))
         {
             r.ok = false;
+            r.why = libvu0::finiteXyz(start) && libvu0::finiteXyz(end) && libvu0::finiteXyz(p) ? 2 : 1;
             return r;
         }
         const Vec4 d = subXyz(end, start);
@@ -86,6 +88,7 @@ namespace kamite::native::collision
         if (!x.ok)
         {
             r.ok = false;
+            r.why = 3;
             return r;
         }
         if (!lessEqual(0.0f, t) || !lessEqual(t, motion::one()))
@@ -94,6 +97,7 @@ namespace kamite::native::collision
         if (!x.ok)
         {
             r.ok = false;
+            r.why = 3;
             return r;
         }
         r.hit = 1;
@@ -109,6 +113,7 @@ namespace kamite::native::collision
     {
         int inside = 0;
         bool ok = true;
+        int why = 0; // a decline's reason: 1 the edges' normalize (v1 - v0 / v3 - v0), 2 a corner's (v_k - p)
         int calls = 0;
         uint16_t status;
     };
@@ -120,6 +125,7 @@ namespace kamite::native::collision
         if (!normalizeStep(vf0, subXyz(v[1], v[0]), r.status, e1) || !normalizeStep(vf0, subXyz(v[3], v[0]), r.status, e3))
         {
             r.ok = false;
+            r.why = 1;
             return r;
         }
         const Vec4 n = libvu0::outerProduct(e1, e3).r;
@@ -127,6 +133,7 @@ namespace kamite::native::collision
             if (!normalizeStep(vf0, subXyz(v[k], p), r.status, u[k]))
             {
                 r.ok = false;
+                r.why = 2;
                 return r;
             }
         r.calls = 7;

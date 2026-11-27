@@ -1579,9 +1579,9 @@ namespace kamite::native::libvu0
         };
         addReadable("func_001503B8", kModelMatrix, false, &modelMatrixReadable<RealEnv>, &modelMatrixReadable<ShadowEnv>);
         addReadable("func_002D8008", kLightColour, true, &lightColourReadable<RealEnv>, &lightColourReadable<ShadowEnv>);
-        // Rung 4 collision C1 (Nov 27): sceVu0InnerProduct, the whole context; registered unchecked (shadowed in K's next
-        // plain Build and Replay).
-        registerFunction(NativeFunction{"sceVu0InnerProduct", kInnerProduct, "libvu0", false, &innerProductNative<RealEnv>,
+        // Rung 4 collision C1 (Nov 27): sceVu0InnerProduct, the whole context; checked since K's 21:48 Build and Replay of
+        // 3151fdc shadowed it (30.33M calls compared, 0 mismatches, 0 declines).
+        registerFunction(NativeFunction{"sceVu0InnerProduct", kInnerProduct, "libvu0", true, &innerProductNative<RealEnv>,
                                         &innerProductNative<ShadowEnv>, nullptr});
     }
 }
