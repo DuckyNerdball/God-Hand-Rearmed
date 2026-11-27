@@ -2093,7 +2093,8 @@ namespace kamite::native::motion
         addF("cModel_aimIkPart", kAimIkPart, &aimIkPartNative<RealEnv>, &aimIkPartNative<ShadowEnv>, true, 0u);
         // M5 batch 3 (Nov 27): func_00153158 fused (IK's two-bone solve: capVu0LengthSq, capVu0Acos x2, Quat_rotatePoint,
         // capVu0ApplyMatrixXYZ, the thunk + capVu0Length x2, func_0015ABA0, SetRotationAxis x2, MtxInitRotQuaternion x2,
-        // sceVu0ApplyMatrix inline). Unchecked: shadowed in dev replays.
-        addF("func_00153158", kIkSolve, &ikSolveNative<RealEnv>, &ikSolveNative<ShadowEnv>, false, 0u);
+        // sceVu0ApplyMatrix inline); checked since K's 15:32 Build and Replay of 2331a43 (261,294 of 261,312 calls compared,
+        // 18 interrupted, 0 mismatches, 0 declines).
+        addF("func_00153158", kIkSolve, &ikSolveNative<RealEnv>, &ikSolveNative<ShadowEnv>, true, 0u);
     }
 }

@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 27, 2026
 
+- Performance: bending a limb's two bones to reach its IK target runs as native code.
 - Performance: aiming a limb at its target in IK, and its rotation helpers, run as native code.
 
 ## November 26, 2026
