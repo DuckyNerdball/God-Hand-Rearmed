@@ -1209,4 +1209,146 @@ namespace kamite::native::motion
             return x.add(f0, f7);
         }
     };
+
+    // ==== M5 batch 2: the IK leaves (claude/rung4-motion-map.md "M5 batch 2") ========================================
+    // capVu0ApplyMatrixXYZ 0x1F8350 (src/cod/001f8350.c): vmulax / vmadday of rows 0 and 1, vmaddz of row 2, by v.xyz (all
+    // four lanes; row 3 never). acc = ACC after vmadday (what the original leaves there). Rows below 2^62 in every lane,
+    // v's xyz too (v.w is never read).
+    inline bool applyXyzInputs(Vec4 r0, Vec4 r1, Vec4 r2, Vec4 v)
+    {
+        return libvu0::finiteInputs(r0) && libvu0::finiteInputs(r1) && libvu0::finiteInputs(r2) && libvu0::finiteXyz(v);
+    }
+    inline libvu0::RowResult applyXyz(Vec4 r0, Vec4 r1, Vec4 r2, Vec4 v)
+    {
+        Vec4 acc = mul(r0, splat<0>(v));
+        acc = add(acc, mul(r1, splat<1>(v)));
+        return libvu0::RowResult{acc, add(acc, mul(r2, splat<2>(v)))};
+    }
+
+    // sceVu0InversMatrix 0x30A3F8 (libvu0.cpp inversOn) on rows: rows 0-2 = in's 3x3 transposed by word (their w lanes
+    // row 3's xyz cleared: x - x), row 3 = inversRows' (-(t R^T), in row 3's w). Every row's xyz below 2^62 (inversInputs).
+    inline bool inversRigidInputs(const Mat4 &in)
+    {
+        for (int k = 0; k < 4; ++k)
+            if (!libvu0::finiteXyz(in.r[k]))
+                return false;
+        return true;
+    }
+    inline Mat4 inversRigid(const Mat4 &in)
+    {
+        const Vec4 v5 = in.r[3];
+        const Vec4 v9 = blend<7>(v5, sub(v5, v5));
+        uint32_t r0[4], r1[4], r2[4], r3[4];
+        store(r0, in.r[0]), store(r1, in.r[1]), store(r2, in.r[2]), store(r3, v9);
+        const Vec4 c0 = bitsOf(r0[0], r1[0], r2[0], r3[0]), c1 = bitsOf(r0[1], r1[1], r2[1], r3[1]),
+                   c2 = bitsOf(r0[2], r1[2], r2[2], r3[2]);
+        return Mat4{{c0, c1, c2, libvu0::inversRows(c0, c1, c2, v5, v9, splat(0.0f)).vf4}};
+    }
+
+    // Quat_rotatePoint 0x15ADA0 (src/cod/0015ada0.c: Quat_mul(t, q, (p, 0)), Quat_mul(r, t, conj q)): out.xyz = r.xyz in
+    // the asm's FPU order (p.w = 0 comes from the frame: each x * 0 is a real product). r.w only reaches the frame (dead):
+    // not computed.
+    inline void quatRotatePoint(Exact &x, const float q[4], const float p[3], float out[3])
+    {
+        const float qx = q[0], qy = q[1], qz = q[2], qw = q[3], px = p[0], py = p[1], pz = p[2];
+        const float zero = registerConstant(bitsFloat(0u));
+        const float f17 = x.mul(qw, pz);
+        float f7 = x.mul(qy, pz);
+        float f3 = x.mul(qz, px);
+        float f13 = x.mul(qz, py);
+        float f6 = x.mul(qx, py);
+        float f4 = x.mul(qy, px);
+        const float f14 = x.mul(qx, pz);
+        const float f16 = x.mul(qz, pz);
+        const float f2 = x.mul(qx, zero);
+        f6 = x.sub(f6, f4);
+        f4 = x.mul(qy, zero);
+        f7 = x.sub(f7, f13);
+        f3 = x.sub(f3, f14);
+        const float f15 = x.mul(qx, px);
+        float f8 = x.mul(qw, zero);
+        f13 = x.mul(qy, py);
+        const float f5 = x.mul(qz, zero);
+        const float f1 = x.mul(qw, px);
+        const float f0 = x.mul(qw, py);
+        f7 = x.add(f7, f2);
+        f3 = x.add(f3, f4);
+        f8 = x.sub(f8, f15);
+        const float tx = x.add(f7, f1);
+        const float ty = x.add(f3, f0);
+        const float nx = negBits(qx), ny = negBits(qy), nz = negBits(qz);
+        f6 = x.add(f6, f5);
+        f8 = x.sub(f8, f13);
+        const float tz = x.add(f6, f17);
+        const float g5 = x.mul(ty, nx);
+        float g0 = x.mul(tx, ny);
+        const float tw = x.sub(f8, f16);
+        float g1 = x.mul(tz, nx);
+        const float g13 = x.mul(tx, nz);
+        g0 = x.sub(g0, g5);
+        const float g14 = x.mul(tz, ny);
+        float g2 = x.mul(ty, nz);
+        const float g7 = x.mul(tx, qw), g3 = x.mul(ty, qw), g11 = x.mul(tz, qw);
+        g1 = x.sub(g1, g13);
+        g2 = x.sub(g2, g14);
+        const float g9 = x.mul(tw, nx), g10 = x.mul(tw, ny);
+        g1 = x.add(g1, g3);
+        g0 = x.add(g0, g11);
+        const float g8 = x.mul(tw, nz);
+        g2 = x.add(g2, g7);
+        out[1] = x.add(g1, g10);
+        out[2] = x.add(g0, g8);
+        out[0] = x.add(g2, g9);
+    }
+
+    // func_0015ABA0 (asm): a quaternion for the basis with z row b (as given), x / y from b x a. c = b x a (FPU, the asm's
+    // order), n1 = c normalized by capVu0Length (vf4 = c with w 1.0; 0 < length: xyz * (1 / length), w 1.0; else (0, 0,
+    // 0, 1)), d = n1 x b, n2 likewise; rows n2, n1, b over the unit matrix (w 0; row 3 (0, 0, 0, 1)); 0x15A190 into q.
+    // false = a length's input past 2^62 (capVu0Length's check); x.ok = the FPU's.
+    inline bool normalizeByLength(Exact &x, const float c[3], float n[3])
+    {
+        const Vec4 v = bitsOf(floatBits(c[0]), floatBits(c[1]), floatBits(c[2]), 0x3F800000u);
+        if (!libvu0::finiteXyz(v))
+            return false;
+        const float len = lane<0>(libvu0::length(vf0Constant(), v, 0).vf4);
+        if (!fpuLess(bitsFloat(0u), len))
+        {
+            n[0] = n[1] = n[2] = bitsFloat(0u);
+            return true;
+        }
+        const float r = x.div(one(), len);
+        n[2] = x.mul(c[2], r);
+        n[0] = x.mul(c[0], r);
+        n[1] = x.mul(c[1], r);
+        return true;
+    }
+    inline bool lookQuat(Exact &x, const float a[3], const float b[3], const uint32_t next[3], float q[4])
+    {
+        const float z0 = b[0], z1 = b[1], z2 = b[2];
+        float c[3], n1[3], d[3], n2[3];
+        {
+            const float f6 = x.mul(z1, a[0]), f4 = x.mul(z2, a[0]), f2 = x.mul(z2, a[1]), f1 = x.mul(z0, a[1]);
+            const float f3 = x.mul(z1, a[2]), f0 = x.mul(z0, a[2]);
+            c[2] = x.sub(f1, f6);
+            c[0] = x.sub(f3, f2);
+            c[1] = x.sub(f4, f0);
+        }
+        if (!normalizeByLength(x, c, n1))
+            return false;
+        {
+            const float f6 = x.mul(n1[2], z1), f4 = x.mul(n1[1], z2), f1 = x.mul(n1[0], z1), f3 = x.mul(n1[1], z0);
+            const float f2 = x.mul(n1[2], z0), f0 = x.mul(n1[0], z2);
+            d[0] = x.sub(f4, f6);
+            d[2] = x.sub(f1, f3);
+            d[1] = x.sub(f2, f0);
+        }
+        if (!normalizeByLength(x, d, n2))
+            return false;
+        Mat4 m = unit();
+        m.r[0] = bitsOf(floatBits(n2[0]), floatBits(n2[1]), floatBits(n2[2]), 0u);
+        m.r[1] = bitsOf(floatBits(n1[0]), floatBits(n1[1]), floatBits(n1[2]), 0u);
+        m.r[2] = bitsOf(floatBits(z0), floatBits(z1), floatBits(z2), 0u);
+        mat2quat(x, m, next, q);
+        return true;
+    }
 }

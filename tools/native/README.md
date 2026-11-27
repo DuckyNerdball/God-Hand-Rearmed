@@ -46,7 +46,8 @@ with kamite/git_commit.h):
        capVu0Acos_0x1f8140 func_003A1B78_0x3a1b78 ps2___ieee754_asinf_0x3a2558 ps2___ieee754_sqrtf_0x3a3b48
        isnanf_0x3a4e00 MtxGetScaleVec_0x148160 func_00147C88_0x147c88 fptodp_0x31edd0 dptofp_0x31eae0 matherr_0x3a4ac8
        Obj0000_Get_D_003FA62C_3A4FB8_0x3a4fb8 ps2___unpack_f_0x31ec48 ps2___make_dp_0x31eab0 ps2___pack_d_0x31de78
-       ps2___unpack_d_0x31dfa8 ps2___make_fp_0x31eda0 ps2___pack_f_0x31eb38 dpcmp_0x31e870 ps2___fpcmp_parts_d_0x31e758"
+       ps2___unpack_d_0x31dfa8 ps2___make_fp_0x31eda0 ps2___pack_f_0x31eb38 dpcmp_0x31e870 ps2___fpcmp_parts_d_0x31e758
+       capVu0ApplyMatrixXYZ_0x1f8350 Quat_rotatePoint_0x15ada0 func_0015ABA0_0x15aba0 cModel_aimIkPart_0x153808"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -253,3 +254,15 @@ wrapper and MtxGetScaleVec are natives of their own too. shadow_test's setupEule
 (the clamps at exactly +-1, atan2's 1e-5 paths), zero rows, wild words; orders 0-5 and past them; out on the matrix;
 _LIB_VERSION 1 / -1 / 0 / 2; the scalar helpers' branch edges (edgeValue). The wrapper's DOMAIN path calls the soft-double
 helpers (fptodp, dptofp, matherr, ...): in the build lines as callees. `<vectors>.euler` / `.asinf` run in libvu0_check.
+
+## M5 batch 2: the IK leaves (rung 4, Nov 27)
+
+capVu0ApplyMatrixXYZ (rows 0-2 of a matrix by v.xyz, every lane), Quat_rotatePoint (q (p, 0) conj(q) in the asm's FPU
+order; v0 = out), func_0015ABA0 (a basis with z row b, x / y rows from b x a normalized by capVu0Length's root, into
+func_0015A190's quaternion) and cModel_aimIkPart (IK_InverseKinematics' aim of a limb part: its world, its position
+moved to the target, its local from the parent's inverse, the child's world by func_001501D0's native, on a JournalEnv:
+each step reads what the earlier ones wrote). shadow_test's setupIk: TRS matrices, unit / scaled / edge quaternions,
+parallel and zero directions (the lengths' 0 path), out on an input, inputs in the frame or a word off (declined);
+aimIkPart on setupModel's model and parts (a part and its child, the position pointer sometimes the child's anchor or the
+part's local translation, the target on the part's own words). `<vectors>.aim` (applyXyz, quatRotatePoint, lookQuat and
+sceVu0InversMatrix's inversRigid against the recompiled functions) runs in libvu0_check.

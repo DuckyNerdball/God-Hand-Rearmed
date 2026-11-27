@@ -187,6 +187,11 @@ KM_RECOMPILED(ps2___make_fp_0x31eda0)
 KM_RECOMPILED(ps2___pack_f_0x31eb38)
 KM_RECOMPILED(dpcmp_0x31e870)
 KM_RECOMPILED(ps2___fpcmp_parts_d_0x31e758)
+// M5 batch 2: the IK leaves
+KM_RECOMPILED(capVu0ApplyMatrixXYZ_0x1f8350)
+KM_RECOMPILED(Quat_rotatePoint_0x15ada0)
+KM_RECOMPILED(func_0015ABA0_0x15aba0)
+KM_RECOMPILED(cModel_aimIkPart_0x153808)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -2778,6 +2783,170 @@ namespace
         }
     }
 
+    // ---- M5 batch 2: the IK leaves ------------------------------------------------------------------------------------
+    // capVu0ApplyMatrixXYZ(out, m, v): a TRS matrix (sometimes wild words: past 2^62 declines), v an anchor-like vector;
+    // out on v or on a row (every read first), addresses off by a word (lqc2 / sqc2 mask them).
+    // Quat_rotatePoint(out, q, p): a unit quaternion (sometimes scaled, the scalar helpers' edges, wild words), a point;
+    // out on q or p (every read first), q / p in the frame or out unaligned (declined).
+    // func_0015ABA0(q, a, b): two directions (sometimes parallel or zero: the lengths' 0 path; edges; wild), b's w random;
+    // out on a or b; a unaligned or in the window (declined); now and then 0x15A190's next table wrong (declined).
+    // cModel_aimIkPart(model, part, target): setupModel's model and parts, the part's child its next with the part as its
+    // parent (sometimes not), the part's position pointer +0xF0 its world's translation (sometimes the child's anchor, a
+    // word off, in the window), a target (sometimes on the part's own words), twist and unscaled joins as setupModel's.
+    void setupIk(uint32_t address, Call &call, uint32_t sp, uint32_t pick, uint32_t seg, uint32_t base, bool wild)
+    {
+        R5900Context &ctx = call.ctx;
+        setGpr(ctx, 29, sp | ((g_rng() % 4u == 0u) ? 0x80000000u : 0u));
+        auto vec = [](uint32_t at, int n, float scale) {
+            for (int k = 0; k < n; ++k)
+                setFloat(at + 4u * static_cast<uint32_t>(k),
+                         static_cast<float>(static_cast<int>(g_rng() % 2001u) - 1000) / 1000.0f * scale);
+        };
+        auto getFloat = [](uint32_t at) {
+            float f;
+            std::memcpy(&f, g_ramA + at, 4);
+            return f;
+        };
+        auto edges = [](uint32_t at, int n) {
+            for (int k = 0; k < n; ++k)
+                setFloat(at + 4u * static_cast<uint32_t>(k), edgeValue());
+        };
+        switch (address)
+        {
+        case 0x1F8350u: // capVu0ApplyMatrixXYZ(out, m, v)
+        {
+            const uint32_t m = base + 0x100u, v = base + 0x200u;
+            Mat4f mm;
+            randomTrs(mm);
+            setMat4f(m, mm);
+            vec(v, 4, (g_rng() % 4u) ? 2.0f : 300.0f);
+            if (wild && g_rng() % 2u)
+                for (uint32_t k = 0; k < 12u; ++k)
+                    if (g_rng() % 4u == 0u)
+                        setU32(m + 4u * k, gameFloat());
+            if (wild && g_rng() % 4u == 0u)
+                setU32(v + 4u * static_cast<uint32_t>(g_rng() % 4u), gameFloat());
+            uint32_t out = base + 0x40u, a1 = m, a2 = v;
+            if (pick == 0)
+                out = v;
+            else if (pick < 4)
+                out = m + 0x10u * (pick - 1u);
+            else if (pick == 4)
+                out += 4u, a1 += 8u, a2 += 12u;
+            setGpr(ctx, 4, out | seg), setGpr(ctx, 5, a1 | seg), setGpr(ctx, 6, a2 | seg);
+            return;
+        }
+        case 0x15ADA0u: // Quat_rotatePoint(out, q, p): v0 = out
+        {
+            uint32_t q = base + 0x100u, p = base + 0x200u, out = base + 0x40u;
+            setQuat(q);
+            const uint32_t qp = static_cast<uint32_t>(g_rng() % 8u);
+            if (qp == 0)
+                for (uint32_t k = 0; k < 4u; ++k)
+                    setFloat(q + 4u * k, getFloat(q + 4u * k) * 3.0f);
+            else if (qp == 1)
+                edges(q, 4);
+            else if (qp == 2 && wild)
+                floatsAt(q, 4, true);
+            vec(p, 4, (g_rng() % 2u) ? 1.0f : 500.0f);
+            if (g_rng() % 8u == 0u)
+                edges(p, 3);
+            else if (wild && g_rng() % 4u == 0u)
+                floatsAt(p, 3, true);
+            if (pick == 0)
+                out = q;
+            else if (pick == 1)
+                out = p;
+            else if (pick == 2)
+                out = q + 4u; // overlapping q: every read comes first
+            else if (pick == 3)
+                q = sp - 0x30u, setQuat(q); // in the frame: declined
+            else if (pick == 4)
+                out += 2u; // unaligned: declined
+            setGpr(ctx, 4, out | seg), setGpr(ctx, 5, q | seg), setGpr(ctx, 6, p | seg);
+            return;
+        }
+        case 0x15ABA0u: // func_0015ABA0(q, a, b)
+        {
+            setBlendTables(true);
+            uint32_t out = base + 0x40u, a = base + 0x100u, b = base + 0x200u;
+            vec(a, 3, 1.0f), vec(b, 4, (g_rng() % 4u) ? 1.0f : 80.0f);
+            const uint32_t sp2 = static_cast<uint32_t>(g_rng() % 10u);
+            if (sp2 == 0) // parallel: b x a = 0
+                for (uint32_t k = 0; k < 3u; ++k)
+                    setFloat(a + 4u * k, getFloat(b + 4u * k) * ((g_rng() % 2u) ? 2.0f : -0.5f));
+            else if (sp2 == 1)
+                for (uint32_t k = 0; k < 3u; ++k)
+                    setU32(((g_rng() % 2u) ? a : b) + 4u * k, 0u); // a zero vector
+            else if (sp2 == 2)
+                edges(g_rng() % 2u ? a : b, 3);
+            else if (sp2 == 3 && wild)
+                floatsAt(g_rng() % 2u ? a : b, 3, true);
+            if (pick == 0)
+                out = a;
+            else if (pick == 1)
+                out = b;
+            else if (pick == 2)
+                a += 2u; // unaligned: declined
+            else if (pick == 3)
+                b += 4u; // lqc2 masks it
+            else if (pick == 4)
+                a = sp - 0x40u; // in the window: declined
+            setGpr(ctx, 4, out | seg), setGpr(ctx, 5, a | seg), setGpr(ctx, 6, b | seg);
+            if (g_rng() % 4u) // five guest calls, each a checkpoint: most runs to the end
+                call.dueAt = 0;
+            return;
+        }
+        default: // cModel_aimIkPart(model, part, target)
+        {
+            const uint32_t model = base + (pick == 0 ? 4u : 0u); // setupModel's (unaligned: declined)
+            uint32_t count = 0;
+            do // a part and its child: two parts at least
+            {
+                setupModel(0x153808u, ctx, sp, pick, seg, base, g_rng() % 2u == 0u);
+                count = g_ramA[model + 0x2B4u];
+            } while (count < 2u);
+            const uint32_t i = static_cast<uint32_t>(g_rng() % (count - 1u));
+            const uint32_t part = model + 0x2C0u + 0x160u * i, child = part + 0x160u;
+            setU32(part + 0x144u, child | seg);
+            if (g_rng() % 8u)
+                setU32(child + 0x148u, part | seg);
+            if (g_rng() % 16u == 0u)
+                setU32(child + 0xD0u, (child + 0x34u) | seg); // the anchor a word off: lqc2 masks it, 0x1501D0 reads it whole
+            uint32_t parentOfPart = 0;
+            std::memcpy(&parentOfPart, g_ramA + part + 0x148u, 4);
+            if (g_rng() % 8u == 0u) // the parent's world row 3 w (1.0 in a rigid matrix): the inverse carries it
+                setFloat((parentOfPart & PS2_RAM_MASK) + 0xBCu, static_cast<float>(g_rng() % 2001u) / 1000.0f);
+            const uint32_t pp = static_cast<uint32_t>(g_rng() % 16u);
+            uint32_t pos = part + 0xB0u;
+            if (pp == 0)
+                pos = child + 0x30u; // the child's anchor: Apply writes the vector it reads
+            else if (pp == 1)
+                pos = part + 0xB4u; // a word off: declined
+            else if (pp == 2)
+                pos = sp - 0x100u; // in the window: declined
+            else if (pp == 3)
+                pos = part + 0x30u; // the part's local translation (rewritten by the second MulMatrix)
+            setU32(part + 0xF0u, pos | seg);
+            uint32_t target = base + 0xE00u + 0x10u * static_cast<uint32_t>(g_rng() % 8u);
+            vec(target, 4, 200.0f);
+            const uint32_t tp = static_cast<uint32_t>(g_rng() % 16u);
+            if (tp == 0)
+                target = part + 0xB0u; // the part's own translation
+            else if (tp == 1)
+                target = child + 0x30u;
+            else if (tp == 2 && wild)
+                floatsAt(target, 4, true);
+            if (wild && g_rng() % 4u == 0u)
+                setU32(part + 4u * static_cast<uint32_t>(g_rng() % 16u), gameFloat());
+            setGpr(ctx, 4, model | seg), setGpr(ctx, 5, part | seg), setGpr(ctx, 6, target | seg);
+            if (g_rng() % 4u)
+                call.dueAt = 0;
+            return;
+        }
+        }
+    }
+
     void setupMotion(const NativeFunction &fn, Call &call, bool wild, uint32_t base, uint32_t seg)
     {
         // Other natives: untouched, and no draws from g_rng (their setups stay the sequence they were proven on).
@@ -2788,7 +2957,8 @@ namespace
             fn.address != 0x14A038u && fn.address != 0x156508u && fn.address != 0x156550u && fn.address != 0x158CD0u &&
             fn.address != 0x159AD0u && fn.address != 0x1599B0u && fn.address != 0x159DA0u && fn.address != 0x158FC8u &&
             fn.address != 0x158328u && fn.address != 0x1F8180u && fn.address != 0x1F8140u && fn.address != 0x3A1B78u &&
-            fn.address != 0x148160u && fn.address != 0x147C88u)
+            fn.address != 0x148160u && fn.address != 0x147C88u && fn.address != 0x1F8350u && fn.address != 0x15ADA0u &&
+            fn.address != 0x15ABA0u && fn.address != 0x153808u)
             return;
         R5900Context &ctx = call.ctx;
         // func_001501D0's twist (partFlags 0x800) in the join and both passes (rung 4, Nov 26): their own setups
@@ -3192,6 +3362,12 @@ namespace
             setGpr(ctx, 4, motion), setGpr(ctx, 5, record | seg);
             return;
         }
+        case 0x1F8350u: // capVu0ApplyMatrixXYZ(out, m, v)
+        case 0x15ADA0u: // Quat_rotatePoint(out, q, p)
+        case 0x15ABA0u: // func_0015ABA0(q, a, b)
+        case 0x153808u: // cModel_aimIkPart(model, part, target)
+            setupIk(fn.address, call, sp, pick, seg, base, wild);
+            return;
         case 0x1F8180u: // capVu0Atan2(f12 = y, f13 = x): f0
         case 0x1F8140u: // capVu0Acos(f12): f0
         case 0x3A1B78u: // asinf(f12): f0
@@ -4363,6 +4539,71 @@ namespace
         }
         std::fclose(fe), std::fclose(fa);
         std::printf("wrote %d euler / %d asinf vectors to %s / .asinf\n", eulers, asins, eulerPath.c_str());
+
+        // The IK leaves (<path>.aim, M5 batch 2): 64 words a record, w[0] the kind, inputs from w[1], the recompiled
+        // function's result from w[40]. 0 capVu0ApplyMatrixXYZ: m's rows 0-2, v -> out; 1 Quat_rotatePoint: q, p -> out
+        // (xyzw); 2 func_0015ABA0: a, b, 0x15A190's next table -> q; 3 sceVu0InversMatrix (aimIkPart's inverse): in -> out.
+        const std::string aimPath = std::string(path) + ".aim";
+        std::FILE *fi = std::fopen(aimPath.c_str(), "wb");
+        int aims = 0;
+        for (int i = 0; i < count; ++i)
+        {
+            Call call;
+            R5900Context &ctx = call.ctx;
+            randomContext(ctx);
+            const uint32_t base = 0x10000u + 0x400u * static_cast<uint32_t>(g_rng() % 64u), kind = static_cast<uint32_t>(i % 4);
+            static constexpr uint32_t kAddress[3] = {0x1F8350u, 0x15ADA0u, 0x15ABA0u};
+            uint32_t w[64] = {kind};
+            if (kind < 3u)
+                setupIk(kAddress[kind], call, 0xF0000u, 5u + static_cast<uint32_t>(g_rng() % 11u), 0u, base, false);
+            else
+            {
+                Mat4f m;
+                if (g_rng() % 2u)
+                    randomRigid(m);
+                else
+                    randomTrs(m);
+                setMat4f(base + 0x100u, m);
+                setGpr(ctx, 4, base + 0x40u), setGpr(ctx, 5, base + 0x100u);
+            }
+            setGpr(ctx, 31, 0x00123450u);
+            uint32_t a0, a1, a2;
+            std::memcpy(&a0, &ctx.r[4], 4), std::memcpy(&a1, &ctx.r[5], 4), std::memcpy(&a2, &ctx.r[6], 4);
+            g_dueAt = 0;
+            switch (kind)
+            {
+            case 0:
+                std::memcpy(w + 1, g_ramA + (a1 & ~0xFu), 48), std::memcpy(w + 13, g_ramA + (a2 & ~0xFu), 16);
+                ctx.pc = 0x1F8350u;
+                capVu0ApplyMatrixXYZ_0x1f8350(g_ramA, &ctx, g_rt);
+                std::memcpy(w + 40, g_ramA + (a0 & ~0xFu), 16);
+                break;
+            case 1:
+                std::memcpy(w + 1, g_ramA + a1, 16), std::memcpy(w + 5, g_ramA + a2, 12);
+                ctx.pc = 0x15ADA0u;
+                Quat_rotatePoint_0x15ada0(g_ramA, &ctx, g_rt);
+                std::memcpy(w + 40, g_ramA + a0, 16);
+                break;
+            case 2:
+                std::memcpy(w + 1, g_ramA + a1, 12), std::memcpy(w + 4, g_ramA + (a2 & ~0xFu), 16);
+                std::memcpy(w + 8, g_ramA + 0x41EE48u, 12);
+                ctx.pc = 0x15ABA0u;
+                func_0015ABA0_0x15aba0(g_ramA, &ctx, g_rt);
+                std::memcpy(w + 40, g_ramA + a0, 16);
+                break;
+            default:
+                std::memcpy(w + 1, g_ramA + a1, 64);
+                ctx.pc = 0x30A3F8u;
+                sceVu0InversMatrix_0x30a3f8(g_ramA, &ctx, g_rt);
+                std::memcpy(w + 40, g_ramA + a0, 64);
+                break;
+            }
+            std::fwrite(w, 4, 64, fi);
+            ++aims;
+            resetRam();
+        }
+        std::fclose(fi);
+        std::printf("wrote %d IK-leaf vectors to %s\n", aims, aimPath.c_str());
     }
 }
 
@@ -4564,7 +4805,9 @@ int main(int argc, char **argv)
         {0x158FC8u, &func_00158FC8_0x158fc8},    {0x158328u, &func_00158328_0x158328},
         {0x1F8180u, &capVu0Atan2_0x1f8180},      {0x1F8140u, &capVu0Acos_0x1f8140},
         {0x3A1B78u, &func_003A1B78_0x3a1b78},    {0x148160u, &MtxGetScaleVec_0x148160},
-        {0x147C88u, &func_00147C88_0x147c88}};
+        {0x147C88u, &func_00147C88_0x147c88},
+        {0x1F8350u, &capVu0ApplyMatrixXYZ_0x1f8350}, {0x15ADA0u, &Quat_rotatePoint_0x15ada0},
+        {0x15ABA0u, &func_0015ABA0_0x15aba0},    {0x153808u, &cModel_aimIkPart_0x153808}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
@@ -4726,7 +4969,8 @@ int main(int argc, char **argv)
                                 0x154240u, 0x30AA40u, 0x14C7E8u, 0x14AC90u, 0x14D0E8u, 0x153B00u, 0x14B810u,
                                 0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u, 0x147B18u, 0x147A48u,
                                 0x150138u, 0x1501D0u, 0x156D70u, 0x15A6A0u, 0x149EB8u, 0x14A038u, 0x158CD0u,
-                                0x159AD0u, 0x1599B0u, 0x159DA0u, 0x158328u, 0x1F8140u, 0x147C88u, 0x148160u})
+                                0x159AD0u, 0x1599B0u, 0x159DA0u, 0x158328u, 0x1F8140u, 0x147C88u, 0x148160u,
+                                0x15ABA0u, 0x153808u})
             if (fn.address == caller && !overridden(fn))
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;

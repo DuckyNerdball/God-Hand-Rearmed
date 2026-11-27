@@ -551,10 +551,78 @@ int main(int argc, char **argv)
     }
     bad += eulerBad + asinBad;
     std::printf("euler: %d vectors, %d differ; asinf: %d vectors, %d differ\n", eulerCount, eulerBad, asinCount, asinBad);
+
+    // The IK leaves (<vectors>.aim, M5 batch 2: 64 words, w[0] the kind, inputs from w[1], the recompiled result from
+    // w[40]): 0 applyXyz, 1 quatRotatePoint (out.w = 1.0), 2 lookQuat (a decline: not compared), 3 inversRigid.
+    int aimCount[4] = {}, aimBad = 0, aimDeclined = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".aim").c_str(), "rb"))
+    {
+        uint32_t w[64];
+        while (std::fread(w, 4, 64, o) == 64)
+        {
+            uint32_t got[16] = {};
+            size_t bytes = 16;
+            const uint32_t kind = w[0] & 3u;
+            motion::Exact x;
+            if (kind == 0u)
+            {
+                const Vec4 r0 = load(w + 1), r1 = load(w + 5), r2 = load(w + 9), v = load(w + 13);
+                if (!motion::applyXyzInputs(r0, r1, r2, v))
+                {
+                    ++aimDeclined;
+                    continue;
+                }
+                store(got, motion::applyXyz(r0, r1, r2, v).r);
+            }
+            else if (kind == 1u)
+            {
+                float q[4], p[3], out[3];
+                std::memcpy(q, w + 1, 16), std::memcpy(p, w + 5, 12);
+                motion::quatRotatePoint(x, q, p, out);
+                std::memcpy(got, out, 12);
+                got[3] = 0x3F800000u;
+            }
+            else if (kind == 2u)
+            {
+                float a[3], b[3], q[4];
+                std::memcpy(a, w + 1, 12), std::memcpy(b, w + 4, 12);
+                if (w[8] != 1u || w[9] != 2u || w[10] != 0u || !motion::lookQuat(x, a, b, w + 8, q))
+                    x.ok = false; // another next table: the native declines (blendTables)
+                std::memcpy(got, q, 16);
+            }
+            else
+            {
+                motion::Mat4 in;
+                for (int k = 0; k < 4; ++k)
+                    in.r[k] = load(w + 1 + 4 * k);
+                if (!motion::inversRigidInputs(in))
+                    x.ok = false;
+                else
+                {
+                    const motion::Mat4 out = motion::inversRigid(in);
+                    for (int k = 0; k < 4; ++k)
+                        store(got + 4 * k, out.r[k]);
+                }
+                bytes = 64;
+            }
+            if (!x.ok)
+            {
+                ++aimDeclined;
+                continue;
+            }
+            ++aimCount[kind];
+            if (std::memcmp(got, w + 40, bytes) != 0 && ++aimBad <= 5)
+                std::printf("IK-leaf vector (kind %u) differs\n", kind);
+        }
+        std::fclose(o);
+    }
+    bad += aimBad;
+    std::printf("IK leaves: apply %d, rotate %d, look %d, invers %d vectors (%d declined), %d differ\n", aimCount[0],
+                aimCount[1], aimCount[2], aimCount[3], aimDeclined, aimBad);
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
                 "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ; twist %d vectors, "
                 "%d differ; track %d vectors, %d differ; decode %d vectors (%d declined), %d differ\n", path, count,
-                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad - eulerBad - asinBad, rotCount, rotBad,
+                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad - eulerBad - asinBad - aimBad, rotCount, rotBad,
                 opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad,
                 trackCount, trackBad, decodeCount, decodeDeclined, decodeBad);
     return bad ? 1 : 0;

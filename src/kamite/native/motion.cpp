@@ -1710,6 +1710,180 @@ namespace kamite::native::motion
             returnFrom(ctx);
             return true;
         }
+
+        // ==== M5 batch 2: the IK leaves (claude/rung4-motion-map.md "M5 batch 2") =====================================
+        // caller_scan (ELF + 81 DLLs): aimIkPart 1, capVu0ApplyMatrixXYZ 14, Quat_rotatePoint 4 (v0 taken as scratch too),
+        // 0x15ABA0 1 sites; none reads a scratch register after the call, no j, no code pointer.
+        constexpr uint32_t kApplyXyz = 0x1F8350u, kQuatRotate = 0x15ADA0u, kLookQuat = 0x15ABA0u, kAimIkPart = 0x153808u;
+
+        // ---- capVu0ApplyMatrixXYZ 0x1F8350 (a0 = out, a1 = m, a2 = v; src/cod/001f8350.c; a leaf, jr ra + nop) -----------
+        // vf4 = v, vf5-vf7 = m's rows 0-2, ACC / vf8 = applyXyz, out = vf8 (lqc2 / sqc2: every address & ~0xF). v and the
+        // rows are read before out is written: out may be any of them.
+        template <class Env>
+        bool applyXyzNative(Env &env, R5900Context *ctx)
+        {
+            uint32_t out, m, v;
+            if (!env.atEnd || !plainRam(e::u32(ctx, e::a0) & ~0xFu, 16u, out) ||
+                !plainRam(e::u32(ctx, e::a1) & ~0xFu, 48u, m) || !plainRam(e::u32(ctx, e::a2) & ~0xFu, 16u, v))
+                return false;
+            const Vec4 vv = e::read128(env, v), r0 = e::read128(env, m), r1 = e::read128(env, m + 16u),
+                       r2 = e::read128(env, m + 32u);
+            if (!applyXyzInputs(r0, r1, r2, vv))
+                return false;
+            const libvu0::RowResult r = applyXyz(r0, r1, r2, vv);
+            e::write128(env, out, r.r);
+            e::setVf(ctx, 4, vv);
+            e::setVf(ctx, 5, r0);
+            e::setVf(ctx, 6, r1);
+            e::setVf(ctx, 7, r2);
+            e::setVf(ctx, 8, r.r);
+            store(&ctx->vu0_acc, r.acc);
+            ctx->pc = e::u32(ctx, e::ra); // a nop delay slot: in_delay_slot as it was
+            return true;
+        }
+
+        // ---- Quat_rotatePoint 0x15ADA0 (a0 = out, a1 = q, a2 = p; src/cod/0015ada0.c): v0 = out --------------------------
+        // A 0x50 frame (p.w = 0 is stored there before most reads: q / p inside it would read the frame), lwc1 / swc1
+        // throughout (word-aligned). Every read before the first write: out.w = 1.0, then y, z, x.
+        constexpr uint32_t kQuatRotateFrame = 0x50u;
+        template <class Env>
+        bool quatRotateNative(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp0 = e::u32(ctx, e::sp), a0 = e::u32(ctx, e::a0), a1 = e::u32(ctx, e::a1),
+                           a2 = e::u32(ctx, e::a2);
+            uint32_t frame, out, q, p;
+            if (!env.atEnd || (sp0 & 0xFu) != 0u || ((a0 | a1 | a2) & 3u) != 0u ||
+                !plainRam(sp0 - kQuatRotateFrame, kQuatRotateFrame, frame) || !plainRam(a0, 16u, out) ||
+                !plainRam(a1, 16u, q) || !plainRam(a2, 12u, p) || e::overlaps(out, 16u, frame, kQuatRotateFrame) ||
+                e::overlaps(q, 16u, frame, kQuatRotateFrame) || e::overlaps(p, 12u, frame, kQuatRotateFrame))
+                return false;
+            float qv[4], pv[3], o[3];
+            std::memcpy(qv, env.at(q, 16u), 16);
+            std::memcpy(pv, env.at(p, 12u), 12);
+            Exact x;
+            quatRotatePoint(x, qv, pv, o);
+            if (!x.ok)
+                return false;
+            e::write32(env, out + 12u, kOne);
+            e::write32(env, out + 4u, floatBits(o[1]));
+            e::write32(env, out + 8u, floatBits(o[2]));
+            e::write32(env, out, floatBits(o[0]));
+            std::memcpy(&ctx->r[e::v0], &ctx->r[e::a0], 8); // daddu v0, a0, zero
+            returnFrom(ctx);
+            return true;
+        }
+
+        // ---- func_0015ABA0 (a0 = q, a1 = a, a2 = b; asm): q = the rotation with z row b and x / y rows from b x a ---------
+        // A 0xD0 frame (s0 / s1, ra, f20 / f21 saved before b is copied in by quadword; the vectors and the matrix in it),
+        // the thunk 0x101E28's 0x10 and 0x15A190's 0x80 below it. a (lwc1: word-aligned), b (lqc2: & ~0xF) and q (0x15A190's
+        // stores, last) clear of the window. calls: the thunk and its capVu0Length twice, UnitMatrix, 0x15A190.
+        constexpr uint32_t kLookQuatWindow = 0xD0u + kMatToQuatFrame;
+        template <class Env>
+        bool lookQuatNative(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp0 = e::u32(ctx, e::sp), a0 = e::u32(ctx, e::a0), a1 = e::u32(ctx, e::a1);
+            uint32_t frame, out, av, bv;
+            BlendTables tb;
+            if (!env.atEnd || (sp0 & 0xFu) != 0u || ((a0 | a1) & 3u) != 0u || !e::vf0Constant(ctx) ||
+                !plainRam(sp0 - kLookQuatWindow, kLookQuatWindow, frame) || !plainRam(a0, 16u, out) ||
+                !plainRam(a1, 12u, av) || !plainRam(e::u32(ctx, e::a2) & ~0xFu, 16u, bv) ||
+                e::overlaps(out, 16u, frame, kLookQuatWindow) || e::overlaps(av, 12u, frame, kLookQuatWindow) ||
+                e::overlaps(bv, 16u, frame, kLookQuatWindow) || !blendTables(env, tb))
+                return false;
+            float a[3], b[4], q[4];
+            std::memcpy(a, env.at(av, 12u), 12);
+            std::memcpy(b, env.at(bv, 16u), 16);
+            Exact x;
+            if (!lookQuat(x, a, b, tb.next, q) || !x.ok)
+                return false;
+            for (int k = 0; k < 6; ++k)
+                env.call();
+            writeWords(env, out, q, 4);
+            returnFrom(ctx);
+            return true;
+        }
+
+        // ---- cModel_aimIkPart 0x153808 (a0 = the model, a1 = the part, a2 = the target; src/cod/00153808.c) -------------
+        // A 0xC0 frame (s0-s4, ra; the parent's inverse at sp). child = part +0x144 (read first); the part's world +0x80 =
+        // MulMatrix(model mtx +0x80, local +0x00); its position *(part +0xF0) = ApplyMatrixXYZ(world, *(child +0xD0)), then
+        // target - itself (xyz by swc1; the original skips that copy when the position is its own frame copy: in the window,
+        // declined); local = MulMatrix(InversMatrix(*(part +0x148) world), world); the child's world by
+        // func_001501D0(child, objFlags +0x250). Each step in the original's order on a JournalEnv (a step reads what the
+        // earlier ones wrote); 0x1501D0 by its native on a scratch context, its frames below (the deepest, 0x1A0).
+        constexpr uint32_t kAimIkFrame = 0xC0u, kAimIkWindow = kAimIkFrame + kPartWorldFrames;
+        template <class Env>
+        bool aimIkPartNative(Env &env, R5900Context *ctx)
+        {
+            const uint32_t sp0 = e::u32(ctx, e::sp), model = e::u32(ctx, e::a0), part = e::u32(ctx, e::a1);
+            uint32_t stackLow, pm, pp;
+            if (!env.atEnd || (sp0 & 0xFu) != 0u || ((model | part) & 0xFu) != 0u || !e::vf0Constant(ctx) ||
+                !plainRam(sp0 - kAimIkWindow, kAimIkWindow, stackLow) || !plainRam(model, 0x260u, pm) ||
+                !plainRam(part, 0x160u, pp) || addiOverflows(part, 64u) || addiOverflows(part + 0x80u, 64u))
+                return false;
+            JournalEnv<Env> j(env, stackLow, kAimIkWindow);
+            if (!j.ok)
+                return false;
+            // MulMatrix(out = part +0x80, A = model +0x80, B = part): A whole first, B row k before out row k (apart here)
+            const uint32_t child = e::read32(j, pp + 0x144u);
+            Mat4 world;
+            if (!multiplyStep(world, readMat(j, pm + 0x80u), readMat(j, pp)))
+                return false;
+            j.call();
+            for (int k = 0; k < 3; ++k)
+                j.checkpoint(32u);
+            writeMat(j, pp + 0x80u, world);
+            // ApplyMatrixXYZ(*(part +0xF0), world, *(child +0xD0))
+            const uint32_t pos = e::read32(j, pp + 0xF0u);
+            uint32_t childAt, out, v;
+            if ((child & 3u) != 0u || !plainRam(child + 0xD0u, 4u, childAt))
+                return false;
+            const uint32_t anchor = e::read32(j, childAt);
+            if (!plainRam(pos & ~0xFu, 16u, out) || !plainRam(anchor & ~0xFu, 16u, v))
+                return false;
+            const Vec4 vv = e::read128(j, v);
+            const Mat4 w = readMat(j, pp + 0x80u);
+            if (!applyXyzInputs(w.r[0], w.r[1], w.r[2], vv))
+                return false;
+            j.call();
+            e::write128(j, out, applyXyz(w.r[0], w.r[1], w.r[2], vv).r);
+            // *pos's xyz = target - *pos (vsub.xyz; lwc1 / swc1 at pos itself: aligned here)
+            const uint32_t pos2 = e::read32(j, pp + 0xF0u);
+            uint32_t tv, pv;
+            if ((pos2 & 0xFu) != 0u || !plainRam(e::u32(ctx, e::a2) & ~0xFu, 16u, tv) || !plainRam(pos2, 16u, pv))
+                return false;
+            const Vec4 t = e::read128(j, tv), p = e::read128(j, pv);
+            if (!libvu0::finiteXyz(t) || !libvu0::finiteXyz(p))
+                return false;
+            uint32_t d[4];
+            store(d, sub(t, p));
+            for (uint32_t k = 0; k < 3u; ++k)
+                e::write32(j, pv + 4u * k, d[k]);
+            // InversMatrix(frame, parent world), then MulMatrix(out = part, A = the inverse, B = part +0x80)
+            const uint32_t parent = e::read32(j, pp + 0x148u);
+            uint32_t in;
+            if (!plainRam((parent + 0x80u) & ~0xFu, 64u, in))
+                return false;
+            const Mat4 pw = readMat(j, in);
+            if (!inversRigidInputs(pw))
+                return false;
+            j.call();
+            Mat4 local;
+            if (!multiplyStep(local, inversRigid(pw), readMat(j, pp + 0x80u)))
+                return false;
+            j.call();
+            for (int k = 0; k < 3; ++k)
+                j.checkpoint(32u);
+            writeMat(j, pp, local);
+            // func_001501D0(child, objFlags as read now)
+            R5900Context c = *ctx;
+            innerArgs(c, sp0 - kAimIkFrame, child, e::read32(j, pm + 0x250u), e::u32(&c, e::a2), e::u32(&c, e::a3));
+            j.call();
+            if (!partWorld(j, &c) || !j.ok)
+                return false;
+            j.commit();
+            returnFrom(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -1812,5 +1986,12 @@ namespace kamite::native::motion
         addF("func_003A1B78", kAsinf, &asinfNative<RealEnv>, &asinfNative<ShadowEnv>, true, NativeFunction::kReturnsF0);
         addF("MtxGetScaleVec", kScaleVec, &scaleVecNative<RealEnv>, &scaleVecNative<ShadowEnv>, true, 0u);
         addF("func_00147C88", kMatToEuler, &matToEulerNative<RealEnv>, &matToEulerNative<ShadowEnv>, true, 0u);
+        // M5 batch 2 (Nov 27): the IK leaves, shadowed: cModel_aimIkPart fused (MulMatrix x2, InversMatrix, ApplyMatrixXYZ,
+        // func_001501D0 inline), capVu0ApplyMatrixXYZ, Quat_rotatePoint (returns v0 = out), func_0015ABA0.
+        addF("capVu0ApplyMatrixXYZ", kApplyXyz, &applyXyzNative<RealEnv>, &applyXyzNative<ShadowEnv>, false, 0u);
+        addF("Quat_rotatePoint", kQuatRotate, &quatRotateNative<RealEnv>, &quatRotateNative<ShadowEnv>, false,
+             NativeFunction::kReturnsV0);
+        addF("func_0015ABA0", kLookQuat, &lookQuatNative<RealEnv>, &lookQuatNative<ShadowEnv>, false, 0u);
+        addF("cModel_aimIkPart", kAimIkPart, &aimIkPartNative<RealEnv>, &aimIkPartNative<ShadowEnv>, false, 0u);
     }
 }

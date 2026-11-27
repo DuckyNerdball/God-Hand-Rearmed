@@ -98,3 +98,7 @@ capVu0Acos,0x001F8140,decomp,capVu0Acos,src/cod/001f8140.c,eed8dc0,db4d1d2aae47,
 func_003A1B78,0x003A1B78,decomp,func_003A1B78,src/cod/003a1b78.c,eed8dc0,b8652d143ef2,rung 4 M5 batch 1: the asinf wrapper with __ieee754_asinf (src/cod/003a2558.c) and __ieee754_sqrtf (src/cod/003a3b48.c) inline; the DOMAIN path declines; returns f0; kRenderPath|kChargeAtEnd
 MtxGetScaleVec,0x00148160,asm,,,,,rung 4 M5 batch 1: the rows' lengths, 0x150710 inline; kRenderPath|kChargeAtEnd
 func_00147C88,0x00147C88,asm,,,,,rung 4 M5 batch 1: a matrix to Euler angles by rotation order (six cases) with MtxGetScaleVec / capVu0Atan2 / the asinf wrapper inline; kRenderPath|kChargeAtEnd
+capVu0ApplyMatrixXYZ,0x001F8350,decomp,capVu0ApplyMatrixXYZ,src/cod/001f8350.c,a6c87fd,5472aace5120,rung 4 M5 batch 2: motion_core applyXyz (vmulax / vmadday / vmaddz of rows 0-2); kRenderPath|kChargeAtEnd
+Quat_rotatePoint,0x0015ADA0,decomp,Quat_rotatePoint,src/cod/0015ada0.c,a6c87fd,c22fb6604c99,rung 4 M5 batch 2: q (p 0) conj(q) in the asm's FPU order; returns v0 = out; kRenderPath|kChargeAtEnd
+func_0015ABA0,0x0015ABA0,asm,,,,,rung 4 M5 batch 2: the basis with z row b and x / y from b x a (two capVu0Length normalizes) into 0x15A190's quaternion; kRenderPath|kChargeAtEnd
+cModel_aimIkPart,0x00153808,decomp,cModel_aimIkPart,src/cod/00153808.c,a6c87fd,e71bb9a1a395,rung 4 M5 batch 2: MulMatrix x2 / InversMatrix / ApplyMatrixXYZ / func_001501D0 inline on a JournalEnv; kRenderPath|kChargeAtEnd
