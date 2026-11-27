@@ -14,9 +14,6 @@
 #include "kamite/native/collision_core.h"
 #include "kamite/native/ee_ctx.h"
 
-#include <cstdio>
-#include <type_traits>
-
 namespace kamite::native::collision
 {
     namespace
@@ -43,35 +40,6 @@ namespace kamite::native::collision
             if (address == 0u)
                 return true;
             return (address & 3u) == 0u && plainRam(address, 12u, offset) && !e::overlaps(offset, 12u, low, window);
-        }
-        // Dev builds: why a C1 native declined in play, the first 12 of each reason per function and run, inputs included
-        // (claude/strip-list.md: K's 21:48 Build and Replay of 3151fdc had 564 HitProbe / 0x135EC8 declines, all in
-        // the two roulette cases). why: 0 an entry check, 1-3 PlaneHit::why, 11-12 QuadInside::why + 10.
-        enum DeclineFn
-        {
-            kNotePlane,
-            kNoteQuad,
-            kNoteProbe
-        };
-        template <class Env>
-        void noteDecline(DeclineFn fn, int why, const Vec4 *v, int n)
-        {
-#if !defined(KAMITE_RELEASE)
-            if constexpr (std::is_same_v<Env, RealEnv>)
-            {
-                static int seen[3][16];
-                if (why < 0 || why > 15 || ++seen[fn][why] > 12)
-                    return;
-                static const char *const names[3] = {"func_00135EC8", "func_001361A0", "HitProbe_probeHitPoint"};
-                std::fprintf(stderr, "[collision] %s declined, why %d:", names[fn], why);
-                for (int k = 0; k < n; ++k)
-                    std::fprintf(stderr, " (%08X %08X %08X %08X)", laneBits<0>(v[k]), laneBits<1>(v[k]), laneBits<2>(v[k]),
-                                 laneBits<3>(v[k]));
-                std::fprintf(stderr, "\n");
-            }
-#else
-            (void)fn, (void)why, (void)v, (void)n;
-#endif
         }
         template <class Env>
         void writeXzy(Env &env, uint32_t offset, Vec4 p)
@@ -138,23 +106,14 @@ namespace kamite::native::collision
             if (!env.atEnd || !e::vf0Constant(ctx) || !frameWindow(ctx, kPlaneHitFrame, low) ||
                 !plain16(e::u32(ctx, e::a0), s) || !plain16(e::u32(ctx, e::a1), en) || !plain16(e::u32(ctx, e::a2), n) ||
                 !plain16(e::u32(ctx, e::a3), pt) || !outWords(e::u32(ctx, e::t0), low, kPlaneHitFrame, out))
-            {
-                noteDecline<Env>(kNotePlane, 0, nullptr, 0);
                 return false;
-            }
             for (uint32_t o : {s, en, n, pt})
                 if (e::overlaps(o, 16u, low, kPlaneHitFrame))
-                {
-                    noteDecline<Env>(kNotePlane, 0, nullptr, 0);
                     return false;
-                }
-            const Vec4 in[4] = {e::read128(env, s), e::read128(env, en), e::read128(env, n), e::read128(env, pt)};
-            const PlaneHit h = planeHit(e::vf(ctx, 0), in[0], in[1], in[2], in[3], ctx->vu0_status);
+            const PlaneHit h = planeHit(e::vf(ctx, 0), e::read128(env, s), e::read128(env, en), e::read128(env, n),
+                                        e::read128(env, pt), ctx->vu0_status);
             if (!h.ok)
-            {
-                noteDecline<Env>(kNotePlane, h.why, in, 4);
                 return false;
-            }
             for (int k = 0; k < 4; ++k)
                 env.call();
             if (h.hit && e::u32(ctx, e::t0) != 0u)
@@ -175,20 +134,13 @@ namespace kamite::native::collision
             if (!env.atEnd || !e::vf0Constant(ctx) || !frameWindow(ctx, kQuadInsideFrame, low) ||
                 !plainRam(e::u32(ctx, e::a0) & ~0xFu, 64u, quad) || !plain16(e::u32(ctx, e::a1), pt) ||
                 e::overlaps(quad, 64u, low, kQuadInsideFrame) || e::overlaps(pt, 16u, low, kQuadInsideFrame))
-            {
-                noteDecline<Env>(kNoteQuad, 0, nullptr, 0);
                 return false;
-            }
-            Vec4 v[5];
+            Vec4 v[4];
             for (uint32_t k = 0; k < 4u; ++k)
                 v[k] = e::read128(env, quad + 16u * k);
-            v[4] = e::read128(env, pt);
-            const QuadInside q = quadInside(e::vf(ctx, 0), v, v[4], ctx->vu0_status);
+            const QuadInside q = quadInside(e::vf(ctx, 0), v, e::read128(env, pt), ctx->vu0_status);
             if (!q.ok)
-            {
-                noteDecline<Env>(kNoteQuad, 10 + q.why, v, 5);
                 return false;
-            }
             env.checkpoint(32u);
             for (int k = 0; k < q.calls; ++k)
                 env.call();
@@ -209,37 +161,25 @@ namespace kamite::native::collision
                 !plain16(e::u32(ctx, e::a0), s) || !plain16(e::u32(ctx, e::a1), en) || !plain16(e::u32(ctx, e::a3), n) ||
                 !plainRam(e::u32(ctx, e::a2) & ~0xFu, 64u, quad) ||
                 !outWords(e::u32(ctx, e::t0), low, kHitProbeWindow, out) || e::overlaps(quad, 64u, low, kHitProbeWindow))
-            {
-                noteDecline<Env>(kNoteProbe, 0, nullptr, 0);
                 return false;
-            }
             for (uint32_t o : {s, en, n})
                 if (e::overlaps(o, 16u, low, kHitProbeWindow))
-                {
-                    noteDecline<Env>(kNoteProbe, 0, nullptr, 0);
                     return false;
-                }
             const Vec4 vf0 = e::vf(ctx, 0);
             Vec4 v[4];
             for (uint32_t k = 0; k < 4u; ++k)
                 v[k] = e::read128(env, quad + 16u * k);
-            const Vec4 in[7] = {e::read128(env, s), e::read128(env, en), e::read128(env, n), v[0], v[1], v[2], v[3]};
-            const PlaneHit h = planeHit(vf0, in[0], in[1], in[2], v[0], ctx->vu0_status);
+            const PlaneHit h = planeHit(vf0, e::read128(env, s), e::read128(env, en), e::read128(env, n), v[0],
+                                        ctx->vu0_status);
             if (!h.ok)
-            {
-                noteDecline<Env>(kNoteProbe, h.why, in, 7);
                 return false;
-            }
             int inside = 0, calls = 1 + 4;
             if (h.hit)
             {
                 // the hit buffer: vf0 (w = 1.0), x / z / y from 0x135EC8
                 const QuadInside q = quadInside(vf0, v, blend<7>(vf0, h.point), h.status);
                 if (!q.ok)
-                {
-                    noteDecline<Env>(kNoteProbe, 10 + q.why, in, 7);
                     return false;
-                }
                 env.checkpoint(32u);
                 calls += 1 + q.calls;
                 inside = q.inside;
@@ -257,8 +197,8 @@ namespace kamite::native::collision
     void registerFunctions()
     {
         // C1 (Nov 27): the probes' leaves; checked since K's 21:48 Build and Replay of 3151fdc shadowed them (0x133408
-        // 15.22M, 0x133948 10.96M, 0x135EC8 2.56M, HitProbe 2.29M, 0x1361A0 1.61M calls compared, 0 mismatches;
-        // 0x135EC8 / HitProbe 564 declines each, the roulette cases: noteDecline logs their reasons).
+        // 15.22M, 0x133948 10.96M, 0x135EC8 2.56M, HitProbe 2.29M, 0x1361A0 1.61M calls compared, 0 mismatches). The
+        // 564 0x135EC8 / HitProbe declines (the roulette cases) are the normalize's own: a stage quad with a zero normal.
         auto add = [](const char *name, uint32_t address, bool (*real)(RealEnv &, R5900Context *),
                       bool (*shadow)(ShadowEnv &, R5900Context *), bool checked, uint32_t returns) {
             NativeFunction fn{name, address, "collision", checked, real, shadow, nullptr};
