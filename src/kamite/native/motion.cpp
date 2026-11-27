@@ -1986,12 +1986,14 @@ namespace kamite::native::motion
         addF("func_003A1B78", kAsinf, &asinfNative<RealEnv>, &asinfNative<ShadowEnv>, true, NativeFunction::kReturnsF0);
         addF("MtxGetScaleVec", kScaleVec, &scaleVecNative<RealEnv>, &scaleVecNative<ShadowEnv>, true, 0u);
         addF("func_00147C88", kMatToEuler, &matToEulerNative<RealEnv>, &matToEulerNative<ShadowEnv>, true, 0u);
-        // M5 batch 2 (Nov 27): the IK leaves, shadowed: cModel_aimIkPart fused (MulMatrix x2, InversMatrix, ApplyMatrixXYZ,
-        // func_001501D0 inline), capVu0ApplyMatrixXYZ, Quat_rotatePoint (returns v0 = out), func_0015ABA0.
-        addF("capVu0ApplyMatrixXYZ", kApplyXyz, &applyXyzNative<RealEnv>, &applyXyzNative<ShadowEnv>, false, 0u);
-        addF("Quat_rotatePoint", kQuatRotate, &quatRotateNative<RealEnv>, &quatRotateNative<ShadowEnv>, false,
+        // M5 batch 2 (Nov 27): the IK leaves: cModel_aimIkPart fused (MulMatrix x2, InversMatrix, ApplyMatrixXYZ,
+        // func_001501D0 inline), capVu0ApplyMatrixXYZ, Quat_rotatePoint (returns v0 = out), func_0015ABA0; checked since K's
+        // 09:56 Build and Replay of f532603 (ApplyMatrixXYZ 2.73M, Quat_rotatePoint 0.32M, aimIkPart 0.26M, 0x15ABA0 0.26M
+        // calls compared, 0 mismatches, 0 declines).
+        addF("capVu0ApplyMatrixXYZ", kApplyXyz, &applyXyzNative<RealEnv>, &applyXyzNative<ShadowEnv>, true, 0u);
+        addF("Quat_rotatePoint", kQuatRotate, &quatRotateNative<RealEnv>, &quatRotateNative<ShadowEnv>, true,
              NativeFunction::kReturnsV0);
-        addF("func_0015ABA0", kLookQuat, &lookQuatNative<RealEnv>, &lookQuatNative<ShadowEnv>, false, 0u);
-        addF("cModel_aimIkPart", kAimIkPart, &aimIkPartNative<RealEnv>, &aimIkPartNative<ShadowEnv>, false, 0u);
+        addF("func_0015ABA0", kLookQuat, &lookQuatNative<RealEnv>, &lookQuatNative<ShadowEnv>, true, 0u);
+        addF("cModel_aimIkPart", kAimIkPart, &aimIkPartNative<RealEnv>, &aimIkPartNative<ShadowEnv>, true, 0u);
     }
 }

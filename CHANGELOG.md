@@ -2,6 +2,10 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 27, 2026
+
+- Performance: aiming a limb at its target in IK, and its rotation helpers, run as native code.
+
 ## November 26, 2026
 
 - Performance: turning bone matrices into angles (IK and many moves) runs as native code.
