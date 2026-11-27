@@ -410,6 +410,8 @@ if(MSVC)
     # runtime objects only. The generated game code never gets /GL (above), so it is not part of that step.
     target_link_options(kamite PRIVATE /FORCE:MULTIPLE /STACK:16777216 $<$<CONFIG:RelWithDebInfo>:/LTCG>)
     target_link_libraries(kamite PRIVATE dbghelp winmm)
+elseif(MINGW)
+    target_link_libraries(kamite PRIVATE dbghelp wevtapi synchronization winmm)
 endif()
 
 if(UNIX AND NOT APPLE AND NOT ANDROID)

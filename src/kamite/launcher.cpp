@@ -2883,6 +2883,16 @@ namespace kamite::launcher
                 for (int a = 0; a < gp::AxisCount; ++a)
                     if (std::fabs(gp::axis(device, static_cast<gp::Axis>(a))) > 0.3f)
                         return true;
+                for (int b = 0; b < gp::rawButtonCount(device); ++b)
+                    if (gp::rawButton(device, b))
+                        return true;
+                for (int h = 0; h < gp::rawHatCount(device); ++h)
+                    for (const unsigned char direction : {1u, 2u, 4u, 8u})
+                        if (gp::rawHat(device, h, direction))
+                            return true;
+                for (int a = 0; a < gp::rawAxisCount(device); ++a)
+                    if (std::fabs(gp::rawAxis(device, a)) > 0.3f)
+                        return true;
             }
             return false;
         }
@@ -2982,12 +2992,36 @@ namespace kamite::launcher
                         bindCell(g_capture.row, true, 0, pc::padButtonBinding(device, b));
                         return true;
                     }
+                for (int b = 0; b < gp::rawButtonCount(device); ++b)
+                    if (gp::rawButton(device, b))
+                    {
+                        bindCell(g_capture.row, true, 0, pc::padButtonBinding(device, gp::kRawButtonBase + b));
+                        return true;
+                    }
+                constexpr unsigned char kHatMasks[] = {1u, 3u, 2u, 6u, 4u, 12u, 8u, 9u};
+                for (int h = 0; h < gp::rawHatCount(device); ++h)
+                    for (int direction = 0; direction < static_cast<int>(std::size(kHatMasks)); ++direction)
+                        if (gp::rawHat(device, h, kHatMasks[direction]))
+                        {
+                            bindCell(g_capture.row, true, 0,
+                                     pc::padButtonBinding(device, gp::kRawHatBase + h * 8 + direction));
+                            return true;
+                        }
                 for (int a = 0; a < gp::AxisCount; ++a)
                 {
                     const float v = gp::axis(device, static_cast<gp::Axis>(a));
                     if (std::fabs(v) > 0.6f)
                     {
                         bindCell(g_capture.row, true, 0, pc::padAxisBinding(device, a, v < 0.0f));
+                        return true;
+                    }
+                }
+                for (int a = 0; a < gp::rawAxisCount(device); ++a)
+                {
+                    const float v = gp::rawAxis(device, a);
+                    if (std::fabs(v) > 0.6f)
+                    {
+                        bindCell(g_capture.row, true, 0, pc::padAxisBinding(device, gp::kRawAxisBase + a, v < 0.0f));
                         return true;
                     }
                 }

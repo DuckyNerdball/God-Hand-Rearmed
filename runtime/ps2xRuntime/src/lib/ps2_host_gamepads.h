@@ -3,13 +3,16 @@
 #include <string>
 #include <vector>
 
-// Host gamepads behind the "SDL-<n>/<element>" bindings of controls.ini (PCSX2's syntax). With SDL3 (the default)
-// the numbers follow PCSX2: an Xbox controller keeps its XInput number, the others take the lowest free one, and the
-// motors work. PS2X_SDL_INPUT=0 (controls.ini [InputSources] SDL = false) reads GLFW's gamepads instead (the raylib
-// input of older versions: GLFW joystick n is SDL-<n>, no vibration). Everything here runs on the window thread.
+// Host gamepads and unmapped SDL joysticks behind the "SDL-<n>/<element>" bindings of controls.ini (PCSX2's syntax).
+// With SDL3 (the default) the numbers follow PCSX2 for gamepads; unmapped joysticks take the lowest free number.
+// PS2X_SDL_INPUT=0 (controls.ini [InputSources] SDL = false) reads GLFW's gamepads instead. Everything here runs on
+// the window thread.
 namespace ps2_host_gamepads
 {
     constexpr int kMaxDevices = 16;
+    constexpr int kRawButtonBase = 64;
+    constexpr int kRawAxisBase = 64;
+    constexpr int kRawHatBase = 512;
 
     // SDL3's SDL_GamepadButton / SDL_GamepadAxis numbering.
     enum Button
@@ -56,6 +59,13 @@ namespace ps2_host_gamepads
     // Whether the controller reports that button at all (SDL3: SDL_GamepadHasButton; the back paddles of an Elite, a
     // DualSense Edge, a Steam pad). GLFW: only the standard buttons.
     [[nodiscard]] bool hasButton(int device, Button button);
+    // Buttons, axes and hats on SDL joysticks without a gamepad mapping.
+    [[nodiscard]] int rawButtonCount(int device);
+    [[nodiscard]] bool rawButton(int device, int button);
+    [[nodiscard]] int rawAxisCount(int device);
+    [[nodiscard]] float rawAxis(int device, int axis);
+    [[nodiscard]] int rawHatCount(int device);
+    [[nodiscard]] bool rawHat(int device, int hat, unsigned char direction);
     // Sticks -1..1 (down and right positive), triggers 0..1.
     [[nodiscard]] float axis(int device, Axis axis);
     // A finger on the controller's touchpad (SDL3 only; the last touchpad, the right one on a pad with two): true and
