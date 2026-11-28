@@ -534,10 +534,12 @@ namespace kamite::native::collision
         add("func_0012F4C8", kGridClear, &gridClearNative<RealEnv>, &gridClearNative<ShadowEnv>, true, 0u, 65536u,
             1024u * 1024u);
         add("func_0012F750", kPolygon, &polygonNative<RealEnv>, &polygonNative<ShadowEnv>, true, 0u, 1024u);
-        // C3 (Nov 28): the solids and the query, shadowed (unchecked). 0x12ED60's footprint: a whole room's seen bits (as
-        // 0x12F4C8's) and the polygons, vertices and solids it reads.
-        add("func_00130700", kSolids, &solidsNative<RealEnv>, &solidsNative<ShadowEnv>, false, 0u, 1024u);
-        add("func_0012ED60", kQuery, &queryNative<RealEnv>, &queryNative<ShadowEnv>, false, NativeFunction::kReturnsV0,
+        // C3 (Nov 28): the solids and the query; checked (K's call). His plain Build and Replay of ab99e29 (the 11:45 build):
+        // 3.80M calls compared, 0 mismatches, 0 declines, but 7 case lines' chains moved while they were shadowed, the same
+        // in two runs, cause not found (claude/rung4-collision-map.md "C3: shadowed"); this live run decides. 0x12ED60's
+        // footprint: a whole room's seen bits (as 0x12F4C8's) and the polygons, vertices and solids it reads.
+        add("func_00130700", kSolids, &solidsNative<RealEnv>, &solidsNative<ShadowEnv>, true, 0u, 1024u);
+        add("func_0012ED60", kQuery, &queryNative<RealEnv>, &queryNative<ShadowEnv>, true, NativeFunction::kReturnsV0,
             65536u, 1024u * 1024u);
     }
 }

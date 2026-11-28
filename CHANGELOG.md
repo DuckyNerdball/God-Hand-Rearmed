@@ -4,6 +4,7 @@ Newest first, one line per change; the code comments say how.
 
 ## November 28, 2026
 
+- Performance: the whole collision check of a line, the stage's boxes and boards included, runs as native code.
 - Performance: checking a line against the stage's collision grid and its polygons, triangles included (walls, floors, shadows, the camera), runs as native code.
 
 ## November 27, 2026
