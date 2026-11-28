@@ -2,6 +2,10 @@
 
 Newest first, one line per change; the code comments say how.
 
+## November 28, 2026
+
+- Performance: checking a line against the stage's collision grid and its polygons, triangles included (walls, floors, shadows, the camera), runs as native code.
+
 ## November 27, 2026
 
 - Performance: the collision tests of a line against a polygon's plane and inside its edges (walls, floors, shadows, IK, the camera) run as native code.

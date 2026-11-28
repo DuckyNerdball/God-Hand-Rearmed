@@ -475,18 +475,19 @@ namespace kamite::native::collision
             NativeFunction::kReturnsV0);
         add("HitProbe_probeHitPoint", kHitProbe, &hitProbeNative<RealEnv>, &hitProbeNative<ShadowEnv>, true,
             NativeFunction::kReturnsV0);
-        // C2 (Nov 27): the grid; shadowed (not checked yet).
-        add("func_00136030", kTriInside, &triInsideNative<RealEnv>, &triInsideNative<ShadowEnv>, false,
+        // C2 (Nov 28): the grid; checked (K's plain Build and Replay of 87a7f9f, the 06:56 build: 25.96M calls compared,
+        // 0 mismatches, 0 declines).
+        add("func_00136030", kTriInside, &triInsideNative<RealEnv>, &triInsideNative<ShadowEnv>, true,
             NativeFunction::kReturnsV0);
-        add("func_00136458", kTriProbe, &triProbeNative<RealEnv>, &triProbeNative<ShadowEnv>, false,
+        add("func_00136458", kTriProbe, &triProbeNative<RealEnv>, &triProbeNative<ShadowEnv>, true,
             NativeFunction::kReturnsV0);
-        add("func_0012F288", kGridRange, &gridRangeNative<RealEnv>, &gridRangeNative<ShadowEnv>, false,
+        add("func_0012F288", kGridRange, &gridRangeNative<RealEnv>, &gridRangeNative<ShadowEnv>, true,
             NativeFunction::kReturnsV0);
         // their recorded footprints: a polygon's flags word per range (a cell lists up to 3 x 255; a room's whole grid
         // ~14,000 ids in limit_break_test_room_loads), so the shadow harness keeps more than the default 256 ranges
-        add("func_0012F600", kGridSeen, &gridSeenNative<RealEnv>, &gridSeenNative<ShadowEnv>, false, 0u, 1024u);
-        add("func_0012F4C8", kGridClear, &gridClearNative<RealEnv>, &gridClearNative<ShadowEnv>, false, 0u, 65536u,
+        add("func_0012F600", kGridSeen, &gridSeenNative<RealEnv>, &gridSeenNative<ShadowEnv>, true, 0u, 1024u);
+        add("func_0012F4C8", kGridClear, &gridClearNative<RealEnv>, &gridClearNative<ShadowEnv>, true, 0u, 65536u,
             1024u * 1024u);
-        add("func_0012F750", kPolygon, &polygonNative<RealEnv>, &polygonNative<ShadowEnv>, false, 0u, 1024u);
+        add("func_0012F750", kPolygon, &polygonNative<RealEnv>, &polygonNative<ShadowEnv>, true, 0u, 1024u);
     }
 }
