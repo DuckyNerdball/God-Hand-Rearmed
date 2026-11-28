@@ -115,3 +115,5 @@ func_0012F288,0x0012F288,decomp,func_0012F288,src/cod/0012f288.c,9979f74,00a2434
 func_0012F600,0x0012F600,decomp,func_0012F600,src/cod/0012f600.c,9979f74,ddd5de876819,rung 4 collision C2: one cell's polygons' seen bit cleared per class; on a journal; kRenderPath|kChargeAtEnd
 func_0012F4C8,0x0012F4C8,decomp,func_0012F4C8,src/cod/0012f4c8.c,9979f74,34bba730827d,rung 4 collision C2: the seen bits over a cell range (0x12F600 inline; the asm's axes; walks past 65,536 cells declined); on a journal; kRenderPath|kChargeAtEnd
 func_0012F750,0x0012F750,asm,,,,,rung 4 collision C2: one polygon of a ChkLine query (InnerProduct / 0x133948 / 0x133408 / 0x136458 or HitProbe inline); on a journal; kRenderPath|kChargeAtEnd
+func_00130700,0x00130700,asm,,,,,rung 4 collision C3: the solids of a ChkLine query (boards and boxes; Normalize / OuterProduct / InnerProduct / 0x133408 / HitProbe inline); on a journal; kRenderPath|kChargeAtEnd
+func_0012ED60,0x0012ED60,asm,,,,,rung 4 collision C3: a line query fused (the thunk + capVu0Length, 0x12F288, 0x12F4C8, 0x12F750 per listed polygon, 0x130700 inline); on a journal; kRenderPath|kChargeAtEnd

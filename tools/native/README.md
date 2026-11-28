@@ -51,7 +51,8 @@ with kamite/git_commit.h):
        func_00153158_0x153158 Circle_line2_0x15f2a8 drawArrow_0x15fb98 sceVu0InnerProduct_0x30a348
        func_00133948_0x133948 func_00133408_0x133408 func_00135EC8_0x135ec8 func_001361A0_0x1361a0
        HitProbe_probeHitPoint_0x1365b8 func_0012F288_0x12f288 func_0012F4C8_0x12f4c8 func_0012F600_0x12f600
-       func_0012F750_0x12f750 func_00136030_0x136030 func_00136458_0x136458"
+       func_0012F750_0x12f750 func_00136030_0x136030 func_00136458_0x136458 func_00130700_0x130700
+       func_0012ED60_0x12ed60"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -320,3 +321,23 @@ image before and after the recompiled function, the native's own decision) runs 
 bodies on the image. Every byte an original reads must lie in kRegions: outside them the two RAMs can differ
 once other natives have run (a 0x12F750 setup that followed a polygon past its table read vertices past 1 MB: one
 mismatch in the full run, none in KM_ONLY runs; Nov 28).
+
+## Rung 4: collision C3, the solids and the query (Nov 28)
+
+func_00130700 (the solids of the scroll's list +0x190: a board's face, a box's six, each with a facing test, HitProbe, the
+hit list, the solids' outputs with a box's id searched first, a strictly closer hit's normal from the solid's corners) and
+func_0012ED60 fused (a line query: the copies, dir through the thunk + capVu0Length, the query state, 0x12F288, 0x12F4C8,
+the cells' polygons through 0x12F750, then 0x130700, the outputs; claude/rung4-collision-map.md "C3"). Both are
+collision_core.h bodies on GridMem (solidsTest, queryTest) with every callee inline as its native's body. shadow_test's
+setupSolids takes setupGrid's room and puts its solids right after the tables: the case's own (KM_COLL pools hold the
+chain as kinds 9+ in chain order: boxes, 2-3 a room) three times in four when the room has some, plus made-up ones
+(boxes of eight corners turned by a yaw or any turn, flat or with squares that underflow; boards from collQuad, either
+winding, collinear now and then; inactive ones, other types, word-aligned ones; owners shared or 0), sometimes a row of
+them along the segment (the solids' list fills, a box's id is searched past its first entry). The corner tables
+0x41D630 / 0x41D640 are a test region, the ELF's values or now and then other corners. Segments aim at a solid's face
+(its corners in the table's order), at a polygon (0x12ED60) or anywhere; the plants (an output in the window below the
+live frames, misaligned, a zero edge, a corner or a vertex on the segment's line) go in g_collPlants. 0x12ED60's stack
+arguments sit at the entry sp (the caller's frame). `<vectors>.solid` (whole calls in the standard layout: the room, its
+solids, the outputs, then the stack 0x400 + the window past them; the image and the corner tables; the native's own
+decision in w[1]) runs in libvu0_check through the same bodies.
+

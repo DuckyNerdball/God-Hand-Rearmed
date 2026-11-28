@@ -585,4 +585,460 @@ namespace kamite::native::collision
         }
         m.sb(s + 0x180u, 1u);
     }
+
+    // ==== C3: the solids and the query (claude/rung4-collision-map.md "C3") =========================================
+
+    // The corner index tables (the ELF's .data, read in place): a board's four (0x41D630: 0, 3, 2, 1), a box's six faces
+    // of four (0x41D640 + 16 face).
+    constexpr uint32_t kBoardCorners = 0x41D630u, kBoxCorners = 0x41D640u;
+    // A walk of the solids list past this declines (the rooms seen list 0-3; a cycle would never end in the original).
+    constexpr uint64_t kMaxSolids = 65536u;
+
+    // ---- One face of a solid in func_00130700 (asm 0x1307A8.. for a board, 0x130C34.. per box face) -----------------
+    // face: its record (u16 +2 the class bits, +4 the attribute bits); corners: the solid's corner array (16 bytes each);
+    // table: its four corner indices. The outputs list / capacity / count (0x130700's a1 / a2 / a3) and `box` (the dedup
+    // of the solid's id +0x30 in the list: a box can hit with several faces).
+    template <class M>
+    inline void solidFace(M &m, Vec4 vf0, uint16_t status, uint32_t s, uint32_t solid, uint32_t face, uint32_t corners,
+                          uint32_t table, bool box, uint32_t outList, uint32_t outCap, uint32_t outCount)
+    {
+        // 1. the class mask (+0x174 read first), the exclude mask
+        const uint32_t classes = m.lw(s + 0x174u);
+        if ((m.lhu(face + 2u) & classes) == 0u || !m.ok)
+            return;
+        const uint32_t attr = m.lw(face + 4u);
+        if ((attr & m.lw(s + 0x178u)) != 0u || !m.ok)
+            return;
+        // 2. the vf0 clear of sp+0x10..+0x4F (3 loops), the corners copied word by word (w 1.0), sp+0x60 / +0x70 (1 loop)
+        m.loop(), m.loop(), m.loop();
+        Vec4 c[4];
+        for (uint32_t k = 0; k < 4u; ++k)
+        {
+            const uint32_t at = (m.lw(table + 4u * k) << 4) + corners;
+            const uint32_t x = m.lw(at), y = m.lw(at + 4u), z = m.lw(at + 8u);
+            c[k] = bitsOf(x, y, z, laneBits<3>(vf0));
+        }
+        m.loop();
+        if (!m.ok)
+            return;
+        // 3. the facing test: N = normalize(c1 - c0) x normalize(c3 - c0); on only for dir . N < 0 (c.lt.s)
+        uint16_t st = status;
+        Vec4 e1, e3;
+        if (!normalizeStep(vf0, subXyz(c[1], c[0]), st, e1) || !normalizeStep(vf0, subXyz(c[3], c[0]), st, e3))
+        {
+            m.ok = false;
+            return;
+        }
+        m.call(), m.call(), m.call(); // Normalize x2, OuterProduct (its inputs: unit vectors)
+        const Vec4 n = blend<8>(libvu0::outerProduct(e1, e3).r, splat(0.0f)); // N.w reaches only the frame
+        m.call();
+        const Vec4 dir = m.lq(s + 0xD0u);
+        if (!m.ok)
+            return;
+        if (!libvu0::finiteXyz(dir) || !libvu0::finiteXyz(n)) // sceVu0InnerProduct's own check
+        {
+            m.ok = false;
+            return;
+        }
+        if (!lessThan(inner(dir, n), 0.0f))
+            return;
+        // 4. HitProbe_probeHitPoint(+0xE0, +0xF0, the corners, N, out = the buffer at sp: vf0, xyz written on a hit)
+        m.call();
+        const Vec4 start = m.lq(s + 0xE0u), end = m.lq(s + 0xF0u);
+        if (!m.ok)
+            return;
+        const PlaneHit h = planeHit(vf0, start, end, n, c[0], st);
+        if (!h.ok)
+        {
+            m.ok = false;
+            return;
+        }
+        int calls = 1 + 4, inside = 0;
+        if (h.hit)
+        {
+            const QuadInside q = quadInside(vf0, c, blend<7>(vf0, h.point), h.status);
+            if (!q.ok)
+            {
+                m.ok = false;
+                return;
+            }
+            m.loop();
+            calls += 1 + q.calls;
+            inside = q.inside;
+            st = q.status;
+        }
+        for (int k = 0; k < calls; ++k)
+            m.call();
+        if (!inside)
+            return;
+        const Vec4 hit = blend<7>(vf0, h.point);
+        // 5. the hit list (as 0x12F750's, with the face record for the group)
+        const uint32_t list = m.lw(s + 0x18Cu);
+        if (list != 0u)
+        {
+            if (m.lbu(s + 0x181u) != 0u)
+            {
+                m.sw(list, face);
+                m.sw(s + 0x17Cu, 1u);
+            }
+            else if (m.lw(s + 0x140u) != 0u)
+            {
+                m.sw(m.lw(s + 0x17Cu) * 4u + list, face);
+                const uint32_t count = m.lw(s + 0x17Cu), capacity = m.lw(s + 0x140u);
+                m.sw(s + 0x17Cu, count + 1u);
+                m.sw(s + 0x140u, capacity - 1u);
+            }
+        }
+        // 6. the solids' outputs: the solid's id +0x30 (0: none); stepped: entry 0 and count 1; else appended while the
+        //    count is below the capacity (a box: once per solid, the list searched first, a loop per entry past the first)
+        if (outList != 0u && outCount != 0u && outCap != 0u)
+        {
+            if (m.lbu(s + 0x181u) != 0u)
+            {
+                const uint32_t id = m.lw(solid + 0x30u);
+                if (id != 0u)
+                {
+                    m.sw(outList, id);
+                    m.sw(outCount, 1u);
+                }
+            }
+            else
+            {
+                const uint32_t count = m.lw(outCount);
+                if (count < outCap)
+                {
+                    bool add = true;
+                    if (box && count != 0u)
+                    {
+                        const uint32_t id = m.lw(solid + 0x30u);
+                        for (uint32_t i = 0; i < count && m.ok; ++i)
+                        {
+                            if (m.lw(i * 4u + outList) == id)
+                            {
+                                add = false;
+                                break;
+                            }
+                            if (i != 0u)
+                                m.loop();
+                        }
+                    }
+                    if (add)
+                    {
+                        const uint32_t id = m.lw(solid + 0x30u);
+                        if (id != 0u)
+                        {
+                            m.sw(count * 4u + outList, id);
+                            m.sw(outCount, m.lw(outCount) + 1u);
+                        }
+                    }
+                }
+            }
+        }
+        // 7. the distance (0x12F750's order); strictly closer (c.lt.s): +0x130 = normalize((c1 - c0) x (c3 - c0)) from
+        //    the solid's own corners (lqc2: & ~0xF; OuterProduct's quadword, then Normalize's in place), +0x188, +0x120 =
+        //    the hit, stepped: +0xF0 = +0x120; +0x180 = 1 on every hit
+        Exact x;
+        const float dy = x.sub(lwc1(m, s + 0xE4u), lane<1>(hit)), dx = x.sub(lwc1(m, s + 0xE0u), lane<0>(hit));
+        const float dz = x.sub(lwc1(m, s + 0xE8u), lane<2>(hit));
+        const float best = lwc1(m, s + 0x188u);
+        const float d2 = x.add(x.add(x.mul(dx, dx), x.mul(dy, dy)), x.mul(dz, dz));
+        if (!x.ok)
+            m.ok = false;
+        m.sw(s + 0x184u, floatBits(d2));
+        if (m.ok && lessThan(d2, best))
+        {
+            m.loop();
+            const uint32_t i1 = m.lw(table + 4u), i0 = m.lw(table);
+            const uint32_t c0 = (i0 << 4) + corners;
+            const Vec4 d1 = subXyz(m.lq((i1 << 4) + corners), m.lq(c0));
+            const uint32_t i3 = m.lw(table + 12u);
+            const Vec4 d3 = subXyz(m.lq((i3 << 4) + corners), m.lq(c0));
+            const Vec4 a = blend<7>(vf0, d1), b = blend<7>(vf0, d3); // sp+0x60 / +0x70: xyz copied, w 1.0
+            if (!m.ok)
+                return;
+            if (!libvu0::finiteXyz(a) || !libvu0::finiteXyz(b)) // sceVu0OuterProduct's own check
+            {
+                m.ok = false;
+                return;
+            }
+            m.call();
+            m.sq(s + 0x130u, blend<8>(libvu0::outerProduct(a, b).r, splat(0.0f)));
+            m.call();
+            Vec4 nn;
+            if (!normalizeStep(vf0, m.lq(s + 0x130u), st, nn) || !m.ok)
+            {
+                m.ok = false;
+                return;
+            }
+            m.sq(s + 0x130u, nn);
+            m.sw(s + 0x188u, m.lw(s + 0x184u));
+            m.sw(s + 0x120u, laneBits<0>(hit)), m.sw(s + 0x124u, laneBits<1>(hit)), m.sw(s + 0x128u, laneBits<2>(hit));
+            if (m.lbu(s + 0x181u) != 0u)
+                copyXyz(m, s + 0xF0u, s + 0x120u);
+        }
+        m.sb(s + 0x180u, 1u);
+    }
+
+    // ---- func_00130700 (asm): the solids of the query (scroll s, the solids' outputs list / capacity / count) -----------
+    // *count = 0 when count != 0; per solid of the list +0x190 (next +0): active (+0x8 bit 0), its bounds +0x10 / +0x20
+    // against the query box +0x90 / +0xA0 (0x133408: a call, its z / y exit a loop); type (+4) 1 = a board (face +0xA8,
+    // corners +0xC0 by 0x41D630), 2 = a box (faces +0xB0 + 16 k, corners +0x110 by 0x41D640 + 16 k; a loop per face past
+    // the first), anything else nothing; a loop per solid that has a next.
+    template <class M>
+    inline void solidsTest(M &m, Vec4 vf0, uint16_t status, uint32_t s, uint32_t outList, uint32_t outCap, uint32_t outCount)
+    {
+        if (outCount != 0u)
+            m.sw(outCount, 0u);
+        uint32_t solid = m.lw(s + 0x190u);
+        for (uint64_t walked = 0; solid != 0u && m.ok; ++walked)
+        {
+            if (walked >= kMaxSolids)
+            {
+                m.ok = false;
+                return;
+            }
+            if ((m.lw(solid + 8u) & 1u) != 0u)
+            {
+                float qmin[3], qmax[3];
+                for (uint32_t i = 0; i < 3u; ++i)
+                    qmin[i] = lwc1(m, s + 0x90u + 4u * i), qmax[i] = lwc1(m, s + 0xA0u + 4u * i);
+                m.call();
+                if (m.ok && overlapStep(m, qmin, qmax, solid + 0x10u, solid + 0x20u) && m.ok)
+                {
+                    const uint32_t type = m.lw(solid + 4u);
+                    if (type == 1u)
+                        solidFace(m, vf0, status, s, solid, solid + 0xA8u, solid + 0xC0u, kBoardCorners, false, outList,
+                                  outCap, outCount);
+                    else if (type == 2u)
+                        for (uint32_t k = 0; k < 6u && m.ok; ++k)
+                        {
+                            solidFace(m, vf0, status, s, solid, solid + 0xB0u + 16u * k, solid + 0x110u, kBoxCorners + 16u * k,
+                                      true, outList, outCap, outCount);
+                            if (k + 1u < 6u)
+                                m.loop();
+                        }
+                }
+            }
+            const uint32_t next = m.lw(solid);
+            if (next != 0u)
+                m.loop();
+            solid = next;
+        }
+    }
+
+    // ---- func_0012ED60 (asm): a line query on the scroll s (ChkLine's body; claude/rung4-collision-map.md "C3") --------
+    // a1 / a2: start / end (the argument registers: the beq guards compare them with s + 0xE0 / + 0xF0); outPoint,
+    // outNormal (0: none), mask, exclude, the hit list; sp: the entry sp (the caller's stack arguments: +0 the list's
+    // capacity, +8 outCount, +0x10 / +0x18 / +0x20 the solids' outputs, byte +0x28 stepped). v0 = the hit byte +0x180.
+    // The callees run inline: the thunk 0x101E28 + capVu0Length (two calls), gridRange, clearRange, polygonTest per
+    // listed polygon, solidsTest.
+    template <class M>
+    inline uint32_t queryTest(M &m, Vec4 vf0, uint16_t status, uint32_t s, uint64_t a1, uint64_t a2, uint32_t outPoint,
+                              uint32_t outNormal, uint32_t mask, uint32_t exclude, uint32_t hits, uint32_t sp)
+    {
+        const uint32_t stepped = m.lbu(sp + 0x28u);
+        if (m.lw(s) == 0u || !m.ok)
+            return 0u;
+        // 1. start into +0xE0 and +0xB0, end into +0xF0 and +0xC0 (word by word)
+        if (a1 != signExtend(s + 0xE0u))
+            copyXyz(m, s + 0xE0u, static_cast<uint32_t>(a1));
+        copyXyz(m, s + 0xB0u, s + 0xE0u);
+        if (a2 != signExtend(s + 0xF0u))
+            copyXyz(m, s + 0xF0u, static_cast<uint32_t>(a2));
+        copyXyz(m, s + 0xC0u, s + 0xF0u);
+        // 2. dir +0xD0 = (+0xC0 - +0xB0) * (1 / |..|) (the thunk and capVu0Length: 0 < length, else (0, 0, 0))
+        {
+            const Vec4 d = subXyz(m.lq(s + 0xC0u), m.lq(s + 0xB0u));
+            m.call(), m.call();
+            if (!m.ok)
+                return 0u;
+            Exact x;
+            Vec4 dir;
+            if (!motion::ikNormalize(x, d, dir) || !x.ok)
+            {
+                m.ok = false;
+                return 0u;
+            }
+            m.sw(s + 0xD0u, laneBits<0>(dir)), m.sw(s + 0xD4u, laneBits<1>(dir)), m.sw(s + 0xD8u, laneBits<2>(dir));
+        }
+        // 3. the query state; |start - end|^2 from the argument pointers (read after the copies)
+        m.sw(s + 0x174u, mask);
+        {
+            const uint32_t ps = static_cast<uint32_t>(a1), pe = static_cast<uint32_t>(a2);
+            const float ex = lwc1(m, pe), sx = lwc1(m, ps), sy = lwc1(m, ps + 4u), ey = lwc1(m, pe + 4u);
+            const float sz = lwc1(m, ps + 8u), ez = lwc1(m, pe + 8u);
+            Exact x;
+            const float dx = x.sub(sx, ex), dy = x.sub(sy, ey), dz = x.sub(sz, ez);
+            const float d2 = x.add(x.add(x.mul(dx, dx), x.mul(dy, dy)), x.mul(dz, dz));
+            if (!x.ok || !m.ok)
+            {
+                m.ok = false;
+                return 0u;
+            }
+            m.sw(s + 0x18Cu, hits);
+            m.sb(s + 0x181u, stepped);
+            m.sw(s + 0x178u, exclude);
+            m.sw(s + 0x17Cu, 0u);
+            m.sb(s + 0x180u, 0u);
+            m.sw(s + 0x140u, m.lw(sp));
+            m.sw(s + 0x188u, floatBits(d2));
+            m.sw(s + 0x184u, floatBits(d2));
+        }
+        // 4. func_0012F288(s, +0xB0, +0xC0): 0 -> 0
+        m.call();
+        if (gridRange(m, s, signExtend(s + 0xB0u), signExtend(s + 0xC0u)) == 0u || !m.ok)
+            return 0u;
+        // 5. func_0012F4C8 over the cell range (the words as lw leaves them: sign-extended)
+        {
+            const uint32_t x0 = m.lw(s + 0x6Cu), x1 = m.lw(s + 0x78u), y0 = m.lw(s + 0x70u), y1 = m.lw(s + 0x7Cu);
+            const uint32_t z0 = m.lw(s + 0x74u), z1 = m.lw(s + 0x80u), cls = m.lw(s + 0x174u);
+            if (!m.ok || !gridWalkBounded(x0, x1, y0, y1, z0, z1))
+            {
+                m.ok = false;
+                return 0u;
+            }
+            m.call();
+            clearRange(m, s, x0, x1, y0, y1, z0, z1, cls);
+            if (!m.ok)
+                return 0u;
+        }
+        // 6. the cells x / y / z (each bound re-read per turn, u32 compares; a loop per taken back-edge), per class bit of
+        //    +0x174 (re-read per class) the cell's ids: func_0012F750 each (a loop per id past the first)
+        uint64_t walked = 0;
+        auto bounded = [&]() {
+            if (++walked > kMaxGridCells)
+                m.ok = false;
+            return m.ok;
+        };
+        uint32_t x = m.lw(s + 0x6Cu);
+        if (!(m.lw(s + 0x78u) < x))
+            for (;;)
+            {
+                if (!bounded())
+                    return 0u;
+                const uint32_t ny = m.lw(s + 0x64u), xn = x + 1u;
+                const uint32_t y1 = m.lw(s + 0x7Cu), nz = m.lw(s + 0x68u);
+                uint32_t y = m.lw(s + 0x70u);
+                const uint32_t b0 = x * ny * nz;
+                if (!(y1 < y))
+                    for (;;)
+                    {
+                        if (!bounded())
+                            return 0u;
+                        const uint32_t nz2 = m.lw(s + 0x68u), yn = y + 1u;
+                        uint32_t z = m.lw(s + 0x74u);
+                        const uint32_t b1 = y * nz2;
+                        const uint32_t z1 = m.lw(s + 0x80u);
+                        if (!(z1 < z))
+                            for (;;)
+                            {
+                                if (!bounded())
+                                    return 0u;
+                                const uint32_t cell = m.lw(s + 0x18u) + ((b0 + b1) + z) * 8u;
+                                const uint32_t start = m.lw(cell), zn = z + 1u;
+                                if (!m.ok)
+                                    return 0u;
+                                if (start != 0xFFFFFFFFu)
+                                {
+                                    const uint32_t base = m.lw(s + 0x1Cu) + start * 2u;
+                                    auto polygons = [&](uint32_t q, uint32_t n) {
+                                        for (uint32_t k = 0; k < n && m.ok; ++k)
+                                        {
+                                            const uint32_t id = m.lhu(q);
+                                            q += 2u;
+                                            if (!m.ok)
+                                                return;
+                                            m.call();
+                                            polygonTest(m, vf0, status, s, id);
+                                            if (k + 1u < n)
+                                                m.loop();
+                                        }
+                                    };
+                                    if ((m.lw(s + 0x174u) & 1u) != 0u)
+                                        polygons(base, m.lbu(cell + 4u));
+                                    if ((m.lw(s + 0x174u) & 2u) != 0u)
+                                    {
+                                        const uint32_t n0 = m.lbu(cell + 4u);
+                                        polygons(base + n0 * 2u, m.lbu(cell + 5u));
+                                    }
+                                    if ((m.lw(s + 0x174u) & 4u) != 0u)
+                                    {
+                                        const uint32_t n0 = m.lbu(cell + 4u), n1 = m.lbu(cell + 5u);
+                                        polygons(base + n0 * 2u + n1 * 2u, m.lbu(cell + 6u));
+                                    }
+                                    if (!m.ok)
+                                        return 0u;
+                                }
+                                if (m.lw(s + 0x80u) < zn)
+                                    break;
+                                m.loop();
+                                z = zn;
+                            }
+                        if (m.lw(s + 0x7Cu) < yn)
+                            break;
+                        m.loop();
+                        y = yn;
+                    }
+                if (!m.ok)
+                    return 0u;
+                if (m.lw(s + 0x78u) < xn)
+                    break;
+                m.loop();
+                x = xn;
+            }
+        if (!m.ok)
+            return 0u;
+        // 7. func_00130700(s, the solids' outputs)
+        {
+            const uint32_t l = m.lw(sp + 0x10u), c = m.lw(sp + 0x18u), n = m.lw(sp + 0x20u);
+            m.call();
+            solidsTest(m, vf0, status, s, l, c, n);
+            if (!m.ok)
+                return 0u;
+        }
+        // 8. a hit: *outPoint = +0x120 (unless it is +0x120), *outNormal = +0x130 normalized (the thunk: the length from
+        //    the quadword, xyz from the words; written x, z, y; not when it is the frame's buffer), *outCount = +0x17C
+        if (m.lbu(s + 0x180u) == 0u || !m.ok)
+            return 0u;
+        if (outPoint != 0u && outPoint != s + 0x120u)
+            copyXyz(m, outPoint, s + 0x120u);
+        if (outNormal != 0u)
+        {
+            m.call(), m.call();
+            const Vec4 v = m.lq(s + 0x130u);
+            if (!m.ok)
+                return 0u;
+            if (!libvu0::finiteXyz(v)) // capVu0Length's check
+            {
+                m.ok = false;
+                return 0u;
+            }
+            const float len = lane<0>(libvu0::length(vf0, v, status).vf4);
+            uint32_t nx = 0u, ny = 0u, nz = 0u;
+            if (lessThan(0.0f, len))
+            {
+                Exact x;
+                const float r = x.div(motion::one(), len);
+                nx = floatBits(x.mul(lwc1(m, s + 0x130u), r));
+                ny = floatBits(x.mul(lwc1(m, s + 0x134u), r));
+                nz = floatBits(x.mul(lwc1(m, s + 0x138u), r));
+                (void)m.lw(s + 0x13Cu);
+                if (!x.ok || !m.ok)
+                {
+                    m.ok = false;
+                    return 0u;
+                }
+            }
+            if (outNormal != sp - 0xE0u + 0x10u)
+            {
+                m.sw(outNormal, nx);
+                m.sw(outNormal + 8u, nz);
+                m.sw(outNormal + 4u, ny);
+            }
+        }
+        const uint32_t outCount = m.lw(sp + 8u);
+        if (outCount != 0u)
+            m.sw(outCount, m.lw(s + 0x17Cu));
+        return m.lbu(s + 0x180u);
+    }
 }

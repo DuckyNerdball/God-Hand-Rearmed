@@ -449,6 +449,51 @@ namespace kamite::native::collision
             returnFrom(ctx);
             return true;
         }
+
+        // ==== C3: the solids and the query (claude/rung4-collision-map.md "C3") =========================================
+        // caller_scan (ELF + 81 DLLs): 0x130700 1, 0x12ED60 5 sites; none reads a scratch register after the call, no j,
+        // no code pointer. Both run collision_core.h's bodies on GridMem with their callees inline (each step as its
+        // native checks it), so a step reads what the earlier ones wrote and a decline puts every write back.
+
+        // ---- func_00130700 (scroll a0, the solids' outputs: list a1, capacity a2, count a3; asm): nothing returned -----
+        // A 0x160 frame; its deepest callee HitProbe 0x40 + 0x150.
+        constexpr uint32_t kSolids = 0x130700u, kSolidsWindow = 0x160u + kHitProbeWindow;
+        template <class Env>
+        bool solidsNative(Env &env, R5900Context *ctx)
+        {
+            uint32_t low;
+            if (!env.atEnd || !e::vf0Constant(ctx) || !frameWindow(ctx, kSolidsWindow, low))
+                return false;
+            GridMem<Env> m(env, low, kSolidsWindow);
+            solidsTest(m, e::vf(ctx, 0), ctx->vu0_status, e::u32(ctx, e::a0), e::u32(ctx, e::a1), e::u32(ctx, e::a2),
+                       e::u32(ctx, e::a3));
+            if (!m.ok)
+                return false;
+            returnFrom(ctx);
+            return true;
+        }
+
+        // ---- func_0012ED60 (scroll a0, start a1, end a2, outPoint a3, outNormal t0, mask t1, exclude t2, hits t3, the
+        // stack: capacity, outCount, the solids' outputs, byte stepped; asm): v0 = the hit byte ------------------------------
+        // A 0xE0 frame; its deepest callee func_00130700 (0x160 + HitProbe's 0x190; 0x12F750's 0x150 + 0x190, the thunk's 0x10
+        // less).
+        constexpr uint32_t kQuery = 0x12ED60u, kQueryWindow = 0xE0u + kSolidsWindow;
+        template <class Env>
+        bool queryNative(Env &env, R5900Context *ctx)
+        {
+            uint32_t low;
+            if (!env.atEnd || !e::vf0Constant(ctx) || !frameWindow(ctx, kQueryWindow, low))
+                return false;
+            GridMem<Env> m(env, low, kQueryWindow);
+            const uint32_t r = queryTest(m, e::vf(ctx, 0), ctx->vu0_status, e::u32(ctx, e::a0), e::u64(ctx, e::a1),
+                                         e::u64(ctx, e::a2), e::u32(ctx, e::a3), e::u32(ctx, e::t0), e::u32(ctx, e::t1),
+                                         e::u32(ctx, e::t2), e::u32(ctx, e::t3), e::u32(ctx, e::sp));
+            if (!m.ok)
+                return false;
+            e::setS32(ctx, e::v0, r);
+            returnFrom(ctx);
+            return true;
+        }
     }
 
     void registerFunctions()
@@ -489,5 +534,10 @@ namespace kamite::native::collision
         add("func_0012F4C8", kGridClear, &gridClearNative<RealEnv>, &gridClearNative<ShadowEnv>, true, 0u, 65536u,
             1024u * 1024u);
         add("func_0012F750", kPolygon, &polygonNative<RealEnv>, &polygonNative<ShadowEnv>, true, 0u, 1024u);
+        // C3 (Nov 28): the solids and the query, shadowed (unchecked). 0x12ED60's footprint: a whole room's seen bits (as
+        // 0x12F4C8's) and the polygons, vertices and solids it reads.
+        add("func_00130700", kSolids, &solidsNative<RealEnv>, &solidsNative<ShadowEnv>, false, 0u, 1024u);
+        add("func_0012ED60", kQuery, &queryNative<RealEnv>, &queryNative<ShadowEnv>, false, NativeFunction::kReturnsV0,
+            65536u, 1024u * 1024u);
     }
 }

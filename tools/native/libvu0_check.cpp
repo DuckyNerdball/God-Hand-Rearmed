@@ -893,10 +893,99 @@ int main(int argc, char **argv)
     std::printf("collision C2: triangle %d, triangle probe %d, range %d, cell %d, cells %d, polygon %d vectors (%d declined), "
                 "%d differ\n", gridCount[0], gridCount[1], gridCount[2], gridCount[3], gridCount[4], gridCount[5],
                 gridDeclined, gridBad);
+
+    // Collision C3 (<vectors>.solid, the solids and the query: whole calls, 24 words + the image before and after the
+    // recompiled function; shadow_test's writer has the layout). The cores run on the image as C2's; the frames' window
+    // below sp (w[16] - w[17] .. w[16]: the recompiled function's frames) is not compared.
+    // SolidMem: the image and the corner tables (0x41D600..6FF, read only); anything else declines
+    struct SolidMem
+    {
+        ImageMem image;
+        std::vector<uint8_t> &tables;
+        bool ok = true;
+        uint32_t calls = 0, loops = 0;
+        bool inTables(uint32_t a, uint32_t n) const { return (a & 0x1FFFFFFu) - 0x41D600u < 0x100u && (a & 0x1FFFFFFu) - 0x41D600u + n <= 0x100u; }
+        uint32_t lw(uint32_t a)
+        {
+            if (inTables(a, 4u) && (a & 3u) == 0u)
+            {
+                uint32_t v;
+                std::memcpy(&v, tables.data() + ((a & 0x1FFFFFFu) - 0x41D600u), 4);
+                return v;
+            }
+            const uint32_t v = image.lw(a);
+            ok = ok && image.ok;
+            return v;
+        }
+        uint32_t lhu(uint32_t a)
+        {
+            const uint32_t v = image.lhu(a);
+            ok = ok && image.ok;
+            return v;
+        }
+        uint32_t lbu(uint32_t a)
+        {
+            const uint32_t v = image.lbu(a);
+            ok = ok && image.ok;
+            return v;
+        }
+        Vec4 lq(uint32_t a)
+        {
+            const Vec4 v = image.lq(a);
+            ok = ok && image.ok;
+            return v;
+        }
+        void sw(uint32_t a, uint32_t v) { image.sw(a, v), ok = ok && image.ok; }
+        void sb(uint32_t a, uint32_t v) { image.sb(a, v), ok = ok && image.ok; }
+        void sq(uint32_t a, Vec4 v) { image.sq(a, v), ok = ok && image.ok; }
+        void call() { ++calls; }
+        void loop() { ++loops; }
+    };
+    int solidCount[2] = {}, solidBad = 0, solidDeclined = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".solid").c_str(), "rb"))
+    {
+        uint32_t w[24], bytes;
+        const Vec4 vf0 = bitsOf(0u, 0u, 0u, 0x3F800000u);
+        while (std::fread(w, 4, 24, o) == 24 && std::fread(&bytes, 4, 1, o) == 1)
+        {
+            std::vector<uint8_t> img(bytes), after(bytes), tables(0x100u);
+            if (std::fread(img.data(), 1, bytes, o) != bytes || std::fread(after.data(), 1, bytes, o) != bytes ||
+                std::fread(tables.data(), 1, 0x100u, o) != 0x100u)
+                break;
+            const uint32_t kind = w[0];
+            SolidMem m{ImageMem{img, w[15]}, tables};
+            const uint16_t status = static_cast<uint16_t>(w[12]);
+            uint32_t v0 = 0;
+            if (kind == 0u)
+                collision::solidsTest(m, vf0, status, w[2], w[3], w[4], w[5]);
+            else
+                v0 = collision::queryTest(m, vf0, status, w[2], (uint64_t{w[10]} << 32) | w[3], (uint64_t{w[11]} << 32) | w[4],
+                                          w[5], w[6], w[7], w[8], w[9], w[16]);
+            if (m.ok != (w[1] == 1u) && ++solidBad <= 5)
+                std::printf("solid vector (kind %u): the check %s, the native %s\n", kind, m.ok ? "ran" : "declined",
+                            w[1] ? "ran" : "declined");
+            if (!m.ok)
+            {
+                ++solidDeclined;
+                continue;
+            }
+            ++solidCount[kind < 2u ? kind : 0u];
+            const uint32_t frame = (w[16] - w[17]) - w[15];
+            std::memcpy(img.data() + frame, after.data() + frame, w[17]);
+            const uint32_t cycles = 8u * m.calls + 32u * m.loops;
+            if ((img != after || (kind == 1u && v0 != w[13]) || cycles != w[14]) && ++solidBad <= 5)
+                std::printf("solid vector (kind %u) differs: image %s, v0 %u / %u, cycles %u / %u\n", kind,
+                            img == after ? "same" : "differs", v0, w[13], cycles, w[14]);
+        }
+        std::fclose(o);
+    }
+    bad += solidBad;
+    std::printf("collision C3: solids %d, query %d vectors (%d declined), %d differ\n", solidCount[0], solidCount[1],
+                solidDeclined, solidBad);
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
                 "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ; twist %d vectors, "
                 "%d differ; track %d vectors, %d differ; decode %d vectors (%d declined), %d differ\n", path, count,
-                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad - eulerBad - asinBad - aimBad - ikBad - collBad - gridBad, rotCount, rotBad,
+                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad - eulerBad - asinBad - aimBad - ikBad - collBad - gridBad - solidBad, rotCount, rotBad,
                 opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad,
                 trackCount, trackBad, decodeCount, decodeDeclined, decodeBad);
     return bad ? 1 : 0;
