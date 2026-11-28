@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 int main(int argc, char **argv)
 {
@@ -762,10 +763,140 @@ int main(int argc, char **argv)
     bad += collBad;
     std::printf("collision C1: inner %d, sort %d, overlap %d, plane %d, quad %d, probe %d vectors (%d declined), %d differ\n",
                 collCount[0], collCount[1], collCount[2], collCount[3], collCount[4], collCount[5], collDeclined, collBad);
+
+    // Collision C2 (<vectors>.grid, the grid: whole calls, 16 words + the image before and after the recompiled function;
+    // shadow_test's writer has the layout). The cores run on the image (ImageMem: an access outside it declines); the
+    // decision must be the native's, then the image, v0 (the three that return one) and the cycles the recompiled ones.
+    struct ImageMem
+    {
+        std::vector<uint8_t> &img;
+        uint32_t at;
+        bool ok = true;
+        uint32_t calls = 0, loops = 0;
+        uint8_t *where(uint32_t a, uint32_t n)
+        {
+            const uint32_t o = (a & 0x1FFFFFFu) - at;
+            if (!ok || (a & (n - 1u)) != 0u || o >= img.size() || o + n > img.size())
+            {
+                ok = false;
+                return nullptr;
+            }
+            return img.data() + o;
+        }
+        uint32_t lw(uint32_t a)
+        {
+            uint32_t v = 0;
+            if (uint8_t *p = where(a, 4u))
+                std::memcpy(&v, p, 4);
+            return v;
+        }
+        uint32_t lhu(uint32_t a)
+        {
+            uint16_t v = 0;
+            if (uint8_t *p = where(a, 2u))
+                std::memcpy(&v, p, 2);
+            return v;
+        }
+        uint32_t lbu(uint32_t a)
+        {
+            const uint8_t *p = where(a, 1u);
+            return p ? *p : 0u;
+        }
+        Vec4 lq(uint32_t a)
+        {
+            const uint8_t *p = where(a & ~0xFu, 16u);
+            return p ? load(p) : splat(0.0f);
+        }
+        void sw(uint32_t a, uint32_t v)
+        {
+            if (uint8_t *p = where(a, 4u))
+                std::memcpy(p, &v, 4);
+        }
+        void sb(uint32_t a, uint32_t v)
+        {
+            if (uint8_t *p = where(a, 1u))
+                *p = static_cast<uint8_t>(v);
+        }
+        void sq(uint32_t a, Vec4 v)
+        {
+            if (uint8_t *p = where(a & ~0xFu, 16u))
+                store(p, v);
+        }
+        void call() { ++calls; }
+        void loop() { ++loops; }
+    };
+    int gridCount[6] = {}, gridBad = 0, gridDeclined = 0;
+    if (std::FILE *o = std::fopen((std::string(argv[1]) + ".grid").c_str(), "rb"))
+    {
+        uint32_t w[16], bytes;
+        const Vec4 vf0 = bitsOf(0u, 0u, 0u, 0x3F800000u);
+        while (std::fread(w, 4, 16, o) == 16 && std::fread(&bytes, 4, 1, o) == 1)
+        {
+            std::vector<uint8_t> img(bytes), after(bytes);
+            if (std::fread(img.data(), 1, bytes, o) != bytes || std::fread(after.data(), 1, bytes, o) != bytes)
+                break;
+            const uint32_t kind = w[0];
+            ImageMem m{img, w[15]};
+            const uint16_t status = static_cast<uint16_t>(w[12]);
+            uint32_t v0 = 0;
+            bool returns = true;
+            if (kind <= 1u)
+            {
+                Vec4 v[3];
+                const uint32_t tri = kind == 0u ? w[2] : w[4];
+                for (uint32_t k = 0; k < 3u; ++k)
+                    v[k] = m.lq((tri & ~0xFu) + 16u * k);
+                if (kind == 0u)
+                {
+                    const collision::TriInside t = collision::triangleInside(vf0, v, m.lq(w[3]), status);
+                    m.ok = m.ok && t.ok, m.calls = static_cast<uint32_t>(t.calls), v0 = static_cast<uint32_t>(t.inside);
+                }
+                else
+                {
+                    const collision::TriProbe t = collision::triangleProbe(vf0, m.lq(w[2]), m.lq(w[3]), v, status);
+                    m.ok = m.ok && t.ok, m.calls = static_cast<uint32_t>(t.calls), v0 = static_cast<uint32_t>(t.hit);
+                    if (m.ok && t.hit && w[5] != 0u) // out: x, z, y
+                        m.sw(w[5], laneBits<0>(t.point)), m.sw(w[5] + 8u, laneBits<2>(t.point)), m.sw(w[5] + 4u, laneBits<1>(t.point));
+                }
+            }
+            else if (kind == 2u)
+                v0 = collision::gridRange(m, w[2], (uint64_t{w[10]} << 32) | w[3], (uint64_t{w[11]} << 32) | w[4]);
+            else if (kind == 3u)
+                collision::clearSeen(m, w[2], w[3], w[4]), returns = false;
+            else if (kind == 4u)
+            {
+                returns = false;
+                if (!collision::gridWalkBounded(w[3], w[4], w[5], w[6], w[7], w[8]))
+                    m.ok = false;
+                else
+                    collision::clearRange(m, w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9]);
+            }
+            else
+                collision::polygonTest(m, vf0, status, w[2], w[3]), returns = false;
+            if (m.ok != (w[1] == 1u) && ++gridBad <= 5)
+                std::printf("grid vector (kind %u): the check %s, the native %s\n", kind, m.ok ? "ran" : "declined",
+                            w[1] ? "ran" : "declined");
+            if (!m.ok)
+            {
+                ++gridDeclined;
+                continue;
+            }
+            ++gridCount[kind < 6u ? kind : 0u];
+            const uint32_t cycles = 8u * m.calls + 32u * m.loops;
+            if ((img != after || (returns && v0 != w[13]) || cycles != w[14]) && ++gridBad <= 5)
+                std::printf("grid vector (kind %u) differs: image %s, v0 %u / %u, cycles %u / %u\n", kind,
+                            img == after ? "same" : "differs", v0, w[13], cycles, w[14]);
+        }
+        std::fclose(o);
+    }
+    bad += gridBad;
+    std::printf("collision C2: triangle %d, triangle probe %d, range %d, cell %d, cells %d, polygon %d vectors (%d declined), "
+                "%d differ\n", gridCount[0], gridCount[1], gridCount[2], gridCount[3], gridCount[4], gridCount[5],
+                gridDeclined, gridBad);
     std::printf("%s: %d vectors, %d differ; RotMatrix %d vectors, %d differ; batch 1 maths %d vectors, %d differ; batch 2 "
                 "maths %d vectors, %d differ; motion %d vectors, %d differ; blend %d vectors, %d differ; twist %d vectors, "
                 "%d differ; track %d vectors, %d differ; decode %d vectors (%d declined), %d differ\n", path, count,
-                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad - eulerBad - asinBad - aimBad - ikBad - collBad, rotCount, rotBad,
+                bad - rotBad - opsBad - b2Bad - motionBad - blendBad - twistBad - trackBad - decodeBad - kind3Bad - eulerBad - asinBad - aimBad - ikBad - collBad - gridBad, rotCount, rotBad,
                 opsCount, opsBad, b2Count, b2Bad, motionCount, motionBad, blendCount, blendBad, twistCount, twistBad,
                 trackCount, trackBad, decodeCount, decodeDeclined, decodeBad);
     return bad ? 1 : 0;

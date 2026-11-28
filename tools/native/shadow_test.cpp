@@ -203,6 +203,13 @@ KM_RECOMPILED(func_00133408_0x133408)
 KM_RECOMPILED(func_00135EC8_0x135ec8)
 KM_RECOMPILED(func_001361A0_0x1361a0)
 KM_RECOMPILED(HitProbe_probeHitPoint_0x1365b8)
+// rung 4 collision, C2: the grid
+KM_RECOMPILED(func_0012F288_0x12f288)
+KM_RECOMPILED(func_0012F4C8_0x12f4c8)
+KM_RECOMPILED(func_0012F600_0x12f600)
+KM_RECOMPILED(func_0012F750_0x12f750)
+KM_RECOMPILED(func_00136030_0x136030)
+KM_RECOMPILED(func_00136458_0x136458)
 #undef KM_RECOMPILED
 
 // ---- the runtime pieces the generated code and the harness call ----------------------------------------------------
@@ -3992,6 +3999,730 @@ namespace
         }
     }
 
+    // ---- rung 4 collision, C2: the grid (claude/rung4-collision-map.md "C2") ------------------------------------------
+    // A room's collision laid out in the test RAM (kGridArea): the scroll, then its tables, each at the low four address
+    // bits it has in the game (the real tables are word-aligned only). Real rooms come from KM_COLL=<file> (the scroll
+    // D_005CAE50 and its tables copied out of the cases' guest RAM by the sandbox's pool script, never committed: u32
+    // 'COLL', u32 regions, then u32 kind, u32 address, u32 size, the bytes; kinds 0 scroll, 1 header, 2 named groups, 3
+    // attributes, 4 vertices, 5 normals, 6 polygons, 7 cells, 8 ids, 9+ solids); else, and a quarter of the time, a
+    // made-up room. Degenerate polygons stay in.
+    enum GridPlant : uint32_t
+    {
+        kPlantWalk = 512u,     // 0x12F4C8's walk past kMaxGridCells (the native's bound)
+        kPlantUpper = 1024u,   // a 0x12F4C8 range register not sign-extended
+        kPlantDivide = 2048u,  // a cell size the divide declines (0, a denormal, exponent 255) or a quotient past FLT_MAX
+        kPlantPointer = 4096u, // a pointer the function follows misaligned (a table, the hit list)
+    };
+    bool isCollisionC2(uint32_t a)
+    {
+        return a == 0x12F288u || a == 0x12F4C8u || a == 0x12F600u || a == 0x12F750u || a == 0x136458u || a == 0x136030u;
+    }
+    struct CollRoom
+    {
+        uint32_t address[9] = {};
+        std::vector<uint8_t> bytes[9];
+    };
+    const std::vector<CollRoom> &realRooms()
+    {
+        static const std::vector<CollRoom> rooms = [] {
+            std::vector<CollRoom> out;
+            const char *path = std::getenv("KM_COLL");
+            std::FILE *f = path ? std::fopen(path, "rb") : nullptr;
+            if (!f)
+                return out;
+            uint32_t head[2];
+            while (std::fread(head, 4, 2, f) == 2 && head[0] == 0x4C4C4F43u)
+            {
+                CollRoom room;
+                for (uint32_t r = 0; r < head[1]; ++r)
+                {
+                    uint32_t h[3];
+                    if (std::fread(h, 4, 3, f) != 3)
+                        break;
+                    std::vector<uint8_t> b((h[2] + 3u) & ~3u);
+                    if (std::fread(b.data(), 1, b.size(), f) != b.size())
+                        break;
+                    b.resize(h[2]);
+                    if (h[0] < 9u)
+                        room.address[h[0]] = h[1], room.bytes[h[0]] = std::move(b);
+                }
+                out.push_back(std::move(room));
+            }
+            std::fclose(f);
+            std::printf("KM_COLL: %zu real rooms\n", out.size());
+            return out;
+        }();
+        return rooms;
+    }
+    constexpr uint32_t kGridArea = 0x40000u, kGridAreaEnd = 0xC0000u;
+    struct GridRoom
+    {
+        uint32_t scroll = 0, attrs = 0, verts = 0, normals = 0, polys = 0, cells = 0, ids = 0;
+        uint32_t nAttr = 0, nVert = 0, nNorm = 0, nPoly = 0, nx = 0, ny = 0, nz = 0, nIds = 0;
+        bool real = false;
+    };
+    GridRoom g_room;
+    uint32_t rd32(uint32_t at)
+    {
+        uint32_t v;
+        std::memcpy(&v, g_ramA + (at & 0x1FFFFFFu), 4);
+        return v;
+    }
+    uint32_t rd16(uint32_t at)
+    {
+        uint16_t v;
+        std::memcpy(&v, g_ramA + (at & 0x1FFFFFFu), 2);
+        return v;
+    }
+    float rdF(uint32_t at)
+    {
+        const uint32_t b = rd32(at);
+        float f;
+        std::memcpy(&f, &b, 4);
+        return f;
+    }
+    // a word near the natives' limits (|x| >= 2^61: a difference of two passes 2^62; exponent 255)
+    bool wildBits(uint32_t b) { return (b & 0x7F800000u) >= 0x5E000000u; }
+    // what a polygon of the room may decline on (the decline probe's ledger): wild words in its vertices or normal, a
+    // zero edge of a quad (0x1361A0's e1 / e3), a normal whose squares underflow
+    uint32_t polygonPlants(uint32_t k)
+    {
+        const uint32_t p = g_room.polys + 0x14u * k;
+        const uint32_t corners = (rd32(p + 0x10u) & 1u) ? 4u : 3u;
+        uint32_t plants = 0;
+        float v[4][3];
+        for (uint32_t j = 0; j < corners; ++j)
+            for (uint32_t i = 0; i < 3u; ++i)
+            {
+                const uint32_t at = g_room.verts + 12u * rd16(p + 2u * j) + 4u * i;
+                plants |= wildBits(rd32(at)) ? kPlantWild : 0u;
+                v[j][i] = rdF(at);
+            }
+        const uint32_t nb = g_room.normals + 12u * rd16(p + 8u);
+        double n2 = 0.0;
+        for (uint32_t i = 0; i < 3u; ++i)
+        {
+            plants |= wildBits(rd32(nb + 4u * i)) ? kPlantWild : 0u;
+            n2 += static_cast<double>(rdF(nb + 4u * i)) * rdF(nb + 4u * i);
+        }
+        if (n2 < 1.0e-36)
+            plants |= kPlantZeroNormal;
+        if (corners == 4u)
+            for (uint32_t j : {1u, 3u})
+                if (v[j][0] == v[0][0] && v[j][1] == v[0][1] && v[j][2] == v[0][2])
+                    plants |= kPlantDegenerate;
+        return plants;
+    }
+    void setBytes(uint32_t at, const void *p, size_t n)
+    {
+        std::memcpy(g_ramA + at, p, n);
+        std::memcpy(g_ramB + at, p, n);
+    }
+    void setU16(uint32_t at, uint32_t v)
+    {
+        const uint16_t h = static_cast<uint16_t>(v);
+        setBytes(at, &h, 2);
+    }
+    // the next table's address: 16-aligned past `at`, plus the game's low bits
+    uint32_t gridNext(uint32_t at, uint32_t low4) { return ((at + 0x1Fu) & ~0xFu) + (low4 & 0xCu); }
+    void placeRealRoom(const CollRoom &r, uint32_t scroll)
+    {
+        GridRoom g;
+        g.real = true;
+        g.scroll = scroll;
+        setBytes(scroll, r.bytes[0].data(), 0x1A0u);
+        uint32_t at = scroll + 0x1A0u;
+        uint32_t where[9] = {};
+        for (int k = 1; k < 9; ++k)
+        {
+            at = gridNext(at, r.address[k]);
+            where[k] = at;
+            if (!r.bytes[k].empty())
+                setBytes(at, r.bytes[k].data(), r.bytes[k].size());
+            at += static_cast<uint32_t>(r.bytes[k].size());
+        }
+        for (int k = 1; k < 9; ++k) // the scroll's pointers +0..+0x1C to the copies
+            setU32(scroll + 4u * static_cast<uint32_t>(k - 1), where[k]);
+        setU32(scroll + 0x190u, 0u); // the solids are C3's
+        g.attrs = where[3], g.verts = where[4], g.normals = where[5], g.polys = where[6], g.cells = where[7], g.ids = where[8];
+        g.nAttr = static_cast<uint32_t>(r.bytes[3].size() / 16u), g.nVert = static_cast<uint32_t>(r.bytes[4].size() / 12u);
+        g.nNorm = static_cast<uint32_t>(r.bytes[5].size() / 12u), g.nPoly = static_cast<uint32_t>(r.bytes[6].size() / 0x14u);
+        g.nIds = static_cast<uint32_t>(r.bytes[8].size() / 2u);
+        g.nx = rd32(scroll + 0x60u), g.ny = rd32(scroll + 0x64u), g.nz = rd32(scroll + 0x68u);
+        g_room = g;
+    }
+    // A made-up room: a small grid of 5 x 50 x 5 m cells (sometimes others), polygons on planes inside it (quads and
+    // triangles, either winding; degenerate ones now and then: a zero edge, repeated vertices, a zero normal), the
+    // normals as the game stores them (quads' unit, triangles' not), selectors from the vertices (sometimes not), cells
+    // listing the polygons their boxes touch, three classes by the attribute's kind.
+    void makeRoom(uint32_t scroll, bool wild)
+    {
+        GridRoom g;
+        g.scroll = scroll;
+        std::memset(g_ramA + scroll, 0, 0x1A0u), std::memset(g_ramB + scroll, 0, 0x1A0u);
+        g.nx = 1u + static_cast<uint32_t>(g_rng() % 5u), g.ny = (g_rng() % 4u) ? 1u : 2u, g.nz = 1u + static_cast<uint32_t>(g_rng() % 5u);
+        float cell[3] = {5.0f, 50.0f, 5.0f}, lo[3];
+        if (g_rng() % 6u == 0u)
+            for (float &c : cell)
+                c = static_cast<float>(1u + g_rng() % 40u) / 4.0f;
+        for (int i = 0; i < 3; ++i)
+            lo[i] = collCoord() * 4.0f;
+        const uint32_t num[3] = {g.nx, g.ny, g.nz};
+        for (uint32_t i = 0; i < 3u; ++i)
+        {
+            setFloat(scroll + 0x30u + 4u * i, lo[i]);
+            setFloat(scroll + 0x40u + 4u * i, lo[i] + cell[i] * static_cast<float>(num[i]) - static_cast<float>(g_rng() % 3u));
+            setFloat(scroll + 0x50u + 4u * i, cell[i]);
+            setU32(scroll + 0x60u + 4u * i, num[i]);
+        }
+        setU32(scroll + 0x3Cu, 0x3F800000u), setU32(scroll + 0x4Cu, 0x3F800000u), setU32(scroll + 0x5Cu, 0x3F800000u);
+        const uint32_t nPoly = 1u + static_cast<uint32_t>(g_rng() % 24u);
+        g.nAttr = 1u + static_cast<uint32_t>(g_rng() % 6u);
+        g.attrs = gridNext(scroll + 0x200u, static_cast<uint32_t>(g_rng()));
+        static constexpr uint32_t kAttrBits[6] = {0x1u, 0x81u, 0x281u, 0x15u, 0x14u, 0x2u};
+        for (uint32_t k = 0; k < g.nAttr; ++k)
+        {
+            randomBytes(g.attrs + 16u * k, 16u);
+            setU16(g.attrs + 16u * k + 2u, 1u << (g_rng() % 3u)); // the kind: wall / floor / ceiling
+            setU32(g.attrs + 16u * k + 4u, kAttrBits[g_rng() % 6u]);
+        }
+        g.verts = gridNext(g.attrs + 16u * g.nAttr, static_cast<uint32_t>(g_rng()));
+        g.nVert = 4u * nPoly;
+        g.normals = gridNext(g.verts + 12u * g.nVert, static_cast<uint32_t>(g_rng()));
+        g.nNorm = nPoly;
+        g.polys = gridNext(g.normals + 12u * g.nNorm, static_cast<uint32_t>(g_rng()));
+        g.nPoly = nPoly;
+        float box[24][2][3];
+        for (uint32_t k = 0; k < nPoly; ++k)
+        {
+            const bool quad = g_rng() % 5u != 0u;
+            float v[4][3], n[3];
+            // a quad on a plane inside the grid (collQuad's shapes, centred in the grid's box)
+            collQuad(0xE8000u, n, v, wild); // scratch: written to both RAMs, overwritten below
+            const float shift[3] = {lo[0] + cell[0] * num[0] * static_cast<float>(g_rng() % 1000u) / 1000.0f,
+                                    lo[1] + std::min(cell[1] * num[1], 20.0f) * static_cast<float>(g_rng() % 1000u) / 1000.0f,
+                                    lo[2] + cell[2] * num[2] * static_cast<float>(g_rng() % 1000u) / 1000.0f};
+            for (auto &p : v)
+                for (int i = 0; i < 3; ++i)
+                    if (std::isfinite(p[i]) && std::fabs(p[i]) < 1.0e6f)
+                        p[i] = p[i] * 0.25f + shift[i];
+            if (g_rng() % 40u == 0u) // repeated vertices (the Elvis room's two)
+                for (int i = 0; i < 3; ++i)
+                    v[2][i] = v[1][i];
+            for (uint32_t j = 0; j < 4u; ++j)
+                for (uint32_t i = 0; i < 3u; ++i)
+                    setFloat(g.verts + 12u * (4u * k + j) + 4u * i, v[j][i]);
+            // the normal: a quad's unit, (v1 - v0) x (v3 - v0); a triangle's (v1 - v0) x (v2 - v0) as is; sometimes flipped
+            // or zero (the facing test skips those)
+            double e1[3], e2[3];
+            for (int i = 0; i < 3; ++i)
+                e1[i] = static_cast<double>(v[1][i]) - v[0][i], e2[i] = static_cast<double>(v[quad ? 3 : 2][i]) - v[0][i];
+            double m[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
+            const double l = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+            const uint32_t npick = static_cast<uint32_t>(g_rng() % 30u);
+            for (int i = 0; i < 3; ++i)
+            {
+                float c = quad ? (l > 0.0 ? static_cast<float>(m[i] / l) : n[i]) : static_cast<float>(m[i] * 0.37);
+                if (npick == 0)
+                    c = -c;
+                else if (npick == 1)
+                    c = 0.0f;
+                if (!std::isfinite(c))
+                    c = n[i];
+                setFloat(g.normals + 12u * k + 4u * static_cast<uint32_t>(i), c);
+            }
+            if (wild && g_rng() % 8u == 0u)
+                setU32(g.normals + 12u * k + 4u * static_cast<uint32_t>(g_rng() % 3u), gameFloat()), g_collPlants |= kPlantWild;
+            const uint32_t p = g.polys + 0x14u * k;
+            const uint32_t corners = quad ? 4u : 3u;
+            for (uint32_t j = 0; j < 4u; ++j)
+                setU16(p + 2u * j, j < corners ? 4u * k + j : 0xFFFFu);
+            setU16(p + 8u, (g_rng() % 10u) ? k : static_cast<uint32_t>(g_rng() % nPoly));
+            uint32_t sel = 0;
+            for (uint32_t i = 0; i < 3u; ++i)
+            {
+                uint32_t mn = 0, mx = 0;
+                for (uint32_t j = 1; j < corners; ++j)
+                {
+                    if (v[j][i] < v[mn][i])
+                        mn = j;
+                    if (v[j][i] > v[mx][i])
+                        mx = j;
+                }
+                sel |= (mn << (4u * i)) | (mx << (4u * i + 2u));
+                box[k][0][i] = v[mn][i], box[k][1][i] = v[mx][i];
+            }
+            if (g_rng() % 12u == 0u) // selectors that don't pick the box (a smaller or wrong one)
+                sel = static_cast<uint32_t>(g_rng()) & 0xFFFu & (quad ? 0xFFFu : 0xAAAu);
+            setU16(p + 0xAu, sel | (static_cast<uint32_t>(g_rng() % 16u) << 12));
+            setU16(p + 0xCu, static_cast<uint32_t>(g_rng() % g.nAttr));
+            setU16(p + 0xEu, static_cast<uint32_t>(g_rng()));
+            uint32_t flags = (quad ? 1u : 0u) | (static_cast<uint32_t>(g_rng()) & 0xFFFFFF00u & ((g_rng() % 4u) ? 0u : ~0u));
+            if (g_rng() % 10u == 0u)
+                flags |= 2u; // off
+            if (g_rng() % 8u == 0u)
+                flags |= 4u; // seen
+            setU32(p + 0x10u, flags);
+        }
+        // the cells: every polygon whose box touches the cell (now and then left out), by its attribute's kind
+        g.cells = gridNext(g.polys + 0x14u * nPoly, static_cast<uint32_t>(g_rng()));
+        g.ids = gridNext(g.cells + 8u * g.nx * g.ny * g.nz, static_cast<uint32_t>(g_rng()));
+        uint32_t nIds = 0;
+        for (uint32_t x = 0; x < g.nx; ++x)
+            for (uint32_t y = 0; y < g.ny; ++y)
+                for (uint32_t z = 0; z < g.nz; ++z)
+                {
+                    const uint32_t c = g.cells + 8u * ((x * g.ny + y) * g.nz + z);
+                    const uint32_t at[3] = {x, y, z};
+                    uint32_t count[3] = {}, list[3][24];
+                    for (uint32_t k = 0; k < nPoly; ++k)
+                    {
+                        bool touches = g_rng() % 16u != 0u;
+                        for (uint32_t i = 0; i < 3u; ++i)
+                        {
+                            const float c0 = lo[i] + cell[i] * static_cast<float>(at[i]), c1 = c0 + cell[i];
+                            if (!(box[k][1][i] >= c0 && box[k][0][i] <= c1))
+                                touches = false;
+                        }
+                        if (!touches && g_rng() % 30u != 0u)
+                            continue;
+                        const uint32_t kind = rd16(g.attrs + 16u * rd16(g.polys + 0x14u * k + 0xCu) + 2u);
+                        const uint32_t cls = kind == 1u ? 0u : kind == 2u ? 1u : 2u;
+                        list[cls][count[cls]++] = k;
+                    }
+                    if (count[0] + count[1] + count[2] == 0u)
+                    {
+                        setU32(c, 0xFFFFFFFFu), setU32(c + 4u, 0u);
+                        continue;
+                    }
+                    setU32(c, nIds);
+                    for (uint32_t cls = 0; cls < 3u; ++cls)
+                    {
+                        g_ramA[c + 4u + cls] = g_ramB[c + 4u + cls] = static_cast<uint8_t>(count[cls]);
+                        for (uint32_t j = 0; j < count[cls]; ++j)
+                            setU16(g.ids + 2u * nIds++, list[cls][j]);
+                    }
+                    g_ramA[c + 7u] = g_ramB[c + 7u] = static_cast<uint8_t>(g_rng());
+                }
+        g.nIds = nIds;
+        for (uint32_t k = 0; k < 8u; ++k) // the pointers: header, named groups (unused here), the tables
+            setU32(scroll + 4u * k, k == 2u ? g.attrs : k == 3u ? g.verts : k == 4u ? g.normals : k == 5u ? g.polys
+                                    : k == 6u ? g.cells : k == 7u ? g.ids : scroll + 0x1A0u);
+        if (g_rng() % 20u == 0u) // a negative cell size (0x12F288's unsigned clamp of a negative hi)
+            setFloat(scroll + 0x50u + 4u * static_cast<uint32_t>(g_rng() % 3u), -5.0f);
+        if (wild && g_rng() % 6u == 0u) // a cell size the divide declines, or 1e-30 (a quotient past FLT_MAX)
+        {
+            static constexpr uint32_t kBad[5] = {0u, 0x00000123u, 0x7F800000u, 0x0DA24260u, 0x80000000u};
+            setU32(scroll + 0x50u + 4u * static_cast<uint32_t>(g_rng() % 3u), kBad[g_rng() % 5u]);
+            g_collPlants |= kPlantDivide;
+        }
+        g_room = g;
+    }
+    // Place a room (real when the pool has one, three times in four) at kGridArea + a few words: the scroll 16-aligned
+    // as the game's, now and then only word-aligned (lqc2 masks: the natives follow it).
+    void gridRoom(bool wild, bool standard)
+    {
+        const std::vector<CollRoom> &rooms = realRooms();
+        const uint32_t scroll = kGridArea + ((!standard && g_rng() % 16u == 0u) ? 4u * static_cast<uint32_t>(1u + g_rng() % 3u) : 0u);
+        if (!standard && !rooms.empty() && g_rng() % 4u != 0u)
+            placeRealRoom(rooms[g_rng() % rooms.size()], scroll);
+        else
+            makeRoom(scroll, wild);
+    }
+    // A point of polygon k (inside, on an edge, at a vertex, just outside, its centre); its corners in v, its count
+    void gridPolygon(uint32_t k, float v[4][3], uint32_t &corners)
+    {
+        const uint32_t p = g_room.polys + 0x14u * k;
+        corners = (rd32(p + 0x10u) & 1u) ? 4u : 3u;
+        for (uint32_t j = 0; j < 4u; ++j)
+        {
+            const uint32_t id = j < corners ? rd16(p + 2u * j) : rd16(p);
+            for (uint32_t i = 0; i < 3u; ++i)
+                v[j][i] = rdF(g_room.verts + 12u * id + 4u * i);
+        }
+        if (corners == 3u)
+            for (int i = 0; i < 3; ++i)
+                v[3][i] = v[0][i];
+    }
+    void gridTarget(const float v[4][3], uint32_t corners, float t[3])
+    {
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 12u);
+        float a = static_cast<float>(g_rng() % 1001u) / 1000.0f, b = static_cast<float>(g_rng() % 1001u) / 1000.0f;
+        if (corners == 3u && a + b > 1.0f)
+            a = 1.0f - a, b = 1.0f - b;
+        const uint32_t e = static_cast<uint32_t>(g_rng() % corners);
+        for (int i = 0; i < 3; ++i)
+        {
+            const float p0 = v[e][i], p1 = v[(e + 1) % corners][i];
+            const float far = corners == 4u ? v[3][i] : v[2][i];
+            if (pick < 6) // inside
+                t[i] = v[0][i] + a * (v[1][i] - v[0][i]) + b * (far - v[0][i]);
+            else if (pick < 8) // on an edge
+                t[i] = p0 + a * (p1 - p0);
+            else if (pick == 8) // a vertex (a normalize of v - p divides by 0: declined)
+                t[i] = p0;
+            else if (pick == 9) // just outside an edge
+                t[i] = p0 + a * (p1 - p0) - (v[(e + 2) % corners][i] - p0) * 1.0e-6f;
+            else if (pick == 10) // outside
+                t[i] = v[0][i] + (1.0f + a) * (v[1][i] - v[0][i]) + b * (far - v[0][i]);
+            else
+                t[i] = corners == 4u ? 0.25f * (v[0][i] + v[1][i] + v[2][i] + v[3][i]) : (v[0][i] + v[1][i] + v[2][i]) / 3.0f;
+        }
+        for (uint32_t k = 0; k < corners; ++k)
+        {
+            double d2 = 0.0;
+            for (int i = 0; i < 3; ++i)
+            {
+                const float d = v[k][i] - t[i];
+                d2 += static_cast<double>(d) * d;
+            }
+            if (d2 < 1.0e-30)
+                g_collPlants |= kPlantAtVertex;
+        }
+    }
+    // A segment for a target point: against the plane's normal n (the facing test passes), along it, straight down (the
+    // shadows' and the floor's probes), parallel, stopping short, starting / ending on it, zero length
+    void gridSegment(const float t[3], const float n[3], float s[3], float e[3])
+    {
+        const uint32_t pick = static_cast<uint32_t>(g_rng() % 12u);
+        float d[3];
+        unitVec(d);
+        const float a = static_cast<float>(1u + g_rng() % 400u) / 80.0f, b = static_cast<float>(1u + g_rng() % 400u) / 80.0f;
+        for (int i = 0; i < 3; ++i)
+        {
+            const float along = pick < 5 ? n[i] + d[i] * 0.4f : pick < 7 ? (i == 1 ? 1.0f : 0.0f) : d[i];
+            s[i] = t[i] + along * a, e[i] = t[i] - along * b;
+            if (pick == 7) // stopping short
+                e[i] = t[i] + along * (a * 0.2f);
+            else if (pick == 8)
+                s[i] = t[i];
+            else if (pick == 9)
+                e[i] = t[i];
+            else if (pick == 10)
+                e[i] = s[i];
+        }
+        if (pick == 11) // parallel to the plane
+        {
+            const float dn = d[0] * n[0] + d[1] * n[1] + d[2] * n[2];
+            for (int i = 0; i < 3; ++i)
+                s[i] = t[i] + (d[i] - n[i] * dn) * a + n[i] * 0.1f, e[i] = s[i] - (d[i] - n[i] * dn) * (a + b);
+        }
+    }
+    // 0x12ED60's query state for 0x12F750: start / end (+0xB0 / +0xC0, +0xE0 / +0xF0), dir +0xD0 = (end - start) x
+    // (1 / |end - start|) (vf0 for a zero length), the masks, the list, the distances
+    void gridQuery(uint32_t scroll, const float s[3], const float e[3], uint32_t base, uint32_t sp, bool wild, bool standard)
+    {
+        float d[3], l2 = 0.0f;
+        for (int i = 0; i < 3; ++i)
+            d[i] = e[i] - s[i], l2 += d[i] * d[i];
+        const float len = std::sqrt(l2), inv = len > 0.0f ? 1.0f / len : 0.0f;
+        for (uint32_t i = 0; i < 3u; ++i)
+        {
+            for (uint32_t o : {0xB0u, 0xE0u})
+                setFloat(scroll + o + 4u * i, s[i]);
+            for (uint32_t o : {0xC0u, 0xF0u})
+                setFloat(scroll + o + 4u * i, e[i]);
+            setFloat(scroll + 0xD0u + 4u * i, d[i] * inv);
+        }
+        for (uint32_t o : {0xBCu, 0xCCu, 0xDCu, 0xECu, 0xFCu})
+            setU32(o + scroll, (g_rng() % 4u) ? 0x3F800000u : collW());
+        if (wild && g_rng() % 6u == 0u)
+        {
+            setU32(scroll + 0xE0u + 4u * static_cast<uint32_t>(g_rng() % 3u), gameFloat());
+            g_collPlants |= kPlantWild;
+        }
+        if (!wild && !standard && g_rng() % 60u == 0u) // far apart: a difference past 2^62
+            setFloat(scroll + 0xE0u, 5.0e18f), setFloat(scroll + 0xF0u, -5.0e18f), g_collPlants |= kPlantFar;
+        setU32(scroll + 0x174u, 1u + static_cast<uint32_t>(g_rng() % 7u));
+        setU32(scroll + 0x178u, (g_rng() % 3u) ? 0u : (g_rng() % 2u) ? 0x12Cu : static_cast<uint32_t>(g_rng() % 0x400u));
+        const bool stepped = g_rng() % 2u != 0u;
+        g_ramA[scroll + 0x181u] = g_ramB[scroll + 0x181u] = stepped ? static_cast<uint8_t>(1u + g_rng() % 255u) : 0u;
+        g_ramA[scroll + 0x180u] = g_ramB[scroll + 0x180u] = static_cast<uint8_t>(g_rng() % 2u);
+        const uint32_t lpick = standard ? static_cast<uint32_t>(g_rng() % 4u) * 2u : static_cast<uint32_t>(g_rng() % 8u);
+        uint32_t list = 0u;
+        if (standard && lpick < 4) // the vectors' layout: the list in the scroll's spare words
+            list = scroll + 0x1C0u + 4u * static_cast<uint32_t>(g_rng() % 4u);
+        else if (lpick < 4)
+            list = base + 0x200u + 4u * static_cast<uint32_t>(g_rng() % 8u);
+        else if (lpick == 4)
+            list = base + 0x202u, g_collPlants |= kPlantPointer;
+        else if (lpick == 5)
+            list = sp - 0x10u - 0x10u * static_cast<uint32_t>(g_rng() % 0x2Eu), g_collPlants |= kPlantFrame;
+        setU32(scroll + 0x18Cu, list);
+        const uint32_t cap = static_cast<uint32_t>(g_rng() % 9u);
+        setU32(scroll + 0x140u, cap);
+        setU32(scroll + 0x17Cu, cap ? static_cast<uint32_t>(g_rng() % (cap + 1u)) : static_cast<uint32_t>(g_rng() % 3u));
+        const uint32_t bpick = static_cast<uint32_t>(g_rng() % 6u);
+        const float best = bpick == 0 ? l2 * static_cast<float>(g_rng() % 1000u) / 1000.0f : bpick == 1 ? 0.0f : l2;
+        setFloat(scroll + 0x184u, best), setFloat(scroll + 0x188u, best);
+    }
+    void setupGrid(const NativeFunction &fn, Call &call, bool wild, uint32_t base, uint32_t seg, bool standard = false)
+    {
+        if (!isCollisionC2(fn.address))
+            return;
+        R5900Context &ctx = call.ctx;
+        g_collPlants = 0;
+        if (fn.address != 0x12F600u && g_rng() % 4u) // guest calls / loops are checkpoints: most runs to the end
+            call.dueAt = 0;
+        uint32_t sp;
+        std::memcpy(&sp, &ctx.r[29], 4);
+        sp &= 0x1FFFFFFu;
+        {
+            uint32_t w3;
+            std::memcpy(&w3, reinterpret_cast<const uint8_t *>(&ctx.vu0_vf[0]) + 12, 4);
+            if (w3 != 0x3F800000u)
+                g_collPlants |= kPlantVf0;
+        }
+        const uint32_t pick = standard ? 15u : static_cast<uint32_t>(g_rng() % 16u);
+        const uint32_t window = fn.address == 0x12F288u ? 0x40u : fn.address == 0x12F4C8u ? 0xC0u : fn.address == 0x12F750u ? 0x2E0u
+                                : fn.address == 0x136458u ? 0x180u : fn.address == 0x136030u ? 0xC0u : 0u;
+        auto inFrame = [&](uint32_t at) { return (sp - 0x10u - 0x10u * static_cast<uint32_t>(g_rng() % (window / 0x10u))) | (at & 0xCu); };
+        gridRoom(wild, standard);
+        g_collPlants &= static_cast<uint32_t>(kPlantVf0) | kPlantDivide; // the room's own: only a cell size the divide declines
+        const GridRoom &g = g_room;
+        if ((g.scroll & 0xFu) != 0u) // the scroll only word-aligned: lqc2 reads the quadword below (w lanes as xyz)
+            g_collPlants |= kPlantPointer;
+        const uint32_t s = g.scroll;
+        switch (fn.address)
+        {
+        case 0x12F288u: // func_0012F288(scroll, boxMin, boxMax): v0
+        {
+            // the box: a segment's ends in or near the room, a case's own query (+0xB0 / +0xC0), outside it, on a cell
+            // boundary, w lanes carried (0x133948 sorts them too)
+            float lo[3], hi[3], p[3], q[3];
+            for (uint32_t i = 0; i < 3u; ++i)
+                lo[i] = rdF(s + 0x30u + 4u * i), hi[i] = rdF(s + 0x40u + 4u * i);
+            const uint32_t bpick = static_cast<uint32_t>(g_rng() % 8u);
+            for (uint32_t i = 0; i < 3u; ++i)
+            {
+                const float span = std::isfinite(hi[i] - lo[i]) && std::fabs(hi[i] - lo[i]) < 1.0e6f ? hi[i] - lo[i] : 10.0f;
+                const float l0 = std::isfinite(lo[i]) && std::fabs(lo[i]) < 1.0e6f ? lo[i] : 0.0f;
+                p[i] = l0 - 0.2f * span + 1.4f * span * static_cast<float>(g_rng() % 1001u) / 1000.0f;
+                q[i] = p[i] + (static_cast<float>(g_rng() % 2001u) / 1000.0f - 1.0f) * ((g_rng() % 4u) ? 4.0f : span);
+                if (bpick == 0) // on a cell boundary exactly
+                    p[i] = l0 + rdF(s + 0x50u + 4u * i) * static_cast<float>(g_rng() % 4u);
+                else if (bpick == 1) // outside: past the far end
+                    p[i] = q[i] = l0 + span * 2.0f + 1.0f;
+                else if (bpick == 2) // one point
+                    q[i] = p[i];
+            }
+            const uint32_t a = standard ? s + 0x1E0u : base + 0x100u + 4u * static_cast<uint32_t>(g_rng() % 4u),
+                           b = standard ? s + 0x1F0u : base + 0x140u;
+            for (uint32_t i = 0; i < 3u; ++i)
+                setFloat(a + 4u * i, p[i]), setFloat(b + 4u * i, q[i]);
+            setU32(a + 12u, collW()), setU32(b + 12u, collW());
+            setU32(s + 0x9Cu, collW()), setU32(s + 0xACu, collW());
+            uint32_t ra = a, rb = b;
+            if (bpick == 3 && g.real) // the case's own last query box (0x12ED60 passes +0xB0 / +0xC0)
+                ra = s + 0xB0u, rb = s + 0xC0u;
+            else if (bpick == 5 && !standard) // overlapping the box it writes: the word-by-word copy's order shows
+            {
+                static constexpr uint32_t kA[6] = {0x94u, 0x8Cu, 0x98u, 0xA0u, 0x9Cu, 0x90u}, kB[6] = {0xA4u, 0x9Cu, 0x94u, 0xA8u, 0x98u, 0x90u};
+                const uint32_t o = static_cast<uint32_t>(g_rng() % 6u);
+                ra = s + kA[o], rb = s + kB[o];
+                for (uint32_t i = 0; i < 10u; ++i) // +0x88..+0xAC: the copies read the w lanes as coordinates here
+                    setFloat(s + 0x88u + 4u * i, (i & 1u) ? p[i % 3u] : q[i % 3u]);
+            }
+            else if (bpick == 4) // the guards: the box already in place
+            {
+                ra = s + 0x90u, rb = s + 0xA0u;
+                for (uint32_t i = 0; i < 3u; ++i)
+                    setFloat(s + 0x90u + 4u * i, p[i]), setFloat(s + 0xA0u + 4u * i, q[i]);
+            }
+            if (wild && g_rng() % 5u == 0u)
+            {
+                setU32(a + 4u * static_cast<uint32_t>(g_rng() % 3u), gameFloat());
+                g_collPlants |= kPlantWild;
+            }
+            if (pick == 0)
+                ra += 2u, g_collPlants |= kPlantWordUnaligned;
+            else if (pick == 1)
+                ra = inFrame(ra), g_collPlants |= kPlantFrame;
+            setGpr(ctx, 4, s | seg), setGpr(ctx, 5, ra | seg), setGpr(ctx, 6, rb | seg);
+            if (pick == 2 && g_rng() % 2u) // the 64-bit guard compare: a1 as the scroll's +0x90 with other upper bits
+            {
+                const int64_t wide = static_cast<int64_t>(static_cast<int32_t>(s + 0x90u)) ^ (int64_t{1} << 40);
+                std::memcpy(&ctx.r[5], &wide, 8);
+                for (uint32_t i = 0; i < 3u; ++i)
+                    setFloat(s + 0x90u + 4u * i, p[i]);
+            }
+            return;
+        }
+        case 0x12F4C8u: // func_0012F4C8(scroll, x0, x1, y0, y1, z0, z1, mask)
+        {
+            uint32_t r[6];
+            const uint32_t num[3] = {g.nx, g.ny, g.nz};
+            for (uint32_t i = 0; i < 3u; ++i)
+            {
+                const uint32_t n = num[i] ? num[i] : 1u;
+                uint32_t a = static_cast<uint32_t>(g_rng() % n), b = static_cast<uint32_t>(g_rng() % n);
+                if (a > b)
+                    std::swap(a, b);
+                const uint32_t rpick = static_cast<uint32_t>(g_rng() % 10u);
+                if (rpick == 0)
+                    a = 0u, b = n - 1u; // the whole axis
+                else if (rpick == 1 && b > a)
+                    std::swap(a, b);   // empty (hi < lo)
+                r[2u * i] = a, r[2u * i + 1u] = b;
+            }
+            if (!standard && g_rng() % 60u == 0u) // a walk past the native's bound: rows only (y empty), the original's cheap
+            {
+                r[0] = 0u, r[1] = 65540u + static_cast<uint32_t>(g_rng() % 100u), r[2] = 1u, r[3] = 0u;
+                g_collPlants |= kPlantWalk;
+            }
+            static constexpr int kRegs[6] = {5, 6, 7, 8, 9, 10};
+            for (int k = 0; k < 6; ++k)
+                setGpr(ctx, kRegs[k], r[k]);
+            uint32_t mask = static_cast<uint32_t>(g_rng() % 8u);
+            if (g_rng() % 4u == 0u)
+                mask |= static_cast<uint32_t>(g_rng()) & ~7u;
+            setGpr(ctx, 11, mask);
+            if (pick == 0) // a range register's upper word not the sign of its lower (declined): x0, x1, y0 or z0 (the
+            {              // original compares y1 / z1 raw every turn: their upper words would walk it past the cells)
+                static constexpr int kSafe[4] = {5, 6, 7, 9};
+                const int k = kSafe[g_rng() % 4u];
+                uint32_t hi = static_cast<uint32_t>(g_rng()) | 1u;
+                std::memcpy(reinterpret_cast<uint8_t *>(&ctx.r[k]) + 4, &hi, 4);
+                g_collPlants |= kPlantUpper;
+            }
+            setGpr(ctx, 4, s | seg);
+            return;
+        }
+        case 0x12F600u: // func_0012F600(scroll, cell, mask)
+        {
+            const uint32_t n = g.nx * g.ny * g.nz;
+            uint32_t cell = g.cells + 8u * static_cast<uint32_t>(g_rng() % (n ? n : 1u));
+            for (int tries = 0; tries < 4 && rd32(cell) == 0xFFFFFFFFu; ++tries) // mostly a listed cell (some empty)
+                cell = g.cells + 8u * static_cast<uint32_t>(g_rng() % (n ? n : 1u));
+            uint32_t mask = static_cast<uint32_t>(g_rng() % 8u);
+            if (g_rng() % 4u == 0u)
+                mask |= static_cast<uint32_t>(g_rng()) & ~7u;
+            if (pick == 0)
+                cell += 2u, g_collPlants |= kPlantPointer; // the start word misaligned
+            setGpr(ctx, 4, s | seg), setGpr(ctx, 5, cell | seg), setGpr(ctx, 6, mask);
+            return;
+        }
+        case 0x12F750u: // func_0012F750(scroll, id)
+        {
+            uint32_t k = static_cast<uint32_t>(g_rng() % (g.nPoly ? g.nPoly : 1u));
+            float v[4][3], t[3], st[3], en[3], n[3];
+            uint32_t corners;
+            gridPolygon(k, v, corners);
+            gridTarget(v, corners, t);
+            const uint32_t nb = g.normals + 12u * rd16(g.polys + 0x14u * k + 8u);
+            for (uint32_t i = 0; i < 3u; ++i)
+                n[i] = rdF(nb + 4u * i);
+            float nn[3] = {n[0], n[1], n[2]};
+            const float l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            if (std::isfinite(l) && l > 1.0e-6f)
+                for (float &c : nn)
+                    c /= l;
+            else
+                nn[0] = 0.0f, nn[1] = 1.0f, nn[2] = 0.0f;
+            gridSegment(t, nn, st, en);
+            if (g.real && g_rng() % 8u == 0u) // the case's own last query
+                for (uint32_t i = 0; i < 3u; ++i)
+                    st[i] = rdF(s + 0xE0u + 4u * i), en[i] = rdF(s + 0xF0u + 4u * i);
+            gridQuery(s, st, en, base, sp, wild, standard);
+            const uint32_t p = g.polys + 0x14u * k;
+            const uint32_t fpick = static_cast<uint32_t>(g_rng() % 10u);
+            if (fpick < 6) // as 0x12F4C8 leaves it: not seen
+                setU32(p + 0x10u, rd32(p + 0x10u) & ~4u);
+            else if (fpick == 6)
+                setU32(p + 0x10u, rd32(p + 0x10u) | 4u);
+            if (g_rng() % 10u == 0u) // excluded by its group
+                setU32(s + 0x178u, rd32(g.attrs + 16u * rd16(p + 0xCu) + 4u));
+            if (!g.real && (rd32(p + 0x10u) & 1u) == 0u && g_rng() % 6u == 0u) // a triangle's selector picks its 4th
+            {                                                                  // id (a valid one)
+                setU16(p + 6u, rd16(p + 2u * static_cast<uint32_t>(g_rng() % 3u)));
+                setU16(p + 0xAu, rd16(p + 0xAu) | 3u);
+            }
+            if (k < g.nPoly)
+                g_collPlants |= polygonPlants(k);
+            if (pick == 0) // a table misaligned
+            {
+                const uint32_t o = 4u * (2u + static_cast<uint32_t>(g_rng() % 6u));
+                setU32(s + o, rd32(s + o) + 2u);
+                g_collPlants |= kPlantPointer;
+            }
+            setGpr(ctx, 4, s | seg), setGpr(ctx, 5, k);
+            return;
+        }
+        case 0x136458u: // func_00136458(start, end, tri, out): v0
+        case 0x136030u: // func_00136030(tri, p): v0
+        {
+            // a triangle of the room (a quad's first three corners for a quad), copied into three quadwords
+            uint32_t k = static_cast<uint32_t>(g_rng() % (g.nPoly ? g.nPoly : 1u));
+            float v[4][3], t[3];
+            uint32_t corners;
+            gridPolygon(k, v, corners);
+            if (g_rng() % 3u == 0u)
+                for (int i = 0; i < 3; ++i)
+                    std::swap(v[1][i], v[2][i]); // the other winding
+            if (g_rng() % 40u == 0u)
+                for (int i = 0; i < 3; ++i)
+                    v[2][i] = v[0][i], g_collPlants |= kPlantDegenerate;
+            const uint32_t tri = base + 0x40u, so = base + 0x100u, eo = base + 0x110u, po = base + 0x120u, oo = base + 0x180u;
+            for (uint32_t j = 0; j < 3u; ++j)
+            {
+                setVec(tri + 16u * j, v[j], (g_rng() % 2u) ? 0x3F800000u : collW());
+                for (uint32_t i = 0; i < 3u; ++i)
+                    g_collPlants |= wildBits(rd32(tri + 16u * j + 4u * i)) ? kPlantWild : 0u;
+            }
+            gridTarget(v, 3u, t);
+            if (wild && g_rng() % 4u == 0u)
+            {
+                uint32_t bits = gameFloat();
+                std::memcpy(&t[g_rng() % 3u], &bits, 4);
+                g_collPlants |= kPlantWild;
+            }
+            if (fn.address == 0x136030u)
+            {
+                setVec(po, t, collW());
+                setGpr(ctx, 4, (tri + (pick == 2 ? 4u : 0u)) | seg), setGpr(ctx, 5, po | seg);
+                if (pick == 3)
+                    setGpr(ctx, 4 + static_cast<int>(g_rng() % 2u), inFrame(0u) | seg), g_collPlants |= kPlantFrame;
+                return;
+            }
+            double e1[3], e2[3];
+            for (int i = 0; i < 3; ++i)
+                e1[i] = static_cast<double>(v[1][i]) - v[0][i], e2[i] = static_cast<double>(v[2][i]) - v[0][i];
+            float nn[3] = {static_cast<float>(e1[1] * e2[2] - e1[2] * e2[1]), static_cast<float>(e1[2] * e2[0] - e1[0] * e2[2]),
+                           static_cast<float>(e1[0] * e2[1] - e1[1] * e2[0])};
+            const float l = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+            if (std::isfinite(l) && l > 1.0e-6f)
+                for (float &c : nn)
+                    c /= l;
+            else
+                nn[0] = 0.0f, nn[1] = 1.0f, nn[2] = 0.0f;
+            float st[3], en[3];
+            gridSegment(t, nn, st, en);
+            if (!standard && g_rng() % 50u == 0u)
+                st[0] = 5.0e18f, en[0] = -5.0e18f, g_collPlants |= kPlantFar;
+            setVec(so, st, collW()), setVec(eo, en, collW());
+            for (uint32_t i = 0; i < 4u; ++i)
+                setU32(oo + 4u * i, static_cast<uint32_t>(g_rng()));
+            uint32_t out = oo;
+            const uint32_t op = standard ? 9u : static_cast<uint32_t>(g_rng() % 10u);
+            if (op == 0)
+                out = 0u;
+            else if (op == 1)
+                out = so; // over start (written last)
+            else if (op == 2)
+                out = oo + 2u, g_collPlants |= kPlantOutUnaligned;
+            setGpr(ctx, 4, (so + (pick == 2 ? 8u : 0u)) | seg), setGpr(ctx, 5, eo | seg);
+            setGpr(ctx, 6, (tri + (pick == 4 ? 4u : 0u)) | seg), setGpr(ctx, 7, out ? (out | seg) : 0u);
+            if (pick == 3)
+                setGpr(ctx, 4 + static_cast<int>(g_rng() % 3u), inFrame(0u) | seg), g_collPlants |= kPlantFrame;
+            else if (pick == 5 && out)
+                setGpr(ctx, 7, inFrame(0u) | seg), g_collPlants |= kPlantFrame;
+            return;
+        }
+        default:
+            return;
+        }
+    }
+
     void setupCall(const NativeFunction &fn, Call &call, bool wild)
     {
         randomContext(call.ctx);
@@ -4028,6 +4759,7 @@ namespace
         setupBatch2(fn, call, wild, base, seg);
         setupMotion(fn, call, wild, base, seg);
         setupCollision(fn, call, wild, base, seg);
+        setupGrid(fn, call, wild, base, seg);
     }
 
     // Runs `run` from the call's state on `ram`; returns the context after, the cycles and checkpoint calls.
@@ -5315,6 +6047,71 @@ namespace
         }
         std::fclose(fc);
         std::printf("wrote %d collision C1 vectors to %s\n", colls, collPath.c_str());
+
+        // Collision C2 (<path>.grid, the grid): whole calls in the standard layout (setupGrid's: a made-up room at
+        // kGridArea, its hit list and boxes in the scroll's spare words; the triangle tests' inputs in the base block),
+        // each record: 16 words (w[0] the kind: 0 0x136030, 1 0x136458, 2 0x12F288, 3 0x12F600, 4 0x12F4C8, 5 0x12F750;
+        // w[1] 1 when the native took the call, which the check must match; w[2..9] a0..t3, w[10] / w[11] a1 / a2's
+        // upper words; w[12] VU0's status; w[13] the recompiled function's v0, w[14] its cycles; w[15] the image's guest
+        // address), u32 the image's bytes, the image before, the image after the recompiled function.
+        const std::string gridPath = std::string(path) + ".grid";
+        std::FILE *fg = std::fopen(gridPath.c_str(), "wb");
+        int grids = 0;
+        const uint32_t kGridKinds[6] = {0x136030u, 0x136458u, 0x12F288u, 0x12F600u, 0x12F4C8u, 0x12F750u};
+        for (int i = 0; i < count / 2; ++i)
+        {
+            const uint32_t kind = static_cast<uint32_t>(i % 6);
+            const kamite::native::NativeFunction *fn = nullptr;
+            for (const kamite::native::NativeFunction &f : g_natives)
+                if (f.address == kGridKinds[kind])
+                    fn = &f;
+            Call call;
+            R5900Context &ctx = call.ctx;
+            randomContext(ctx);
+            const uint32_t base = 0x10000u + 0x400u * static_cast<uint32_t>(g_rng() % 64u);
+            setGpr(ctx, 29, 0xF0000u);
+            setupGrid(*fn, call, false, base, 0u, true);
+            setGpr(ctx, 31, 0x00123450u);
+            ctx.pc = kGridKinds[kind];
+            uint32_t w[16] = {};
+            w[0] = kind;
+            for (int r = 4; r <= 11; ++r)
+                std::memcpy(&w[2 + r - 4], &ctx.r[r], 4);
+            std::memcpy(&w[10], reinterpret_cast<const uint8_t *>(&ctx.r[5]) + 4, 4);
+            std::memcpy(&w[11], reinterpret_cast<const uint8_t *>(&ctx.r[6]) + 4, 4);
+            w[12] = ctx.vu0_status;
+            // the image: the base block for the triangle tests, the room (scroll to its last table) for the grid ones
+            uint32_t at = base, bytes = 0x200u;
+            if (kind >= 2u)
+            {
+                at = g_room.scroll & ~0xFu;
+                bytes = ((g_room.ids + 2u * g_room.nIds + 0x1Fu) & ~0xFu) - at;
+            }
+            w[15] = at;
+            std::vector<uint8_t> before(g_ramA + at, g_ramA + at + bytes);
+            {
+                R5900Context nctx = ctx;
+                kamite::native::RealEnv env{g_ramB, g_rt};
+                w[1] = kamite::native::runNative(*fn, fn->runReal, env, &nctx) ? 1u : 0u;
+            }
+            g_dueAt = 0;
+            g_charged = 0;
+            Recompiled rec = nullptr;
+            for (const auto &[address, f] : g_callees)
+                if (address == kGridKinds[kind])
+                    rec = f;
+            rec(g_ramA, &ctx, g_rt);
+            std::memcpy(&w[13], &ctx.r[2], 4);
+            w[14] = static_cast<uint32_t>(g_charged);
+            std::fwrite(w, 4, 16, fg);
+            std::fwrite(&bytes, 4, 1, fg);
+            std::fwrite(before.data(), 1, bytes, fg);
+            std::fwrite(g_ramA + at, 1, bytes, fg);
+            ++grids;
+            resetRam();
+        }
+        std::fclose(fg);
+        std::printf("wrote %d collision C2 vectors to %s\n", grids, gridPath.c_str());
     }
 }
 
@@ -5523,7 +6320,10 @@ int main(int argc, char **argv)
         {0x153158u, &func_00153158_0x153158},
         {0x30A348u, &sceVu0InnerProduct_0x30a348}, {0x133948u, &func_00133948_0x133948},
         {0x133408u, &func_00133408_0x133408},    {0x135EC8u, &func_00135EC8_0x135ec8},
-        {0x1361A0u, &func_001361A0_0x1361a0},    {0x1365B8u, &HitProbe_probeHitPoint_0x1365b8}};
+        {0x1361A0u, &func_001361A0_0x1361a0},    {0x1365B8u, &HitProbe_probeHitPoint_0x1365b8},
+        {0x12F288u, &func_0012F288_0x12f288},    {0x12F4C8u, &func_0012F4C8_0x12f4c8},
+        {0x12F600u, &func_0012F600_0x12f600},    {0x12F750u, &func_0012F750_0x12f750},
+        {0x136030u, &func_00136030_0x136030},    {0x136458u, &func_00136458_0x136458}};
     g_callees.push_back({0x151368u, &func_00151368_0x151368}); // callees only (no native)
     g_callees.push_back({0x309C30u, &Tim2CalcBufWidth_0x309c30});
     g_callees.push_back({0x31DE10u, &ps2___muldi3_0x31de10});
@@ -5688,7 +6488,8 @@ int main(int argc, char **argv)
                                 0x14C6B8u, 0x14AAB8u, 0x147728u, 0x147B60u, 0x147BF8u, 0x147B18u, 0x147A48u,
                                 0x150138u, 0x1501D0u, 0x156D70u, 0x15A6A0u, 0x149EB8u, 0x14A038u, 0x158CD0u,
                                 0x159AD0u, 0x1599B0u, 0x159DA0u, 0x158328u, 0x1F8140u, 0x147C88u, 0x148160u,
-                                0x15ABA0u, 0x153808u, 0x153158u, 0x135EC8u, 0x1361A0u, 0x1365B8u})
+                                0x15ABA0u, 0x153808u, 0x153158u, 0x135EC8u, 0x1361A0u, 0x1365B8u, 0x12F288u,
+                                0x12F4C8u, 0x12F750u, 0x136458u, 0x136030u})
             if (fn.address == caller && !overridden(fn))
                 checkInvisible(fn, recompiledOf(fn), calls / 4);
     g_nestedCalls = false;

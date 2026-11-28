@@ -50,7 +50,8 @@ with kamite/git_commit.h):
        capVu0ApplyMatrixXYZ_0x1f8350 Quat_rotatePoint_0x15ada0 func_0015ABA0_0x15aba0 cModel_aimIkPart_0x153808
        func_00153158_0x153158 Circle_line2_0x15f2a8 drawArrow_0x15fb98 sceVu0InnerProduct_0x30a348
        func_00133948_0x133948 func_00133408_0x133408 func_00135EC8_0x135ec8 func_001361A0_0x1361a0
-       HitProbe_probeHitPoint_0x1365b8"
+       HitProbe_probeHitPoint_0x1365b8 func_0012F288_0x12f288 func_0012F4C8_0x12f4c8 func_0012F600_0x12f600
+       func_0012F750_0x12f750 func_00136030_0x136030 func_00136458_0x136458"
     # three at a time: more runs the sandbox out of memory
     echo $F | tr ' ' '\n' | xargs -P 3 -I{} g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC -c /tmp/gen/{}.cpp -o /tmp/nt/{}.o
     g++ -std=c++20 -O2 -msse4.1 -ffp-contract=off $INC tools/native/shadow_test.cpp src/kamite/native/shadow.cpp \
@@ -299,3 +300,23 @@ stopping short, starting or ending on the plane (t = 0 / 1), parallel, reversed,
 denormals for the compares; pointers unaligned (lqc2 masks them), in the frames' window, out 0 / over an input / unaligned.
 Its `g_collPlants` notes what each setup planted for a decline probe (a /tmp copy whose declines record their line).
 `<vectors>.coll` (whole calls in the standard layout with the native's own decision in w[1]) runs in libvu0_check.
+
+## Rung 4: collision C2, the grid (Nov 27)
+
+func_0012F288 (the query box and its cell range), func_0012F4C8 / func_0012F600 (the seen bits over a cell range / one
+cell), func_0012F750 (one polygon of a ChkLine query: the facing test, its box, 0x136458 or HitProbe) and the triangle
+path func_00136458 / func_00136030 (claude/rung4-collision-map.md "C2"). The grid functions are collision_core.h bodies
+templated on a guest memory (collision.cpp's GridMem: each access in the asm's order through the env; one misaligned,
+outside plain RAM or in the frames' window declines; each write keeps its old bytes and a decline puts them back), so
+they follow the original through aliasing; their callees run inline with their natives' checks. shadow_test's
+setupGrid lays a room out at 0x40000 (the scroll, then its tables at the game's low address bits): a real one when
+`KM_COLL=<file>` names a pool (the scroll D_005CAE50 and its tables copied out of the cases' guest RAM by a sandbox
+script, never committed: u32 'COLL', u32 regions, then per region u32 kind, u32 address, u32 size, the bytes), three
+times in four, else a made-up one (a small grid, quads and triangles on planes, degenerate ones, the game's normals,
+cells listing the polygons their boxes touch). Each setup records its plants in g_collPlants (the decline probe's
+ledger) and never lets an original walk past the tables (0x12F4C8's y1 / z1 registers are compared raw every turn:
+only x0 / x1 / y0 / z0 get odd upper words). `<vectors>.grid` (whole calls in the standard layout: a made-up room, the
+image before and after the recompiled function, the native's own decision) runs in libvu0_check through the same
+bodies on the image. Every byte an original reads must lie in kRegions: outside them the two RAMs can differ
+once other natives have run (a 0x12F750 setup that followed a polygon past its table read vertices past 1 MB: one
+mismatch in the full run, none in KM_ONLY runs; Nov 28).
